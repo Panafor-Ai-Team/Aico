@@ -18,6 +18,7 @@ import defaultChat from '@/locales/default/chat';
 import defaultCommon from '@/locales/default/common';
 import defaultError from '@/locales/default/error';
 import defaultHome from '@/locales/default/home';
+import { BRANDING_CLOUD_NAME, BRANDING_EMAIL, BRANDING_NAME, ORG_NAME } from '@lobechat/const';
 import { normalizeLocale } from '@/locales/resources';
 import { isOnServerSide } from '@/utils/env';
 import { unwrapESMModule } from '@/utils/esm/unwrapESMModule';
@@ -98,6 +99,12 @@ export const createI18nNext = (lang?: string) => {
         partialBundledLanguages: true,
 
         interpolation: {
+          defaultVariables: {
+            appName: BRANDING_NAME,
+            cloudName: BRANDING_CLOUD_NAME,
+            orgName: ORG_NAME,
+            supportEmail: BRANDING_EMAIL.support || 'support@example.com',
+          },
           escapeValue: false,
         },
         // Re-render components when new language resources are loaded from backend,
