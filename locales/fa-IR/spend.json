@@ -12,7 +12,7 @@
   "table.columns.spend": "اعتبار مصرف‌شده",
   "table.columns.startTime": "تاریخ ایجاد",
   "table.columns.totalTokens": "میزان استفاده از توکن",
-  "table.columns.trigger.enums.agent_signal": "سیگنال دستیار",
+  "table.columns.trigger.enums.agent_signal": "سیگنال ایجنت",
   "table.columns.trigger.enums.api": "تماس API",
   "table.columns.trigger.enums.bot": "پیام ربات",
   "table.columns.trigger.enums.chat": "پیام چت",

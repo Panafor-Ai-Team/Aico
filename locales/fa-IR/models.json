@@ -1040,7 +1040,7 @@
   "pro-deepseek-v3.description": "مدل خدمات اختصاصی سازمانی با هم‌زمانی بسته‌بندی‌شده.",
   "qianfan-70b.description": "Qianfan 70B یک مدل بزرگ چینی برای تولید با کیفیت بالا و استدلال پیچیده است.",
   "qianfan-8b.description": "Qianfan 8B یک مدل عمومی میان‌رده است که بین هزینه و کیفیت در تولید متن و پاسخ به پرسش‌ها تعادل برقرار می‌کند.",
-  "qianfan-agent-intent-32k.description": "Qianfan Agent Intent 32K برای شناسایی نیت و هماهنگی دستیار‌ها با پشتیبانی از زمینه طولانی طراحی شده است.",
+  "qianfan-agent-intent-32k.description": "Qianfan Agent Intent 32K برای شناسایی نیت و هماهنگی ایجنت‌ها با پشتیبانی از زمینه طولانی طراحی شده است.",
   "qianfan-agent-lite-8k.description": "Qianfan Agent Lite 8K یک مدل سبک‌وزن برای گفت‌وگوی چندمرحله‌ای کم‌هزینه و جریان‌های کاری است.",
   "qianfan-check-vl.description": "Qianfan Check VL یک مدل بازبینی محتوای چندوجهی برای تطابق تصویر-متن و وظایف شناسایی است.",
   "qianfan-composition.description": "Qianfan Composition یک مدل تولید چندوجهی برای درک و تولید ترکیبی تصویر و متن است.",

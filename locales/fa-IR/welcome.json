@@ -1,6 +1,6 @@
 {
   "guide.agents.replaceBtn": "بازنشانی",
-  "guide.agents.title": "پیشنهادهای دستیار جدید:",
+  "guide.agents.title": "پیشنهادهای ایجنت جدید:",
   "guide.defaultMessage": "من دستیار {{appName}} شما هستم. با هر ایده‌ای شروع کنید.<br />به دستیار‌ای تخصصی‌تر نیاز دارید؟ روی <plus /> کلیک کنید تا یکی بسازید.",
   "guide.defaultMessageWithoutCreate": "به {{appName}} خوش آمدید. یک جمله کافی‌ست—فقط هدفتان را بیان کنید.",
   "guide.groupActivities.analysis.codeReview.description": "بحث‌های فنی و بازبینی‌های گروهی تغییرات و پیاده‌سازی‌های کد",
@@ -263,7 +263,7 @@
   "guide.welcome.night": "شب بخیر",
   "guide.welcome.noon": "ظهر بخیر",
   "header": "خوش آمدید",
-  "pickAgent": "یا از قالب‌های زیر یک دستیار انتخاب کنید",
+  "pickAgent": "یا از قالب‌های زیر یک ایجنت انتخاب کنید",
   "skip": "رد کردن ساخت",
   "slogan.desc1": "اینجا، دستیارها همیشه آماده‌اند. ایده‌ها می‌توانند همکاری کنند، ثبت شوند و تکامل یابند.",
   "slogan.desc2": "اولین دستیار خود را بسازید و شروع کنیم~",
