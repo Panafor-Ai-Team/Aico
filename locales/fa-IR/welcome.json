@@ -1,7 +1,7 @@
 {
   "guide.agents.replaceBtn": "بازنشانی",
-  "guide.agents.title": "پیشنهادهای نماینده جدید:",
-  "guide.defaultMessage": "من نماینده {{appName}} شما هستم. با هر ایده‌ای شروع کنید.<br />به نماینده‌ای تخصصی‌تر نیاز دارید؟ روی <plus /> کلیک کنید تا یکی بسازید.",
+  "guide.agents.title": "پیشنهادهای دستیار جدید:",
+  "guide.defaultMessage": "من دستیار {{appName}} شما هستم. با هر ایده‌ای شروع کنید.<br />به دستیار‌ای تخصصی‌تر نیاز دارید؟ روی <plus /> کلیک کنید تا یکی بسازید.",
   "guide.defaultMessageWithoutCreate": "به {{appName}} خوش آمدید. یک جمله کافی‌ست—فقط هدفتان را بیان کنید.",
   "guide.groupActivities.analysis.codeReview.description": "بحث‌های فنی و بازبینی‌های گروهی تغییرات و پیاده‌سازی‌های کد",
   "guide.groupActivities.analysis.codeReview.emoji": "💻",
@@ -39,7 +39,7 @@
   "guide.groupActivities.game.debateClub.emoji": "⚖️",
   "guide.groupActivities.game.debateClub.prompt": "بیایید یک مناظره ساختاریافته داشته باشیم. می‌توانید در سازماندهی یک بحث منطقی کمک کنید؟",
   "guide.groupActivities.game.debateClub.title": "باشگاه مناظره",
-  "guide.groupActivities.game.gameNight.description": "بازی‌ها و فعالیت‌های تعاملی سرگرم‌کننده برای ایجاد ارتباط و لذت بردن گروهی",
+  "guide.groupActivities.game.gameNight.description": "بازی‌ها و فعالیت‌های تدستیاری سرگرم‌کننده برای ایجاد ارتباط و لذت بردن گروهی",
   "guide.groupActivities.game.gameNight.emoji": "🎲",
   "guide.groupActivities.game.gameNight.prompt": "شب بازی شروع شده! می‌توانید در سازماندهی بازی‌های سرگرم‌کننده کمک کنید؟",
   "guide.groupActivities.game.gameNight.title": "شب بازی",
@@ -116,7 +116,7 @@
   "guide.groupActivities.writing.studyGroup.emoji": "📚",
   "guide.groupActivities.writing.studyGroup.prompt": "بیایید یک گروه مطالعه تشکیل دهیم. می‌توانید در درک مفاهیم و حل مسائل کمک کنید؟",
   "guide.groupActivities.writing.studyGroup.title": "گروه مطالعه",
-  "guide.groupMessage": "به گروه‌ها خوش آمدید. در یک گفت‌وگوی مشترک، بگذارید عوامل با هم وظایف را پیش ببرند.",
+  "guide.groupMessage": "به گروه‌ها خوش آمدید. در یک گفت‌وگوی مشترک، بگذارید دستیارها با هم وظایف را پیش ببرند.",
   "guide.groupTemplates.analysis.description": "بینش‌های مبتنی بر داده و تحلیل‌های پژوهشی عمیق",
   "guide.groupTemplates.analysis.members": [
     {
@@ -263,10 +263,10 @@
   "guide.welcome.night": "شب بخیر",
   "guide.welcome.noon": "ظهر بخیر",
   "header": "خوش آمدید",
-  "pickAgent": "یا از قالب‌های زیر یک عامل انتخاب کنید",
+  "pickAgent": "یا از قالب‌های زیر یک دستیار انتخاب کنید",
   "skip": "رد کردن ساخت",
-  "slogan.desc1": "اینجا، عوامل همیشه آماده‌اند. ایده‌ها می‌توانند همکاری کنند، ثبت شوند و تکامل یابند.",
-  "slogan.desc2": "اولین عامل خود را بسازید و شروع کنیم~",
+  "slogan.desc1": "اینجا، دستیارها همیشه آماده‌اند. ایده‌ها می‌توانند همکاری کنند، ثبت شوند و تکامل یابند.",
+  "slogan.desc2": "اولین دستیار خود را بسازید و شروع کنیم~",
   "slogan.title": "به خود ذهنی هوشمندتر ببخشید",
   "welcomeMessages": {
     "1": "خوش برگشتی 😊",
