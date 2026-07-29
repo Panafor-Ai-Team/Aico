@@ -26,20 +26,6 @@
         background: inherit;
         gap: 12px;
       }
-      #loading-brand {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        color: #1f1f1f;
-      }
-      #loading-brand img {
-        width: 40px;
-        height: 40px;
-        border-radius: 8px;
-      }
-      html[data-theme='dark'] #loading-brand {
-        color: #f0f0f0;
-      }
     </style>
     <script>
       window.__LOBE_BOOT_T_HTML__ = performance.now();
@@ -117,11 +103,7 @@
   </head>
 
   <body>
-    <div id="loading-screen">
-      <div id="loading-brand" aria-label="Loading" role="status">
-        <img alt="Aico" height="40" src="/icons/icon-192x192.png" width="40" />
-      </div>
-    </div>
+    <div id="loading-screen" aria-label="Loading" role="status"></div>
     <div id="root" style="height: 100%"></div>
 
     <!--ANALYTICS_SCRIPTS-->

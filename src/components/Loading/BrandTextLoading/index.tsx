@@ -10,12 +10,7 @@ interface BrandTextLoadingProps {
 }
 
 const BrandTextLoading = ({ debugId }: BrandTextLoadingProps) => {
-  if (isCustomBranding)
-    return (
-      <div className={styles.container}>
-        <CircleLoading />
-      </div>
-    );
+  if (isCustomBranding) return <CircleLoading />;
 
   const showDebug = process.env.NODE_ENV === 'development' && debugId;
 

@@ -15,16 +15,6 @@
         background: inherit;
         gap: 12px;
       }
-      #loading-brand {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      }
-      #loading-brand img {
-        width: 40px;
-        height: 40px;
-        border-radius: 8px;
-      }
     </style>
   </head>
   <body style="height: 100%">
@@ -58,11 +48,8 @@
           rtl.indexOf(locale.split('-')[0].toLowerCase()) >= 0 ? 'rtl' : 'ltr';
       })();
     </script>
-    <div id="loading-screen">
-      <div id="loading-brand" aria-label="Loading" role="status">
-        <img alt="Aico" height="40" src="/icons/icon-192x192.png" width="40" />
-      </div>
-        <div id="root" style="height: 100%"></div>
+    <div id="loading-screen" aria-label="Loading" role="status"></div>
+    <div id="root" style="height: 100%"></div>
     <script>
       window.__SERVER_CONFIG__ = undefined;
     </script>
