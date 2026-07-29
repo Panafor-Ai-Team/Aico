@@ -49,6 +49,7 @@ export const config = {
     '/signup(.*)',
     '/signin(.*)',
     '/verify-email(.*)',
+    '/verify-phone(.*)',
     '/verify-im(.*)',
     '/verify',
     '/verify/(.*)',
