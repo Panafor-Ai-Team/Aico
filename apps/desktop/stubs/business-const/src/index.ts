@@ -1,5 +1,5 @@
 export const BRANDING_CLOUD_NAME = 'Aico Cloud';
-export const BRANDING_LOGO_URL = '';
+export const BRANDING_LOGO_URL = '/icons/icon-192x192.png';
 export const BRANDING_NAME = 'Aico';
 export const LOBE_CHAT_CLOUD = BRANDING_CLOUD_NAME;
 export const DEFAULT_EMBEDDING_PROVIDER = 'openai';

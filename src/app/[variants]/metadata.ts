@@ -24,7 +24,7 @@ export const generateMetadata = async (props: DynamicLayoutProps) => {
     },
     description: t('chat.description', { appName: BRANDING_NAME }),
     icons:
-      isCustomBranding && BRANDING_LOGO_URL
+      isCustomBranding && BRANDING_LOGO_URL.startsWith('http')
         ? BRANDING_LOGO_URL
         : {
             apple: '/apple-touch-icon.png?v=1',

@@ -24,8 +24,8 @@ export const LOBE_CHAT_CLOUD = BRANDING_CLOUD_NAME;
 /** Public marketing / docs site URL (defaults to APP_URL when unset). */
 export const BRANDING_SITE_URL = readBrandingEnv('BRANDING_SITE_URL', '');
 
-/** Optional custom logo URL. When set, replaces default favicons and product logo artwork. */
-export const BRANDING_LOGO_URL = readBrandingEnv('BRANDING_LOGO_URL', '');
+/** Product logo URL used by ProductLogo / metadata. Defaults to the favicon_io PWA icon. */
+export const BRANDING_LOGO_URL = readBrandingEnv('BRANDING_LOGO_URL', '/icons/icon-192x192.png');
 
 export const BRANDING_URL = {
   help: undefined,

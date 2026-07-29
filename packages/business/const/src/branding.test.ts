@@ -7,11 +7,13 @@ describe('branding env configuration', () => {
   });
 
   it('defaults to Aico when no env vars are set', async () => {
-    const { BRANDING_NAME, ORG_NAME, BRANDING_CLOUD_NAME } = await import('./branding');
+    const { BRANDING_NAME, ORG_NAME, BRANDING_CLOUD_NAME, BRANDING_LOGO_URL } =
+      await import('./branding');
 
     expect(BRANDING_NAME).toBe('Aico');
     expect(ORG_NAME).toBe('Aico');
     expect(BRANDING_CLOUD_NAME).toBe('Aico Cloud');
+    expect(BRANDING_LOGO_URL).toBe('/icons/icon-192x192.png');
   });
 
   it('reads NEXT_PUBLIC_BRANDING_NAME for client-exposed overrides', async () => {
