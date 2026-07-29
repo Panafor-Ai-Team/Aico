@@ -7,7 +7,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { verifyPassword as defaultVerifyPassword } from 'better-auth/crypto';
 import { type BetterAuthOptions } from 'better-auth/minimal';
 import { betterAuth } from 'better-auth/minimal';
-import { admin, emailOTP, genericOAuth, magicLink } from 'better-auth/plugins';
+import { admin, emailOTP, genericOAuth, magicLink, phoneNumber } from 'better-auth/plugins';
 import { type BetterAuthPlugin } from 'better-auth/types';
 import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici';
 
@@ -97,6 +97,7 @@ const MAGIC_LINK_EXPIRES_IN = 900;
 // OTP expiration time (in seconds) - 5 minutes for mobile OTP verification
 const OTP_EXPIRES_IN = 300;
 const enableMagicLink = authEnv.AUTH_ENABLE_MAGIC_LINK;
+const enablePhoneNumber = authEnv.AUTH_ENABLE_PHONE_NUMBER;
 const enabledSSOProviders = parseSSOProviders(authEnv.AUTH_SSO_PROVIDERS);
 
 const { socialProviders, genericOAuthProviders } = initBetterAuthSSOProviders();
@@ -334,6 +335,21 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
                   to: email,
                   ...template,
                 });
+              },
+            }),
+          ]
+        : []),
+      ...(enablePhoneNumber
+        ? [
+            phoneNumber({
+              otpLength: 6,
+              expiresIn: OTP_EXPIRES_IN,
+              sendOTP: ({ phoneNumber: _phone, code: _code }) => {
+                // TODO: integrate real SMS provider (e.g. Twilio, Kavenegar)
+                console.warn('[phone-auth] SMS not wired yet — OTP:', _code, 'to', _phone);
+              },
+              signUpOnVerification: {
+                getTempEmail: (phoneNum) => `${phoneNum.replaceAll('+', '')}@phone.placeholder`,
               },
             }),
           ]
