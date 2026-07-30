@@ -775,6 +775,39 @@ export const createMainAreaChildren = (): RouteObject[] => [
     path: 'downloads',
   },
 
+  // Aico organization admin
+  {
+    element: dynamicElement(() => import('@/routes/(main)/org'), 'Desktop > Org'),
+    errorElement: <ErrorBoundary />,
+    path: 'org',
+  },
+  {
+    element: dynamicElement(
+      () => import('@/routes/(main)/org/[orgId]/members'),
+      'Desktop > Org > Members',
+    ),
+    errorElement: <ErrorBoundary />,
+    path: 'org/:orgId/members',
+  },
+  {
+    element: dynamicElement(
+      () => import('@/routes/(main)/invite/[token]'),
+      'Desktop > Invite Accept',
+    ),
+    errorElement: <ErrorBoundary />,
+    path: 'invite/:token',
+  },
+  {
+    element: dynamicElement(() => import('@/routes/(main)/platform'), 'Desktop > Platform Admin'),
+    errorElement: <ErrorBoundary />,
+    path: 'platform',
+  },
+  {
+    element: dynamicElement(() => import('@/routes/(main)/wallet'), 'Desktop > Wallet'),
+    errorElement: <ErrorBoundary />,
+    path: 'wallet',
+  },
+
   // Settings routes (personal-only — never mirrored under /:workspaceSlug)
   {
     children: [

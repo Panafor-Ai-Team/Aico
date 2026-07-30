@@ -115,6 +115,7 @@ import { groupRouteMeta } from '@/routes/(main)/group/features/routeMeta';
 import GroupProfilePage from '@/routes/(main)/group/profile';
 import DesktopHome from '@/routes/(main)/home';
 import DesktopHomeLayout from '@/routes/(main)/home/_layout';
+import InviteAcceptPage from '@/routes/(main)/invite/[token]';
 import DesktopMemoryLayout from '@/routes/(main)/memory/_layout';
 import MemoryHomePage from '@/routes/(main)/memory/(home)';
 import MemoryActivitiesPage from '@/routes/(main)/memory/activities';
@@ -122,9 +123,12 @@ import MemoryContextsPage from '@/routes/(main)/memory/contexts';
 import MemoryExperiencesPage from '@/routes/(main)/memory/experiences';
 import MemoryIdentitiesPage from '@/routes/(main)/memory/identities';
 import MemoryPreferencesPage from '@/routes/(main)/memory/preferences';
+import OrgAdminPage from '@/routes/(main)/org';
+import OrgMembersPage from '@/routes/(main)/org/[orgId]/members';
 import PageIndexPage from '@/routes/(main)/page';
 import DesktopPageLayout from '@/routes/(main)/page/_layout';
 import PageDetailPage from '@/routes/(main)/page/[id]';
+import PlatformAdminPage from '@/routes/(main)/platform';
 import ResourceLayout from '@/routes/(main)/resource/_layout';
 import ResourceHomePage from '@/routes/(main)/resource/(home)';
 import ResourceHomeLayout from '@/routes/(main)/resource/(home)/_layout';
@@ -139,6 +143,7 @@ import TaskDetailRoute from '@/routes/(main)/task/[taskId]';
 import AllTasksPage from '@/routes/(main)/tasks';
 import VerifyWorkspace from '@/routes/(main)/verify';
 import VerifyEmptyPage from '@/routes/(main)/verify/empty';
+import WalletPage from '@/routes/(main)/wallet';
 import AcceptanceReportPage from '@/routes/acceptance/[acceptanceId]';
 import SharePagePage from '@/routes/share/page/[id]';
 import { sharePageRouteMeta } from '@/routes/share/page/[id]/routeMeta';
@@ -647,6 +652,32 @@ export const createMainAreaChildren = (): RouteObject[] => [
     errorElement: <ErrorBoundary />,
     handle: { meta: routeMeta({ icon: Download, titleKey: 'navigation.downloads' }) },
     path: 'downloads',
+  },
+
+  {
+    element: <OrgAdminPage />,
+    errorElement: <ErrorBoundary />,
+    path: 'org',
+  },
+  {
+    element: <OrgMembersPage />,
+    errorElement: <ErrorBoundary />,
+    path: 'org/:orgId/members',
+  },
+  {
+    element: <InviteAcceptPage />,
+    errorElement: <ErrorBoundary />,
+    path: 'invite/:token',
+  },
+  {
+    element: <PlatformAdminPage />,
+    errorElement: <ErrorBoundary />,
+    path: 'platform',
+  },
+  {
+    element: <WalletPage />,
+    errorElement: <ErrorBoundary />,
+    path: 'wallet',
   },
 
   // Settings routes (personal-only — never mirrored under /:workspaceSlug)

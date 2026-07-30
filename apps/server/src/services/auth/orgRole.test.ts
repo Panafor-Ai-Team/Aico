@@ -1,14 +1,38 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getCurrentOrgRole, isPlatformAdmin, requiresPhoneVerification } from './orgRole';
+const mocks = vi.hoisted(() => ({
+  getMemberRole: vi.fn(),
+  isPlatformAdmin: vi.fn(),
+}));
 
-describe('orgRole helpers (Phase 1 stubs)', () => {
-  it('getCurrentOrgRole always returns null until Phase 2 schema exists', async () => {
-    await expect(getCurrentOrgRole('user_1', 'org_1')).resolves.toBeNull();
+vi.mock('@/database/server', () => ({
+  getServerDB: vi.fn(async () => ({})),
+}));
+
+vi.mock('@/database/models/organization', () => ({
+  OrganizationModel: class {
+    getMemberRole = mocks.getMemberRole;
+    isPlatformAdmin = mocks.isPlatformAdmin;
+  },
+}));
+
+// Import after mocks so vi.mock factories are registered first
+const { getCurrentOrgRole, isPlatformAdmin, requiresPhoneVerification } = await import('./orgRole');
+
+describe('orgRole helpers', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it('isPlatformAdmin always returns false until platform_admins exists', async () => {
-    await expect(isPlatformAdmin('user_1')).resolves.toBe(false);
+  it('getCurrentOrgRole delegates to OrganizationModel', async () => {
+    mocks.getMemberRole.mockResolvedValue('admin');
+    await expect(getCurrentOrgRole('user_1', 'org_1')).resolves.toBe('admin');
+    expect(mocks.getMemberRole).toHaveBeenCalledWith('user_1', 'org_1');
+  });
+
+  it('isPlatformAdmin delegates to OrganizationModel', async () => {
+    mocks.isPlatformAdmin.mockResolvedValue(true);
+    await expect(isPlatformAdmin('user_1')).resolves.toBe(true);
   });
 
   describe('requiresPhoneVerification', () => {
@@ -30,8 +54,19 @@ describe('orgRole helpers (Phase 1 stubs)', () => {
       ).resolves.toBe(true);
     });
 
-    it('requires verify when orgId is set but Phase 2 stub returns null role', async () => {
-      // Once Phase 2 lands: member → false, owner/admin → true
+    it('skips for invited org members', async () => {
+      mocks.getMemberRole.mockResolvedValue('member');
+      await expect(
+        requiresPhoneVerification({
+          orgId: 'org_1',
+          phoneNumberVerified: false,
+          userId: 'user_1',
+        }),
+      ).resolves.toBe(false);
+    });
+
+    it('requires verify for org owners', async () => {
+      mocks.getMemberRole.mockResolvedValue('owner');
       await expect(
         requiresPhoneVerification({
           orgId: 'org_1',

@@ -1,31 +1,28 @@
 /**
- * Aico Phase 1 auth helpers.
- *
- * Phone verification is NOT required to sign in. It is only required when a
- * user claims trial credits / acts as an independent buyer or org admin who
- * can spend quota (see `requiresPhoneVerification`).
- *
- * `getCurrentOrgRole` / `isPlatformAdmin` depend on Phase 2 schema
- * (`organization_members`, `platform_admins`). Until those tables land, stubs
- * return null / false.
+ * Aico auth helpers for org / platform RBAC and phone-verify policy.
  */
+
+import { OrganizationModel } from '@/database/models/organization';
+import { getServerDB } from '@/database/server';
 
 export type OrgRole = 'owner' | 'admin' | 'member';
 
 /**
  * Resolve the caller's role inside an organization.
- * Phase 2 stub — always `null` until organization schema exists.
  */
-export async function getCurrentOrgRole(_userId: string, _orgId: string): Promise<OrgRole | null> {
-  return null;
+export async function getCurrentOrgRole(userId: string, orgId: string): Promise<OrgRole | null> {
+  const db = await getServerDB();
+  const model = new OrganizationModel(db);
+  return model.getMemberRole(userId, orgId);
 }
 
 /**
  * Whether the user is a platform (super) admin — independent of org roles.
- * Phase 2 stub — always `false` until `platform_admins` exists.
  */
-export async function isPlatformAdmin(_userId: string): Promise<boolean> {
-  return false;
+export async function isPlatformAdmin(userId: string): Promise<boolean> {
+  const db = await getServerDB();
+  const model = new OrganizationModel(db);
+  return model.isPlatformAdmin(userId);
 }
 
 export interface RequiresPhoneVerificationInput {
@@ -58,6 +55,6 @@ export async function requiresPhoneVerification(
     if (role === 'owner' || role === 'admin') return true;
   }
 
-  // Independent buyer, or Phase 2 stub (null role)
+  // Independent buyer, or unknown role
   return true;
 }
