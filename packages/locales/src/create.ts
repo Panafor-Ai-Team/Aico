@@ -2,7 +2,6 @@ import i18n from 'i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 import resourcesToBackend from 'i18next-resources-to-backend';
 import { initReactI18next } from 'react-i18next';
-import { isRtlLang } from 'rtl-detect';
 
 import chat from '@/../locales/en-US/chat.json';
 import common from '@/../locales/en-US/common.json';
@@ -18,7 +17,9 @@ import defaultChat from '@/locales/default/chat';
 import defaultCommon from '@/locales/default/common';
 import defaultError from '@/locales/default/error';
 import defaultHome from '@/locales/default/home';
+import { BRANDING_CLOUD_NAME, BRANDING_EMAIL, BRANDING_NAME, ORG_NAME } from '@lobechat/const';
 import { normalizeLocale } from '@/locales/resources';
+import { applyDocumentDirection } from '@/utils/client/applyDocumentDirection';
 import { isOnServerSide } from '@/utils/env';
 import { unwrapESMModule } from '@/utils/esm/unwrapESMModule';
 import { loadI18nNamespaceModule } from '@/utils/i18n/loadI18nNamespaceModule';
@@ -62,10 +63,7 @@ export const createI18nNext = (lang?: string) => {
     );
   // Dynamically set HTML direction on language change
   instance.on('languageChanged', (lng) => {
-    if (typeof window !== 'undefined') {
-      const direction = isRtlLang(lng) ? 'rtl' : 'ltr';
-      document.documentElement.dir = direction;
-    }
+    applyDocumentDirection(lng);
   });
   return {
     init: (params: { initAsync?: boolean } = {}) => {
@@ -80,6 +78,8 @@ export const createI18nNext = (lang?: string) => {
               [DEFAULT_LANG]: defaultResources,
               [initialLang]: createBundledResources(),
             };
+
+      applyDocumentDirection(initialLang);
 
       const initPromise = instance.init({
         debug: debugMode,
@@ -98,6 +98,12 @@ export const createI18nNext = (lang?: string) => {
         partialBundledLanguages: true,
 
         interpolation: {
+          defaultVariables: {
+            appName: BRANDING_NAME,
+            cloudName: BRANDING_CLOUD_NAME,
+            orgName: ORG_NAME,
+            supportEmail: BRANDING_EMAIL.support || 'support@example.com',
+          },
           escapeValue: false,
         },
         // Re-render components when new language resources are loaded from backend,
