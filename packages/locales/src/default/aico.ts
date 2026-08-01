@@ -31,7 +31,6 @@ export default {
   'errors.TRIAL_PHONE_ALREADY_USED': 'Trial has already been used with this phone number.',
   'errors.TRIAL_PHONE_BLOCKED': 'This phone number is not eligible for trial.',
   'errors.TRIAL_REQUEST_LIMIT': 'Trial request limit has been reached.',
-
   'invite.accept': 'Accept invitation',
   'invite.accepted': 'You joined the organization',
   'invite.description': 'Join {{org}} as {{role}}',
