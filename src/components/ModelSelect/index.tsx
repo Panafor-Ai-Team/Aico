@@ -1,7 +1,7 @@
 import { BRANDING_NAME } from '@lobechat/business-const';
 import { type ChatModelCard } from '@lobechat/types';
 import { type IconAvatarProps } from '@lobehub/icons';
-import { LobeHub, ModelIcon, ProviderIcon } from '@lobehub/icons';
+import { LobeHub, ProviderIcon } from '@lobehub/icons';
 import { type FlexboxProps } from '@lobehub/ui';
 import { Avatar, Flexbox, Icon, Tag, Text, Tooltip } from '@lobehub/ui';
 import { createStaticStyles, useResponsive } from 'antd-style';
@@ -20,6 +20,7 @@ import { type CSSProperties, type FC } from 'react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
 import { ProductLogo } from '@/components/Branding/ProductLogo';
 import { isCustomBranding } from '@/const/version';
 import { type AiProviderSourceType } from '@/types/aiProvider';
@@ -296,7 +297,7 @@ export const ModelItemRender = memo<ModelItemRenderProps>(
           gap={8}
           style={{ flexShrink: 1, minWidth: 0, overflow: 'hidden' }}
         >
-          <ModelIcon model={id} size={20} />
+          <BrandedModelIcon model={id} size={20} />
           <Text
             style={mobile ? { maxWidth: '60vw' } : { minWidth: 0, overflow: 'hidden' }}
             ellipsis={{

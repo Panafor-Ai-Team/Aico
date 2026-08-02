@@ -3,6 +3,8 @@
 import type { ReactNode } from 'react';
 import { Navigate } from 'react-router';
 
+import { getActiveWorkspaceSlug } from '@/business/client/hooks/useActiveWorkspaceSlug';
+import { buildWorkspaceAwarePath } from '@/features/Workspace/workspaceAwarePath';
 import { useClientDataSWR } from '@/libs/swr';
 import { lambdaClient } from '@/libs/trpc/client';
 
@@ -31,7 +33,8 @@ const AicoManagedRedirect = ({ children, fallback, id }: Props) => {
 
   const runtimeId = managedStatus?.runtimeProviderId ?? 'openrouter';
   if (!id || id === 'all' || !ALLOWED.has(id)) {
-    return <Navigate replace to={`/settings/provider/${runtimeId}`} />;
+    const to = buildWorkspaceAwarePath(`/settings/provider/${runtimeId}`, getActiveWorkspaceSlug());
+    return <Navigate replace to={to} />;
   }
 
   return <>{children ?? fallback}</>;
