@@ -23,7 +23,7 @@ const ProviderDetail = memo<ProviderDetailProps>(({ showConfig = true, ...card }
   const { data: managedStatus } = useClientDataSWR('aico-provider-status', () =>
     lambdaClient.aicoBilling.getManagedProviderStatus.query(),
   );
-  const aicoManaged = Boolean(managedStatus?.managed);
+  const aicoManaged = managedStatus?.managed ?? true;
   // Managed Aico traffic hides BYOK config so users never see/edit OpenRouter secrets.
   const hideKeyConfig = aicoManaged && (card.id === 'openrouter' || card.id === 'aico');
 
