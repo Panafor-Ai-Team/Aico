@@ -20,4 +20,20 @@ Then cross-link:
 
 - Plane comment (or link) → GitHub issue URL
 - GitHub issue body → Plane browse URL / `AICO-xx`
-- If a PR follows, reference **both** in the PR body (`Related to #n`, Plane `AICO-xx`)
+
+# Pull requests and auto-close
+
+When opening a GitHub PR that implements a GitHub issue, the PR body **must** include a closing keyword so merge closes the issue:
+
+```markdown
+Fixes #123
+```
+
+Use exactly that form (also acceptable: `Closes #123`, `Resolves #123`). Do **not** use only `Related to #123` / `See #123` when the PR is meant to finish the issue — those do not auto-close on merge.
+
+Also link Plane in the same PR body (Plane does not auto-close from GitHub keywords):
+
+```markdown
+Fixes #123
+Plane: https://plane.panafor.com/panaforai/browse/AICO-xx
+```
