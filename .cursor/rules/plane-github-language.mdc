@@ -23,17 +23,32 @@ Then cross-link:
 
 # Pull requests and auto-close
 
-When opening a GitHub PR that implements a GitHub issue, the PR body **must** include a closing keyword so merge closes the issue:
+When opening a GitHub PR that implements GitHub issue(s), the PR body **must**
+include closing keyword(s) so merge closes them:
 
 ```markdown
 Fixes #123
 ```
 
-Use exactly that form (also acceptable: `Closes #123`, `Resolves #123`). Do **not** use only `Related to #123` / `See #123` when the PR is meant to finish the issue — those do not auto-close on merge.
-
-Also link Plane in the same PR body (Plane does not auto-close from GitHub keywords):
+For **multiple** issues finished by the same PR, list one closing line per issue
+(GitHub closes all of them on merge):
 
 ```markdown
 Fixes #123
+Fixes #456
+Closes #789
+```
+
+Also acceptable per line: `Closes #n`, `Resolves #n`. Do **not** use only
+`Related to #n` / `See #n` when the PR is meant to finish those issues — those
+do not auto-close on merge.
+
+Also link Plane work item(s) in the same PR body (Plane does not auto-close from
+GitHub keywords):
+
+```markdown
+Fixes #123
+Fixes #456
 Plane: https://plane.panafor.com/panaforai/browse/AICO-xx
+Plane: https://plane.panafor.com/panaforai/browse/AICO-yy
 ```
