@@ -50,7 +50,8 @@ If current branch is `canary`/`main` but there are NO uncommitted changes and no
 
 - Title: `<gitmoji> <type>(<scope>): <description>`
 - Body: based on PR template (`.github/PULL_REQUEST_TEMPLATE.md`), fill checkboxes
-- Link related GitHub issues using magic keywords (`Fixes #123`, `Closes #123`)
+- **Required for linked GitHub issues**: include closing keyword(s) in the PR body so merge closes them — one line per issue, e.g. `Fixes #123` and `Fixes #456` (also `Closes` / `Resolves`). Do not use only `Related to #123` when the PR completes those issues.
+- Link Plane work items by URL / identifier in the body (Plane does not auto-close from GitHub keywords)
 - Link Linear issues if applicable (`Fixes LOBE-xxx`)
 - Use HEREDOC for body to preserve formatting
 
