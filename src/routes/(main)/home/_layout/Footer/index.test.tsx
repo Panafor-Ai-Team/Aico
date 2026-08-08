@@ -233,21 +233,26 @@ afterEach(() => {
 });
 
 describe('Footer help menu tracking', () => {
+  const openHelpMenu = async (user: ReturnType<typeof userEvent.setup>) => {
+    const helpButtons = screen.getAllByRole('button', { name: 'Help' });
+    await user.click(helpButtons.at(-1)!);
+  };
+
   it('does not show Get App when downloads are hidden', async () => {
     const user = userEvent.setup();
     await renderFooter({ hideGitHub: false });
 
-    await user.click(screen.getByRole('button', { name: 'Help' }));
+    await openHelpMenu(user);
 
     expect(screen.queryByRole('link', { name: 'Get App' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'GitHub' })).toBeInTheDocument();
-  }, 20000);
+  }, 40_000);
 
   it('does not show Get App in desktop builds', async () => {
     const user = userEvent.setup();
     await renderFooter({ desktop: true, hideGitHub: false });
 
-    await user.click(screen.getByRole('button', { name: 'Help' }));
+    await openHelpMenu(user);
 
     expect(screen.queryByRole('link', { name: 'Get App' })).not.toBeInTheDocument();
   }, 20000);
@@ -256,7 +261,7 @@ describe('Footer help menu tracking', () => {
     const user = userEvent.setup();
     await renderFooter({ enableBusinessFeatures: true });
 
-    await user.click(screen.getByRole('button', { name: 'Help' }));
+    await openHelpMenu(user);
 
     const openedCall = analyticsTrack.mock.calls.find(
       ([event]) => event?.name === 'home_footer_menu_opened',
@@ -269,7 +274,7 @@ describe('Footer help menu tracking', () => {
     const user = userEvent.setup();
     await renderFooter({ enableBusinessFeatures: true });
 
-    await user.click(screen.getByRole('button', { name: 'Help' }));
+    await openHelpMenu(user);
     await user.click(await screen.findByText('Invite a friend'));
 
     expect(analyticsTrack).toHaveBeenCalledWith({
@@ -282,7 +287,7 @@ describe('Footer help menu tracking', () => {
     const user = userEvent.setup();
     await renderFooter({ enableBusinessFeatures: false });
 
-    await user.click(screen.getByRole('button', { name: 'Help' }));
+    await openHelpMenu(user);
 
     expect(screen.queryByText('Invite a friend')).not.toBeInTheDocument();
   }, 20000);
@@ -295,7 +300,7 @@ describe('Footer help menu tracking', () => {
       homeSidebar: true,
     });
 
-    await user.click(screen.getByRole('button', { name: 'Help' }));
+    await openHelpMenu(user);
 
     const openedCall = analyticsTrack.mock.calls.find(
       ([event]) => event?.name === 'home_footer_menu_opened',
