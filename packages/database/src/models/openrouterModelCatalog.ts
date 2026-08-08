@@ -1,4 +1,9 @@
-import { computeDefaultEnabledOpenRouterModelIds } from '@lobechat/business-const';
+import {
+  OPENROUTER_AUTO_DISPLAY_NAME,
+  OPENROUTER_AUTO_MODEL_ID,
+  computeDefaultEnabledOpenRouterModelIds,
+  ensureOpenRouterAutoModel,
+} from '@lobechat/business-const';
 import { eq, inArray, sql } from 'drizzle-orm';
 import type { AiProviderModelListItem, ModelAbilities, Pricing } from 'model-bank';
 import { AiModelSourceEnum, normalizeAiModelType } from 'model-bank';
@@ -34,6 +39,15 @@ export type OpenRouterCatalogModelInput = {
 };
 
 const SYNC_STATE_ID = 'default';
+
+const AUTO_CATALOG_CARD: OpenRouterCatalogModelInput = {
+  contextWindowTokens: 2_000_000,
+  description:
+    'Routes each request to the best available model based on context length, topic, and complexity.',
+  displayName: OPENROUTER_AUTO_DISPLAY_NAME,
+  id: OPENROUTER_AUTO_MODEL_ID,
+  type: 'chat',
+};
 
 export class OpenRouterModelCatalogModel {
   private db: LobeChatDatabase;
@@ -73,15 +87,16 @@ export class OpenRouterModelCatalogModel {
       })),
     );
 
-    return rows.map((row) => {
+    const mapped = rows.map((row) => {
       const payload = (row.payload ?? {}) as Record<string, unknown>;
+      const isAuto = row.id === OPENROUTER_AUTO_MODEL_ID;
       return {
         ...payload,
         abilities: (row.abilities ?? {}) as ModelAbilities,
         contextWindowTokens: row.contextWindowTokens ?? undefined,
         description: row.description ?? undefined,
-        displayName: row.displayName ?? undefined,
-        // Platform default: latest 4 chat models per openai/anthropic/google.
+        displayName: isAuto ? OPENROUTER_AUTO_DISPLAY_NAME : (row.displayName ?? undefined),
+        // Platform default: Auto + latest 4 chat / openai|anthropic|google.
         // Per-user overrides live in `ai_models` and win at merge time.
         enabled: defaultEnabled.has(row.id),
         id: row.id,
@@ -92,6 +107,22 @@ export class OpenRouterModelCatalogModel {
         type: normalizeAiModelType(row.type),
       } as AiProviderModelListItem;
     });
+
+    if (mapped.some((m) => m.id === OPENROUTER_AUTO_MODEL_ID)) return mapped;
+
+    return [
+      {
+        abilities: {},
+        contextWindowTokens: AUTO_CATALOG_CARD.contextWindowTokens,
+        description: AUTO_CATALOG_CARD.description,
+        displayName: OPENROUTER_AUTO_DISPLAY_NAME,
+        enabled: true,
+        id: OPENROUTER_AUTO_MODEL_ID,
+        source: AiModelSourceEnum.Remote,
+        type: 'chat',
+      } as AiProviderModelListItem,
+      ...mapped,
+    ];
   };
 
   /**
@@ -113,7 +144,7 @@ export class OpenRouterModelCatalogModel {
     const now = new Date();
 
     await this.db.transaction(async (tx) => {
-      const enabledIds = [...defaultEnabled];
+      const enabledIds = [...defaultEnabled].filter((id) => rows.some((r) => r.id === id));
       const disabledIds = rows.map((r) => r.id).filter((id) => !defaultEnabled.has(id));
 
       if (enabledIds.length > 0) {
@@ -139,28 +170,29 @@ export class OpenRouterModelCatalogModel {
 
   /**
    * Replace the catalog with a fresh OpenRouter snapshot.
-   * Recomputes platform default `enabled` (latest 4 chat / openai|anthropic|google) on every sync.
+   * Always keeps product Auto and recomputes default `enabled` on every sync.
    */
   replaceCatalog = async (params: {
     models: OpenRouterCatalogModelInput[];
     triggeredBy: string;
   }): Promise<OpenRouterCatalogSyncStatus> => {
     const now = new Date();
-    const incomingIds = params.models.map((m) => m.id);
+    const models = ensureOpenRouterAutoModel(params.models, AUTO_CATALOG_CARD);
+    const incomingIds = models.map((m) => m.id);
 
     const existing = await this.db
       .select({ id: openrouterModelCatalog.id })
       .from(openrouterModelCatalog);
 
     const defaultEnabled = computeDefaultEnabledOpenRouterModelIds(
-      params.models.map((model) => ({
+      models.map((model) => ({
         id: model.id,
         releasedAt: model.releasedAt,
         type: model.type,
       })),
     );
 
-    const rows: NewOpenrouterModelCatalog[] = params.models.map((model) => {
+    const rows: NewOpenrouterModelCatalog[] = models.map((model) => {
       const {
         abilities,
         contextWindowTokens,
@@ -175,11 +207,14 @@ export class OpenRouterModelCatalogModel {
         ...rest
       } = model;
 
+      const resolvedDisplayName =
+        id === OPENROUTER_AUTO_MODEL_ID ? OPENROUTER_AUTO_DISPLAY_NAME : (displayName ?? null);
+
       return {
         abilities: abilities ?? {},
         contextWindowTokens: contextWindowTokens ?? null,
         description: description ?? null,
-        displayName: displayName ?? null,
+        displayName: resolvedDisplayName,
         enabled: defaultEnabled.has(id),
         id,
         payload: {
@@ -187,7 +222,7 @@ export class OpenRouterModelCatalogModel {
           abilities,
           contextWindowTokens,
           description,
-          displayName,
+          displayName: resolvedDisplayName,
           id,
           pricing,
           releasedAt,
@@ -204,8 +239,10 @@ export class OpenRouterModelCatalogModel {
 
     await this.db.transaction(async (tx) => {
       if (incomingIds.length > 0) {
-        // Delete rows that disappeared from OpenRouter
-        const stale = existing.filter((r) => !incomingIds.includes(r.id)).map((r) => r.id);
+        // Delete rows that disappeared from OpenRouter (never drop Auto)
+        const stale = existing
+          .filter((r) => !incomingIds.includes(r.id) && r.id !== OPENROUTER_AUTO_MODEL_ID)
+          .map((r) => r.id);
         if (stale.length > 0) {
           await tx.delete(openrouterModelCatalog).where(inArray(openrouterModelCatalog.id, stale));
         }
