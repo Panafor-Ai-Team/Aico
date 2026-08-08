@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  OPENROUTER_AUTO_MODEL_ID,
   computeDefaultEnabledOpenRouterModelIds,
   pickPreferredDefaultOpenRouterModelId,
 } from './openrouterDefaultModels';
 
 describe('computeDefaultEnabledOpenRouterModelIds', () => {
-  it('enables the newest 4 chat models per openai/anthropic/google family', () => {
+  it('enables Auto plus the newest 4 chat models per openai/anthropic/google family', () => {
     const enabled = computeDefaultEnabledOpenRouterModelIds([
+      { id: OPENROUTER_AUTO_MODEL_ID, type: 'chat' },
       { id: 'openai/gpt-1', releasedAt: '2024-01-01', type: 'chat' },
       { id: 'openai/gpt-2', releasedAt: '2024-06-01', type: 'chat' },
       { id: 'openai/gpt-3', releasedAt: '2025-01-01', type: 'chat' },
@@ -29,6 +31,7 @@ describe('computeDefaultEnabledOpenRouterModelIds', () => {
 
     expect(enabled).toEqual(
       new Set([
+        OPENROUTER_AUTO_MODEL_ID,
         'openai/gpt-5',
         'openai/gpt-4',
         'openai/gpt-3',
@@ -64,6 +67,16 @@ describe('computeDefaultEnabledOpenRouterModelIds', () => {
 });
 
 describe('pickPreferredDefaultOpenRouterModelId', () => {
+  it('prefers openrouter/auto over family models', () => {
+    expect(
+      pickPreferredDefaultOpenRouterModelId([
+        'openai/gpt-new',
+        OPENROUTER_AUTO_MODEL_ID,
+        'anthropic/claude-x',
+      ]),
+    ).toBe(OPENROUTER_AUTO_MODEL_ID);
+  });
+
   it('prefers openai then anthropic then google using insertion order', () => {
     expect(
       pickPreferredDefaultOpenRouterModelId([

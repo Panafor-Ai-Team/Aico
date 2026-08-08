@@ -1,6 +1,7 @@
--- Reseed OpenRouter catalog platform defaults: enable only the newest 4 chat
--- models per openai / anthropic / google family. All other rows stay disabled.
--- Idempotent; safe to re-run. Per-user `ai_models` overrides are unchanged.
+-- Reseed OpenRouter catalog platform defaults: enable openrouter/auto plus the
+-- newest 4 chat models per openai / anthropic / google family. All other rows
+-- stay disabled. Idempotent; safe to re-run. Per-user `ai_models` overrides
+-- are unchanged.
 
 --> statement-breakpoint
 ALTER TABLE "openrouter_model_catalog" ALTER COLUMN "enabled" SET DEFAULT false;--> statement-breakpoint
@@ -21,7 +22,10 @@ WITH ranked AS (
 )
 UPDATE "openrouter_model_catalog" AS c
 SET
-  "enabled" = EXISTS (
-    SELECT 1 FROM ranked AS r WHERE r.id = c.id AND r.rn <= 4
+  "enabled" = (
+    c.id = 'openrouter/auto'
+    OR EXISTS (
+      SELECT 1 FROM ranked AS r WHERE r.id = c.id AND r.rn <= 4
+    )
   ),
   "updated_at" = now();

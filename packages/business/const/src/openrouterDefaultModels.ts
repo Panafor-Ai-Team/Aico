@@ -1,3 +1,6 @@
+/** Pinned OpenRouter auto-router id (UI brands as `{BRANDING_NAME}/auto`). */
+export const OPENROUTER_AUTO_MODEL_ID = 'openrouter/auto';
+
 /** OpenRouter id prefixes treated as default-enabled families (ChatGPT / Claude / Gemini). */
 export const OPENROUTER_DEFAULT_ENABLED_FAMILIES = ['openai', 'anthropic', 'google'] as const;
 
@@ -28,7 +31,8 @@ const isChatType = (type?: string | null): boolean => {
 
 /**
  * Returns the set of OpenRouter model ids that should be enabled by default:
- * the {@link DEFAULT_ENABLED_MODELS_PER_FAMILY} newest chat models from each of
+ * always includes {@link OPENROUTER_AUTO_MODEL_ID} when present in the catalog,
+ * plus the {@link DEFAULT_ENABLED_MODELS_PER_FAMILY} newest chat models from each of
  * openai / anthropic / google (by `releasedAt` desc; missing dates sort last).
  */
 export const computeDefaultEnabledOpenRouterModelIds = (
@@ -50,6 +54,11 @@ export const computeDefaultEnabledOpenRouterModelIds = (
 
   const enabled = new Set<string>();
 
+  // Pin Aico Auto whenever it exists in the catalog (outside the 4-per-family rule).
+  if (models.some((m) => m.id === OPENROUTER_AUTO_MODEL_ID)) {
+    enabled.add(OPENROUTER_AUTO_MODEL_ID);
+  }
+
   for (const family of OPENROUTER_DEFAULT_ENABLED_FAMILIES) {
     const ranked = buckets.get(family)!.toSorted((a, b) => {
       const aDate = a.releasedAt?.slice(0, 10) || '';
@@ -69,14 +78,13 @@ export const computeDefaultEnabledOpenRouterModelIds = (
 };
 
 /**
- * Prefer the newest OpenAI chat model from a default-enabled set, then Anthropic, then Google.
- * Expects `enabledIds` in insertion order from {@link computeDefaultEnabledOpenRouterModelIds}
- * (newest-first within each family).
+ * Prefer Aico Auto, then newest OpenAI / Anthropic / Google from the default-enabled set.
  */
 export const pickPreferredDefaultOpenRouterModelId = (
   enabledIds: Iterable<string>,
 ): string | null => {
   const ids = [...enabledIds];
+  if (ids.includes(OPENROUTER_AUTO_MODEL_ID)) return OPENROUTER_AUTO_MODEL_ID;
   for (const family of OPENROUTER_DEFAULT_ENABLED_FAMILIES) {
     const prefix = `${family}/`;
     const match = ids.find((id) => id.startsWith(prefix));
