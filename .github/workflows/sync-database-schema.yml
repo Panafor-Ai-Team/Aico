@@ -2,12 +2,10 @@ name: Database Schema Visualization CI
 permissions:
   contents: read
 
+# Aico: not used (upstream docs schema viz on main).
+# Restore upstream `on:` when re-enabling. Manual run still possible.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'docs/development/database-schema.dbml'
+  workflow_dispatch: {}
 
 jobs:
   build:

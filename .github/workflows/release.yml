@@ -5,10 +5,10 @@ permissions:
   issues: write
   pull-requests: write
 
+# Aico: not used (upstream LobeHub semver tag releases).
+# Restore upstream `on:` when re-enabling. Manual run still possible.
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  workflow_dispatch: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

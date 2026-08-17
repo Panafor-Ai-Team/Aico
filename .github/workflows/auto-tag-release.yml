@@ -3,11 +3,10 @@ name: Auto Tag Release
 permissions:
   contents: write
 
+# Aico: not used (upstream LobeHub main-branch release tagging).
+# Restore upstream `on:` when re-enabling. Manual run still possible.
 on:
-  pull_request_target:
-    types: [closed]
-    branches:
-      - main
+  workflow_dispatch: {}
 
 jobs:
   auto-tag:

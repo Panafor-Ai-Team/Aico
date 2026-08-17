@@ -1,8 +1,9 @@
 name: Auto-close duplicate issues
 # Auto-closes issues that are duplicates of existing issues
+
+# Aico: not used (upstream LobeHub issue hygiene).
+# Restore upstream `on:` when re-enabling. Manual run still possible.
 on:
-  schedule:
-    - cron: '0 2 * * *'
   workflow_dispatch: {}
 
 jobs:

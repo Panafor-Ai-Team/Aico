@@ -1,9 +1,9 @@
 name: 'Lock Stale Issues'
 
+# Aico: not used (upstream LobeHub issue hygiene).
+# Restore upstream `on:` when re-enabling. Manual run still possible.
 on:
-  schedule:
-    - cron: '0 1 * * *'
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 permissions:
   issues: write

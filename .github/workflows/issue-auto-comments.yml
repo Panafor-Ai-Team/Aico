@@ -1,14 +1,9 @@
 name: Issue Auto Comment
+
+# Aico: not used (upstream LobeHub Discord/comment bots).
+# Restore upstream `on:` when re-enabling. Manual run still possible.
 on:
-  issues:
-    types:
-      - opened
-      - closed
-      - assigned
-  pull_request_target:
-    types:
-      - opened
-      - closed
+  workflow_dispatch: {}
 
 permissions:
   contents: read
