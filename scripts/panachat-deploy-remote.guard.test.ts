@@ -35,7 +35,7 @@ describe('control-plane CI/CD wiring', () => {
     expect(compose).not.toMatch(
       /panachat-control-plane:[\s\S]*?volumes:[\t\v\f\r \xA0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]*\n\s*-\s+\.\.:\/app/,
     );
-    expect(compose).toContain('S3_INTERNAL_ENDPOINT=http://rustfs:9000');
+    expect(compose).toContain("'S3_INTERNAL_ENDPOINT=${S3_INTERNAL_ENDPOINT:-http://rustfs:9000}'");
     expect(compose).toContain('RUSTFS_CORS_ALLOWED_ORIGINS=${RUSTFS_CORS_ALLOWED_ORIGINS:-*}');
     expect(compose).toContain('pull_policy: always');
 
