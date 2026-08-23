@@ -257,11 +257,22 @@ async function generateByChatModel(
     },
   ];
 
-  // Add image for editing mode if provided
+  // Add image(s) for editing mode if provided
+  // Support both single imageUrl and multiple imageUrls
+  const referenceImages: string[] = [];
+
   if (params.imageUrl && params.imageUrl !== null) {
-    log('Processing image URL for editing mode: %s', params.imageUrl);
+    referenceImages.push(params.imageUrl);
+  }
+  if (Array.isArray(params.imageUrls) && params.imageUrls.length > 0) {
+    referenceImages.push(...params.imageUrls);
+  }
+
+  // Process all reference images
+  for (const imageUrl of referenceImages) {
+    log('Processing image URL for editing mode: %s', imageUrl);
     try {
-      const processedImageUrl = await processImageUrlForChat(params.imageUrl);
+      const processedImageUrl = await processImageUrlForChat(imageUrl);
       content.push({
         image_url: {
           url: processedImageUrl,

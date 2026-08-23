@@ -911,5 +911,66 @@ describe('createOpenAICompatibleImage', () => {
       expect(result.imageUrl).toBe('data:image/png;base64,fromImagesApi');
       expect(mockClient.images.generate).toHaveBeenCalled();
     });
+
+    it('sends multiple imageUrls in chat completions for OpenRouter', async () => {
+      vi.mocked(mockClient.chat.completions.create).mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: [{ image_url: { url: 'data:image/png;base64,result' }, type: 'image_url' }],
+            },
+          },
+        ],
+      } as any);
+
+      const result = await createOpenAICompatibleImage(
+        mockClient,
+        {
+          model: 'black-forest-labs/flux-2',
+          params: {
+            imageUrls: ['https://example.com/img1.jpg', 'https://example.com/img2.jpg'],
+            prompt: 'combine these images',
+          },
+        },
+        'openrouter',
+      );
+
+      expect(result.imageUrl).toBe('data:image/png;base64,result');
+      const callArgs = vi.mocked(mockClient.chat.completions.create).mock.calls[0][0] as any;
+      expect(callArgs.messages[0].content).toHaveLength(3); // text + 2 images
+      expect(callArgs.messages[0].content[1].type).toBe('image_url');
+      expect(callArgs.messages[0].content[2].type).toBe('image_url');
+    });
+
+    it('combines imageUrl and imageUrls for OpenRouter', async () => {
+      vi.mocked(mockClient.chat.completions.create).mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: [
+                { image_url: { url: 'data:image/png;base64,combined' }, type: 'image_url' },
+              ],
+            },
+          },
+        ],
+      } as any);
+
+      const result = await createOpenAICompatibleImage(
+        mockClient,
+        {
+          model: 'black-forest-labs/flux-2',
+          params: {
+            imageUrl: 'https://example.com/main.jpg',
+            imageUrls: ['https://example.com/ref1.jpg'],
+            prompt: 'edit with reference',
+          },
+        },
+        'openrouter',
+      );
+
+      expect(result.imageUrl).toBe('data:image/png;base64,combined');
+      const callArgs = vi.mocked(mockClient.chat.completions.create).mock.calls[0][0] as any;
+      expect(callArgs.messages[0].content).toHaveLength(3); // text + imageUrl + imageUrls
+    });
   });
 });
