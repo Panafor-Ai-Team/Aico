@@ -77,6 +77,19 @@ describe('control-plane CI/CD wiring', () => {
     expect(nginx).toContain('not object authorization');
   });
 
+  it('backs up the active stack, never prod state during preview deploys', () => {
+    const script = read('scripts/panachat-deploy-remote.sh');
+    const backup = read('scripts/panachat-backup.sh');
+
+    // Deploy script pins the backup to this stack's infra env…
+    expect(script).toContain(
+      'export PANACHAT_INFRA_ENV_FILE="${PANACHAT_INFRA_ENV_FILE:-$INFRA_ENV_FILE}"',
+    );
+    // …and the backup script must not hardcode the prod $DEPLOY_DIR/.env.
+    expect(backup).toContain('local envf="${PANACHAT_INFRA_ENV_FILE:-$DEPLOY_DIR/.env}"');
+    expect(backup).not.toContain('"$DEPLOY_DIR/.env" 2>/dev/null | cut -d= -f2-');
+  });
+
   it('keeps the S3 bucket private so raw object URLs are not world-readable', () => {
     const compose = read('docker-compose/deploy/docker-compose.panachat.yml');
     const deployCompose = read('docker-compose/deploy/docker-compose.yml');
