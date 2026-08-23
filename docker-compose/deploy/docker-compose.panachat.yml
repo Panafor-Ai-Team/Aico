@@ -55,8 +55,9 @@ services:
     env_file:
       - ${PANACHAT_APP_ENV_FILE:-../../.env}
       - ${PANACHAT_INFRA_ENV_FILE:-.env}
-    extra_hosts:
-      - 'mailer.panafor.com:host-gateway'
+    # SMTP reaches the stalwart container directly: the deploy attaches it to
+    # this network with the alias "mailer.panafor.com" (TLS cert hostname).
+    # Never re-add extra_hosts:host-gateway — cross-bridge hairpin drops data.
     networks:
       - panachat-network
     restart: unless-stopped
@@ -101,8 +102,9 @@ services:
     env_file:
       - ${PANACHAT_APP_ENV_FILE:-../../.env}
       - ${PANACHAT_INFRA_ENV_FILE:-.env}
-    extra_hosts:
-      - 'mailer.panafor.com:host-gateway'
+    # SMTP reaches the stalwart container directly: the deploy attaches it to
+    # this network with the alias "mailer.panafor.com" (TLS cert hostname).
+    # Never re-add extra_hosts:host-gateway — cross-bridge hairpin drops data.
     networks:
       - panachat-network
     restart: unless-stopped
