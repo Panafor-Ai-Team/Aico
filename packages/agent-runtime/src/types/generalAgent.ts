@@ -127,7 +127,7 @@ export interface GeneralAgentConfig {
  */
 export interface GeneralAgentCompressionResultPayload {
   /** Compressed messages (summary + pinned + recent) */
-  compressedMessages: any[];
+  compressedMessages?: any[];
   /** Compression group ID in database */
   groupId: string;
   /** Parent message ID for subsequent LLM call (last assistant message before compression) */
