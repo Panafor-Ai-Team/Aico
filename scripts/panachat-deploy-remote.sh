@@ -350,6 +350,8 @@ run_backup() {
   export LOBE_DB_NAME="${LOBE_DB_NAME:-${PANACHAT_DB_NAME:-lobechat}}"
   export PANACHAT_BACKUP_DIR="${PANACHAT_BACKUP_DIR:-$DEFAULT_BACKUP_DIR}"
   export PANACHAT_DATA_DIR="${PANACHAT_DATA_DIR:-$STATE_DIR/data}"
+  # Backup script must load stack values from THIS env (preview ≠ prod .env).
+  export PANACHAT_INFRA_ENV_FILE="${PANACHAT_INFRA_ENV_FILE:-$INFRA_ENV_FILE}"
   "$ROOT/scripts/panachat-backup.sh" --reason pre-deploy
 }
 
