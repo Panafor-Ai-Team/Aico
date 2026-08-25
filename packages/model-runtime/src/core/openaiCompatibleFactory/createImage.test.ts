@@ -228,6 +228,93 @@ describe('createOpenAICompatibleImage', () => {
           `Failed to process image URL: TypeError: Currently we don't support image url: ${mockInvalidUrl}`,
         );
       });
+
+      it('should send multiple reference images from imageUrls', async () => {
+        vi.spyOn(uriParserModule, 'parseDataUri').mockReturnValue({
+          type: 'base64',
+          base64: 'someBase64Data',
+          mimeType: null,
+        });
+
+        const mockChatResponse = {
+          choices: [
+            {
+              message: {
+                images: [
+                  {
+                    image_url: {
+                      url: 'data:image/png;base64,multi',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        };
+
+        vi.mocked(mockClient.chat.completions.create).mockResolvedValue(mockChatResponse as any);
+
+        const payload: CreateImagePayload = {
+          model: 'test-model:image',
+          params: {
+            prompt: 'Combine these images',
+            imageUrls: ['data:image/png;base64,one', 'data:image/png;base64,two'],
+          },
+        };
+
+        const result = await createOpenAICompatibleImage(mockClient, payload, 'test-provider');
+
+        expect(result.imageUrl).toBe('data:image/png;base64,multi');
+
+        const callArgs = vi.mocked(mockClient.chat.completions.create).mock.calls[0][0] as any;
+        // text prompt + 2 reference images
+        expect(callArgs.messages[0].content).toHaveLength(3);
+        expect(callArgs.messages[0].content[1].type).toBe('image_url');
+        expect(callArgs.messages[0].content[2].type).toBe('image_url');
+      });
+
+      it('should combine imageUrl and imageUrls as reference images', async () => {
+        vi.spyOn(uriParserModule, 'parseDataUri').mockReturnValue({
+          type: 'base64',
+          base64: 'someBase64Data',
+          mimeType: null,
+        });
+
+        const mockChatResponse = {
+          choices: [
+            {
+              message: {
+                images: [
+                  {
+                    image_url: {
+                      url: 'data:image/png;base64,combined',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        };
+
+        vi.mocked(mockClient.chat.completions.create).mockResolvedValue(mockChatResponse as any);
+
+        const payload: CreateImagePayload = {
+          model: 'test-model:image',
+          params: {
+            prompt: 'Edit with reference',
+            imageUrl: 'data:image/png;base64,main',
+            imageUrls: ['data:image/png;base64,ref'],
+          },
+        };
+
+        const result = await createOpenAICompatibleImage(mockClient, payload, 'test-provider');
+
+        expect(result.imageUrl).toBe('data:image/png;base64,combined');
+
+        const callArgs = vi.mocked(mockClient.chat.completions.create).mock.calls[0][0] as any;
+        // text prompt + imageUrl + imageUrls entry
+        expect(callArgs.messages[0].content).toHaveLength(3);
+      });
     });
 
     describe('generateByChatModel function', () => {
