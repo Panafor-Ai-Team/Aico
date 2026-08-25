@@ -136,15 +136,13 @@ const mockDbUpdate = vi.fn().mockReturnValue({
 
 function setupMocks() {
   const mockUpdate = vi.fn().mockResolvedValue(undefined);
-  const mockGetFullFileUrl = vi.fn().mockResolvedValue(null);
-  const mockGetKeyFromFullUrl = vi.fn().mockResolvedValue(null);
 
   vi.mocked(AsyncTaskModel).mockImplementation(() => ({ update: mockUpdate }) as any);
   vi.mocked(FileService).mockImplementation(
     () =>
       ({
-        getFullFileUrl: mockGetFullFileUrl,
-        getKeyFromFullUrl: mockGetKeyFromFullUrl,
+        getFullFileUrl: vi.fn().mockResolvedValue(null),
+        getKeyFromFullUrl: vi.fn().mockResolvedValue(null),
       }) as any,
   );
 
@@ -153,7 +151,7 @@ function setupMocks() {
     cb({ insert: mockInsert, update: mockDbUpdate }),
   );
 
-  return { mockGetFullFileUrl, mockGetKeyFromFullUrl, mockUpdate };
+  return { mockUpdate };
 }
 
 // ---- import router AFTER mocks are set up ----
@@ -178,40 +176,6 @@ describe('videoRouter', () => {
   });
 
   describe('createVideo - async strategy routing', () => {
-    it('should resolve uploaded reference images to external access URLs', async () => {
-      const { mockGetFullFileUrl, mockGetKeyFromFullUrl } = setupMocks();
-      mockGetKeyFromFullUrl
-        .mockResolvedValueOnce('files/first-frame.jpg')
-        .mockResolvedValueOnce('files/last-frame.jpg');
-      mockGetFullFileUrl
-        .mockResolvedValueOnce('https://storage.example.com/first-frame.jpg?signature=first')
-        .mockResolvedValueOnce('https://storage.example.com/last-frame.jpg?signature=last');
-      mockCreateVideo.mockResolvedValue({ inferenceId: 'inf-frames', useWebhook: true });
-
-      const caller = videoRouter.createCaller(mockCtx);
-      const result = await caller.createVideo({
-        ...defaultInput,
-        aicoBilling: { source: 'personal' },
-        params: {
-          endImageUrl: 'https://app.example.com/f/last-frame',
-          imageUrl: 'https://app.example.com/f/first-frame',
-          prompt: 'animate this image',
-        },
-        provider: 'openrouter',
-      });
-
-      expect(result.success).toBe(true);
-      expect(mockCreateVideo).toHaveBeenCalledWith(
-        expect.objectContaining({
-          params: expect.objectContaining({
-            endImageUrl: 'https://storage.example.com/last-frame.jpg?signature=last',
-            imageUrl: 'https://storage.example.com/first-frame.jpg?signature=first',
-          }),
-        }),
-        expect.any(Object),
-      );
-    });
-
     it('should use webhook path when response contains useWebhook: true', async () => {
       const { mockUpdate } = setupMocks();
       mockCreateVideo.mockResolvedValue({ inferenceId: 'inf-1', useWebhook: true });

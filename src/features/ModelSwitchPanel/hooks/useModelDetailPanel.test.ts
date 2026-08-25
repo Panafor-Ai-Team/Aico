@@ -55,7 +55,6 @@ const translations: Record<string, string> = {
   'ModelSwitchPanel.detail.pricing.credits.output': 'Output {{amount}} credits/M tokens',
   'ModelSwitchPanel.detail.pricing.credits.perImage': '~ {{amount}} credits / image',
   'ModelSwitchPanel.detail.pricing.credits.perVideo': '~ {{amount}} credits / video',
-  'ModelSwitchPanel.detail.pricing.credits.video': 'credits/video',
 };
 
 const t = ((key: string, options?: Record<string, string>) => {

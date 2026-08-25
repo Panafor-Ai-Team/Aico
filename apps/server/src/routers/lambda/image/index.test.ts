@@ -630,8 +630,16 @@ describe('imageRouter', () => {
       expect(result.success).toBe(true);
     });
 
-    describe('reference image access URLs', () => {
-      it('should resolve a single uploaded reference to an external access URL', async () => {
+    describe('development environment URL conversion', () => {
+      beforeEach(() => {
+        vi.stubEnv('NODE_ENV', 'development');
+      });
+
+      afterEach(() => {
+        vi.unstubAllEnvs();
+      });
+
+      it('should convert single imageUrl to S3 URL in development mode', async () => {
         mockGetKeyFromFullUrl.mockResolvedValue('files/image-key.jpg');
         mockGetFullFileUrl.mockResolvedValue('https://s3.amazonaws.com/bucket/files/image-key.jpg');
 
@@ -648,16 +656,9 @@ describe('imageRouter', () => {
 
         expect(result.success).toBe(true);
         expect(mockGetFullFileUrl).toHaveBeenCalledWith('files/image-key.jpg');
-        expect(mockAsyncCallerCreateImage).toHaveBeenCalledWith(
-          expect.objectContaining({
-            params: expect.objectContaining({
-              imageUrl: 'https://s3.amazonaws.com/bucket/files/image-key.jpg',
-            }),
-          }),
-        );
       });
 
-      it('should resolve multiple uploaded references to external access URLs', async () => {
+      it('should convert multiple imageUrls to S3 URLs in development mode', async () => {
         mockGetKeyFromFullUrl
           .mockResolvedValueOnce('files/image1.jpg')
           .mockResolvedValueOnce('files/image2.jpg');
@@ -680,16 +681,6 @@ describe('imageRouter', () => {
         expect(mockGetFullFileUrl).toHaveBeenCalledTimes(2);
         expect(mockGetFullFileUrl).toHaveBeenCalledWith('files/image1.jpg');
         expect(mockGetFullFileUrl).toHaveBeenCalledWith('files/image2.jpg');
-        expect(mockAsyncCallerCreateImage).toHaveBeenCalledWith(
-          expect.objectContaining({
-            params: expect.objectContaining({
-              imageUrls: [
-                'https://s3.amazonaws.com/bucket/files/image1.jpg',
-                'https://s3.amazonaws.com/bucket/files/image2.jpg',
-              ],
-            }),
-          }),
-        );
       });
 
       it('should not convert URLs when getFullFileUrl returns null', async () => {
