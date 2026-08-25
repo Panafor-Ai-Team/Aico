@@ -1,5 +1,6 @@
 'use client';
 
+import { ModelIcon } from '@lobehub/icons';
 import { ActionIcon, Flexbox, Text } from '@lobehub/ui';
 import { Switch, Tabs } from '@lobehub/ui/base-ui';
 import { Divider } from 'antd';
@@ -7,7 +8,6 @@ import { Images } from 'lucide-react';
 import { memo, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
 import { loginRequired } from '@/components/Error/loginRequiredNotification';
 import Action from '@/features/ChatInput/ActionBar/components/Action';
 import ModelSwitchPanel from '@/features/ModelSwitchPanel';
@@ -319,7 +319,6 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
               placement="topLeft"
               pricingMode="image"
               provider={currentProvider ?? undefined}
-              showAddModel={false}
               onModelChange={async ({ model, provider }) => {
                 if (!canCreate) return;
 
@@ -327,7 +326,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
               }}
             >
               <ActionIcon
-                icon={<BrandedModelIcon model={currentModel ?? ''} size={22} />}
+                icon={<ModelIcon model={currentModel ?? ''} size={22} />}
                 size={{
                   blockSize: 36,
                   size: 20,

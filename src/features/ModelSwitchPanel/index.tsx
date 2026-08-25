@@ -25,7 +25,6 @@ const ModelSwitchPanel = memo<ModelSwitchPanelProps>(
     placement = 'topLeft',
     pricingMode,
     provider: providerProp,
-    showAddModel,
     openOnHover = true,
   }) => {
     const [internalOpen, setInternalOpen] = useState(false);
@@ -54,7 +53,6 @@ const ModelSwitchPanel = memo<ModelSwitchPanelProps>(
                   model={modelProp}
                   pricingMode={pricingMode}
                   provider={providerProp}
-                  showAddModel={showAddModel}
                   onModelChange={onModelChange}
                   onOpenChange={handleOpenChange}
                 />

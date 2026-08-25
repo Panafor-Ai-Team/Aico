@@ -1,7 +1,6 @@
 import {
   type AIVideoModelCard,
   extractVideoDefaultValues,
-  resolveVideoModelParamsSchema,
   type RuntimeVideoGenParams,
   type RuntimeVideoGenParamsKeys,
   type RuntimeVideoGenParamsValue,
@@ -39,7 +38,7 @@ export function getVideoModelAndDefaults(model: string, provider: string) {
     );
   }
 
-  const parametersSchema = resolveVideoModelParamsSchema(activeModel.parameters);
+  const parametersSchema = activeModel.parameters as VideoModelParamsSchema;
   const defaultValues = extractVideoDefaultValues(parametersSchema);
 
   return { activeModel, defaultValues, parametersSchema };
