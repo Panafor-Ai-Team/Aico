@@ -35,7 +35,7 @@ describe('control-plane CI/CD wiring', () => {
     expect(compose).not.toMatch(
       /panachat-control-plane:[\s\S]*?volumes:[\t\v\f\r \xA0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]*\n\s*-\s+\.\.:\/app/,
     );
-    expect(compose).toContain('S3_INTERNAL_ENDPOINT=http://rustfs:9000');
+    expect(compose).toContain("'S3_INTERNAL_ENDPOINT=${S3_INTERNAL_ENDPOINT:-http://rustfs:9000}'");
     expect(compose).toContain('RUSTFS_CORS_ALLOWED_ORIGINS=${RUSTFS_CORS_ALLOWED_ORIGINS:-*}');
     expect(compose).toContain('pull_policy: always');
 
@@ -75,6 +75,19 @@ describe('control-plane CI/CD wiring', () => {
     expect(nginx).toContain('proxy_hide_header Access-Control-Allow-Origin');
     expect(nginx).toContain('return 204');
     expect(nginx).toContain('not object authorization');
+  });
+
+  it('backs up the active stack, never prod state during preview deploys', () => {
+    const script = read('scripts/panachat-deploy-remote.sh');
+    const backup = read('scripts/panachat-backup.sh');
+
+    // Deploy script pins the backup to this stack's infra env…
+    expect(script).toContain(
+      'export PANACHAT_INFRA_ENV_FILE="${PANACHAT_INFRA_ENV_FILE:-$INFRA_ENV_FILE}"',
+    );
+    // …and the backup script must not hardcode the prod $DEPLOY_DIR/.env.
+    expect(backup).toContain('local envf="${PANACHAT_INFRA_ENV_FILE:-$DEPLOY_DIR/.env}"');
+    expect(backup).not.toContain('"$DEPLOY_DIR/.env" 2>/dev/null | cut -d= -f2-');
   });
 
   it('keeps the S3 bucket private so raw object URLs are not world-readable', () => {
