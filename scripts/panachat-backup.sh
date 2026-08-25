@@ -56,10 +56,13 @@ STRICT=0
 RESTORE_FILE=""
 
 load_deploy_env() {
-  [[ -f "$DEPLOY_DIR/.env" ]] || return 0
+  # Honor PANACHAT_INFRA_ENV_FILE (set by panachat-deploy-remote.sh for the
+  # active stack) so preview deploys never read prod's data dir / fingerprint.
+  local envf="${PANACHAT_INFRA_ENV_FILE:-$DEPLOY_DIR/.env}"
+  [[ -f "$envf" ]] || return 0
   local key val
-  for key in PANACHAT_DATA_DIR PANACHAT_BACKUP_DIR LOBE_DB_NAME POSTGRES_VOLUME_NAME RUSTFS_VOLUME_NAME; do
-    val="$(grep -E "^${key}=" "$DEPLOY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)"
+  for key in PANACHAT_DATA_DIR PANACHAT_BACKUP_DIR LOBE_DB_NAME POSTGRES_CONTAINER POSTGRES_VOLUME_NAME RUSTFS_VOLUME_NAME; do
+    val="$(grep -E "^${key}=" "$envf" 2>/dev/null | cut -d= -f2- || true)"
     if [[ -n "$val" ]]; then
       printf -v "$key" '%s' "$val"
     fi
