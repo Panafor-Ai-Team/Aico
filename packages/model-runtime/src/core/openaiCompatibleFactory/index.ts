@@ -75,7 +75,7 @@ import type { OpenAIStreamOptions } from '../streams';
 import { OpenAIResponsesStream, OpenAIStream } from '../streams';
 import type { ChatPayloadForTransformStream } from '../streams/protocol';
 import { convertOpenAIResponseUsage, convertOpenAIUsage } from '../usageConverters/openai';
-import { createOpenAICompatibleImage } from './createImage';
+import { createOpenAICompatibleImage, type ImageEditMode } from './createImage';
 import { createOpenAICompatibleVideo, pollOpenAICompatibleVideoStatus } from './createVideo';
 import { transformResponseAPIToStream, transformResponseToStream } from './nonStreamToStream';
 
@@ -295,6 +295,12 @@ export interface OpenAICompatibleFactoryOptions<T extends Record<string, any> = 
     inferenceId: string,
     options: CreateVideoOptions,
   ) => Promise<PollVideoStatusResult>;
+  /**
+   * How reference images are sent when editing. Defaults to `imagesEdit`
+   * (multipart `/images/edits`). Providers without that route — notably
+   * OpenRouter — must set `inputReferences`.
+   */
+  imageEditMode?: ImageEditMode;
   models?:
     | ((params: { client: OpenAI; options?: ConstructorOptions<T> }) => Promise<ChatModelCard[]>)
     | {
@@ -334,6 +340,7 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
   responses,
   promptCacheKeyModels,
   createImage: customCreateImage,
+  imageEditMode,
   createVideo: customCreateVideo,
   handleCreateVideoWebhook: customHandleCreateVideoWebhook,
   handlePollVideoStatus: customHandlePollVideoStatus,
@@ -867,6 +874,7 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
       log('using default createOpenAICompatibleImage');
       // Use the new createOpenAICompatibleImage function
       return createOpenAICompatibleImage(this.client, payload, this.id, {
+        imageEditMode,
         pricingContext: options?.pricingContext,
         pricingModel: payload.model,
         requestModel: resolveMappedModelId(payload.model, this.modelIdMappingOptions),

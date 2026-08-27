@@ -1000,6 +1000,215 @@ describe('createOpenAICompatibleImage', () => {
     });
   });
 
+  describe('chat model mode - response extraction shapes', () => {
+    const usage = {
+      total_tokens: 1000,
+      input_tokens: 100,
+      output_tokens: 900,
+      input_tokens_details: { text_tokens: 50, image_tokens: 50 },
+    };
+    const payload: CreateImagePayload = {
+      model: 'google/gemini-3.1-flash-image-preview:image',
+      params: { prompt: 'make it red' },
+    };
+
+    const runWithMessage = async (message: any) => {
+      vi.mocked(mockClient.chat.completions.create).mockResolvedValue({
+        choices: [{ message }],
+        usage,
+      } as any);
+      return createOpenAICompatibleImage(mockClient, payload, 'openrouter');
+    };
+
+    it('extracts from message.images (existing shape)', async () => {
+      const result = await runWithMessage({
+        images: [{ image_url: { url: 'https://cdn/img.png' } }],
+      });
+      expect(result.imageUrl).toBe('https://cdn/img.png');
+      expect(result.modelUsage).toBeDefined();
+    });
+
+    it('extracts from multimodal content parts', async () => {
+      const result = await runWithMessage({
+        content: [{ type: 'image_url', image_url: { url: 'https://cdn/part.png' } }],
+      });
+      expect(result.imageUrl).toBe('https://cdn/part.png');
+      expect(result.modelUsage).toBeDefined();
+    });
+
+    it('extracts b64_json content parts as a data URI', async () => {
+      const result = await runWithMessage({
+        content: [{ type: 'image', b64_json: 'abc123' }],
+      });
+      expect(result.imageUrl).toBe('data:image/png;base64,abc123');
+      expect(result.modelUsage).toBeDefined();
+    });
+
+    it('extracts a data URI embedded in string content', async () => {
+      const result = await runWithMessage({
+        content: 'Here you go: data:image/png;base64,AAAbbb111 enjoy',
+      });
+      expect(result.imageUrl).toBe('data:image/png;base64,AAAbbb111');
+      expect(result.modelUsage).toBeDefined();
+    });
+
+    it('extracts a markdown image from string content', async () => {
+      const result = await runWithMessage({
+        content: '![out](https://cdn/markdown.png)',
+      });
+      expect(result.imageUrl).toBe('https://cdn/markdown.png');
+      expect(result.modelUsage).toBeDefined();
+    });
+
+    it('still throws when the response carries no image at all', async () => {
+      await expect(runWithMessage({ content: 'sorry, I cannot do that' })).rejects.toThrow(
+        'No image generated in chat completion response',
+      );
+    });
+  });
+
+  describe('image mode - imageEditMode: inputReferences', () => {
+    const editedResponse = { data: [{ b64_json: 'editedViaInputReferences' }] };
+
+    // Any call to this means we tried to download the reference server-side,
+    // which is both unnecessary and SSRF-prone for the input_references transport.
+    const failIfFetched = () =>
+      vi.fn().mockImplementation(() => {
+        throw new Error('reference image must not be fetched server-side');
+      });
+
+    it('never calls /images/edits for OpenRouter reference-image edits', async () => {
+      global.fetch = failIfFetched() as any;
+      vi.mocked(mockClient.images.generate).mockResolvedValue(editedResponse as any);
+
+      const payload: CreateImagePayload = {
+        model: 'bytedance-seed/seedream-5-0-lite',
+        params: {
+          prompt: 'رنگشو قرمز کن',
+          imageUrls: ['https://example.com/a.jpg', 'https://example.com/b.jpg'],
+        },
+      };
+
+      const result = await createOpenAICompatibleImage(mockClient, payload, 'openrouter', {
+        imageEditMode: 'inputReferences',
+      });
+
+      // The regression: /images/edits does not exist on OpenRouter and returns 404.
+      expect(mockClient.images.edit).not.toHaveBeenCalled();
+      expect(mockClient.images.generate).toHaveBeenCalledTimes(1);
+      expect(result.imageUrl).toBe('data:image/png;base64,editedViaInputReferences');
+    });
+
+    it('sends references as input_references and drops the image field', async () => {
+      global.fetch = failIfFetched() as any;
+      vi.mocked(mockClient.images.generate).mockResolvedValue(editedResponse as any);
+
+      const payload: CreateImagePayload = {
+        model: 'bytedance-seed/seedream-5-0-lite',
+        params: {
+          prompt: 'make it red',
+          imageUrls: ['https://example.com/a.jpg', 'https://example.com/b.jpg'],
+        },
+      };
+
+      await createOpenAICompatibleImage(mockClient, payload, 'openrouter', {
+        imageEditMode: 'inputReferences',
+      });
+
+      const body = vi.mocked(mockClient.images.generate).mock.calls[0][0] as any;
+      expect(body.input_references).toEqual([
+        { image_url: { url: 'https://example.com/a.jpg' }, type: 'image_url' },
+        { image_url: { url: 'https://example.com/b.jpg' }, type: 'image_url' },
+      ]);
+      expect(body.image).toBeUndefined();
+      expect(body.model).toBe('bytedance-seed/seedream-5-0-lite');
+      expect(body.prompt).toBe('make it red');
+    });
+
+    it('normalises a single imageUrl string into one input_reference', async () => {
+      global.fetch = failIfFetched() as any;
+      vi.mocked(mockClient.images.generate).mockResolvedValue(editedResponse as any);
+
+      const payload: CreateImagePayload = {
+        model: 'bytedance-seed/seedream-5-0-lite',
+        params: { prompt: 'edit', imageUrl: 'https://example.com/one.jpg' },
+      };
+
+      await createOpenAICompatibleImage(mockClient, payload, 'openrouter', {
+        imageEditMode: 'inputReferences',
+      });
+
+      const body = vi.mocked(mockClient.images.generate).mock.calls[0][0] as any;
+      expect(body.input_references).toEqual([
+        { image_url: { url: 'https://example.com/one.jpg' }, type: 'image_url' },
+      ]);
+      expect(mockClient.images.edit).not.toHaveBeenCalled();
+    });
+
+    it('reports identical modelUsage under both edit transports', async () => {
+      const usage = {
+        total_tokens: 1000,
+        input_tokens: 100,
+        output_tokens: 900,
+        input_tokens_details: { text_tokens: 50, image_tokens: 50 },
+      };
+      const params = { prompt: 'same prompt', imageUrls: ['https://example.com/a.jpg'] };
+
+      // input_references transport
+      global.fetch = failIfFetched() as any;
+      vi.mocked(mockClient.images.generate).mockResolvedValue({
+        data: [{ b64_json: 'x' }],
+        usage,
+      } as any);
+      const viaRefs = await createOpenAICompatibleImage(
+        mockClient,
+        { model: 'm', params },
+        'openrouter',
+        { imageEditMode: 'inputReferences' },
+      );
+
+      // multipart transport
+      const mockArrayBuffer = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer;
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: async () => mockArrayBuffer,
+        headers: { get: (n: string) => (n === 'content-type' ? 'image/jpeg' : null) },
+      } as any);
+      vi.mocked(mockClient.images.edit).mockResolvedValue({
+        data: [{ b64_json: 'x' }],
+        usage,
+      } as any);
+      const viaMultipart = await createOpenAICompatibleImage(
+        mockClient,
+        { model: 'm', params },
+        'openrouter',
+      );
+
+      // Billing must not depend on which transport carried the reference image.
+      expect(viaRefs.modelUsage).toEqual(viaMultipart.modelUsage);
+    });
+
+    it('still uses multipart /images/edits when the mode is not set', async () => {
+      const mockArrayBuffer = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer;
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: async () => mockArrayBuffer,
+        headers: { get: (n: string) => (n === 'content-type' ? 'image/jpeg' : null) },
+      } as any);
+      vi.mocked(mockClient.images.edit).mockResolvedValue(editedResponse as any);
+
+      const payload: CreateImagePayload = {
+        model: 'dall-e-2',
+        params: { prompt: 'edit', imageUrls: ['https://example.com/a.jpg'] },
+      };
+
+      await createOpenAICompatibleImage(mockClient, payload, 'openai');
+
+      expect(mockClient.images.edit).toHaveBeenCalled();
+      expect(mockClient.images.generate).not.toHaveBeenCalled();
+    });
+  });
+
   describe('image mode - usage tracking', () => {
     it('should include modelUsage when usage is present in response', async () => {
       const mockImageResponse = {

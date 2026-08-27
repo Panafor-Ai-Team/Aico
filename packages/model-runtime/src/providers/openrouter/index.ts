@@ -96,6 +96,10 @@ export const params = {
   debug: {
     chatCompletion: () => process.env.DEBUG_OPENROUTER_CHAT_COMPLETION === '1',
   },
+  // OpenRouter has no /images/edits route — editing goes through
+  // /images/generations with an `input_references` array. Without this,
+  // every reference-image edit fails with a bare `404 Not Found`.
+  imageEditMode: 'inputReferences',
   handlePollVideoStatus: async (inferenceId, options) =>
     pollOpenRouterVideoStatus(inferenceId, {
       apiKey: options.apiKey,
