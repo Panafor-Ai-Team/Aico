@@ -138,6 +138,7 @@ export const UNIT_ICON_MAP: Partial<Record<PricingUnitName, LucideIcon>> = {
   textInput_cacheRead: CircleFadingArrowUp,
   textInput_cacheWrite: CircleFadingArrowUp,
   textOutput: ArrowDownToDot,
+  videoGeneration: VideoIcon,
 };
 
 const UNIT_SORT_ORDER: Record<PricingUnitName, number> = {
@@ -331,10 +332,19 @@ export const useModelDetailPanel = ({
   const approximatePriceLabel = useMemo(() => {
     if (!displayPricing || !pricingMode) return null;
     const currency = displayPricing.currency as ModelPriceCurrency | undefined;
-    if (pricingMode === 'image' && typeof displayPricing.approximatePricePerImage === 'number') {
+    // Prefer the per-model approximatePricePerImage/Video field: it is computed
+    // by resolveImageSinglePrice/resolveVideoSinglePrice from the pricing units
+    // (including token-priced generators, which have no dedicated pricing-unit
+    // field of their own), whereas displayPricing.approximatePricePerImage only
+    // ever holds a value when a model-bank entry sets it explicitly.
+    const approximatePricePerImage =
+      model?.approximatePricePerImage ?? displayPricing.approximatePricePerImage;
+    const approximatePricePerVideo =
+      model?.approximatePricePerVideo ?? displayPricing.approximatePricePerVideo;
+    if (pricingMode === 'image' && typeof approximatePricePerImage === 'number') {
       const amount = isCreditPricing
-        ? formatBrandingCreditRate(displayPricing.approximatePricePerImage, 'image')
-        : formatPriceByCurrency(displayPricing.approximatePricePerImage, currency);
+        ? formatBrandingCreditRate(approximatePricePerImage, 'image')
+        : formatPriceByCurrency(approximatePricePerImage, currency);
       return t(
         isCreditPricing
           ? 'ModelSwitchPanel.detail.pricing.credits.perImage'
@@ -345,10 +355,10 @@ export const useModelDetailPanel = ({
         },
       );
     }
-    if (pricingMode === 'video' && typeof displayPricing.approximatePricePerVideo === 'number') {
+    if (pricingMode === 'video' && typeof approximatePricePerVideo === 'number') {
       const amount = isCreditPricing
-        ? formatBrandingCreditRate(displayPricing.approximatePricePerVideo)
-        : formatPriceByCurrency(displayPricing.approximatePricePerVideo, currency);
+        ? formatBrandingCreditRate(approximatePricePerVideo)
+        : formatPriceByCurrency(approximatePricePerVideo, currency);
       return t(
         isCreditPricing
           ? 'ModelSwitchPanel.detail.pricing.credits.perVideo'
@@ -360,7 +370,7 @@ export const useModelDetailPanel = ({
       );
     }
     return null;
-  }, [displayPricing, isCreditPricing, pricingMode, t]);
+  }, [displayPricing, isCreditPricing, model, pricingMode, t]);
 
   const getCreditsUnitLabel = useCallback(
     (unit: PricingUnit['unit']) =>

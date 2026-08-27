@@ -215,6 +215,8 @@
   "providerModels.item.delete.confirm": "آیا از حذف مدل {{displayName}} مطمئن هستید؟",
   "providerModels.item.delete.success": "حذف با موفقیت انجام شد",
   "providerModels.item.delete.title": "حذف مدل",
+  "providerModels.item.modelConfig.audio.extra": "این تنظیم قابلیت ورودی صوتی را در برنامه فعال می‌کند. پشتیبانی از درک صدا کاملاً به خود مدل بستگی دارد. لطفاً برای اطمینان از در دسترس بودن این قابلیت، مدل را آزمایش کنید.",
+  "providerModels.item.modelConfig.audio.title": "پشتیبانی از ورودی صوتی",
   "providerModels.item.modelConfig.azureDeployName.extra": "فیلدی که در درخواست‌های واقعی Azure OpenAI استفاده می‌شود",
   "providerModels.item.modelConfig.azureDeployName.placeholder": "نام استقرار مدل در Azure را وارد کنید",
   "providerModels.item.modelConfig.azureDeployName.title": "نام استقرار مدل",

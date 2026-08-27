@@ -4,6 +4,10 @@ import type { AiProviderSettings } from './aiProvider';
 
 export interface ChatModelCard {
   /**
+   *  whether model supports audio input
+   */
+  audio?: boolean;
+  /**
    * the context window (or input + output tokens limit)
    */
   contextWindowTokens?: number;

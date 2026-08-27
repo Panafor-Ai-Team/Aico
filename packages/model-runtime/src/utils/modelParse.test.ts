@@ -224,6 +224,19 @@ describe('modelParse', () => {
       expect(result[1].vision).toBe(false); // 'gpt-3.5-turbo' not in openai vision keywords
     });
 
+    it('should carry through an explicit audio ability reported by the remote catalog', async () => {
+      const modelList = [
+        { audio: true, id: 'gpt-audio-model' },
+        { id: 'gpt-4o' }, // no audio field reported
+      ];
+
+      const config = MODEL_LIST_CONFIGS.openai;
+      const result = await processModelList(modelList, config);
+
+      expect(result.find((m) => m.id === 'gpt-audio-model')!.audio).toBe(true);
+      expect(result.find((m) => m.id === 'gpt-4o')!.audio).toBeUndefined();
+    });
+
     it('should use information from known models when available', async () => {
       const modelList = [
         { id: 'gpt-4' }, // This is in our mock default list

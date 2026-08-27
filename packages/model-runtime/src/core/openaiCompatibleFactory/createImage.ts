@@ -12,7 +12,7 @@ import type {
 import { getModelPricing } from '../../utils/getModelPricing';
 import { parseDataUri } from '../../utils/uriParser';
 import { convertImageUrlToFile } from '../contextBuilders/openai';
-import { convertOpenAIImageUsage } from '../usageConverters/openai';
+import { convertOpenAIImageUsage, convertOpenAIUsage } from '../usageConverters/openai';
 
 const log = createDebug('lobe-image:openai-compatible');
 
@@ -165,7 +165,15 @@ async function processImageUrlForChat(imageUrl: string): Promise<string> {
     }
     return `data:${mimeType || 'image/png'};base64,${base64}`;
   } else if (type === 'url') {
-    // For URL type, convert to base64 first
+    // Chat hands remote image URLs to the provider untouched and the provider
+    // fetches them itself (see contextBuilders/openai.ts's forceImageBase64
+    // gate, which OpenRouter never sets). Doing our own server-side fetch here
+    // is what breaks Image Create with an uploaded reference: `imageUrlToBase64`
+    // goes through ssrfSafeFetch, which rejects an APP_URL or S3 endpoint that
+    // resolves to a private/loopback address. Only inline to base64 when an
+    // operator has explicitly opted in via the same flag chat already respects.
+    if (process.env.LLM_VISION_IMAGE_USE_BASE64 !== '1') return imageUrl;
+
     const { base64: urlBase64, mimeType: urlMimeType } = await imageUrlToBase64(imageUrl);
     return `data:${urlMimeType};base64,${urlBase64}`;
   } else {
@@ -179,9 +187,11 @@ async function processImageUrlForChat(imageUrl: string): Promise<string> {
 async function generateByChatModel(
   client: OpenAI,
   payload: CreateImagePayload,
-  requestModel?: string,
+  provider: string,
+  imageOptions?: CreateOpenAICompatibleImageOptions,
 ): Promise<CreateImageResponse> {
   const { model, params } = payload;
+  const requestModel = imageOptions?.requestModel;
   const actualModel = (requestModel ?? model).replace(':image', ''); // Remove :image suffix
 
   log('Creating image via chat API with model: %s and params: %O', actualModel, params);
@@ -218,7 +228,10 @@ async function generateByChatModel(
       });
       log('Successfully processed image URL for chat input');
     } catch (error) {
-      throw new Error(`Failed to process image URL: ${error}`, { cause: error });
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to process image URL (${imageUrl.slice(0, 120)}): ${message}`, {
+        cause: error,
+      });
     }
   }
 
@@ -235,6 +248,10 @@ async function generateByChatModel(
     // createImage uses the raw OpenAI client, so set it here explicitly.
     modalities: ['image', 'text'],
     stream: false,
+    // Ask OpenRouter to report real cost in `usage.cost` so the generation
+    // cost badge (which reads modelUsage.cost) has something to show. Ignored
+    // by OpenAI-compatible endpoints that don't recognize the field.
+    usage: { include: true },
   } as Parameters<typeof client.chat.completions.create>[0]);
 
   log('Chat API response: %O', response);
@@ -252,7 +269,21 @@ async function generateByChatModel(
       const image = images[0];
       if (image.image_url?.url) {
         log('Successfully extracted image from chat response');
-        return { imageUrl: image.image_url.url };
+        return {
+          imageUrl: image.image_url.url,
+          ...(response.usage
+            ? {
+                modelUsage: convertOpenAIUsage(response.usage, {
+                  pricing: await getModelPricing(
+                    imageOptions?.pricingModel ?? actualModel,
+                    provider,
+                    imageOptions?.pricingContext,
+                  ),
+                  provider,
+                }),
+              }
+            : {}),
+        };
       }
     }
   }
@@ -275,7 +306,7 @@ export async function createOpenAICompatibleImage(
 
   // Check if it's a chat model for image generation (via :image suffix)
   if (routingModel.endsWith(':image')) {
-    return await generateByChatModel(client, payload, options?.requestModel);
+    return await generateByChatModel(client, payload, provider, options);
   }
 
   // Default to traditional images API

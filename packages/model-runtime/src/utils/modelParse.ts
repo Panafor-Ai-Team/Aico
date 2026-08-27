@@ -651,6 +651,7 @@ const processModelCard = (
   const pricing = mergePricing(formatPricing(model.pricing), formatPricing(knownModel?.pricing));
 
   return {
+    audio: model.audio ?? knownModel?.abilities?.audio ?? undefined,
     contextWindowTokens: model.contextWindowTokens ?? knownModel?.contextWindowTokens ?? undefined,
     description: model.description ?? knownModel?.description ?? '',
     displayName: processDisplayName(model.displayName ?? knownModel?.displayName ?? model.id),

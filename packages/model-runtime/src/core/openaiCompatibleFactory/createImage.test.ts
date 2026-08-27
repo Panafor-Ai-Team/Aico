@@ -155,11 +155,11 @@ describe('createOpenAICompatibleImage', () => {
         await expect(
           createOpenAICompatibleImage(mockClient, payload, 'test-provider'),
         ).rejects.toThrow(
-          "Failed to process image URL: TypeError: Image URL doesn't contain base64 data",
+          `Failed to process image URL (${mockImageUrl}): Image URL doesn't contain base64 data`,
         );
       });
 
-      it('should process URL type by converting to base64', async () => {
+      it('should forward a remote URL reference untouched by default (no server-side fetch)', async () => {
         const mockHttpImageUrl = 'https://example.com/image.jpg';
 
         vi.spyOn(uriParserModule, 'parseDataUri').mockReturnValue({
@@ -168,10 +168,7 @@ describe('createOpenAICompatibleImage', () => {
           mimeType: null,
         });
 
-        vi.spyOn(imageToBase64Module, 'imageUrlToBase64').mockResolvedValue({
-          base64: 'convertedBase64Data',
-          mimeType: 'image/jpeg',
-        });
+        const fetchSpy = vi.spyOn(imageToBase64Module, 'imageUrlToBase64');
 
         const mockChatResponse = {
           choices: [
@@ -201,8 +198,68 @@ describe('createOpenAICompatibleImage', () => {
 
         const result = await createOpenAICompatibleImage(mockClient, payload, 'test-provider');
 
-        expect(imageToBase64Module.imageUrlToBase64).toHaveBeenCalledWith(mockHttpImageUrl);
+        // The server must not dereference the reference image itself — that
+        // self-fetch is what breaks Image Create behind SSRF protection.
+        // The provider fetches the URL directly, exactly like chat does.
+        expect(fetchSpy).not.toHaveBeenCalled();
+        const callArgs = vi.mocked(mockClient.chat.completions.create).mock.calls[0][0] as any;
+        expect(callArgs.messages[0].content[1]).toEqual({
+          image_url: { url: mockHttpImageUrl },
+          type: 'image_url',
+        });
         expect(result.imageUrl).toBe('data:image/png;base64,output');
+      });
+
+      it('should still convert a remote URL to base64 when LLM_VISION_IMAGE_USE_BASE64=1', async () => {
+        const mockHttpImageUrl = 'https://example.com/image.jpg';
+        const previous = process.env.LLM_VISION_IMAGE_USE_BASE64;
+        process.env.LLM_VISION_IMAGE_USE_BASE64 = '1';
+
+        try {
+          vi.spyOn(uriParserModule, 'parseDataUri').mockReturnValue({
+            type: 'url',
+            base64: null,
+            mimeType: null,
+          });
+
+          vi.spyOn(imageToBase64Module, 'imageUrlToBase64').mockResolvedValue({
+            base64: 'convertedBase64Data',
+            mimeType: 'image/jpeg',
+          });
+
+          const mockChatResponse = {
+            choices: [
+              {
+                message: {
+                  images: [
+                    {
+                      image_url: {
+                        url: 'data:image/png;base64,output',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          };
+
+          vi.mocked(mockClient.chat.completions.create).mockResolvedValue(mockChatResponse as any);
+
+          const payload: CreateImagePayload = {
+            model: 'vision-model:image',
+            params: {
+              prompt: 'Convert and process',
+              imageUrl: mockHttpImageUrl,
+            },
+          };
+
+          const result = await createOpenAICompatibleImage(mockClient, payload, 'test-provider');
+
+          expect(imageToBase64Module.imageUrlToBase64).toHaveBeenCalledWith(mockHttpImageUrl);
+          expect(result.imageUrl).toBe('data:image/png;base64,output');
+        } finally {
+          process.env.LLM_VISION_IMAGE_USE_BASE64 = previous;
+        }
       });
 
       it('should throw error for unsupported image URL type', async () => {
@@ -225,7 +282,7 @@ describe('createOpenAICompatibleImage', () => {
         await expect(
           createOpenAICompatibleImage(mockClient, payload, 'test-provider'),
         ).rejects.toThrow(
-          `Failed to process image URL: TypeError: Currently we don't support image url: ${mockInvalidUrl}`,
+          `Failed to process image URL (${mockInvalidUrl}): Currently we don't support image url: ${mockInvalidUrl}`,
         );
       });
 
@@ -362,6 +419,7 @@ describe('createOpenAICompatibleImage', () => {
           modalities: ['image', 'text'],
           model: 'gemini-2.0-flash',
           stream: false,
+          usage: { include: true },
         });
       });
 
@@ -534,6 +592,79 @@ describe('createOpenAICompatibleImage', () => {
         await expect(
           createOpenAICompatibleImage(mockClient, payload, 'test-provider'),
         ).rejects.toThrow('No image generated in chat completion response');
+      });
+
+      it('should request usage.include and populate modelUsage from the provider-reported cost', async () => {
+        const mockChatResponse = {
+          choices: [
+            {
+              message: {
+                images: [
+                  {
+                    image_url: {
+                      url: 'data:image/png;base64,withUsage',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+          usage: {
+            completion_tokens: 1290,
+            cost: 0.0391,
+            prompt_tokens: 10,
+            total_tokens: 1300,
+          },
+        };
+
+        vi.mocked(mockClient.chat.completions.create).mockResolvedValue(mockChatResponse as any);
+
+        const payload: CreateImagePayload = {
+          model: 'gemini-2.0-flash:image',
+          params: {
+            prompt: 'Generate a cat image',
+          },
+        };
+
+        const result = await createOpenAICompatibleImage(mockClient, payload, 'openrouter');
+
+        expect(mockClient.chat.completions.create).toHaveBeenCalledWith(
+          expect.objectContaining({ usage: { include: true } }),
+        );
+        expect(result.imageUrl).toBe('data:image/png;base64,withUsage');
+        expect(result.modelUsage?.cost).toBe(0.0391);
+      });
+
+      it('should not include modelUsage when the chat completion response has no usage', async () => {
+        const mockChatResponse = {
+          choices: [
+            {
+              message: {
+                images: [
+                  {
+                    image_url: {
+                      url: 'data:image/png;base64,noUsage',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        };
+
+        vi.mocked(mockClient.chat.completions.create).mockResolvedValue(mockChatResponse as any);
+
+        const payload: CreateImagePayload = {
+          model: 'gemini-2.0-flash:image',
+          params: {
+            prompt: 'Generate a cat image',
+          },
+        };
+
+        const result = await createOpenAICompatibleImage(mockClient, payload, 'openrouter');
+
+        expect(result.imageUrl).toBe('data:image/png;base64,noUsage');
+        expect(result.modelUsage).toBeUndefined();
       });
 
       it('should successfully process image with valid imageUrl', async () => {

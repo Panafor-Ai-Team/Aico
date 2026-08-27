@@ -1586,6 +1586,8 @@ export default {
   'upload.action.imageDisabled':
     'The current model does not support visual recognition. Please switch models to use this feature.',
   'upload.action.imageUpload': 'Upload Image',
+  'upload.action.mediaDisabled':
+    'The current model does not support this type of upload: {{files}}. Please switch models to use this feature.',
   'upload.action.tooltip': 'Upload',
   'upload.clientMode.actionFiletip': 'Upload File',
   'upload.clientMode.actionTooltip': 'Upload',

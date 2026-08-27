@@ -176,6 +176,13 @@ LobeHub performs SSRF security checks in the following scenarios:
 
    Without SSRF protection, these requests could expose internal network resources.
 
+   This conversion only runs when `LLM_VISION_IMAGE_USE_BASE64=1` is set (chat
+   models rely on providers fetching image URLs themselves by default). If you
+   enable it and `APP_URL` or your S3 endpoint resolves to a private or loopback
+   address, set `SSRF_ALLOW_PRIVATE_IP_ADDRESS=1` (or add it to
+   `SSRF_ALLOW_IP_ADDRESS_LIST`) — otherwise reference-image uploads to Image
+   Create will fail with `SSRF blocked: ... is not allowed`.
+
 2. **Web Crawler**: When using web crawling features to fetch external content.
 
 3. **Proxy Requests**: When proxying external API requests.
@@ -248,11 +255,11 @@ When this feature is enabled, users can upload images or videos while using a mo
 
 - Type: Optional
 - Description: Sets the default number of images to generate for AI image generation. Users can still override this value in their settings.
-- Default: `2`
+- Default: `1`
 - Example: `6`
 - Range: `1-20`
 
-This environment variable allows administrators to customize the default image generation count for their deployment. The value must be between 1 and 20. If not set, it defaults to 2. Users can still adjust this value in their personal settings.
+This environment variable allows administrators to customize the default image generation count for their deployment. The value must be between 1 and 20. If not set, it defaults to 1. Users can still adjust this value in their personal settings.
 
 ## Plugin Service
 

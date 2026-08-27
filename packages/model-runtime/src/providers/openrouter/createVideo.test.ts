@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 describe('createOpenRouterVideo', () => {
-  it('submits duration, aspect_ratio, and input_references', async () => {
+  it('submits duration and aspect_ratio without any reference images', async () => {
     global.fetch = vi.fn().mockResolvedValueOnce({
       json: async () => ({ id: 'video-job-1' }),
       ok: true,
@@ -35,7 +35,6 @@ describe('createOpenRouterVideo', () => {
       params: {
         aspectRatio: '9:16',
         duration: 5.4,
-        imageUrl: 'https://cdn.example/ref.png',
         prompt: 'A cat walking',
         resolution: '1080p',
       },
@@ -53,14 +52,99 @@ describe('createOpenRouterVideo', () => {
       aspect_ratio: '9:16',
       duration: 5,
       generate_audio: false,
-      input_references: ['https://cdn.example/ref.png'],
       model: 'google/veo-3',
       prompt: 'A cat walking',
       resolution: '1080p',
     });
+    expect(body.frame_images).toBeUndefined();
+    expect(body.input_references).toBeUndefined();
   });
 
-  it('throws a generic error when the API rejects the request', async () => {
+  it('sends a single start frame via frame_images with frame_type first_frame', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      json: async () => ({ id: 'video-job-1' }),
+      ok: true,
+    });
+
+    const payload: CreateVideoPayload = {
+      model: 'google/veo-3',
+      params: {
+        imageUrl: 'https://cdn.example/start.png',
+        prompt: 'A cat walking',
+      },
+    };
+
+    await createOpenRouterVideo(payload, mockOptions);
+
+    const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+    expect(body.frame_images).toEqual([
+      {
+        frame_type: 'first_frame',
+        image_url: { url: 'https://cdn.example/start.png' },
+        type: 'image_url',
+      },
+    ]);
+    expect(body.input_references).toBeUndefined();
+  });
+
+  it('sends start and end frames via frame_images with the right frame_type each', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      json: async () => ({ id: 'video-job-1' }),
+      ok: true,
+    });
+
+    const payload: CreateVideoPayload = {
+      model: 'google/veo-3',
+      params: {
+        endImageUrl: 'https://cdn.example/end.png',
+        imageUrl: 'https://cdn.example/start.png',
+        prompt: 'A cat walking',
+      },
+    };
+
+    await createOpenRouterVideo(payload, mockOptions);
+
+    const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+    expect(body.frame_images).toEqual([
+      {
+        frame_type: 'first_frame',
+        image_url: { url: 'https://cdn.example/start.png' },
+        type: 'image_url',
+      },
+      {
+        frame_type: 'last_frame',
+        image_url: { url: 'https://cdn.example/end.png' },
+        type: 'image_url',
+      },
+    ]);
+    expect(body.input_references).toBeUndefined();
+  });
+
+  it('sends style-reference imageUrls via input_references as objects', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      json: async () => ({ id: 'video-job-1' }),
+      ok: true,
+    });
+
+    const payload: CreateVideoPayload = {
+      model: 'google/veo-3',
+      params: {
+        imageUrls: ['https://cdn.example/ref1.png', 'https://cdn.example/ref2.png'],
+        prompt: 'A cat walking',
+      },
+    };
+
+    await createOpenRouterVideo(payload, mockOptions);
+
+    const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+    expect(body.input_references).toEqual([
+      { image_url: { url: 'https://cdn.example/ref1.png' }, type: 'image_url' },
+      { image_url: { url: 'https://cdn.example/ref2.png' }, type: 'image_url' },
+    ]);
+    expect(body.frame_images).toBeUndefined();
+  });
+
+  it('throws an error including the status and the provider response body', async () => {
     global.fetch = vi.fn().mockResolvedValueOnce({
       ok: false,
       status: 402,
@@ -69,7 +153,19 @@ describe('createOpenRouterVideo', () => {
 
     await expect(
       createOpenRouterVideo({ model: 'google/veo-3', params: { prompt: 'x' } }, mockOptions),
-    ).rejects.toThrow('Video generation failed (402)');
+    ).rejects.toThrow('Video generation failed (402): OpenRouter payment required');
+  });
+
+  it('throws a bare status message when the response body is empty', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: async () => '',
+    });
+
+    await expect(
+      createOpenRouterVideo({ model: 'google/veo-3', params: { prompt: 'x' } }, mockOptions),
+    ).rejects.toThrow('Video generation failed (400)');
   });
 });
 
@@ -134,5 +230,17 @@ describe('pollOpenRouterVideoStatus', () => {
     await expect(
       pollOpenRouterVideoStatus('video-job-1', { apiKey: 'test-api-key' }),
     ).resolves.toEqual({ error: 'safety filter', status: 'failed' });
+  });
+
+  it('includes the response body in the thrown error when polling fails', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      text: async () => 'job not found',
+    });
+
+    await expect(
+      pollOpenRouterVideoStatus('video-job-1', { apiKey: 'test-api-key' }),
+    ).rejects.toThrow('Video generation failed (404): job not found');
   });
 });

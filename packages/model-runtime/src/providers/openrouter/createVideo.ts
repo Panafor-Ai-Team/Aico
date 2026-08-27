@@ -54,7 +54,8 @@ export const pollOpenRouterVideoStatus = async (
   if (!response.ok) {
     const errorText = await response.text();
     log('Video status API error %s: %s', response.status, errorText);
-    throw new Error(`Video generation failed (${response.status})`);
+    const detail = errorText.slice(0, 500);
+    throw new Error(`Video generation failed (${response.status})${detail ? `: ${detail}` : ''}`);
   }
 
   const data = (await response.json()) as OpenRouterVideoJob;
@@ -84,12 +85,29 @@ export const pollOpenRouterVideoStatus = async (
   return { status: 'pending' };
 };
 
+/**
+ * OpenRouter's `/videos` endpoint expects reference images as objects, not raw
+ * URL strings: `{ type: 'image_url', image_url: { url } }`, optionally with a
+ * `frame_type` when used inside `frame_images`.
+ * @see https://openrouter.ai/docs/guides/overview/multimodal/video-generation
+ */
+const imageRef = (url: string) => ({ image_url: { url }, type: 'image_url' as const });
+
 export const createOpenRouterVideo = async (
   payload: CreateVideoPayload,
   options: CreateVideoOptions,
 ): Promise<CreateVideoResponse> => {
   const { model, params } = payload;
-  const { prompt, imageUrl, aspectRatio, duration, resolution, generateAudio } = params;
+  const {
+    prompt,
+    imageUrl,
+    endImageUrl,
+    imageUrls,
+    aspectRatio,
+    duration,
+    resolution,
+    generateAudio,
+  } = params;
   const baseURL = options.baseURL || DEFAULT_BASE_URL;
 
   const body: Record<string, unknown> = {
@@ -102,7 +120,18 @@ export const createOpenRouterVideo = async (
   }
   if (resolution) body.resolution = resolution;
   if (aspectRatio) body.aspect_ratio = aspectRatio;
-  if (imageUrl) body.input_references = [imageUrl];
+
+  // `frame_images` (first/last frame) takes precedence over `input_references`
+  // (style guidance) when both are present, so only send references when there
+  // is no first/last frame to specify.
+  const frameImages = [
+    ...(imageUrl ? [{ ...imageRef(imageUrl), frame_type: 'first_frame' as const }] : []),
+    ...(endImageUrl ? [{ ...imageRef(endImageUrl), frame_type: 'last_frame' as const }] : []),
+  ];
+  if (frameImages.length > 0) body.frame_images = frameImages;
+
+  const references = Array.isArray(imageUrls) ? imageUrls.filter(Boolean).map(imageRef) : [];
+  if (references.length > 0) body.input_references = references;
 
   log('Creating video with OpenRouter API - model: %s, params: %O', model, body);
 
@@ -115,7 +144,8 @@ export const createOpenRouterVideo = async (
   if (!response.ok) {
     const errorText = await response.text();
     log('Video API error %s: %s', response.status, errorText);
-    throw new Error(`Video generation failed (${response.status})`);
+    const detail = errorText.slice(0, 500);
+    throw new Error(`Video generation failed (${response.status})${detail ? `: ${detail}` : ''}`);
   }
 
   const data = (await response.json()) as OpenRouterVideoJob;

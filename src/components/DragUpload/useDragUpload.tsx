@@ -2,7 +2,10 @@ import { toast } from '@lobehub/ui/base-ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useVisualMediaUploadAbility } from '@/hooks/useVisualMediaUploadAbility';
+import {
+  isUploadBlockedByAbility,
+  useVisualMediaUploadAbility,
+} from '@/hooks/useVisualMediaUploadAbility';
 import { useAgentStore } from '@/store/agent';
 import { agentSelectors } from '@/store/agent/selectors';
 
@@ -78,21 +81,26 @@ export const useDragUpload = (onUploadFiles: (files: File[]) => Promise<void>) =
   const model = useAgentStore(agentSelectors.currentAgentModel);
   const provider = useAgentStore(agentSelectors.currentAgentModelProvider);
   const agentId = useAgentStore((s) => s.activeAgentId ?? undefined);
-  const { canUploadImage, canUploadVideo } = useVisualMediaUploadAbility(model, provider, agentId);
+  const mediaUploadAbility = useVisualMediaUploadAbility(model, provider, agentId);
 
   const warnIfVisualUploadUnsupported = useCallback(
     (files: File[]) => {
-      const hasImageFiles = files.some((file) => file.type.startsWith('image/'));
-      const hasVideoFiles = files.some((file) => file.type.startsWith('video/'));
-
-      if ((hasImageFiles && !canUploadImage) || (hasVideoFiles && !canUploadVideo)) {
-        toast.warning(t('upload.clientMode.visionNotSupported'));
+      // Reject the whole batch on the first unsupported file (image, video,
+      // audio, or document — all four are gated here now; audio and document
+      // were previously not checked at all, letting them through silently).
+      const blocked = files.filter((file) => isUploadBlockedByAbility(file, mediaUploadAbility));
+      if (blocked.length > 0) {
+        toast.warning(
+          t('upload.action.mediaDisabled', {
+            files: blocked.map((file) => file.name).join(', '),
+          }),
+        );
         return true;
       }
 
       return false;
     },
-    [canUploadImage, canUploadVideo, t],
+    [mediaUploadAbility, t],
   );
 
   const handleDragEnter = useCallback((e: DragEvent) => {

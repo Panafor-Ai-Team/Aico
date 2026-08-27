@@ -183,14 +183,12 @@ const ModelConfigForm = memo<ModelConfigFormProps>(
             <Checkbox />
           </Form.Item>
           <Form.Item
-            extra={t('providerModels.item.modelConfig.type.extra')}
-            label={t('providerModels.item.modelConfig.type.title')}
-            name={'type'}
+            extra={t('providerModels.item.modelConfig.audio.extra')}
+            label={t('providerModels.item.modelConfig.audio.title')}
+            name={['abilities', 'audio']}
+            valuePropName={'checked'}
           >
-            <Select
-              options={modelTypeOptions}
-              placeholder={t('providerModels.item.modelConfig.type.placeholder')}
-            />
+            <Checkbox />
           </Form.Item>
           <Form.Item
             extra={t('providerModels.item.modelConfig.files.extra')}
@@ -199,6 +197,16 @@ const ModelConfigForm = memo<ModelConfigFormProps>(
             valuePropName={'checked'}
           >
             <Checkbox />
+          </Form.Item>
+          <Form.Item
+            extra={t('providerModels.item.modelConfig.type.extra')}
+            label={t('providerModels.item.modelConfig.type.title')}
+            name={'type'}
+          >
+            <Select
+              options={modelTypeOptions}
+              placeholder={t('providerModels.item.modelConfig.type.placeholder')}
+            />
           </Form.Item>
         </Form>
       </div>
