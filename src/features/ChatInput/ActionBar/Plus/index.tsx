@@ -29,7 +29,10 @@ import { useTranslation } from 'react-i18next';
 import { openAttachKnowledgeModal } from '@/features/LibraryModal';
 import { useIsDark } from '@/hooks/useIsDark';
 import { useModelSupportToolUse } from '@/hooks/useModelSupportToolUse';
-import { useVisualMediaUploadAbility } from '@/hooks/useVisualMediaUploadAbility';
+import {
+  isUploadBlockedByAbility,
+  useVisualMediaUploadAbility,
+} from '@/hooks/useVisualMediaUploadAbility';
 import { useAgentStore } from '@/store/agent';
 import { agentSelectors, chatConfigByIdSelectors } from '@/store/agent/selectors';
 import { aiModelSelectors, aiProviderSelectors, useAiInfraStore } from '@/store/aiInfra';
@@ -332,11 +335,7 @@ const usePlusMenuItems = ({ close }: { close: () => void }): ActionDropdownMenuI
   const isMemoryEnabled = useMemoryEnabled(agentId);
   const [showTypoBar, setShowTypoBar] = useChatInputStore((s) => [s.showTypoBar, s.setShowTypoBar]);
   const editor = useChatInputStore((s) => s.editor);
-  const { canUploadImage, canUploadVideo, canUploadAudio } = useVisualMediaUploadAbility(
-    model,
-    provider,
-    agentId,
-  );
+  const mediaUploadAbility = useVisualMediaUploadAbility(model, provider, agentId);
   const enableFC = useModelSupportToolUse(model, provider);
   const handleOpenKnowledge = useCallback(() => {
     close();
@@ -483,9 +482,10 @@ const usePlusMenuItems = ({ close }: { close: () => void }): ActionDropdownMenuI
             multiple
             showUploadList={false}
             beforeUpload={async (file) => {
-              if (file.type.startsWith('image') && !canUploadImage) return false;
-              if (file.type.startsWith('video') && !canUploadVideo) return false;
-              if (file.type.startsWith('audio') && !canUploadAudio) return false;
+              if (isUploadBlockedByAbility(file, mediaUploadAbility)) {
+                toast.error(t('upload.action.mediaDisabled', { files: file.name }));
+                return false;
+              }
               const validation = validateVideoFileSize(file);
               if (!validation.isValid) {
                 toast.error(
@@ -744,9 +744,7 @@ const usePlusMenuItems = ({ close }: { close: () => void }): ActionDropdownMenuI
     canConfigureResource,
     enableTopicAcceptance,
     tVerify,
-    canUploadImage,
-    canUploadVideo,
-    canUploadAudio,
+    mediaUploadAbility,
     editor,
     enableFC,
     enableGatewayMode,

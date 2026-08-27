@@ -8,6 +8,29 @@ import { agentByIdSelectors } from '@/store/agent/selectors';
 import { aiModelSelectors, useAiInfraStore } from '@/store/aiInfra';
 import { serverConfigSelectors, useServerConfigStore } from '@/store/serverConfig';
 
+export interface VisualMediaUploadAbility {
+  canUploadAudio: boolean;
+  canUploadDocument: boolean;
+  canUploadImage: boolean;
+  canUploadVideo: boolean;
+}
+
+/**
+ * True when the current model (per `abilities`) cannot accept this file, so
+ * callers can reject it with a specific reason instead of silently dropping
+ * it. Anything that isn't image/video/audio is treated as a document — RAG
+ * extracts text from it, gated only by the `files` ability.
+ */
+export const isUploadBlockedByAbility = (
+  file: File,
+  abilities: VisualMediaUploadAbility,
+): boolean => {
+  if (file.type.startsWith('image/')) return !abilities.canUploadImage;
+  if (file.type.startsWith('video/')) return !abilities.canUploadVideo;
+  if (file.type.startsWith('audio/')) return !abilities.canUploadAudio;
+  return !abilities.canUploadDocument;
+};
+
 export const useVisualMediaUploadAbility = (model: string, provider: string, agentId?: string) => {
   const supportVision = useModelSupportVision(model, provider);
   const supportVideo = useModelSupportVideo(model, provider);

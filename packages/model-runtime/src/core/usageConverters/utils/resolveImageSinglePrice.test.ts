@@ -38,9 +38,19 @@ describe('resolveImageSinglePrice', () => {
     expect(resolveImageSinglePrice(pricing)).toEqual({ approximatePrice: 0.04 });
   });
 
-  it('does not invent a per-image price from token rates on imageOutput', () => {
+  it('estimates an approximate per-image price from a token-priced imageOutput rate', () => {
     const pricing: Pricing = {
       units: [{ name: 'imageOutput', rate: 40, strategy: 'fixed', unit: 'millionTokens' }],
+    };
+
+    // 40 USD / million tokens * 1290 tokens/image (documented default) / 1_000_000
+    expect(resolveImageSinglePrice(pricing).approximatePrice).toBeCloseTo((40 * 1290) / 1_000_000);
+    expect(resolveImageSinglePrice(pricing).price).toBeUndefined();
+  });
+
+  it('returns nothing when there is no imageGeneration or token-priced imageOutput unit', () => {
+    const pricing: Pricing = {
+      units: [{ name: 'textInput', rate: 1, strategy: 'fixed', unit: 'millionTokens' }],
     };
 
     expect(resolveImageSinglePrice(pricing)).toEqual({});

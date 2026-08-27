@@ -241,6 +241,9 @@ export default {
   'providerModels.item.delete.confirm': 'Are you sure you want to delete model {{displayName}}?',
   'providerModels.item.delete.success': 'Deletion successful',
   'providerModels.item.delete.title': 'Delete Model',
+  'providerModels.item.modelConfig.audio.extra':
+    'This setting enables audio input configuration within the application. Whether audio understanding is supported depends entirely on the model itself. Please test the model to verify the availability of this feature.',
+  'providerModels.item.modelConfig.audio.title': 'Supports Audio Input',
   'providerModels.item.modelConfig.azureDeployName.extra':
     'Field used for actual requests in Azure OpenAI',
   'providerModels.item.modelConfig.azureDeployName.placeholder':

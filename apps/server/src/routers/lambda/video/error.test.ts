@@ -23,4 +23,17 @@ describe('createVideoTaskSubmitError', () => {
       'Content policy check failed. Revise your prompt and try again.',
     );
   });
+
+  it('should propagate the provider status and response body from a rejected request', () => {
+    // Mirrors what packages/model-runtime/.../openrouter/createVideo.ts now throws
+    // when OpenRouter rejects a request carrying a reference image.
+    const error = createVideoTaskSubmitError(
+      new Error('Video generation failed (400): input_references[0] must be an object'),
+    );
+
+    expect(error.name).toBe(AsyncTaskErrorType.TaskTriggerError);
+    expect(error.body.detail).toBe(
+      'Failed to submit video task: Video generation failed (400): input_references[0] must be an object',
+    );
+  });
 });

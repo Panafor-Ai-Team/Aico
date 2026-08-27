@@ -92,6 +92,57 @@ describe('mapOpenRouterModelCard modalities', () => {
     });
   });
 
+  it('leaves files undefined (not false) when input_modalities says nothing about it', () => {
+    const mapped = mapOpenRouterModelCard(
+      baseCard({
+        architecture: {
+          input_modalities: ['text'],
+          instruct_type: null,
+          modality: 'text->text',
+          output_modalities: ['text'],
+          tokenizer: 'default',
+        },
+        id: 'openai/gpt-5',
+      }),
+    );
+
+    // Explicit `false` here would make canUploadDocument (files !== false)
+    // hard-block document upload for every OpenRouter model that doesn't
+    // advertise `file` in input_modalities — most of them. `undefined` lets
+    // callers fall through to a model-bank default instead.
+    expect(mapped.files).toBeUndefined();
+  });
+
+  it('sets audio from input_modalities', () => {
+    const withAudio = mapOpenRouterModelCard(
+      baseCard({
+        architecture: {
+          input_modalities: ['text', 'audio'],
+          instruct_type: null,
+          modality: 'text+audio->text',
+          output_modalities: ['text'],
+          tokenizer: 'default',
+        },
+        id: 'openai/gpt-audio',
+      }),
+    );
+    expect(withAudio.audio).toBe(true);
+
+    const withoutAudio = mapOpenRouterModelCard(
+      baseCard({
+        architecture: {
+          input_modalities: ['text'],
+          instruct_type: null,
+          modality: 'text->text',
+          output_modalities: ['text'],
+          tokenizer: 'default',
+        },
+        id: 'openai/gpt-5',
+      }),
+    );
+    expect(withoutAudio.audio).toBe(false);
+  });
+
   it('sets type video for exclusive video output', () => {
     const mapped = mapOpenRouterModelCard(
       baseCard({
@@ -107,7 +158,9 @@ describe('mapOpenRouterModelCard modalities', () => {
     );
 
     expect(mapped.type).toBe('video');
-    expect(mapped.video).toBe(true);
+    // A text-to-video generator does not accept video as chat input — `video`
+    // ability tracks input understanding, not this model's own output type.
+    expect(mapped.video).toBe(false);
     expect(mapped.parameters).toMatchObject({
       aspectRatio: expect.any(Object),
       duration: expect.any(Object),

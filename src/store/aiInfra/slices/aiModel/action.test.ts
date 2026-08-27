@@ -283,6 +283,43 @@ describe('AiModelAction', () => {
       expect(toast.warning).not.toHaveBeenCalled();
     });
 
+    it('should carry the audio ability through to the batch update payload', async () => {
+      const mockRemoteModels = [
+        {
+          audio: true,
+          displayName: 'Audio Model',
+          enabled: true,
+          id: 'remote-audio',
+          type: 'chat',
+        },
+      ];
+
+      const { result } = renderHook(() => useStore());
+      const batchUpdateSpy = vi
+        .spyOn(aiModelService, 'batchUpdateAiModels')
+        .mockResolvedValue(undefined as any);
+      vi.spyOn(result.current, 'refreshAiModelList').mockResolvedValue(undefined);
+
+      vi.resetModules();
+      vi.doMock('@/services/models', () => ({
+        modelsService: {
+          getModels: vi.fn().mockResolvedValue(mockRemoteModels),
+        },
+      }));
+
+      await act(async () => {
+        await result.current.fetchRemoteModelList('test-provider');
+      });
+
+      await waitFor(() => {
+        expect(batchUpdateSpy).toHaveBeenCalled();
+      });
+
+      expect(batchUpdateSpy.mock.calls[0][1][0]).toMatchObject({
+        abilities: { audio: true },
+      });
+    });
+
     it('should deduplicate remote models and warn after a successful update', async () => {
       const generatedImageModelId = 'gemini-3.1-flash-image-preview:image';
       const mockRemoteModels = [

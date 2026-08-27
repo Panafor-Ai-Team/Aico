@@ -1394,6 +1394,7 @@
   "upload.action.folderUpload": "上传文件夹",
   "upload.action.imageDisabled": "当前模型不支持视觉识别。请切换模型后再试",
   "upload.action.imageUpload": "上传图片",
+  "upload.action.mediaDisabled": "当前模型不支持此类型的上传：{{files}}。请切换模型后使用该功能。",
   "upload.action.tooltip": "上传",
   "upload.clientMode.actionFiletip": "上传文件",
   "upload.clientMode.actionTooltip": "上传",

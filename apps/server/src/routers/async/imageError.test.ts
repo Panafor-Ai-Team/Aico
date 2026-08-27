@@ -78,4 +78,22 @@ describe('categorizeImageGenerationError', () => {
       errorType: AsyncTaskErrorType.ServerError,
     });
   });
+
+  it('should surface the underlying reason when reference-image processing fails (e.g. SSRF block)', () => {
+    // Mirrors what createImage.ts now throws when processImageUrlForChat fails,
+    // e.g. an operator-opted-in fetch of a private-IP APP_URL is SSRF-blocked.
+    const result = categorizeImageGenerationError({
+      error: new Error(
+        'Failed to process image URL (https://internal.example/f/abc): SSRF blocked: 10.0.0.5 is not allowed',
+      ),
+      isAborted: false,
+      isEditingImage: true,
+    });
+
+    expect(result).toEqual({
+      errorMessage:
+        'Failed to process image URL (https://internal.example/f/abc): SSRF blocked: 10.0.0.5 is not allowed',
+      errorType: AsyncTaskErrorType.ServerError,
+    });
+  });
 });

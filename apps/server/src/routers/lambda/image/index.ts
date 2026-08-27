@@ -142,7 +142,10 @@ export const imageRouter = router({
               if (key) {
                 log('Converted URL %s to key %s', url, key);
               } else {
-                log('Failed to extract key from URL: %s', url);
+                // Dropped below (imageKeys filters out nulls), which de-aligns
+                // this reference's index against params.imageUrls. Warn loudly
+                // since this is silent data loss, not just a debug detail.
+                console.warn('Failed to extract storage key from reference image URL: %s', url);
               }
               return key;
             }),
@@ -155,8 +158,9 @@ export const imageRouter = router({
           };
           log('Successfully converted imageUrls to keys for database: %O', imageKeys);
         } catch (error) {
-          console.error('Error converting imageUrls to keys: %O', error);
-          console.error('Keeping original imageUrls due to conversion error');
+          // configForDatabase.imageUrls keeps the original full URLs on this
+          // path; validateNoUrlsInConfig below will name the offending one.
+          console.error('Error converting imageUrls %O to keys: %O', params.imageUrls, error);
         }
       }
       // 2) Process single image in imageUrl
@@ -167,11 +171,15 @@ export const imageRouter = router({
             log('Converted single imageUrl to key: %s -> %s', params.imageUrl, key);
             configForDatabase = { ...configForDatabase, imageUrl: key };
           } else {
-            log('Failed to extract key from single imageUrl: %s', params.imageUrl);
+            console.warn(
+              'Failed to extract storage key from reference image URL: %s',
+              params.imageUrl,
+            );
           }
         } catch (error) {
-          console.error('Error converting imageUrl to key: %O', error);
-          // Keep original value if conversion fails
+          // configForDatabase.imageUrl keeps the original full URL on this
+          // path; validateNoUrlsInConfig below will name it in the thrown error.
+          console.error('Error converting imageUrl %s to key: %O', params.imageUrl, error);
         }
       }
 

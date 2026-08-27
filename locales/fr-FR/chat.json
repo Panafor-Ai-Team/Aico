@@ -1423,6 +1423,7 @@
   "upload.action.folderUpload": "Téléverser un dossier",
   "upload.action.imageDisabled": "Le modèle actuel ne prend pas en charge la reconnaissance visuelle. Veuillez changer de modèle pour utiliser cette fonctionnalité.",
   "upload.action.imageUpload": "Téléverser une image",
+  "upload.action.mediaDisabled": "Le modèle actuel ne prend pas en charge ce type de téléversement : {{files}}. Veuillez changer de modèle pour utiliser cette fonctionnalité.",
   "upload.action.tooltip": "Téléverser",
   "upload.clientMode.actionFiletip": "Téléverser un fichier",
   "upload.clientMode.actionTooltip": "Téléverser",

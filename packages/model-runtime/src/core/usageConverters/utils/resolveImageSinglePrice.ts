@@ -7,6 +7,14 @@ export interface ImageSinglePriceResult {
 
 const DEFAULT_REFERENCE_MP = (1024 * 1024) / 1_000_000;
 
+/**
+ * Gemini-family image models bill roughly this many output tokens per
+ * generated image (documented default; actual usage varies by resolution).
+ * Used only to turn a token-priced `imageOutput` rate into a rough per-image
+ * estimate for display when no dedicated `imageGeneration` unit exists.
+ */
+export const DEFAULT_IMAGE_OUTPUT_TOKENS = 1290;
+
 export const resolveImageSinglePrice = (pricing?: Pricing): ImageSinglePriceResult => {
   if (!pricing) return {};
 
@@ -17,25 +25,37 @@ export const resolveImageSinglePrice = (pricing?: Pricing): ImageSinglePriceResu
 
   // Priority 2: Calculate exact price from pricing units
   const imageGenerationUnit = pricing.units.find((unit) => unit.name === 'imageGeneration');
-  if (!imageGenerationUnit) return {};
 
-  if (imageGenerationUnit.strategy === 'fixed') {
-    if (imageGenerationUnit.unit === 'image') {
-      return { price: imageGenerationUnit.rate };
+  if (imageGenerationUnit) {
+    if (imageGenerationUnit.strategy === 'fixed') {
+      if (imageGenerationUnit.unit === 'image') {
+        return { price: imageGenerationUnit.rate };
+      }
+
+      if (imageGenerationUnit.unit === 'megapixel') {
+        return { price: imageGenerationUnit.rate * DEFAULT_REFERENCE_MP };
+      }
     }
 
-    if (imageGenerationUnit.unit === 'megapixel') {
-      return { price: imageGenerationUnit.rate * DEFAULT_REFERENCE_MP };
+    // Lookup: show the lowest listed price as an approximate per-image amount.
+    if (imageGenerationUnit.strategy === 'lookup') {
+      const prices = Object.values(imageGenerationUnit.lookup.prices);
+      if (prices.length > 0) return { approximatePrice: Math.min(...prices) };
     }
   }
 
-  // Lookup: show the lowest listed price as an approximate per-image amount.
-  if (imageGenerationUnit.strategy === 'lookup') {
-    const prices = Object.values(imageGenerationUnit.lookup.prices);
-    if (prices.length === 0) return {};
-    return { approximatePrice: Math.min(...prices) };
+  // Priority 3: token-priced generators (e.g. OpenRouter's Gemini image
+  // models) live on imageOutput/millionTokens rather than imageGeneration.
+  // Estimate a rough per-image cost so Create still shows *something* instead
+  // of nothing; this is deliberately an approximation, never an exact price.
+  const imageOutputUnit = pricing.units.find(
+    (unit) => unit.name === 'imageOutput' && unit.strategy === 'fixed',
+  );
+  if (imageOutputUnit && imageOutputUnit.unit === 'millionTokens') {
+    return {
+      approximatePrice: (imageOutputUnit.rate * DEFAULT_IMAGE_OUTPUT_TOKENS) / 1_000_000,
+    };
   }
 
-  // Token-priced generators live on imageOutput, not imageGeneration.
   return {};
 };

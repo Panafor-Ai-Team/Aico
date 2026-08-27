@@ -211,6 +211,42 @@ describe('useModelDetailPanel', () => {
     expect(result.current.hasAbilities).toBe(true);
   });
 
+  it('falls back to the model-level approximatePricePerImage for token-priced generators', () => {
+    // OpenRouter prices Gemini-family image generators on imageOutput/millionTokens,
+    // so pricing.approximatePricePerImage is never set at the source — only the
+    // top-level field computed by resolveImageSinglePrice (normalizeImageModel).
+    const tokenPricedImagePricing = {
+      currency: 'USD',
+      units: [{ name: 'imageOutput', rate: 40, strategy: 'fixed', unit: 'millionTokens' }],
+    } as Pricing;
+
+    const { result } = renderModelDetailPanelHook({
+      enabledList: createEnabledList('openrouter', tokenPricedImagePricing, {
+        approximatePricePerImage: 0.05,
+      }),
+      pricingMode: 'image',
+      provider: 'openrouter',
+    });
+
+    expect(result.current.approximatePriceLabel).toBe('~ $0.05 / image');
+  });
+
+  it('prefers an explicit pricing.approximatePricePerImage when the model has no top-level field', () => {
+    const explicitPricing = {
+      approximatePricePerImage: 0.04,
+      currency: 'USD',
+      units: [{ name: 'imageGeneration', rate: 0.04, strategy: 'fixed', unit: 'image' }],
+    } as Pricing;
+
+    const { result } = renderModelDetailPanelHook({
+      enabledList: createEnabledList('openrouter', explicitPricing),
+      pricingMode: 'image',
+      provider: 'openrouter',
+    });
+
+    expect(result.current.approximatePriceLabel).toBe('~ $0.04 / image');
+  });
+
   it('updates expanded detail sections', () => {
     const { result } = renderModelDetailPanelHook();
 

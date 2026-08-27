@@ -1425,6 +1425,7 @@
   "upload.action.folderUpload": "بارگذاری پوشه",
   "upload.action.imageDisabled": "مدل فعلی از شناسایی تصویری پشتیبانی نمی‌کند. لطفاً مدل را تغییر دهید.",
   "upload.action.imageUpload": "بارگذاری تصویر",
+  "upload.action.mediaDisabled": "مدل فعلی از این نوع بارگذاری پشتیبانی نمی‌کند: {{files}}. لطفاً برای استفاده از این قابلیت، مدل را تغییر دهید.",
   "upload.action.tooltip": "بارگذاری",
   "upload.clientMode.actionFiletip": "بارگذاری فایل",
   "upload.clientMode.actionTooltip": "بارگذاری",

@@ -14,7 +14,10 @@ import RepoIcon from '@/components/LibIcon';
 import TipGuide from '@/components/TipGuide';
 import { openAttachKnowledgeModal } from '@/features/LibraryModal';
 import { usePermission } from '@/hooks/usePermission';
-import { useVisualMediaUploadAbility } from '@/hooks/useVisualMediaUploadAbility';
+import {
+  isUploadBlockedByAbility,
+  useVisualMediaUploadAbility,
+} from '@/hooks/useVisualMediaUploadAbility';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
 import { useFileStore } from '@/store/file';
@@ -56,11 +59,8 @@ const FileUpload = memo(() => {
   const agentId = useAgentId();
   const { model, provider } = useEffectiveModel(agentId);
 
-  const { canUploadImage, canUploadVideo, canUploadAudio } = useVisualMediaUploadAbility(
-    model,
-    provider,
-    agentId,
-  );
+  const mediaUploadAbility = useVisualMediaUploadAbility(model, provider, agentId);
+  const { canUploadImage } = mediaUploadAbility;
 
   const [showTip, updateGuideState] = useUserStore((s) => [
     preferenceSelectors.showUploadFileInKnowledgeBaseTip(s),
@@ -137,12 +137,10 @@ const FileUpload = memo(() => {
           multiple
           showUploadList={false}
           beforeUpload={async (file) => {
-            if (
-              (file.type.startsWith('image') && !canUploadImage) ||
-              (file.type.startsWith('video') && !canUploadVideo) ||
-              (file.type.startsWith('audio') && !canUploadAudio)
-            )
+            if (isUploadBlockedByAbility(file, mediaUploadAbility)) {
+              toast.error(t('upload.action.mediaDisabled', { files: file.name }));
               return false;
+            }
 
             // Validate video file size
             const validation = validateVideoFileSize(file);
@@ -177,12 +175,10 @@ const FileUpload = memo(() => {
           multiple={true}
           showUploadList={false}
           beforeUpload={async (file) => {
-            if (
-              (file.type.startsWith('image') && !canUploadImage) ||
-              (file.type.startsWith('video') && !canUploadVideo) ||
-              (file.type.startsWith('audio') && !canUploadAudio)
-            )
+            if (isUploadBlockedByAbility(file, mediaUploadAbility)) {
+              toast.error(t('upload.action.mediaDisabled', { files: file.name }));
               return false;
+            }
 
             // Validate video file size
             const validation = validateVideoFileSize(file);

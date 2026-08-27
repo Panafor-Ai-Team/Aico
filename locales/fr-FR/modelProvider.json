@@ -215,6 +215,8 @@
   "providerModels.item.delete.confirm": "Êtes-vous sûr de vouloir supprimer le modèle {{displayName}} ?",
   "providerModels.item.delete.success": "Suppression réussie",
   "providerModels.item.delete.title": "Supprimer le modèle",
+  "providerModels.item.modelConfig.audio.extra": "Ce paramètre active la configuration d'entrée audio dans l'application. La prise en charge de la compréhension audio dépend entièrement du modèle. Veuillez tester le modèle pour vérifier la disponibilité de cette fonctionnalité.",
+  "providerModels.item.modelConfig.audio.title": "Prise en charge de l'entrée audio",
   "providerModels.item.modelConfig.azureDeployName.extra": "Champ utilisé pour les requêtes réelles dans Azure OpenAI",
   "providerModels.item.modelConfig.azureDeployName.placeholder": "Veuillez saisir le nom de déploiement du modèle dans Azure",
   "providerModels.item.modelConfig.azureDeployName.title": "Nom de déploiement du modèle",

@@ -184,11 +184,18 @@ export const mapOpenRouterModelCard = (
   }
 
   return {
+    // OpenRouter marks audio-input-capable chat models with audio in
+    // input_modalities.
+    audio: inputModalities.includes('audio'),
     contextWindowTokens: top_provider.context_length || model.context_length,
     description: model.description,
     displayName,
-    // OpenRouter marks document/PDF-capable chat models with file in input_modalities.
-    files: inputModalities.includes('file'),
+    // OpenRouter marks document/PDF-capable chat models with file in
+    // input_modalities. Leave `undefined` (not `false`) when the modality list
+    // doesn't mention files at all, so downstream merges (modelParse.ts) can
+    // distinguish "known unsupported" from "unknown" and fall through to a
+    // model-bank default instead of hard-blocking uploads.
+    files: inputModalities.includes('file') ? true : undefined,
     functionCall: supported_parameters.includes('tools'),
     // Multimodal image generators expose image in output_modalities (often with text).
     // Chat type stays; postProcessModelList adds `{id}:image` for the Image tab.
@@ -219,9 +226,11 @@ export const mapOpenRouterModelCard = (
     reasoning: hasReasoning,
     releasedAt: new Date(model.created * 1000).toISOString().split('T')[0],
     type: resolvedType,
-    // Video in input_modalities = can analyze video as input (chat ability),
-    // not type:'video' generation.
-    video: inputModalities.includes('video') || resolvedType === 'video',
+    // Video in input_modalities = can analyze video as input (chat ability).
+    // Deliberately not OR'd with `resolvedType === 'video'`: that conflated
+    // video *generation* models with video *input* understanding, making a
+    // text-to-video generator falsely claim it accepts video uploads in chat.
+    video: inputModalities.includes('video'),
     vision: inputModalities.includes('image'),
     // Merge all applicable extendParams for settings
     ...(() => {

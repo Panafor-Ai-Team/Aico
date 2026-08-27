@@ -2,6 +2,7 @@ import { renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useModelSupportAudio } from '@/hooks/useModelSupportAudio';
+import { useModelSupportFiles } from '@/hooks/useModelSupportFiles';
 import { useModelSupportToolUse } from '@/hooks/useModelSupportToolUse';
 import { useModelSupportVideo } from '@/hooks/useModelSupportVideo';
 import { useModelSupportVision } from '@/hooks/useModelSupportVision';
@@ -9,9 +10,13 @@ import { useAgentStore } from '@/store/agent';
 import { useAiInfraStore } from '@/store/aiInfra';
 import { useServerConfigStore } from '@/store/serverConfig';
 
-import { useVisualMediaUploadAbility } from './useVisualMediaUploadAbility';
+import {
+  isUploadBlockedByAbility,
+  useVisualMediaUploadAbility,
+} from './useVisualMediaUploadAbility';
 
 vi.mock('@/hooks/useModelSupportAudio');
+vi.mock('@/hooks/useModelSupportFiles');
 vi.mock('@/hooks/useModelSupportToolUse');
 vi.mock('@/hooks/useModelSupportVideo');
 vi.mock('@/hooks/useModelSupportVision');
@@ -49,6 +54,7 @@ vi.mock('@/store/serverConfig', () => ({
 }));
 
 const mockedUseModelSupportAudio = vi.mocked(useModelSupportAudio);
+const mockedUseModelSupportFiles = vi.mocked(useModelSupportFiles);
 const mockedUseModelSupportToolUse = vi.mocked(useModelSupportToolUse);
 const mockedUseModelSupportVideo = vi.mocked(useModelSupportVideo);
 const mockedUseModelSupportVision = vi.mocked(useModelSupportVision);
@@ -60,6 +66,7 @@ describe('useVisualMediaUploadAbility', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedUseModelSupportAudio.mockReturnValue(false);
+    mockedUseModelSupportFiles.mockReturnValue(undefined);
     mockedUseModelSupportVision.mockReturnValue(false);
     mockedUseModelSupportVideo.mockReturnValue(false);
     mockedUseModelSupportToolUse.mockReturnValue(false);
@@ -217,5 +224,48 @@ describe('useVisualMediaUploadAbility', () => {
     expect(result.current.canUploadAudio).toBe(false);
     expect(result.current.canUploadImage).toBe(false);
     expect(result.current.canUploadVideo).toBe(false);
+  });
+
+  it('should allow document upload by default when the files ability is unknown', () => {
+    mockedUseModelSupportFiles.mockReturnValue(undefined);
+
+    const { result } = renderHook(() => useVisualMediaUploadAbility('model', 'provider'));
+
+    expect(result.current.canUploadDocument).toBe(true);
+  });
+
+  it('should block document upload only when the model explicitly declares files: false', () => {
+    mockedUseModelSupportFiles.mockReturnValue(false);
+
+    const { result } = renderHook(() => useVisualMediaUploadAbility('model', 'provider'));
+
+    expect(result.current.canUploadDocument).toBe(false);
+  });
+});
+
+describe('isUploadBlockedByAbility', () => {
+  const abilities = {
+    canUploadAudio: false,
+    canUploadDocument: false,
+    canUploadImage: true,
+    canUploadVideo: false,
+  };
+
+  const fileOfType = (type: string) => new File(['x'], 'name', { type });
+
+  it('checks image/video/audio files against their matching ability', () => {
+    expect(isUploadBlockedByAbility(fileOfType('image/png'), abilities)).toBe(false);
+    expect(isUploadBlockedByAbility(fileOfType('video/mp4'), abilities)).toBe(true);
+    expect(isUploadBlockedByAbility(fileOfType('audio/mpeg'), abilities)).toBe(true);
+  });
+
+  it('treats anything else as a document, gated on canUploadDocument', () => {
+    expect(isUploadBlockedByAbility(fileOfType('application/pdf'), abilities)).toBe(true);
+    expect(
+      isUploadBlockedByAbility(fileOfType('application/pdf'), {
+        ...abilities,
+        canUploadDocument: true,
+      }),
+    ).toBe(false);
   });
 });
