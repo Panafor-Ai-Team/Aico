@@ -55,6 +55,14 @@ describe('LobeOpenRouterAI - custom features', () => {
       expect(params.handlePollVideoStatus).toBeDefined();
     });
 
+    it('edits images via input_references, not the nonexistent /images/edits route', () => {
+      expect(params.imageEditMode).toBe('inputReferences');
+      // Deliberately NOT a custom createImage: the factory does not forward
+      // `pricingContext` to custom impls, so routing through the shared
+      // createOpenAICompatibleImage is what keeps billing behaviour identical.
+      expect(params.createImage).toBeUndefined();
+    });
+
     it('should have chatCompletion configuration', () => {
       expect(params.chatCompletion).toBeDefined();
       expect(params.chatCompletion.handlePayload).toBeDefined();
