@@ -225,13 +225,25 @@ export const convertOpenAIImageUsage = (
   usage: OpenAI.Images.ImagesResponse.Usage,
   pricing?: Pricing,
 ): ModelUsage => {
+  // OpenAI's Images API reports `input_tokens` / `output_tokens` plus an
+  // `input_tokens_details` breakdown. OpenRouter's /images/generations instead
+  // returns the chat-style `prompt_tokens` / `completion_tokens` and no details
+  // object at all, so reading `input_tokens_details.image_tokens` directly threw
+  // `Cannot read properties of undefined (reading 'image_tokens')` and discarded
+  // an image the provider had already generated (and billed for).
+  // Read both shapes, and never assume the details object exists.
+  const raw = usage as unknown as Record<string, any>;
+  const inputTokens = raw.input_tokens ?? raw.prompt_tokens;
+  const outputTokens = raw.output_tokens ?? raw.completion_tokens;
+  const inputDetails = raw.input_tokens_details;
+
   const data: ModelTokensUsage = {
-    inputImageTokens: usage.input_tokens_details.image_tokens,
-    inputTextTokens: usage.input_tokens_details.text_tokens,
-    outputImageTokens: usage.output_tokens,
-    totalInputTokens: usage.input_tokens,
-    totalOutputTokens: usage.output_tokens,
-    totalTokens: usage.total_tokens,
+    inputImageTokens: inputDetails?.image_tokens,
+    inputTextTokens: inputDetails?.text_tokens,
+    outputImageTokens: outputTokens,
+    totalInputTokens: inputTokens,
+    totalOutputTokens: outputTokens,
+    totalTokens: raw.total_tokens,
   };
 
   return withPricingOrProviderCost(data as ModelUsage, pricing, usage);
