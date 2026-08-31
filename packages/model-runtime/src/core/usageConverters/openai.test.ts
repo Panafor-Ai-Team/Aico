@@ -703,4 +703,33 @@ describe('convertOpenAIImageUsage', () => {
 
     expect(convertOpenAIImageUsage(usage, pricing).cost).toBe(0.04);
   });
+
+  // OpenRouter's /images/generations returns chat-style usage with no
+  // `input_tokens_details`. Reading that object directly threw
+  // "Cannot read properties of undefined (reading 'image_tokens')", which
+  // discarded an image the provider had already generated and billed for.
+  it('handles OpenRouter chat-style image usage without input_tokens_details', () => {
+    const usage = {
+      prompt_tokens: 0,
+      completion_tokens: 4175,
+      total_tokens: 4175,
+      cost: 0.04,
+    } as unknown as OpenAI.Images.ImagesResponse.Usage;
+
+    const result = convertOpenAIImageUsage(usage);
+
+    expect(result.totalInputTokens).toBe(0);
+    expect(result.totalOutputTokens).toBe(4175);
+    expect(result.outputImageTokens).toBe(4175);
+    expect(result.totalTokens).toBe(4175);
+    // Provider-reported cost is authoritative for this shape.
+    expect(result.cost).toBe(0.04);
+  });
+
+  it('does not throw when the usage object omits input_tokens_details', () => {
+    const usage = { total_tokens: 10 } as unknown as OpenAI.Images.ImagesResponse.Usage;
+
+    expect(() => convertOpenAIImageUsage(usage)).not.toThrow();
+    expect(convertOpenAIImageUsage(usage).inputImageTokens).toBeUndefined();
+  });
 });
