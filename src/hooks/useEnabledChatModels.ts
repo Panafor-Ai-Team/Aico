@@ -1,4 +1,4 @@
-import { DEFAULT_PROVIDER } from '@lobechat/business-const';
+import { DEFAULT_PROVIDER, OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
 import isEqual from 'fast-deep-equal';
 import { type AiModelForSelect, type AiProviderModelListItem } from 'model-bank';
 import { useMemo } from 'react';
@@ -68,9 +68,15 @@ export const useEnabledChatModels = (): EnabledProviderWithModels[] => {
       return scoped.filter((provider) => !isAicoManagedRuntimeProvider(provider.id));
     }
 
+    // Auto is the product's meta-router, not an admin-grantable team model —
+    // always present in org wallet mode regardless of the team's allow-list.
     const allowSet = new Set(allowed.modelIds);
     const children = catalog
-      .filter((model) => (model.type || 'chat') === 'chat' && allowSet.has(model.id))
+      .filter(
+        (model) =>
+          (model.type || 'chat') === 'chat' &&
+          (model.id === OPENROUTER_AUTO_MODEL_ID || allowSet.has(model.id)),
+      )
       .map(catalogModelToSelect);
 
     if (children.length === 0) {

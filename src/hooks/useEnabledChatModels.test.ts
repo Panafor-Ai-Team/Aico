@@ -131,4 +131,41 @@ describe('useEnabledChatModels', () => {
     expect(result.current[0].id).toBe('openrouter');
     expect(result.current[0].children.map((m) => m.id)).toEqual(['openai/gpt-4o-mini']);
   });
+
+  it('on org wallet always includes Auto even when the team allow-list omits it', async () => {
+    useAicoBillingStore.mockImplementation((selector: any) =>
+      selector({ context: { organizationId: 'org-1', source: 'organization' } }),
+    );
+    useAiInfraStore.mockImplementation((selector: any) => selector({ enabledChatModelList: [] }));
+
+    useClientDataSWR.mockImplementation((key: unknown) => {
+      if (key === 'aico-provider-status') return { data: { managed: true } };
+      if (Array.isArray(key) && key[0] === 'aico-my-allowed-models') {
+        // Team allow-list was never backfilled with Auto.
+        return { data: { modelIds: ['openai/gpt-4o-mini'] } };
+      }
+      if (Array.isArray(key) && key[0] === 'aico-managed-model-catalog') {
+        return {
+          data: [
+            { abilities: {}, displayName: 'Auto', id: 'openrouter/auto', type: 'chat' },
+            {
+              abilities: {},
+              displayName: 'GPT-4o mini',
+              id: 'openai/gpt-4o-mini',
+              type: 'chat',
+            },
+          ],
+        };
+      }
+      return { data: undefined };
+    });
+
+    const { useEnabledChatModels } = await import('./useEnabledChatModels');
+    const { result } = renderHook(() => useEnabledChatModels());
+
+    expect(result.current[0].children.map((m) => m.id)).toEqual([
+      'openrouter/auto',
+      'openai/gpt-4o-mini',
+    ]);
+  });
 });
