@@ -1,3 +1,4 @@
+import { OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
 import { ChatErrorType, type ErrorType } from '@lobechat/types';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
@@ -217,6 +218,9 @@ export class AicoManagedPolicy {
       if (!me) {
         throw new AicoManagedPolicyError('ORG_MEMBERSHIP_REQUIRED', ChatErrorType.Forbidden);
       }
+      // Auto is the product's meta-router, not an admin-grantable team model —
+      // always usable on the org wallet regardless of the team's allow-list.
+      if (modelId === OPENROUTER_AUTO_MODEL_ID) return;
       const allowed = await this.orgModel.getAllowedModelsForMember(me.id);
       if (!allowed || allowed.length === 0 || !allowed.includes(modelId)) {
         throw new AicoManagedPolicyError(`MODEL_NOT_ALLOWED:${modelId}`, ChatErrorType.BadRequest);
