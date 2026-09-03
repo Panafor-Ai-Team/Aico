@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   computeDefaultEnabledOpenRouterModelIds,
+  DEFAULT_AUTO_IMAGE_MODEL_ID,
   ensureOpenRouterAutoModel,
+  isDefaultAutoImageModelId,
   OPENROUTER_AUTO_MODEL_ID,
   pickPreferredDefaultOpenRouterModelId,
 } from './openrouterDefaultModels';
@@ -94,5 +96,22 @@ describe('ensureOpenRouterAutoModel', () => {
       id: OPENROUTER_AUTO_MODEL_ID,
     });
     expect(result).toHaveLength(1);
+  });
+});
+
+describe('isDefaultAutoImageModelId', () => {
+  it('matches the pinned default image model and its synthesized :image sibling', () => {
+    expect(isDefaultAutoImageModelId(DEFAULT_AUTO_IMAGE_MODEL_ID)).toBe(true);
+    expect(isDefaultAutoImageModelId(`${DEFAULT_AUTO_IMAGE_MODEL_ID}:image`)).toBe(true);
+    expect(isDefaultAutoImageModelId('google/gemini-2.5-flash-image:image')).toBe(false);
+  });
+
+  it('enables the pinned default image model out of the box', () => {
+    const enabled = computeDefaultEnabledOpenRouterModelIds([
+      { id: OPENROUTER_AUTO_MODEL_ID, type: 'chat' },
+      { id: DEFAULT_AUTO_IMAGE_MODEL_ID, type: 'image' },
+    ]);
+
+    expect(enabled.has(DEFAULT_AUTO_IMAGE_MODEL_ID)).toBe(true);
   });
 });

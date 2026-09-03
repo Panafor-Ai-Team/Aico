@@ -1,3 +1,11 @@
+export {
+  clearConfirmedImageModels,
+  getConfirmedImageModel,
+  IMAGE_GENERATION_CONFIRM_AUDIT,
+  type ImageGenerationModelChoice,
+  imageGenerationModelConfirmAudit,
+  setConfirmedImageModel,
+} from './confirmation';
 export type { ImageGenerationRuntimeService } from './ExecutionRuntime';
 export { ImageGenerationManifest } from './manifest';
 export { systemPrompt } from './systemRole';

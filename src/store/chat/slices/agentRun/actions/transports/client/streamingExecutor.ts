@@ -11,6 +11,10 @@ import {
   GeneralChatAgent,
   isParkedStatus,
 } from '@lobechat/agent-runtime';
+import {
+  IMAGE_GENERATION_CONFIRM_AUDIT,
+  imageGenerationModelConfirmAudit,
+} from '@lobechat/builtin-tool-image-generation';
 import { LobeAgentManifest } from '@lobechat/builtin-tool-lobe-agent';
 import { createPathScopeAudit } from '@lobechat/builtin-tool-local-system';
 import { PageAgentIdentifier } from '@lobechat/builtin-tool-page-agent';
@@ -63,6 +67,9 @@ import type { RunParkedReason, RunScope } from '../../lifecycle/types';
 const log = debug('lobe-store:streaming-executor');
 
 const dynamicInterventionAudits = {
+  // First image generation of a conversation asks once, naming the model that
+  // will be charged; every later call runs straight through.
+  [IMAGE_GENERATION_CONFIRM_AUDIT]: imageGenerationModelConfirmAudit,
   pathScopeAudit: createPathScopeAudit({
     areAllPathsSafe: async ({ paths, resolveAgainstScope }) => {
       if (!isDesktop) return false;

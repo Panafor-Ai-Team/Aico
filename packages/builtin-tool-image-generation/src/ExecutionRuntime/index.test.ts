@@ -74,6 +74,47 @@ const createService = (
 });
 
 describe('ImageGenerationExecutionRuntime', () => {
+  const pinnedCatalogService = () =>
+    createService({
+      listImageModels: vi.fn().mockResolvedValue({
+        providers: [
+          {
+            id: 'openrouter',
+            models: [{ id: 'some/other-image-model' }, { id: 'meta/muse-image' }],
+            name: 'OpenRouter',
+          },
+        ],
+        totalModels: 2,
+      }),
+    });
+
+  it('prefers the pinned default image model over catalog order when none is requested', async () => {
+    const service = pinnedCatalogService();
+    const runtime = new ImageGenerationExecutionRuntime(service);
+
+    const result = await runtime.generateImage({ prompt: 'a cat' });
+
+    expect(result.success).toBe(true);
+    expect(service.createImage).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'meta/muse-image', provider: 'openrouter' }),
+    );
+  });
+
+  it('still honours an explicitly requested image model', async () => {
+    const service = pinnedCatalogService();
+    const runtime = new ImageGenerationExecutionRuntime(service);
+
+    const result = await runtime.generateImage({
+      model: 'some/other-image-model',
+      prompt: 'a cat',
+    });
+
+    expect(result.success).toBe(true);
+    expect(service.createImage).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'some/other-image-model' }),
+    );
+  });
+
   it('lists available image models with descriptions and parameter hints', async () => {
     const runtime = new ImageGenerationExecutionRuntime(createService());
 
