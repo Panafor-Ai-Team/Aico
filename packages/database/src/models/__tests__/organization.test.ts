@@ -1,3 +1,4 @@
+import { OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -201,6 +202,13 @@ describe('OrganizationModel', () => {
         periodAmountMicroUsd: 30_000_000,
       }),
     ).rejects.toThrow('INSUFFICIENT_ORG_BALANCE');
+  });
+
+  it('grants the Auto model to the default team so org wallets can use it', async () => {
+    const org = await orgModel.createOrganization({ name: 'Auto Org', ownerUserId: ownerId });
+    const teams = await orgModel.listTeams(org.id);
+    const rules = await orgModel.getTeamModelAccess(teams[0].id);
+    expect(rules.map((r) => r.modelId)).toContain(OPENROUTER_AUTO_MODEL_ID);
   });
 
   it('sets team model access allow-list', async () => {

@@ -1,3 +1,4 @@
+import { OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
 import { and, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql } from 'drizzle-orm';
 
 import {
@@ -43,6 +44,7 @@ export const DEFAULT_TEAM_SLUG = 'unspecified';
 
 /** Cheap OpenRouter chat models granted to new Unspecified teams by default. */
 export const DEFAULT_TEAM_MODEL_IDS = [
+  OPENROUTER_AUTO_MODEL_ID,
   'openai/gpt-4o-mini',
   'google/gemini-2.0-flash-001',
   'deepseek/deepseek-chat-v3-0324',
