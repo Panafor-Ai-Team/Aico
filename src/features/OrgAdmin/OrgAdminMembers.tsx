@@ -21,6 +21,7 @@ import {
 import { groupedNumberInputProps } from '@/features/AicoBilling/groupedNumberInput';
 import { AICO_TABLE_SCROLL, aicoPanelStyles } from '@/features/AicoPanels';
 import { presentInviteLink } from '@/features/OrgAdmin/InviteLinkModal';
+import { TeamModelsForm } from '@/features/OrgAdmin/TeamModelsForm';
 import { buildPhoneVerifyRedirectUrl, isValidIranianPhoneNumber } from '@/libs/better-auth/phone';
 import { useClientDataSWR } from '@/libs/swr';
 import { lambdaClient } from '@/libs/trpc/client';
@@ -113,7 +114,6 @@ export const OrgAdminMembers = () => {
   const allocPeriod = Form.useWatch('period', allocForm);
   /** One FIN-003 key per in-flight allocate attempt (stable across retries / double-submit). */
   const allocIdempotencyKeyRef = useRef<string | null>(null);
-  const [modelsForm] = Form.useForm<{ modelIds: string[]; teamId: string }>();
   const [upgradeForm] = Form.useForm<{ name: string }>();
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const [inviting, setInviting] = useState(false);
@@ -1006,58 +1006,15 @@ export const OrgAdminMembers = () => {
                   ]}
                 />
               </div>
-              <Form
-                disabled={readOnly}
-                form={modelsForm}
-                layout="vertical"
-                onFinish={async (values) => {
-                  if (!selectedOrgId || readOnly) return;
-                  setBusy(true);
-                  try {
-                    await lambdaClient.organization.setTeamModels.mutate({
-                      modelIds: values.modelIds || [],
-                      orgId: selectedOrgId,
-                      teamId: values.teamId,
-                    });
-                    toast.success(t('org.modelsSaved'));
-                    await mutateTeams();
-                  } catch (err) {
-                    toastAicoError(err, t, 'org.modelsFailed');
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-              >
-                <Form.Item label={t('org.team')} name="teamId" rules={[{ required: true }]}>
-                  <Select
-                    options={(teams || []).map((team) => ({ label: team.name, value: team.id }))}
-                    style={{ width: '100%' }}
-                    onChange={(teamId) => {
-                      const team = (teams || []).find((item) => item.id === teamId);
-                      modelsForm.setFieldValue('modelIds', team?.modelIds || []);
-                    }}
-                  />
-                </Form.Item>
-                <Form.Item label={t('org.modelIds')} name="modelIds">
-                  <Select
-                    allowClear
-                    showSearch
-                    mode="multiple"
-                    options={modelOptions}
-                    placeholder={t('org.modelIdsPlaceholder')}
-                    style={{ width: '100%' }}
-                    filterOption={(input, option) => {
-                      const q = input.toLowerCase();
-                      const label = String(option?.label ?? '').toLowerCase();
-                      const value = String(option?.value ?? '').toLowerCase();
-                      return label.includes(q) || value.includes(q);
-                    }}
-                  />
-                </Form.Item>
-                <Button disabled={readOnly} htmlType="submit" loading={busy}>
-                  {t('org.saveModels')}
-                </Button>
-              </Form>
+              {selectedOrgId && (
+                <TeamModelsForm
+                  modelOptions={modelOptions}
+                  orgId={selectedOrgId}
+                  readOnly={readOnly}
+                  teams={teams || []}
+                  onSaved={mutateTeams}
+                />
+              )}
             </Flexbox>
           </Block>
         </Flexbox>
