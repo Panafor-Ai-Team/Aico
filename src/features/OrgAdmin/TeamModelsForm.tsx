@@ -1,14 +1,15 @@
 'use client';
 
+import { Flexbox, Tag, Text } from '@lobehub/ui';
 import { Button, Select, toast } from '@lobehub/ui/base-ui';
-import { Form, Input } from 'antd';
+import { Form } from 'antd';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { toastAicoError } from '@/business/client/resolveAicoErrorMessage';
 import { lambdaClient } from '@/libs/trpc/client';
 
-import { filterModelOptionsKeepingSelected } from './filterModelOptionsKeepingSelected';
+import { excludeSelectedModelOptions } from './excludeSelectedModelOptions';
 
 type ModelOption = { label: string; value: string };
 type Team = { id: string; modelIds: string[]; name: string };
@@ -29,12 +30,14 @@ export const TeamModelsForm = ({
   const { t } = useTranslation('aico');
   const [form] = Form.useForm<{ teamId: string }>();
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
-  const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const visibleOptions = useMemo(
-    () => filterModelOptionsKeepingSelected(modelOptions, query, selectedModelIds),
-    [modelOptions, query, selectedModelIds],
+  const labelFor = (modelId: string) =>
+    modelOptions.find((option) => option.value === modelId)?.label ?? modelId;
+
+  const addableOptions = useMemo(
+    () => excludeSelectedModelOptions(modelOptions, selectedModelIds),
+    [modelOptions, selectedModelIds],
   );
 
   return (
@@ -67,26 +70,44 @@ export const TeamModelsForm = ({
           onChange={(teamId) => {
             const team = teams.find((item) => item.id === teamId);
             setSelectedModelIds(team?.modelIds || []);
-            setQuery('');
           }}
         />
       </Form.Item>
       <Form.Item label={t('org.modelIds')}>
-        <Input
-          allowClear
-          placeholder={t('org.modelIdsPlaceholder')}
-          style={{ marginBottom: 8 }}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <Select
-          allowClear
-          mode="multiple"
-          options={visibleOptions}
-          style={{ width: '100%' }}
-          value={selectedModelIds}
-          onChange={(value) => setSelectedModelIds((value as string[] | null) || [])}
-        />
+        <Flexbox gap={8}>
+          <Flexbox horizontal gap={4} wrap="wrap">
+            {selectedModelIds.length === 0 ? (
+              <Text type="secondary">{t('org.noModelsGranted')}</Text>
+            ) : (
+              selectedModelIds.map((modelId) => (
+                <Tag
+                  closable={!readOnly}
+                  key={modelId}
+                  onClose={(e) => {
+                    e.preventDefault();
+                    setSelectedModelIds((prev) => prev.filter((id) => id !== modelId));
+                  }}
+                >
+                  {labelFor(modelId)}
+                </Tag>
+              ))
+            )}
+          </Flexbox>
+          <Select
+            allowClear
+            showSearch
+            options={addableOptions}
+            placeholder={t('org.modelIdsPlaceholder')}
+            style={{ width: '100%' }}
+            value={undefined}
+            onChange={(value) => {
+              if (!value) return;
+              setSelectedModelIds((prev) =>
+                prev.includes(value as string) ? prev : [...prev, value as string],
+              );
+            }}
+          />
+        </Flexbox>
       </Form.Item>
       <Button disabled={readOnly} htmlType="submit" loading={busy}>
         {t('org.saveModels')}
