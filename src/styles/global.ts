@@ -82,14 +82,21 @@ const genGlobalStyle = ({ token }: { prefixCls: string; token: Theme }) => css`
    * control LTR (standard toggle UX) under RTL documents.
    *
    * Tabs / Segmented indicators (Settings → Appearance animation, platform/org
-   * admin tabs, etc.): JS writes physical offsetLeft into --active-tab-left /
-   * --active-item-left, but component CSS binds logical inset-inline-start.
-   * Under document RTL that places the pill from the wrong edge.
+   * admin tabs, etc.): JS measures a physical left offset into
+   * --active-tab-left / --active-item-left, but the component CSS binds it to
+   * the logical inset-inline-start. For an absolutely positioned box the
+   * logical inset maps through the *containing block's* direction (the tab
+   * list), not the indicator's own, so a direction:ltr rule on the indicator does
+   * nothing — under RTL the pill lands mirrored (picking the first tab
+   * highlights the last one).
    *
-   * Fix: force direction:ltr on the indicator so inset-inline-start resolves to
-   * physical left (matching the JS offset). Do not fight with left +
-   * inset-inline overrides — inset-inline:auto after left wipes the offset
-   * under RTL (inline-end maps to left), which left the pill on the wrong tab.
+   * Fix: feed the indicator the mirrored (right-edge) distance under RTL.
+   * - Tabs: Base UI already publishes --active-tab-right inline, so remap the
+   *   var with !important (inline styles otherwise win). All variants derive
+   *   from it, so the dot variant stays centered too.
+   * - Segmented: only a left offset is published, so mirror it against the
+   *   list's padding box, which is what both offsetLeft and inset percentages
+   *   resolve against.
    */
   :dir(rtl) [role='switch'],
   html[dir='rtl'] [role='switch'] {
@@ -98,9 +105,14 @@ const genGlobalStyle = ({ token }: { prefixCls: string; token: Theme }) => css`
     direction: ltr;
   }
 
-  [role='tablist'] > [role='presentation'],
-  [data-orientation] > [aria-hidden='true']:first-of-type {
-    direction: ltr;
+  :dir(rtl) [role='tablist'] > [role='presentation'],
+  html[dir='rtl'] [role='tablist'] > [role='presentation'] {
+    --active-tab-left: var(--active-tab-right) !important;
+  }
+
+  :dir(rtl) [data-orientation='horizontal'] > [aria-hidden='true']:first-of-type,
+  html[dir='rtl'] [data-orientation='horizontal'] > [aria-hidden='true']:first-of-type {
+    inset-inline-start: calc(100% - var(--active-item-left) - var(--active-item-width));
   }
 `;
 

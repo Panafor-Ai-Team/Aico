@@ -21,13 +21,29 @@ describe('global RTL control fixes', () => {
     expect(source).toContain('direction: ltr');
   });
 
-  it('forces LTR on Tabs/Segmented indicators so inset-inline-start matches physical left', () => {
-    expect(source).toContain("[role='tablist'] > [role='presentation']");
-    expect(source).toContain("[data-orientation] > [aria-hidden='true']:first-of-type");
-    expect(source).toMatch(/\[role='tablist'\] > \[role='presentation'\][\s\S]*?direction:\s*ltr/);
-    // Prior broken approaches (inset-inline:auto wiped left under RTL)
+  it('feeds Tabs indicators the right-edge offset under RTL', () => {
+    expect(source).toContain(":dir(rtl) [role='tablist'] > [role='presentation']");
+    expect(source).toContain("html[dir='rtl'] [role='tablist'] > [role='presentation']");
+    // Must override the inline-styled var, hence !important.
+    expect(source).toContain('--active-tab-left: var(--active-tab-right) !important;');
+  });
+
+  it('mirrors Segmented indicators against the list padding box under RTL', () => {
+    expect(source).toContain(
+      "html[dir='rtl'] [data-orientation='horizontal'] > [aria-hidden='true']:first-of-type",
+    );
+    expect(source).toContain(
+      'inset-inline-start: calc(100% - var(--active-item-left) - var(--active-item-width));',
+    );
+  });
+
+  it('does not rely on approaches that cannot work for absolutely positioned indicators', () => {
+    // `direction: ltr` on the indicator itself is ignored: logical insets map
+    // through the containing block's direction.
+    expect(source).not.toMatch(
+      /\[role='tablist'\] > \[role='presentation'\][\s\S]*?direction:\s*ltr/,
+    );
+    // inset-inline: auto wiped the physical left offset under RTL.
     expect(source).not.toContain('inset-inline: auto');
-    expect(source).not.toContain('var(--active-tab-right)');
-    expect(source).not.toContain('(var(--active-tab-width) - 100%)');
   });
 });
