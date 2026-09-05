@@ -45,6 +45,7 @@ import {
   DEVICE_TOOL_IDENTIFIERS,
   REMOTE_DEVICE_TOOL_IDENTIFIERS,
 } from '@/server/services/aiAgent/deviceToolRegistry';
+import { isCloudSandboxConfigured } from '@/server/services/sandbox/config';
 
 import {
   type ServerAgentToolsContext,
@@ -301,7 +302,10 @@ export const createServerAgentToolsEngine = (
     // Always-on builtin tools
     ...Object.fromEntries(alwaysOnToolIds.map((id) => [id, true])),
     // System-level rules (may override user selection for specific tools)
-    [CloudSandboxManifest.identifier]: runtimeMode === 'cloud',
+    // Cloud sandbox: the agent must be on the cloud runtime AND the deployment
+    // must actually have a sandbox backend configured. Without one every call
+    // 401s into a LobeHub sign-in popup, so the tool must never be offered.
+    [CloudSandboxManifest.identifier]: runtimeMode === 'cloud' && isCloudSandboxConfigured(),
     [KnowledgeBaseManifest.identifier]: hasEnabledKnowledgeBases,
     // Local-system: the user must have opted into local runtime
     // (`runtimeMode === 'local'`) AND have an online, auto-activated device

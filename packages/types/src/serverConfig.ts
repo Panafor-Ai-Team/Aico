@@ -95,6 +95,12 @@ export interface GlobalServerConfig {
   defaultAgent?: PartialDeep<UserDefaultAgent>;
   disableEmailPassword?: boolean;
   enableBusinessFeatures?: boolean;
+  /**
+   * Whether the deployment has a reachable Cloud Sandbox backend (a configured
+   * Onlyboxes console, or Market Trusted Client credentials). When false the
+   * Cloud Sandbox tool is kept out of the toolset entirely.
+   */
+  enableCloudSandbox?: boolean;
   enableComposio?: boolean;
   /**
    * @deprecated
