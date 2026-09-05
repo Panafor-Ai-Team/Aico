@@ -1,4 +1,4 @@
-import { OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
+import { isDefaultAutoImageModelId, OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
 import { ChatErrorType, type ErrorType } from '@lobechat/types';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
@@ -221,6 +221,11 @@ export class AicoManagedPolicy {
       // Auto is the product's meta-router, not an admin-grantable team model —
       // always usable on the org wallet regardless of the team's allow-list.
       if (modelId === OPENROUTER_AUTO_MODEL_ID) return;
+      // Same reasoning for the product's default image generator: image
+      // generation is a product feature rather than a chat-model grant, and a
+      // team that never listed it would otherwise fail every image request with
+      // MODEL_NOT_ALLOWED. Other image models still need an explicit grant.
+      if (isDefaultAutoImageModelId(modelId)) return;
       const allowed = await this.orgModel.getAllowedModelsForMember(me.id);
       if (!allowed || allowed.length === 0 || !allowed.includes(modelId)) {
         throw new AicoManagedPolicyError(`MODEL_NOT_ALLOWED:${modelId}`, ChatErrorType.BadRequest);

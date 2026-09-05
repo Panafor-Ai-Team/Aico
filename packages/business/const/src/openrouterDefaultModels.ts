@@ -20,12 +20,32 @@ export const DEFAULT_ENABLED_MODELS_PER_FAMILY = 4;
  * default selection never enables them unless we pin them here.
  */
 export const DEFAULT_ENABLED_OPENROUTER_IMAGE_MODEL_IDS = [
+  'meta/muse-image',
   'google/gemini-3.1-flash-image-preview:image',
   'google/gemini-2.5-flash-image:image',
   'google/gemini-3-pro-image-preview:image',
 ] as const;
 
 const IMAGE_MODEL_SUFFIX = ':image';
+
+/**
+ * Provider that serves the default image generator for the product Auto router.
+ * Auto (`{BRANDING_NAME}/auto`) never resolves an image model on its own, so the
+ * image-generation tool pins this one instead of walking the catalog and burning
+ * credits on whichever generator happens to sort first.
+ */
+export const DEFAULT_AUTO_IMAGE_MODEL_PROVIDER = 'openrouter';
+
+/** Default image generator used when the chat model is the Auto router. */
+export const DEFAULT_AUTO_IMAGE_MODEL_ID = 'meta/muse-image';
+
+/**
+ * Catalog sync stores chat models with image output under an `:image` suffix, so
+ * the pinned default can legitimately show up under either id.
+ */
+export const isDefaultAutoImageModelId = (id: string): boolean =>
+  id === DEFAULT_AUTO_IMAGE_MODEL_ID ||
+  id === `${DEFAULT_AUTO_IMAGE_MODEL_ID}${IMAGE_MODEL_SUFFIX}`;
 
 export type OpenRouterDefaultModelCandidate = {
   id: string;

@@ -1,3 +1,4 @@
+import { isDefaultAutoImageModelId } from '@lobechat/business-const';
 import {
   type AsyncTaskError,
   AsyncTaskStatus,
@@ -382,6 +383,16 @@ export class ImageGenerationExecutionRuntime {
 
       if (matchedProvider) return { model, provider: matchedProvider.id };
     } else {
+      // Pin the product default first. Falling straight through to "whichever
+      // generator sorts first" is what made Auto walk the catalog, failing and
+      // burning credits one paid model at a time.
+      for (const providerItem of state.providers) {
+        const pinned = providerItem.models.find((candidate) =>
+          isDefaultAutoImageModelId(candidate.id),
+        );
+        if (pinned) return { model: pinned.id, provider: providerItem.id };
+      }
+
       for (const providerItem of state.providers) {
         const firstModel = providerItem.models[0];
         if (firstModel) return { model: firstModel.id, provider: providerItem.id };

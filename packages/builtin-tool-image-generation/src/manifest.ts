@@ -1,5 +1,6 @@
 import type { BuiltinToolManifest } from '@lobechat/types';
 
+import { IMAGE_GENERATION_CONFIRM_AUDIT } from './confirmation';
 import { systemPrompt } from './systemRole';
 import { ImageGenerationApiName, ImageGenerationIdentifier } from './types';
 
@@ -53,6 +54,17 @@ export const ImageGenerationManifest: BuiltinToolManifest = {
       defaultTimeoutMs: 180_000,
       description:
         'Generate images and wait by default until final image URLs are available. Only use getImageGenerationStatus if this returns a still-processing result or if waitUntilComplete is false.',
+      /**
+       * The first image request of a conversation opens a confirmation card that
+       * names the default image model and lets the user pick another one. Once
+       * confirmed, `imageGenerationModelConfirmAudit` returns false for the rest
+       * of the conversation, so retries neither re-prompt nor drift onto another
+       * paid model. `required` (not `always`) so an explicit auto-run user is
+       * still never interrupted.
+       */
+      humanIntervention: {
+        dynamic: { default: 'never', policy: 'required', type: IMAGE_GENERATION_CONFIRM_AUDIT },
+      },
       name: ImageGenerationApiName.generateImage,
       parameters: {
         additionalProperties: false,

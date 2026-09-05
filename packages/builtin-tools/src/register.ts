@@ -52,6 +52,7 @@ import {
 } from '@lobechat/builtin-tool-group-management/client';
 import {
   ImageGenerationInspectors,
+  ImageGenerationInterventions,
   ImageGenerationManifest,
   ImageGenerationRenders,
 } from '@lobechat/builtin-tool-image-generation/client';
@@ -304,6 +305,10 @@ export const registerBuiltinToolSurfaces = (): void => {
       BuiltinIntervention
     >,
     [GroupManagementManifest.identifier]: GroupManagementInterventions as Record<
+      string,
+      BuiltinIntervention
+    >,
+    [ImageGenerationManifest.identifier]: ImageGenerationInterventions as Record<
       string,
       BuiltinIntervention
     >,

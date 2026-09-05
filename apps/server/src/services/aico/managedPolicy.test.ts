@@ -1,4 +1,4 @@
-import { OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
+import { DEFAULT_AUTO_IMAGE_MODEL_ID, OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
 import type { LobeChatDatabase } from '@lobechat/database';
 import { getTestDB } from '@lobechat/database/test-utils';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -102,6 +102,30 @@ describe('org wallet: Auto model is not gated by the team allow-list', () => {
     await expect(
       policy.authorize({ billing, modelId: 'openai/gpt-4o', userId: ownerId }),
     ).rejects.toMatchObject({ code: 'MODEL_NOT_ALLOWED:openai/gpt-4o' });
+  });
+
+  it('lets the default image generator through when the team allow-list omits it', async () => {
+    const org = await orgModel.createOrganization({ name: 'Image Org', ownerUserId: ownerId });
+    const teams = await orgModel.listTeams(org.id);
+    await orgModel.setTeamModelAccess({
+      modelIds: ['openai/gpt-4o-mini'],
+      orgId: org.id,
+      teamId: teams[0].id,
+    });
+
+    const policy = new AicoManagedPolicy(db, async () => null);
+    const billing = parseAicoBillingContext({ organizationId: org.id, source: 'organization' });
+
+    // Clears the allow-list gate and fails later (no budget provisioned) rather
+    // than MODEL_NOT_ALLOWED, which is what blocked org image generation.
+    await expect(
+      policy.authorize({ billing, modelId: DEFAULT_AUTO_IMAGE_MODEL_ID, userId: ownerId }),
+    ).rejects.toMatchObject({ code: 'MEMBER_BUDGET_INACTIVE' });
+
+    // Other image models still need an explicit grant.
+    await expect(
+      policy.authorize({ billing, modelId: 'some/other-image-model', userId: ownerId }),
+    ).rejects.toMatchObject({ code: 'MODEL_NOT_ALLOWED:some/other-image-model' });
   });
 
   it('lets Auto through even when the team is locked to zero models', async () => {
