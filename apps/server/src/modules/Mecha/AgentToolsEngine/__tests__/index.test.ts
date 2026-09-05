@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { CloudSandboxManifest } from '@lobechat/builtin-tool-cloud-sandbox';
 import { GroupAgentBuilderManifest } from '@lobechat/builtin-tool-group-agent-builder';
 import { GroupManagementManifest } from '@lobechat/builtin-tool-group-management';
 import { ImageGenerationManifest } from '@lobechat/builtin-tool-image-generation';
@@ -11,10 +12,21 @@ import { SkillsApiName, SkillsManifest } from '@lobechat/builtin-tool-skills';
 import { WebBrowsingManifest } from '@lobechat/builtin-tool-web-browsing';
 import { builtinTools } from '@lobechat/builtin-tools';
 import { ToolsEngine } from '@lobechat/context-engine';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createServerAgentToolsEngine, createServerToolsEngine } from '../index';
 import { type InstalledPlugin, type ServerAgentToolsContext } from '../types';
+
+// The Cloud Sandbox deployment gate reads server env; drive it explicitly so the
+// suite doesn't depend on whatever sandbox credentials the test env happens to
+// carry. Defaults to a configured deployment.
+const { mockIsCloudSandboxConfigured } = vi.hoisted(() => ({
+  mockIsCloudSandboxConfigured: vi.fn(() => true),
+}));
+
+vi.mock('@/server/services/sandbox/config', () => ({
+  isCloudSandboxConfigured: mockIsCloudSandboxConfigured,
+}));
 
 // Mock installed plugins
 const mockInstalledPlugins: InstalledPlugin[] = [
@@ -726,6 +738,56 @@ describe('createServerAgentToolsEngine', () => {
       });
 
       expect(result.enabledToolIds).toContain(MemoryManifest.identifier);
+    });
+  });
+
+  describe('CloudSandbox tool enable rules', () => {
+    // Regression: a deployment with no sandbox backend (no Onlyboxes console, no
+    // Market Trusted Client credentials) 401s on every sandbox call, which the
+    // client surfaces as a LobeHub sign-in popup. The tool must not reach the
+    // model at all in that case.
+    const buildEnabledToolIds = () => {
+      const engine = createServerAgentToolsEngine(createMockContext(), {
+        agentConfig: { agencyConfig: { executionTarget: 'sandbox' } },
+        model: 'gpt-4',
+        provider: 'openai',
+      });
+
+      return engine.generateToolsDetailed({
+        model: 'gpt-4',
+        provider: 'openai',
+        toolIds: [CloudSandboxManifest.identifier],
+      }).enabledToolIds;
+    };
+
+    it('should enable CloudSandbox on the cloud runtime when a sandbox backend is configured', () => {
+      mockIsCloudSandboxConfigured.mockReturnValue(true);
+
+      expect(buildEnabledToolIds()).toContain(CloudSandboxManifest.identifier);
+    });
+
+    it('should disable CloudSandbox when the deployment has no sandbox backend', () => {
+      mockIsCloudSandboxConfigured.mockReturnValue(false);
+
+      expect(buildEnabledToolIds()).not.toContain(CloudSandboxManifest.identifier);
+    });
+
+    it('should disable CloudSandbox when the agent is not on the cloud runtime', () => {
+      mockIsCloudSandboxConfigured.mockReturnValue(true);
+
+      const engine = createServerAgentToolsEngine(createMockContext(), {
+        agentConfig: { agencyConfig: { executionTarget: 'none' } },
+        model: 'gpt-4',
+        provider: 'openai',
+      });
+
+      const result = engine.generateToolsDetailed({
+        model: 'gpt-4',
+        provider: 'openai',
+        toolIds: [CloudSandboxManifest.identifier],
+      });
+
+      expect(result.enabledToolIds).not.toContain(CloudSandboxManifest.identifier);
     });
   });
 

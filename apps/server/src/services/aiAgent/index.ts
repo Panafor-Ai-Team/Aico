@@ -159,6 +159,7 @@ import { buildCloudHeteroContext } from '@/server/services/heterogeneousAgent/cl
 import { buildRemoteDeviceHeteroContext } from '@/server/services/heterogeneousAgent/remoteDeviceHeteroContext';
 import { MarketService } from '@/server/services/market';
 import { isResourceAuthorOrAdmin } from '@/server/services/resourcePermission';
+import { isCloudSandboxConfigured } from '@/server/services/sandbox/config';
 import {
   buildConnectorOwnershipPrompt,
   collectBorrowedConnectors,
@@ -3242,12 +3243,16 @@ export class AiAgentService {
       // Effective runtimeMode from the plan's resolved target — same value the
       // engine derives, single derivation point.
       const agentRuntimeMode = executionTargetToRuntimeMode(executionPlan.target);
+      // A `cloud` runtime only counts when the deployment has a sandbox backend
+      // configured; otherwise the tool would be offered, approved by the user,
+      // and then dead-end in a Market 401 / LobeHub sign-in popup.
+      const cloudSandboxAvailable = agentRuntimeMode === 'cloud' && isCloudSandboxConfigured();
       // When sandbox is not the active runtime, remove lobe-cloud-sandbox from the
       // manifest map. The initial seed via getEnabledPluginManifests (which includes
       // defaultToolIds) may have already placed it there, and the allowedBuiltinTools
       // loop below only guards the discoverable-builtin append path. Deleting here
       // covers both sources in a single point.
-      if (agentRuntimeMode !== 'cloud') {
+      if (!cloudSandboxAvailable) {
         delete toolManifestMap[CloudSandboxManifest.identifier];
       }
       // Same single-point deletion for the device tools: a `none` / `sandbox`
@@ -3266,8 +3271,7 @@ export class AiAgentService {
         if (!isManifestIngestAllowed(tool.identifier)) continue;
         // lobe-cloud-sandbox is only activator-discoverable when runtimeMode resolves
         // to 'cloud' (i.e. executionTarget='sandbox').
-        if (tool.identifier === CloudSandboxManifest.identifier && agentRuntimeMode !== 'cloud')
-          continue;
+        if (tool.identifier === CloudSandboxManifest.identifier && !cloudSandboxAvailable) continue;
         // device tools are only activator-discoverable in device-capable sessions
         if (stripDeviceTools && isDeviceToolIdentifier(tool.identifier)) continue;
         if (tool.discoverable !== false && !toolManifestMap[tool.identifier]) {

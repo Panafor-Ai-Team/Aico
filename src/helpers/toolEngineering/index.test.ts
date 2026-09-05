@@ -94,6 +94,31 @@ vi.mock('@/store/tool', () => ({
         type: 'builtin' as const,
       },
       {
+        identifier: 'lobe-cloud-sandbox',
+        manifest: {
+          api: [
+            {
+              description: 'List files in the cloud sandbox',
+              name: 'listFiles',
+              parameters: {
+                properties: {
+                  path: { type: 'string' },
+                },
+                required: ['path'],
+                type: 'object',
+              },
+            },
+          ],
+          identifier: 'lobe-cloud-sandbox',
+          meta: {
+            title: 'Cloud Sandbox',
+            avatar: 'C',
+          },
+          type: 'builtin',
+        } as unknown as ToolManifest,
+        type: 'builtin' as const,
+      },
+      {
         identifier: 'lobe-image-generation',
         manifest: {
           api: [
@@ -150,6 +175,7 @@ vi.mock('../isCanUseFC', () => ({
   isCanUseFC: () => mockIsCanUseFC,
 }));
 
+let mockIsCloudSandboxEnabled = false;
 let mockCurrentAgentPlugins: string[] = [];
 let mockCurrentAgentDisabledPlugins: string[] = [];
 let mockCurrentChatConfig: { enableAgentMode?: boolean; memory?: { enabled?: boolean } } = {};
@@ -167,7 +193,7 @@ vi.mock('@/store/agent/selectors', () => ({
   },
   agentChatConfigSelectors: {
     currentChatConfig: () => mockCurrentChatConfig,
-    isCloudSandboxEnabled: () => false,
+    isCloudSandboxEnabled: () => mockIsCloudSandboxEnabled,
     isLocalSystemEnabled: () => false,
     isMemoryToolEnabled: () => false,
   },
@@ -214,6 +240,8 @@ describe('toolEngineering', () => {
     mockCurrentChatConfig = {};
     mockImageOutputSupport = false;
     mockServerConfig = {};
+    mockIsCloudSandboxEnabled = false;
+    delete (window as any).global_serverConfigStore;
   });
 
   // `TOOL_NAME_MAX_LENGTH` is a server env, but this path generates tool names in
@@ -371,6 +399,53 @@ describe('toolEngineering', () => {
       });
 
       expect(result.enabledToolIds).not.toContain('lobe-image-generation');
+    });
+
+    // Regression: on a deployment with no sandbox backend the Market provider
+    // 401s and the client turns that into a LobeHub sign-in popup — so the tool
+    // must never reach the model in the first place.
+    describe('cloud sandbox deployment gate', () => {
+      const setServerConfig = (serverConfig: Record<string, unknown>) => {
+        (window as any).global_serverConfigStore = { getState: () => ({ serverConfig }) };
+      };
+
+      const buildEnabledToolIds = () => {
+        const toolsEngine = createAgentToolsEngine({ model: 'gpt-4', provider: 'openai' });
+
+        return toolsEngine.generateToolsDetailed({
+          model: 'gpt-4',
+          provider: 'openai',
+          toolIds: [],
+        }).enabledToolIds;
+      };
+
+      it('should drop the cloud sandbox tool when the deployment has no sandbox backend', () => {
+        mockIsCloudSandboxEnabled = true;
+        setServerConfig({ enableCloudSandbox: false });
+
+        expect(buildEnabledToolIds()).not.toContain('lobe-cloud-sandbox');
+      });
+
+      it('should keep the cloud sandbox tool when the deployment has a sandbox backend', () => {
+        mockIsCloudSandboxEnabled = true;
+        setServerConfig({ enableCloudSandbox: true });
+
+        expect(buildEnabledToolIds()).toContain('lobe-cloud-sandbox');
+      });
+
+      it('should stay permissive when the server config has not hydrated yet', () => {
+        mockIsCloudSandboxEnabled = true;
+        setServerConfig({});
+
+        expect(buildEnabledToolIds()).toContain('lobe-cloud-sandbox');
+      });
+
+      it('should still drop the tool when the agent is not on the cloud runtime', () => {
+        mockIsCloudSandboxEnabled = false;
+        setServerConfig({ enableCloudSandbox: true });
+
+        expect(buildEnabledToolIds()).not.toContain('lobe-cloud-sandbox');
+      });
     });
 
     it('should include web browsing tool as default when no tools are provided', () => {

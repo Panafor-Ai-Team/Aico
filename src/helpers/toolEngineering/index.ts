@@ -234,6 +234,13 @@ export const createAgentToolsEngine = (
     agentChatConfigSelectors.currentChatConfig(agentState).memory?.enabled ??
     settingsSelectors.memoryEnabled(useUserStore.getState());
   const webBrowsingEnabled = searchConfig.useApplicationBuiltinSearchTool;
+  // Deployment-level gate: the server reports `false` when neither an Onlyboxes
+  // console nor Market Trusted Client credentials are configured (see
+  // `isCloudSandboxConfigured`). Only an explicit `false` disables the tool —
+  // `undefined` (config not hydrated yet, or a server that predates the flag)
+  // stays permissive so a working deployment never loses the tool mid-session.
+  const cloudSandboxConfigured =
+    window.global_serverConfigStore?.getState()?.serverConfig?.enableCloudSandbox !== false;
   const imageGenerationEnabled =
     isCanUseFC(workingModel.model, workingModel.provider) &&
     !aiModelSelectors.isModelSupportImageOutput(
@@ -266,7 +273,12 @@ export const createAgentToolsEngine = (
     [BrowserManifest.identifier]:
       agentChatConfigSelectors.isLocalSystemEnabled(agentState) &&
       labPreferSelectors.enableInAppBrowser(useUserStore.getState()),
-    [CloudSandboxManifest.identifier]: agentChatConfigSelectors.isCloudSandboxEnabled(agentState),
+    // Cloud sandbox needs both the agent's cloud runtime AND a sandbox backend
+    // configured on the deployment (`enableCloudSandbox`). Without a backend the
+    // tool would be proposed, approved, and then dead-end in a Market 401 that
+    // the client surfaces as a LobeHub sign-in popup.
+    [CloudSandboxManifest.identifier]:
+      agentChatConfigSelectors.isCloudSandboxEnabled(agentState) && cloudSandboxConfigured,
     [KnowledgeBaseManifest.identifier]: kbEnabled,
     [LocalSystemManifest.identifier]: agentChatConfigSelectors.isLocalSystemEnabled(agentState),
     [MemoryManifest.identifier]: memoryEnabled,
