@@ -1,3 +1,4 @@
+import { BRANDING_NAME } from '@lobechat/business-const';
 import {
   COMPOSIO_APP_TYPES,
   LOBEHUB_SKILL_PROVIDERS,
@@ -67,10 +68,19 @@ const SKILL_ICON_SIZE = 18;
 const CLOSE_TOOL_DETAIL_POPOVER_EVENT = 'lobe-chat-tool-detail-popover-close';
 
 const officialTag = (
-  <Tooltip placement={'top'} title={'LobeHub'}>
+  <Tooltip placement={'top'} title={BRANDING_NAME}>
     <Tag color={'success'} icon={<Icon icon={BadgeCheck} />} size={'small'} />
   </Tooltip>
 );
+
+const formatSkillAuthor = (author?: string) => {
+  if (!author) return author;
+  if (author === 'LobeHub') return BRANDING_NAME;
+  if (author === 'LobeHub Market') return `${BRANDING_NAME} Market`;
+  return author;
+};
+
+const isOfficialSkillAuthor = (author?: string) => author === 'LobeHub' || author === BRANDING_NAME;
 
 type SkillPolicyMode = AgentPluginMode;
 
@@ -912,7 +922,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
               <ToolItemDetailPopover
                 icon={<ComposioSkillIcon icon={type.icon} label={type.label} size={36} />}
                 identifier={type.identifier}
-                sourceLabel={type.author}
+                sourceLabel={formatSkillAuthor(type.author)}
                 title={type.label}
                 description={t(`tools.composio.servers.${type.identifier}.description` as any, {
                   defaultValue: type.description,
@@ -927,7 +937,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
                   displayName: type.label,
                   onDelete: () => removeComposioServer(server.identifier),
                 },
-                extraTag: type.author === 'LobeHub' ? officialTag : undefined,
+                extraTag: isOfficialSkillAuthor(type.author) ? officialTag : undefined,
                 icon,
                 id: server.identifier,
                 popoverContent,
@@ -1028,7 +1038,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
               <ToolItemDetailPopover
                 icon={<LobehubSkillIcon icon={provider.icon} label={provider.label} size={36} />}
                 identifier={provider.id}
-                sourceLabel={provider.author}
+                sourceLabel={formatSkillAuthor(provider.author)}
                 title={provider.label}
                 description={t(`tools.lobehubSkill.providers.${provider.id}.description` as any, {
                   defaultValue: provider.description,
@@ -1039,7 +1049,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
             if (server?.status === LobehubSkillStatus.CONNECTED || server?.isConnected) {
               return createManagedSkillItem({
                 badge: <Icon icon={McpIcon} size={12} />,
-                extraTag: provider.author === 'LobeHub' ? officialTag : undefined,
+                extraTag: isOfficialSkillAuthor(provider.author) ? officialTag : undefined,
                 icon,
                 id: server.identifier,
                 popoverContent,
@@ -1419,7 +1429,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
         <Tag color={'warning'} icon={<Icon icon={Package} />} size={'small'}>
           {t('store.customPlugin', { ns: 'plugin' })}
         </Tag>
-      ) : item.author === 'LobeHub' ? (
+      ) : isOfficialSkillAuthor(item.author) ? (
         officialTag
       ) : undefined,
       icon,

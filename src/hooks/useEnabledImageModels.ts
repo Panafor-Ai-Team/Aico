@@ -1,4 +1,4 @@
-import { DEFAULT_PROVIDER } from '@lobechat/business-const';
+import { BRANDING_NAME, DEFAULT_PROVIDER } from '@lobechat/business-const';
 import isEqual from 'fast-deep-equal';
 import { useMemo } from 'react';
 
@@ -77,7 +77,7 @@ export const useEnabledImageModels = (): {
     const orgProvider: EnabledProviderWithModels = {
       children,
       id: managedFromPersonal?.id ?? DEFAULT_PROVIDER,
-      name: managedFromPersonal?.name ?? 'OpenRouter',
+      name: managedFromPersonal?.name ?? BRANDING_NAME,
       source: managedFromPersonal?.source ?? 'builtin',
     };
 

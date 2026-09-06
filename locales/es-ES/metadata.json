@@ -12,7 +12,7 @@
   "discover.models.title": "Comunidad de Modelos",
   "discover.plugins.description": "Explora gráficos, herramientas académicas, generación de imágenes/video/voz y flujos de trabajo: añade Habilidades a tus Agentes.",
   "discover.plugins.title": "Comunidad de Habilidades",
-  "discover.providers.description": "Explora los principales proveedores de modelos: OpenAI / Qwen / Ollama / Anthropic / DeepSeek / Google Gemini / OpenRouter",
+  "discover.providers.description": "Explora los principales proveedores de modelos: OpenAI / Qwen / Ollama / Anthropic / DeepSeek / Google Gemini",
   "discover.providers.title": "Comunidad de Proveedores",
   "discover.search": "Buscar",
   "discover.title": "Descubrir",

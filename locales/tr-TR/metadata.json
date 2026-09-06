@@ -12,7 +12,7 @@
   "discover.models.title": "Model Topluluğu",
   "discover.plugins.description": "Grafikler, akademik araçlar, görsel/video/ses üretimi ve iş akışları—Ajanlarınıza Yetenekler ekleyin.",
   "discover.plugins.title": "Yetenek Topluluğu",
-  "discover.providers.description": "OpenAI / Qwen / Ollama / Anthropic / DeepSeek / Google Gemini / OpenRouter gibi önde gelen model sağlayıcılarını keşfedin",
+  "discover.providers.description": "OpenAI / Qwen / Ollama / Anthropic / DeepSeek / Google Gemini gibi önde gelen model sağlayıcılarını keşfedin",
   "discover.providers.title": "Sağlayıcı Topluluğu",
   "discover.search": "Ara",
   "discover.title": "Keşfet",

@@ -1,6 +1,5 @@
 'use client';
 
-import { ModelTag } from '@lobehub/icons';
 import { ActionIconGroup, Block, Flexbox, Markdown, Tag, Text } from '@lobehub/ui';
 import { toast } from '@lobehub/ui/base-ui';
 import { createStaticStyles } from 'antd-style';
@@ -12,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useActiveWorkspaceId } from '@/business/client/hooks/useActiveWorkspaceId';
 import useRenderBusinessVideoBatchItem from '@/business/client/hooks/useRenderBusinessVideoBatchItem';
+import { BrandedModelTag } from '@/components/Branding/BrandedModelTag';
 import { GenerationInvalidAPIKey } from '@/routes/(main)/(create)/features/GenerationInput';
 import { useVideoStore } from '@/store/video';
 import { AsyncTaskErrorType, AsyncTaskStatus } from '@/types/asyncTask';
@@ -245,7 +245,7 @@ export const VideoGenerationBatchItem = memo<VideoGenerationBatchItemProps>(({ b
         style={{ opacity: 0.66 }}
       >
         <Flexbox horizontal align={'center'} gap={4}>
-          <ModelTag model={batch.model} variant={'borderless'} />
+          <BrandedModelTag model={batch.model} variant={'borderless'} />
           {batch.config?.resolution && <Tag variant={'borderless'}>{batch.config.resolution}</Tag>}
         </Flexbox>
         <Flexbox horizontal align={'center'} gap={6}>
