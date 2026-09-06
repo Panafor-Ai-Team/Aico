@@ -83,7 +83,9 @@ export const AssistantActionsBar = memo<AssistantActionsBarProps>(({ actionsConf
           {showCost ? (
             <MessageCostBadge
               metadata={data.metadata}
+              model={data.model}
               performance={data.performance}
+              provider={data.provider}
               usage={data.usage}
             />
           ) : null}
