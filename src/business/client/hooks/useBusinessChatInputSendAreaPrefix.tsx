@@ -70,3 +70,9 @@ export const getBusinessChatInputSendAreaPrefix = (sendAreaPrefix?: ReactNode): 
 };
 
 export const useBusinessChatInputSendAreaPrefix = getBusinessChatInputSendAreaPrefix;
+
+/**
+ * Image / video generation inputs reuse the chat wallet switcher so users can pick
+ * which wallet (personal or team) funds a generation, just like in chat.
+ */
+export const getBusinessGenerationSendAreaPrefix = getBusinessChatInputSendAreaPrefix;

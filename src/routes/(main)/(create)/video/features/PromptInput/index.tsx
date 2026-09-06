@@ -9,6 +9,7 @@ import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import VideoFreeQuotaInfo from '@/business/client/features/VideoFreeQuotaInfo';
+import { getBusinessGenerationSendAreaPrefix } from '@/business/client/hooks/useBusinessChatInputSendAreaPrefix';
 import { loginRequired } from '@/components/Error/loginRequiredNotification';
 import Action from '@/features/ChatInput/ActionBar/components/Action';
 import ModelSwitchPanel from '@/features/ModelSwitchPanel';
@@ -663,6 +664,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
                 visibility={displayVisibility}
                 onChange={setNewGenerationTopicVisibility}
               />
+              {getBusinessGenerationSendAreaPrefix()}
             </>
           }
           onGenerate={handleGenerate}
