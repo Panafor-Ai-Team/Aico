@@ -1,7 +1,6 @@
 'use client';
 
 import { useAutoAnimate } from '@formkit/auto-animate/react';
-import { ModelTag } from '@lobehub/icons';
 import { ActionIconGroup, Block, Flexbox, Grid, Image, Markdown, Tag, Text } from '@lobehub/ui';
 import { toast } from '@lobehub/ui/base-ui';
 import { createStaticStyles } from 'antd-style';
@@ -14,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useActiveWorkspaceId } from '@/business/client/hooks/useActiveWorkspaceId';
 import useRenderBusinessBatchItem from '@/business/client/hooks/useRenderBusinessBatchItem';
+import { BrandedModelTag } from '@/components/Branding/BrandedModelTag';
 import { GenerationInvalidAPIKey } from '@/routes/(main)/(create)/features/GenerationInput';
 import { useImageStore } from '@/store/image';
 import { AsyncTaskErrorType } from '@/types/asyncTask';
@@ -155,7 +155,7 @@ export const GenerationBatchItem = memo<GenerationBatchItemProps>(({ batch }) =>
         style={{ opacity: 0.66 }}
       >
         <Flexbox horizontal align={'center'} gap={4}>
-          <ModelTag model={batch.model} variant={'borderless'} />
+          <BrandedModelTag model={batch.model} variant={'borderless'} />
           {batch.width && batch.height && (
             <Tag variant={'borderless'}>
               {batch.width} × {batch.height}

@@ -16,7 +16,7 @@ export const handleLobeHubModelDeprecatedError = (error: unknown) => {
     ?.requestedModel;
 
   toast.error(
-    t('response.LobeHubModelDeprecated', {
+    t('response.ModelDeprecated', {
       model: requestedModel ?? '-',
       ns: 'error',
     }),

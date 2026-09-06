@@ -1,4 +1,8 @@
-import { DEFAULT_PROVIDER, OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
+import {
+  BRANDING_NAME,
+  DEFAULT_PROVIDER,
+  OPENROUTER_AUTO_MODEL_ID,
+} from '@lobechat/business-const';
 import isEqual from 'fast-deep-equal';
 import { type AiModelForSelect, type AiProviderModelListItem } from 'model-bank';
 import { useMemo } from 'react';
@@ -90,7 +94,7 @@ export const useEnabledChatModels = (): EnabledProviderWithModels[] => {
     const orgProvider: EnabledProviderWithModels = {
       children,
       id: managedFromPersonal?.id ?? DEFAULT_PROVIDER,
-      name: managedFromPersonal?.name ?? 'OpenRouter',
+      name: managedFromPersonal?.name ?? BRANDING_NAME,
       source: managedFromPersonal?.source ?? 'builtin',
     };
 

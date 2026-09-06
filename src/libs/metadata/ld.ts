@@ -8,8 +8,6 @@ import { OFFICIAL_SITE, OFFICIAL_URL } from '@/const/url';
 import { type Locales } from '@/locales/resources';
 import { getCanonicalUrl } from '@/server/utils/url';
 
-import pkg from '../../../package.json';
-
 const LAST_MODIFIED = new Date().toISOString();
 export const AUTHOR_LIST = {
   arvinxx: {
@@ -27,7 +25,7 @@ export const AUTHOR_LIST = {
   lobehub: {
     avatar: 'https://avatars.githubusercontent.com/u/131470832?v=4',
     desc: 'Official Account',
-    name: 'LobeHub',
+    name: ORG_NAME,
     url: 'https://github.com/lobehub',
   },
 };
@@ -206,7 +204,7 @@ export class Ld {
     const baseInfo: any = {
       '@id': this.getId(OFFICIAL_URL, '#website'),
       '@type': 'WebSite',
-      'description': pkg.description,
+      'description': `${BRANDING_NAME} - Agent teammates that grow with you`,
       'inLanguage': DEFAULT_LANG,
       'name': BRANDING_NAME,
       'publisher': {

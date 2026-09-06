@@ -274,7 +274,7 @@ export default {
   'header.title': 'Billing',
   'keyMissMatch.button': 'Restore usage and continue conversation',
   'keyMissMatch.description':
-    'Due to an occasional system failure, your current subscription usage is temporarily inactive. Please click the button below to restore usage and continue the conversation. If this happens repeatedly, please contact us via email (support@lobehub.com)',
+    'Due to an occasional system failure, your current subscription usage is temporarily inactive. Please click the button below to restore usage and continue the conversation. If this happens repeatedly, please contact support',
   'keyMissMatch.title': 'Restore Subscription Usage Now',
   'limitation.chat.budgetReady.action': 'Continue Chatting',
   'limitation.chat.budgetReady.desc': 'Your available credits now cover this request.',
@@ -433,7 +433,7 @@ export default {
   'plans.credit.api': 'Custom API',
   'plans.credit.apiDesc': 'Requires your own model API configuration',
   'plans.credit.apiProvider':
-    'Supports 20+ mainstream model providers including OpenAI / Anthropic / OpenRouter',
+    'Supports 20+ mainstream model providers including OpenAI / Anthropic',
   'plans.credit.buy': 'Purchase Credits',
   'plans.credit.buyDesc': 'Also supports purchasing credits on demand',
   'plans.credit.none': 'No built-in credits',

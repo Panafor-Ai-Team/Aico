@@ -1,7 +1,6 @@
 'use client';
 
 import { type AgentItem } from '@lobechat/types';
-import { ModelIcon } from '@lobehub/icons';
 import { ActionIcon, Flexbox, Icon, Popover, Skeleton, Text } from '@lobehub/ui';
 import { SkillsIcon } from '@lobehub/ui/icons';
 import { createStaticStyles } from 'antd-style';
@@ -10,6 +9,8 @@ import { memo, type PropsWithChildren, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
 import ModelSelect from '@/features/ModelSelect';
 import { useResourceAccess } from '@/features/ResourcePermission/useResourceAccess';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
@@ -161,9 +162,9 @@ const AgentProfilePopup = memo<AgentProfilePopupProps>(
         <Flexbox horizontal align={'center'} className={styles.footer} gap={14} wrap={'wrap'}>
           {merged.model && (
             <Flexbox horizontal align={'center'} className={styles.statItem} gap={6}>
-              <ModelIcon model={merged.model} size={14} />
+              <BrandedModelIcon model={merged.model} size={14} />
               <Text fontSize={12} type={'secondary'}>
-                {merged.model}
+                {formatBrandedModelId(merged.model)}
               </Text>
             </Flexbox>
           )}
