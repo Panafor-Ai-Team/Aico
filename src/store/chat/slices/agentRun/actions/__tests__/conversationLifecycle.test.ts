@@ -7,6 +7,7 @@ import { agentService } from '@/services/agent';
 import { aiChatService } from '@/services/aiChat';
 import { chatService } from '@/services/chat';
 import { messageService } from '@/services/message';
+import { topicService } from '@/services/topic';
 import * as agentGroupStore from '@/store/agentGroup';
 import { setPendingTopicRepos } from '@/store/chat/pendingTopicRepos';
 import { messageMapKey } from '@/store/chat/utils/messageMapKey';
@@ -703,6 +704,107 @@ describe('ConversationLifecycle actions', () => {
         // or the sidebar spinner sticks forever (the #16745 regression).
         expect(useChatStore.getState().topicLoadingIds).not.toContain(newTopicId);
         expect(useChatStore.getState().topicLoadingIds).not.toContain(optimisticTopicId);
+      });
+
+      it('should keep a model switch made during the optimistic-topic window instead of reverting to the send-time snapshot', async () => {
+        // Regression: switching the model right after hitting send (before the
+        // server confirms the real topicId) used to get silently reverted once
+        // resolveOptimisticTopic ran — it re-applied the stale `optimisticTopic`
+        // snapshot captured at send time, clobbering the interim switch that had
+        // only ever patched the temporary `tmp_topic_*` row client-side.
+        const { result } = renderHook(() => useChatStore());
+        const agentId = TEST_IDS.SESSION_ID;
+        const topicKey = topicMapKey({ agentId });
+        const newTopicId = TEST_IDS.NEW_TOPIC_ID;
+
+        let resolveServerSend!: (value: any) => void;
+        const serverSendPromise = new Promise<any>((resolve) => {
+          resolveServerSend = resolve;
+        });
+
+        act(() => {
+          useChatStore.setState({
+            activeAgentId: agentId,
+            activeTopicId: undefined,
+            executeClientAgent: vi.fn().mockResolvedValue(undefined),
+            summaryTopicTitle: vi.fn().mockResolvedValue(undefined),
+            topicDataMap: {
+              [topicKey]: {
+                currentPage: 0,
+                hasMore: false,
+                isExpandingPageSize: false,
+                isLoadingMore: false,
+                items: [],
+                pageSize: 20,
+                total: 0,
+              },
+            },
+          });
+        });
+
+        const sendMessageInServerSpy = vi
+          .spyOn(aiChatService, 'sendMessageInServer')
+          .mockReturnValue(serverSendPromise);
+        vi.spyOn(topicService, 'updateTopic').mockResolvedValue(undefined as any);
+
+        let sendPromise!: ReturnType<typeof result.current.sendMessage>;
+        act(() => {
+          sendPromise = result.current.sendMessage({
+            context: { agentId, threadId: null, topicId: null },
+            message: 'hello',
+          });
+        });
+
+        await waitFor(() => expect(sendMessageInServerSpy).toHaveBeenCalled());
+
+        const optimisticTopicId = useChatStore.getState().topicDataMap[topicKey]?.items[0]?.id;
+        expect(optimisticTopicId).toMatch(/^tmp_topic_/);
+
+        // The user opens the model switcher and picks a different model while
+        // the topic is still the optimistic placeholder — this is what happens
+        // when someone switches models right after hitting send.
+        await act(async () => {
+          await useChatStore.getState().updateTopicModel(optimisticTopicId!, {
+            model: 'switched-model',
+            provider: 'switched-provider',
+          });
+        });
+
+        expect(
+          useChatStore
+            .getState()
+            .topicDataMap[topicKey]?.items.find((topic) => topic.id === optimisticTopicId)?.model,
+        ).toBe('switched-model');
+
+        // The server now confirms the real topicId for the message sent before
+        // the switch.
+        await act(async () => {
+          resolveServerSend({
+            assistantMessageId: TEST_IDS.ASSISTANT_MESSAGE_ID,
+            isCreateNewTopic: true,
+            messages: [
+              createMockMessage({
+                id: TEST_IDS.USER_MESSAGE_ID,
+                role: 'user',
+                topicId: newTopicId,
+              }),
+              createMockMessage({
+                id: TEST_IDS.ASSISTANT_MESSAGE_ID,
+                role: 'assistant',
+                topicId: newTopicId,
+              }),
+            ],
+            topicId: newTopicId,
+            topics: { items: [{ id: newTopicId, title: 'Server Topic' }], total: 1 },
+            userMessageId: TEST_IDS.USER_MESSAGE_ID,
+          } as any);
+          await sendPromise;
+        });
+
+        const resolvedTopic = useChatStore
+          .getState()
+          .topicDataMap[topicKey]?.items.find((topic) => topic.id === newTopicId);
+        expect(resolvedTopic?.model).toBe('switched-model');
       });
 
       it('should hold the migrated topicLoadingIds owner through a hetero new-topic run and release it at the end', async () => {
