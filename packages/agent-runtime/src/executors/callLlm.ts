@@ -307,13 +307,22 @@ export const callLlm =
     const existingAssistantMessageId = llmPayload.assistantMessageId;
     // Pre-created placeholders (e.g. sendMessage creates the assistant row
     // before the operation exists) miss the creation-time provenance stamp —
-    // merge it here so reused messages carry metadata.operationId too.
-    // Best-effort: the stamp is only a tracing aid and must never turn a
-    // normal send/resume into an LLM error before streaming starts.
+    // merge it here so reused messages carry metadata.operationId too. They
+    // also carry whatever model/provider the placeholder was stamped with at
+    // creation time, which for the top-level turn is the AGENT's default
+    // (sendMessage doesn't know about a topic-scoped model override) — not
+    // necessarily `model`/`provider` resolved above, the ones this call
+    // actually runs against (e.g. after a mid-topic model switch). Correct it
+    // here so the persisted row, and everything reading it (cost/usage
+    // display, history replay), reflects the model that really answered.
+    // Best-effort: this stamp is only a tracing/display aid and must never
+    // turn a normal send/resume into an LLM error before streaming starts.
     if (existingAssistantMessageId) {
       try {
         await transports.messages.update(existingAssistantMessageId, {
           metadata: { operationId: operation.operationId },
+          model,
+          provider,
         });
       } catch (error) {
         console.warn('[call_llm] Failed to stamp operation id provenance:', error);

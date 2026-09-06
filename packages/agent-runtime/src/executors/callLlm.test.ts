@@ -268,9 +268,13 @@ describe('callLlm executor', () => {
     });
     expect(messages.createAssistantMessage).not.toHaveBeenCalled();
     // Pre-created placeholders exist before the operation does — the executor
-    // must merge the provenance stamp onto them.
+    // must merge the provenance stamp onto them, and correct their model/provider
+    // to what this call actually resolved to (the placeholder may have been
+    // stamped with the agent's default, e.g. before a mid-topic model switch).
     expect(messages.update).toHaveBeenCalledWith('assistant-existing', {
       metadata: { operationId: 'op-1' },
+      model: 'gpt-4',
+      provider: 'openai',
     });
     expect(transport.createTrace).toHaveBeenCalledWith(
       expect.objectContaining({
