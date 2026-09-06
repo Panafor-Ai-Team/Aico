@@ -411,6 +411,7 @@ export class ChatTopicActionImpl {
     id: string,
     { model, provider }: { model: string; provider: string },
   ): Promise<void> => {
+    this.#pendingTopicModelWrites.set(id, { expiresAt: Date.now() + 15_000, model, provider });
     await this.#get().internal_updateTopic(id, { model, provider });
   };
 
@@ -427,6 +428,21 @@ export class ChatTopicActionImpl {
    */
   #pendingTopicStatusWrites = new Map<string, { expiresAt: number; status: ChatTopicStatus }>();
 
+  /**
+   * Same guard as `#pendingTopicStatusWrites`, for `updateTopicModel`. It
+   * matters most for a model switch made while the topic still carried its
+   * first-send optimistic `tmp_topic_*` id: `resolveOptimisticTopic` replays
+   * that switch as a real `updateTopicModel` once the id resolves (see
+   * `conversationLifecycle.ts`), but the SAME server response that resolved
+   * the id also carries the topic LIST fetched before that replay's persist
+   * completes — its stale (pre-switch) model would otherwise win the very next
+   * `internal_updateTopics` reconciliation, in the same tick.
+   */
+  #pendingTopicModelWrites = new Map<
+    string,
+    { expiresAt: number; model: string; provider: string }
+  >();
+
   #reconcileFetchedTopics = (items: ChatTopic[], currentItems?: ChatTopic[]): ChatTopic[] => {
     let next = items;
 
@@ -439,6 +455,21 @@ export class ChatTopicActionImpl {
           return item;
         }
         return { ...item, status: pending.status };
+      });
+    }
+
+    if (this.#pendingTopicModelWrites.size > 0) {
+      next = next.map((item) => {
+        const pending = this.#pendingTopicModelWrites.get(item.id);
+        if (!pending) return item;
+        if (
+          pending.expiresAt <= Date.now() ||
+          (item.model === pending.model && item.provider === pending.provider)
+        ) {
+          this.#pendingTopicModelWrites.delete(item.id);
+          return item;
+        }
+        return { ...item, model: pending.model, provider: pending.provider };
       });
     }
 

@@ -770,18 +770,50 @@ export class ConversationLifecycleActionImpl {
       );
     };
 
+    // The optimistic topic's model can have been switched (via updateTopicModel)
+    // while it still carried its temporary `tmp_topic_*` id — that write only
+    // ever patches this client's local state, since the server has no such id
+    // to persist against. Read the row's CURRENT model/metadata here instead of
+    // the `optimisticTopic` snapshot captured at send time: reusing that stale
+    // snapshot would re-apply the pre-switch model and silently revert a model
+    // switch made in the gap between hitting send and the server confirming
+    // the real topicId.
+    const getLiveOptimisticTopic = () =>
+      optimisticTopic
+        ? this.#get().topicDataMap[topicMapKey(optimisticTopicScope)]?.items.find(
+            (item) => item.id === optimisticTopic.id,
+          )
+        : undefined;
+
     const resolveOptimisticTopic = (topicId: string, title = optimisticTopic?.title) => {
+      const liveOptimisticTopic = getLiveOptimisticTopic();
+      const metadata = liveOptimisticTopic?.metadata ?? optimisticTopic?.metadata;
+      const model = liveOptimisticTopic?.model ?? optimisticTopic?.model;
+      const provider = liveOptimisticTopic?.provider ?? optimisticTopic?.provider;
+      // A switch made while the topic still carried its temporary id never
+      // reached the server (there was no real id to persist against yet) —
+      // replay it as a genuine `updateTopicModel` below, once `topicId` is real.
+      const switchedDuringPendingWindow =
+        !!model && (model !== optimisticTopic?.model || provider !== optimisticTopic?.provider);
+
+      const persistPendingModelSwitch = () => {
+        if (!switchedDuringPendingWindow || !model) return;
+
+        void this.#get()
+          .updateTopicModel(topicId, { model, provider: provider || '' })
+          .catch((err) => {
+            console.error('[resolveOptimisticTopic] failed to persist mid-send model switch:', err);
+          });
+      };
+
       if (!optimisticTopic || !optimisticTopicActive) {
         addResolvedTopicPlaceholder(
           topicId,
           title || t('defaultTitle', { ns: 'topic' }),
           'sendMessage/reconcileOptimisticTopic/add',
-          {
-            metadata: optimisticTopic?.metadata,
-            model: optimisticTopic?.model,
-            provider: optimisticTopic?.provider,
-          },
+          { metadata, model: model ?? undefined, provider: provider ?? undefined },
         );
+        persistPendingModelSwitch();
         return;
       }
 
@@ -790,14 +822,13 @@ export class ConversationLifecycleActionImpl {
         nextId: topicId,
         previousId: optimisticTopic.id,
         value: {
-          ...(optimisticTopic.metadata ? { metadata: optimisticTopic.metadata } : {}),
-          ...(optimisticTopic.model
-            ? { model: optimisticTopic.model, provider: optimisticTopic.provider }
-            : {}),
+          ...(metadata ? { metadata } : {}),
+          ...(model ? { model, provider } : {}),
           ...(operationContext.groupId ? {} : { sessionId: operationContext.agentId }),
           title: title || t('defaultTitle', { ns: 'topic' }),
         },
       });
+      persistPendingModelSwitch();
       optimisticTopicActive = false;
       optimisticTopicResolved = true;
     };
