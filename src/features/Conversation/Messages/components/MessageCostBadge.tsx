@@ -6,11 +6,14 @@ import { CoinsIcon } from 'lucide-react';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import { aiModelSelectors, useAiInfraStore } from '@/store/aiInfra';
 import { useGlobalStore } from '@/store/global';
 import { systemStatusSelectors } from '@/store/global/selectors';
 import { formatNumber } from '@/utils/format';
 
 import { formatMessageCostUsd, resolveMessageCost } from './resolveMessageCost';
+import { resolveMessageModelName } from './resolveMessageModelName';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   chip: css`
@@ -47,6 +50,24 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     font-weight: 500;
     font-variant-numeric: tabular-nums;
     color: ${cssVar.colorText};
+  `,
+  modelName: css`
+    overflow: hidden;
+
+    font-size: 12px;
+    font-weight: 500;
+    color: ${cssVar.colorText};
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `,
+  modelRow: css`
+    display: flex;
+    gap: 6px;
+    align-items: center;
+
+    min-width: 0;
+    padding-block-end: 8px;
+    border-block-end: 1px solid ${cssVar.colorSplit};
   `,
   sectionTitle: css`
     margin-block-end: 4px;
@@ -112,56 +133,81 @@ const buildUsageDetailRows = (
 
 interface MessageCostBadgeProps {
   metadata?: Record<string, unknown> | null;
+  model?: string | null;
   performance?: ModelPerformance;
+  provider?: string | null;
   usage?: ModelUsage;
 }
 
-const MessageCostBadge = memo<MessageCostBadgeProps>(({ usage, metadata, performance }) => {
-  const { t } = useTranslation('chat');
-  const isShowCredit = useGlobalStore(systemStatusSelectors.isShowCredit);
+const MessageCostBadge = memo<MessageCostBadgeProps>(
+  ({ usage, metadata, performance, model, provider }) => {
+    const { t } = useTranslation('chat');
+    const isShowCredit = useGlobalStore(systemStatusSelectors.isShowCredit);
+    const modelCard = useAiInfraStore(aiModelSelectors.getModelCard(model ?? '', provider ?? ''));
 
-  const cost = useMemo(() => resolveMessageCost(usage, metadata), [usage, metadata]);
-  const detailRows = useMemo(
-    () => buildUsageDetailRows(usage, performance, t),
-    [usage, performance, t],
-  );
+    const cost = useMemo(() => resolveMessageCost(usage, metadata), [usage, metadata]);
+    const detailRows = useMemo(
+      () => buildUsageDetailRows(usage, performance, t),
+      [usage, performance, t],
+    );
 
-  if (isShowCredit) return null;
-  if (cost === undefined || cost <= 0) return null;
+    if (isShowCredit) return null;
+    if (cost === undefined || cost <= 0) return null;
 
-  const amount = formatMessageCostUsd(cost);
-  const label = t('messageAction.cost');
+    const amount = formatMessageCostUsd(cost);
+    const label = t('messageAction.cost');
 
-  return (
-    <Popover
-      placement="top"
-      trigger="hover"
-      content={
-        <Flexbox gap={12} style={{ minWidth: 220, padding: 4 }}>
-          <div>
-            <div className={styles.sectionTitle}>{label}</div>
-            <div className={styles.costValue}>{amount}</div>
-          </div>
+    const { name: modelName, showIcon } = resolveMessageModelName({
+      displayName: modelCard?.displayName,
+      model,
+      provider,
+    });
 
-          {detailRows.length > 0 && (
-            <Flexbox gap={6}>
-              {detailRows.map((row) => (
-                <div className={styles.detailRow} key={row.key}>
-                  <span>{row.label}</span>
-                  <span className={styles.detailValue}>{row.value}</span>
-                </div>
-              ))}
-            </Flexbox>
-          )}
-        </Flexbox>
-      }
-    >
-      <Center horizontal aria-label={`${label}: ${amount}`} className={styles.chip}>
-        <Icon icon={CoinsIcon} size={14} />
-      </Center>
-    </Popover>
-  );
-});
+    return (
+      <Popover
+        placement="top"
+        trigger="hover"
+        content={
+          <Flexbox gap={12} style={{ minWidth: 220, padding: 4 }}>
+            {/* The model heads the card: it names what produced this reply, and
+                every number below is only meaningful once you know which model
+                they belong to. */}
+            {modelName && (
+              <div className={styles.modelRow}>
+                {showIcon && <BrandedModelIcon model={model!} size={16} type={'mono'} />}
+                <span className={styles.modelName}>{modelName}</span>
+              </div>
+            )}
+
+            <div>
+              <div className={styles.sectionTitle}>{label}</div>
+              <div className={styles.costValue}>{amount}</div>
+            </div>
+
+            {detailRows.length > 0 && (
+              <Flexbox gap={6}>
+                {detailRows.map((row) => (
+                  <div className={styles.detailRow} key={row.key}>
+                    <span>{row.label}</span>
+                    <span className={styles.detailValue}>{row.value}</span>
+                  </div>
+                ))}
+              </Flexbox>
+            )}
+          </Flexbox>
+        }
+      >
+        <Center
+          horizontal
+          aria-label={modelName ? `${label}: ${amount} · ${modelName}` : `${label}: ${amount}`}
+          className={styles.chip}
+        >
+          <Icon icon={CoinsIcon} size={14} />
+        </Center>
+      </Popover>
+    );
+  },
+);
 
 MessageCostBadge.displayName = 'MessageCostBadge';
 
