@@ -1036,6 +1036,13 @@
       "when": 1787900000000,
       "tag": "0147_aico_usage_multiplier",
       "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1788000000000,
+      "tag": "0148_aico_wallet_raw_capacity",
+      "breakpoints": true
     }
   ],
   "version": "6"

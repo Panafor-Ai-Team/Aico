@@ -361,22 +361,12 @@ export const userWallets = pgTable(
     /** Soft-delete freeze of non-zero personal balance pending refund/recovery. */
     frozenMicroUsd: bigint('frozen_micro_usd', { mode: 'number' }).notNull().default(0),
     /**
-     * AICO-180 usage-multiplier checkpoint. `usageBaselineMicroUsd` is
-     * OpenRouter's raw usage counter at the last multiplier change and
-     * `billedUsageBeforeBaselineMicroUsd` what had been billed by then, so a
-     * multiplier change never reprices usage already charged at the old rate.
+     * AICO-184. Raw upstream spend this wallet has bought, accumulated as
+     * `deposit / M_at_payment` on every top-up. `balanceMicroUsd` is what the
+     * user paid; this is what it buys, so a later multiplier change cannot
+     * revalue money already paid. Doubles as the OpenRouter key limit.
      */
-    usageBaselineMicroUsd: bigint('usage_baseline_micro_usd', { mode: 'number' })
-      .notNull()
-      .default(0),
-    billedUsageBeforeBaselineMicroUsd: bigint('billed_usage_before_baseline_micro_usd', {
-      mode: 'number',
-    })
-      .notNull()
-      .default(0),
-    checkpointMultiplierBp: bigint('checkpoint_multiplier_bp', { mode: 'number' })
-      .notNull()
-      .default(12_000),
+    rawCapacityMicroUsd: bigint('raw_capacity_micro_usd', { mode: 'number' }).notNull().default(0),
     lastSyncedAt: timestamptz('last_synced_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
