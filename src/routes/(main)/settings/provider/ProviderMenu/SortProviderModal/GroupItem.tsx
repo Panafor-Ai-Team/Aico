@@ -1,7 +1,7 @@
-import { ProviderIcon } from '@lobehub/icons';
 import { Avatar, Flexbox, SortableList } from '@lobehub/ui';
 import { memo } from 'react';
 
+import { BrandedProviderIcon } from '@/components/Branding/BrandedProviderIcon';
 import { type AiProviderListItem } from '@/types/aiProvider';
 
 interface GroupItemProps extends AiProviderListItem {
@@ -21,7 +21,12 @@ const GroupItem = memo<GroupItemProps>(({ id, name, source, logo, disabled }) =>
             style={{ borderRadius: 6 }}
           />
         ) : (
-          <ProviderIcon provider={id} size={24} style={{ borderRadius: 6 }} type={'avatar'} />
+          <BrandedProviderIcon
+            provider={id}
+            size={24}
+            style={{ borderRadius: 6 }}
+            type={'avatar'}
+          />
         )}
         {name}
       </Flexbox>

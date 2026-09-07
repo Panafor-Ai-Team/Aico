@@ -3,6 +3,8 @@ import {
   isRemoteHeterogeneousType,
 } from '@lobechat/heterogeneous-agents';
 
+import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
+
 interface MessageModelNameInput {
   /** `displayName` of the resolved model card, when the model is known locally. */
   displayName?: string;
@@ -18,7 +20,8 @@ interface MessageModelName {
 
 /**
  * Model identity for the cost hover card: the friendly display name when the
- * model card is known, the raw id otherwise. Remote platform agents (openclaw,
+ * model card is known, the branded id otherwise (`openrouter/auto` shows as
+ * `panachat/auto`). Remote platform agents (openclaw,
  * hermes) never expose a real model id and fall back to their brand label —
  * the same rule the inline Usage row applies.
  */
@@ -32,5 +35,8 @@ export const resolveMessageModelName = ({
     if (brand) return { name: brand, showIcon: false };
   }
 
-  return { name: displayName || model || undefined, showIcon: !!model };
+  return {
+    name: displayName || (model ? formatBrandedModelId(model) : undefined),
+    showIcon: !!model,
+  };
 };

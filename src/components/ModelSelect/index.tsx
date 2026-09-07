@@ -1,7 +1,7 @@
 import { BRANDING_NAME } from '@lobechat/business-const';
 import { type ChatModelCard } from '@lobechat/types';
 import { type IconAvatarProps } from '@lobehub/icons';
-import { LobeHub, ProviderIcon } from '@lobehub/icons';
+import { ProviderIcon } from '@lobehub/icons';
 import { type FlexboxProps } from '@lobehub/ui';
 import { Avatar, Flexbox, Icon, Tag, Text, Tooltip } from '@lobehub/ui';
 import { createStaticStyles, useResponsive } from 'antd-style';
@@ -352,7 +352,9 @@ interface ProviderItemRenderProps {
 export const ProviderItemRender = memo<ProviderItemRenderProps>(
   ({ provider, name, source, logo, type = 'mono', size = 16 }) => {
     const isMono = type === 'mono';
-    const useBrandLogo = isCustomBranding && (provider === 'openrouter' || provider === 'aico');
+    const useBrandLogo =
+      isCustomBranding &&
+      (provider === 'openrouter' || provider === 'aico' || provider === 'lobehub');
     const displayName = useBrandLogo ? BRANDING_NAME : name;
     return (
       <Flexbox
@@ -374,8 +376,6 @@ export const ProviderItemRender = memo<ProviderItemRenderProps>(
           />
         ) : useBrandLogo ? (
           <ProductLogo size={size} type={isMono ? 'mono' : 'flat'} />
-        ) : provider === 'lobehub' ? (
-          <LobeHub.Morden size={size} />
         ) : (
           <ProviderIcon provider={provider} size={size} type={type} />
         )}

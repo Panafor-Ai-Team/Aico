@@ -1,12 +1,12 @@
 'use client';
 
-import { ProviderIcon } from '@lobehub/icons';
 import { Button } from '@lobehub/ui/base-ui';
 import { ModelProvider } from 'model-bank';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import urlJoin from 'url-join';
 
+import { BrandedProviderIcon } from '@/components/Branding/BrandedProviderIcon';
 import { isAicoManagedRuntimeProvider } from '@/features/AicoBilling/isManagedRuntimeProvider';
 import BaseErrorForm from '@/features/Conversation/Error/BaseErrorForm';
 import { isAicoManagedProviderMode } from '@/features/Conversation/Error/isAicoManagedProviderMode';
@@ -37,7 +37,7 @@ const GenerationInvalidAPIKey = memo<GenerationInvalidAPIKeyProps>(({ provider, 
 
   return (
     <BaseErrorForm
-      avatar={<ProviderIcon provider={provider} shape={'square'} size={40} />}
+      avatar={<BrandedProviderIcon provider={provider} shape={'square'} size={40} />}
       title={t(`unlock.apiKey.title`, { name: providerName, ns: 'error' })}
       action={
         <Button

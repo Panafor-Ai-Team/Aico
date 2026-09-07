@@ -68,6 +68,32 @@ describe('computeDefaultEnabledOpenRouterModelIds', () => {
     expect(enabled.has('google/veo-3')).toBe(true);
     expect(enabled.has('deepseek/deepseek-chat')).toBe(false);
   });
+
+  it('pins gpt-4o even when newer generations push it out of the newest 4', () => {
+    const enabled = computeDefaultEnabledOpenRouterModelIds([
+      { id: 'openai/gpt-4o', releasedAt: '2024-05-01', type: 'chat' },
+      { id: 'openai/gpt-5', releasedAt: '2025-08-01', type: 'chat' },
+      { id: 'openai/gpt-5.1', releasedAt: '2025-11-01', type: 'chat' },
+      { id: 'openai/gpt-5.2', releasedAt: '2026-01-01', type: 'chat' },
+      { id: 'openai/gpt-5.3', releasedAt: '2026-03-01', type: 'chat' },
+      { id: 'openai/gpt-5.4', releasedAt: '2026-05-01', type: 'chat' },
+    ]);
+
+    expect(enabled.has('openai/gpt-4o')).toBe(true);
+  });
+
+  it('enables every catalog embedding model', () => {
+    const enabled = computeDefaultEnabledOpenRouterModelIds([
+      { id: 'openai/gpt-4o', releasedAt: '2025-01-01', type: 'chat' },
+      { id: 'openai/text-embedding-3-small', type: 'embedding' },
+      { id: 'openai/text-embedding-3-large', type: 'embedding' },
+      { id: 'google/text-embedding-005', type: 'embedding' },
+    ]);
+
+    expect(enabled.has('openai/text-embedding-3-small')).toBe(true);
+    expect(enabled.has('openai/text-embedding-3-large')).toBe(true);
+    expect(enabled.has('google/text-embedding-005')).toBe(true);
+  });
 });
 
 describe('pickPreferredDefaultOpenRouterModelId', () => {

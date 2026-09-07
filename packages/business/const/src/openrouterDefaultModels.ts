@@ -15,6 +15,13 @@ export type OpenRouterDefaultEnabledFamily = (typeof OPENROUTER_DEFAULT_ENABLED_
 export const DEFAULT_ENABLED_MODELS_PER_FAMILY = 4;
 
 /**
+ * Chat models pinned on top of the newest-per-family curation, so widely used
+ * models stay enabled even after newer generations push them out of the top 4
+ * (e.g. `openai/gpt-4o`).
+ */
+export const DEFAULT_ENABLED_OPENROUTER_PINNED_CHAT_MODEL_IDS = ['openai/gpt-4o'] as const;
+
+/**
  * Image Create defaults (OpenRouter Nano Banana family).
  * Catalog sync stores these as `type: 'image'` with `:image` suffix; chat-only
  * default selection never enables them unless we pin them here.
@@ -72,14 +79,19 @@ const isImageOrVideoType = (type?: string | null): boolean => {
   return normalized === 'image' || normalized === 'video';
 };
 
+const isEmbeddingType = (type?: string | null): boolean =>
+  (type || '').toLowerCase() === 'embedding';
+
 /**
  * Returns the set of OpenRouter model ids that should be enabled by default:
  * always includes {@link OPENROUTER_AUTO_MODEL_ID}, plus the
  * {@link DEFAULT_ENABLED_MODELS_PER_FAMILY} newest chat models from each of
  * openai / anthropic / google (by `releasedAt` desc; missing dates sort last),
+ * pinned chat models ({@link DEFAULT_ENABLED_OPENROUTER_PINNED_CHAT_MODEL_IDS}),
  * every catalog `image` / `video` generator (Create pickers only list enabled
- * models), plus Nano Banana Image-tab pins and `:image` clones of default chat
- * ids when those rows exist.
+ * models) and every catalog `embedding` model (knowledge / memory pickers only
+ * list enabled models), plus Nano Banana Image-tab pins and `:image` clones of
+ * default chat ids when those rows exist.
  */
 export const computeDefaultEnabledOpenRouterModelIds = (
   models: OpenRouterDefaultModelCandidate[],
@@ -117,6 +129,11 @@ export const computeDefaultEnabledOpenRouterModelIds = (
     }
   }
 
+  // Pin widely used chat models that the newest-per-family curation would drop.
+  for (const pinnedId of DEFAULT_ENABLED_OPENROUTER_PINNED_CHAT_MODEL_IDS) {
+    if (catalogIds.has(pinnedId)) enabled.add(pinnedId);
+  }
+
   // Pin Image Create Nano Banana defaults when the catalog has them.
   for (const imageId of DEFAULT_ENABLED_OPENROUTER_IMAGE_MODEL_IDS) {
     if (catalogIds.has(imageId)) enabled.add(imageId);
@@ -131,8 +148,10 @@ export const computeDefaultEnabledOpenRouterModelIds = (
 
   // Image / Video Create list enabled models only. Chat stays curated (hundreds
   // of cards); enable every catalog generator so Flux, Veo, etc. appear.
+  // Same for embeddings: knowledge / memory pickers only list enabled models,
+  // so enable every catalog embedding (e.g. text-embedding-3-small/large).
   for (const model of models) {
-    if (isImageOrVideoType(model.type)) enabled.add(model.id);
+    if (isImageOrVideoType(model.type) || isEmbeddingType(model.type)) enabled.add(model.id);
   }
 
   return enabled;

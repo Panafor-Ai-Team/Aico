@@ -1,12 +1,12 @@
 'use client';
 
-import { ProviderIcon } from '@lobehub/icons';
 import { Flexbox, Input, InputPassword, Text, TextArea } from '@lobehub/ui';
 import { Button, Select, toast, useModalContext } from '@lobehub/ui/base-ui';
 import { Form } from 'antd';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { BrandedProviderIcon } from '@/components/Branding/BrandedProviderIcon';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { useAiInfraStore } from '@/store/aiInfra/store';
 import { type CreateAiProviderParams } from '@/types/aiProvider';
@@ -138,7 +138,7 @@ const CreateNewProviderContent = memo(() => {
               const iconProvider = value === 'router' ? 'newapi' : (value as string);
               return (
                 <Flexbox horizontal align={'center'} gap={8}>
-                  <ProviderIcon provider={iconProvider} size={18} />
+                  <BrandedProviderIcon provider={iconProvider} size={18} />
                   {label}
                 </Flexbox>
               );

@@ -480,7 +480,7 @@ const ProviderConfig = memo<ProviderConfigProps>(
             )}
             {name}
           </Flexbox>
-        ) : isCustomBranding && (id === 'openrouter' || id === 'aico') ? (
+        ) : isCustomBranding && (id === 'openrouter' || id === 'aico' || id === 'lobehub') ? (
           <Flexbox horizontal align={'center'} gap={8}>
             <ProductLogo size={24} type={'flat'} />
             <Text style={{ fontSize: 16, fontWeight: 'bold' }}>{BRANDING_NAME}</Text>

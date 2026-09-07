@@ -16,10 +16,14 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('@lobehub/icons', () => ({
-  ModelIcon: ({ model }: { model: string }) => <span>{model}</span>,
-  ProviderIcon: ({ provider }: { provider: string }) => <span>{provider}</span>,
-}));
+vi.mock('@lobehub/icons', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    ModelIcon: ({ model }: { model: string }) => <span>{model}</span>,
+    ProviderIcon: ({ provider }: { provider: string }) => <span>{provider}</span>,
+  };
+});
 
 vi.mock('@lobehub/ui', () => ({
   ActionIcon: () => <button type="button" />,
