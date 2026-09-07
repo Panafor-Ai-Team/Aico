@@ -306,3 +306,64 @@ export const rebaseCheckpoint = (params: {
     usageBaselineMicroUsd: raw,
   };
 };
+
+/**
+ * AICO-184 wallet capacity. A top-up buys raw upstream spend once, at the
+ * multiplier in force when it was paid, and no later change to the platform
+ * multiplier may revalue it.
+ *
+ * `rawCapacityMicroUsd` accumulates `deposit / M_at_payment` across every
+ * top-up, so it is the raw counterpart of the wallet's cumulative
+ * `balanceMicroUsd` and doubles as the OpenRouter key limit.
+ */
+export const rawCapacityFromDeposit = (
+  depositMicroUsd: number,
+  bp: number | null | undefined,
+): number => removeMultiplierMicroUsd(depositMicroUsd, bp);
+
+/**
+ * The rate a wallet actually bought at, blended across its top-ups:
+ * `balance / rawCapacity`. Falls back to the platform rate for a wallet that
+ * has bought nothing yet (a trial key funds the key without crediting the
+ * wallet), so usage is still billed rather than shown as free.
+ */
+export const blendedMultiplierBp = (params: {
+  balanceMicroUsd: number;
+  fallbackBp: number | null | undefined;
+  rawCapacityMicroUsd: number;
+}): number => {
+  const balance = Math.trunc(Number(params.balanceMicroUsd ?? 0));
+  const capacity = Math.trunc(Number(params.rawCapacityMicroUsd ?? 0));
+  if (!Number.isFinite(balance) || !Number.isFinite(capacity) || balance <= 0 || capacity <= 0) {
+    return safeBp(params.fallbackBp);
+  }
+  return Math.round((balance * MULTIPLIER_BP_SCALE) / capacity);
+};
+
+/**
+ * Billed usage from OpenRouter's raw counter at the wallet's blended rate.
+ * Reaches `balanceMicroUsd` exactly when raw usage reaches capacity, so
+ * remaining still lands on zero when the wallet is spent.
+ */
+export const billedUsageFromCapacity = (params: {
+  balanceMicroUsd: number;
+  fallbackBp: number | null | undefined;
+  rawCapacityMicroUsd: number;
+  rawUsageMicroUsd: number;
+}): number => {
+  const raw = Math.max(0, Math.trunc(Number(params.rawUsageMicroUsd ?? 0)));
+  const capacity = Math.max(0, Math.trunc(Number(params.rawCapacityMicroUsd ?? 0)));
+  const balance = Math.max(0, Math.trunc(Number(params.balanceMicroUsd ?? 0)));
+  if (raw <= 0) return 0;
+  // Spending the whole capacity bills the whole balance — never a rounding
+  // cent more or less, whatever the blend divides to.
+  if (capacity > 0 && balance > 0 && raw >= capacity) return balance;
+  return applyMultiplierMicroUsd(
+    raw,
+    blendedMultiplierBp({
+      balanceMicroUsd: balance,
+      fallbackBp: params.fallbackBp,
+      rawCapacityMicroUsd: capacity,
+    }),
+  );
+};

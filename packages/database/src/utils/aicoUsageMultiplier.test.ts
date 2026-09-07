@@ -3,8 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   applyMultiplierMicroUsd,
   assertValidMultiplierBp,
+  billedUsageFromCapacity,
   billedUsageFromRaw,
+  blendedMultiplierBp,
   keyLimitFromBilled,
+  rawCapacityFromDeposit,
   rebaseCheckpoint,
   removeMultiplierMicroUsd,
   type UsageMultiplierCheckpoint,
@@ -115,5 +118,64 @@ describe('a multiplier change does not reprice past usage (AICO-180 regression)'
         bp: checkpoint.checkpointMultiplierBp,
       }),
     ).toBe(9 * USD);
+  });
+});
+
+describe('a multiplier change does not revalue money already paid (AICO-184 regression)', () => {
+  it('gives each top-up the rate that was in force when it was paid', () => {
+    // $1.20 at 1.2x, then the platform moves to 1.5x, then $1.50 at 1.5x.
+    const capacity =
+      rawCapacityFromDeposit(1_200_000, 12_000) + rawCapacityFromDeposit(1_500_000, 15_000);
+
+    // Each purchase bought a dollar of upstream spend and keeps it.
+    expect(capacity).toBe(2_000_000);
+
+    // What AICO-180 did instead: divide the whole $2.70 by the current rate,
+    // silently revaluing the first top-up down to $0.80.
+    expect(removeMultiplierMicroUsd(2_700_000, 15_000)).toBe(1_800_000);
+  });
+
+  it('bills usage at the blend of the rates actually bought at', () => {
+    const balanceMicroUsd = 2_700_000;
+    const rawCapacityMicroUsd = 2_000_000;
+
+    expect(blendedMultiplierBp({ balanceMicroUsd, fallbackBp: 15_000, rawCapacityMicroUsd })).toBe(
+      13_500,
+    );
+
+    const billed = (rawUsageMicroUsd: number) =>
+      billedUsageFromCapacity({
+        balanceMicroUsd,
+        fallbackBp: 15_000,
+        rawCapacityMicroUsd,
+        rawUsageMicroUsd,
+      });
+
+    expect(billed(0)).toBe(0);
+    expect(billed(1_000_000)).toBe(1_350_000);
+    // Spending the capacity bills the balance exactly — no rounding drift.
+    expect(billed(2_000_000)).toBe(2_700_000);
+    expect(billed(2_500_000)).toBe(2_700_000);
+  });
+
+  it('lowering the multiplier does not inflate capacity either', () => {
+    // Paid $1.50 at 1.5x; the platform then drops to 1.2x.
+    const capacity = rawCapacityFromDeposit(1_500_000, 15_000);
+    expect(capacity).toBe(1_000_000);
+    // AICO-180 would have handed out $1.25 of spend for the same $1.50.
+    expect(removeMultiplierMicroUsd(1_500_000, 12_000)).toBe(1_250_000);
+  });
+
+  it('falls back to the platform rate for a wallet that has bought nothing', () => {
+    // A trial funds the key without crediting the wallet — usage must still be
+    // billed rather than shown as free.
+    expect(
+      billedUsageFromCapacity({
+        balanceMicroUsd: 0,
+        fallbackBp: 12_000,
+        rawCapacityMicroUsd: 0,
+        rawUsageMicroUsd: 1_000_000,
+      }),
+    ).toBe(1_200_000);
   });
 });

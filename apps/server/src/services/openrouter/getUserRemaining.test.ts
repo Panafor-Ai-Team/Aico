@@ -31,6 +31,10 @@ class ControllableOpenRouterClient implements OpenRouterManagementClient {
     return { ...row };
   };
 
+  deleteKey: OpenRouterManagementClient['deleteKey'] = async (hash) => {
+    this.keys.delete(hash);
+  };
+
   getKey: OpenRouterManagementClient['getKey'] = async (hash) => {
     const row = this.keys.get(hash);
     if (!row) throw new Error(`OpenRouter mock key not found: ${hash}`);
@@ -99,49 +103,76 @@ describe('getUserRemaining', () => {
     expect(remaining.usageMicroUsd).toBe(3_000_000);
   });
 
-  it('bills usage from before a multiplier change at the old rate', async () => {
+  it('credits capacity at the multiplier in force when the top-up was paid', async () => {
     const billing = new AicoBillingModel(db);
     const client = new ControllableOpenRouterClient();
     const keys = new AicoOpenRouterKeyService(db, client);
 
-    await billing.manualCreditUser({
+    const { transaction } = await billing.manualCreditUser({
       amountMicroUsd: 12_000_000,
       amountToman: 60_000,
       createdByUserId: userId,
       fxRateTomanPerUsd: 50_000,
       userId,
     });
-    await keys.ensureUserKey(userId);
 
-    // Stand the wallet up as if it had been metered at 1.0x until now: $5 of raw
-    // spend billed as $5. The platform multiplier row itself is global and other
-    // suites read it concurrently, so drive the change from the wallet side.
+    // AICO-184: $12 at 1.2x buys $10 of raw spend, once and for good.
+    const wallet = await billing.getUserWallet(userId);
+    expect(Number(wallet!.rawCapacityMicroUsd)).toBe(10_000_000);
+    // The rate is stamped on the transaction so it can never be re-derived.
+    expect(transaction.metadata).toMatchObject({
+      multiplierBp: 12_000,
+      rawCapacityAddedMicroUsd: 10_000_000,
+    });
+
+    await keys.ensureUserKey(userId);
+    const keyed = await billing.getUserWallet(userId);
+    expect(client.keys.get(keyed!.openrouterKeyId!).limit).toBeCloseTo(10, 6);
+  });
+
+  it('does not revalue a paid-for balance when the multiplier changes (AICO-184)', async () => {
+    const billing = new AicoBillingModel(db);
+    const client = new ControllableOpenRouterClient();
+    const keys = new AicoOpenRouterKeyService(db, client);
+
+    await billing.manualCreditUser({
+      amountMicroUsd: 1_200_000,
+      amountToman: 6000,
+      createdByUserId: userId,
+      fxRateTomanPerUsd: 50_000,
+      userId,
+    });
+
+    // Stand in for a second top-up of $1.50 made after the platform rate moved
+    // to 1.5x: $1.50 / 1.5 = $1.00 more of raw spend. Written directly because
+    // the multiplier config row is global and other suites read it concurrently.
     await db
       .update(userWallets)
-      .set({ billedUsageBeforeBaselineMicroUsd: 0, checkpointMultiplierBp: 10_000 })
+      .set({ balanceMicroUsd: 2_700_000, rawCapacityMicroUsd: 2_000_000 })
       .where(eq(userWallets.userId, userId));
 
-    const keyHash = (await billing.getUserWallet(userId))!.openrouterKeyId!;
-    const key = client.keys.get(keyHash);
-    key.usage = 5;
-    key.limitRemaining = key.limit - key.usage;
-
-    // Reading rebases the checkpoint to the platform's 1.2x: the first $5 keeps
-    // its $5, and the meter restarts from there.
-    await expect(keys.getUserRemaining(userId)).resolves.toMatchObject({
-      usageMicroUsd: 5_000_000,
-    });
-    const rebased = await billing.getUserWallet(userId);
-    expect(Number(rebased!.usageBaselineMicroUsd)).toBe(5_000_000);
-    expect(Number(rebased!.billedUsageBeforeBaselineMicroUsd)).toBe(5_000_000);
-    expect(Number(rebased!.checkpointMultiplierBp)).toBe(12_000);
-
-    // $2 more of raw spend now bills at 1.2x -> $2.40, for $7.40 in total.
     await keys.ensureUserKey(userId);
-    key.usage = 7;
+    const wallet = await billing.getUserWallet(userId);
+    const key = client.keys.get(wallet!.openrouterKeyId!);
+
+    // $2.00 of capacity — what the two purchases were worth at their own rates.
+    // Dividing the $2.70 balance by the current 1.5x would have given $1.80.
+    expect(key.limit).toBeCloseTo(2, 6);
+
+    // $1 of raw spend bills at the 1.35 blend the wallet actually bought at.
+    key.usage = 1;
     key.limitRemaining = key.limit - key.usage;
-    await expect(keys.getUserRemaining(userId)).resolves.toMatchObject({
-      usageMicroUsd: 7_400_000,
+    await expect(keys.getUserRemaining(userId)).resolves.toEqual({
+      remainingMicroUsd: 1_350_000,
+      usageMicroUsd: 1_350_000,
+    });
+
+    // Spending the whole capacity bills the whole balance, to the micro-USD.
+    key.usage = 2;
+    key.limitRemaining = 0;
+    await expect(keys.getUserRemaining(userId)).resolves.toEqual({
+      remainingMicroUsd: 0,
+      usageMicroUsd: 2_700_000,
     });
   });
 

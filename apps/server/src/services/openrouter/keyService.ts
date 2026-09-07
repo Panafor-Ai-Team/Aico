@@ -3,6 +3,7 @@ import { OrganizationModel } from '@/database/models/organization';
 import type { LobeChatDatabase } from '@/database/type';
 import {
   applyMultiplierMicroUsd,
+  billedUsageFromCapacity,
   billedUsageFromRaw,
   type BudgetPeriod,
   currentCycleLimitMicroUsd,
@@ -96,56 +97,6 @@ export class AicoOpenRouterKeyService {
   }
 
   /**
-   * Raw (unmultiplied) lifetime usage OpenRouter has recorded for a key.
-   * Returns null when the key is unusable or OpenRouter is unreachable — callers
-   * must treat null as "cannot rebase now" and leave the checkpoint alone.
-   */
-  private readRawKeyUsageMicro = async (keyId: string | null | undefined) => {
-    if (!keyId || isStaleManagedKeyId(keyId)) return null;
-    try {
-      const info = await this.client.getKey(keyId);
-      return Number(openRouterUsdToMicroFloor(info.usage));
-    } catch {
-      return null;
-    }
-  };
-
-  /**
-   * AICO-180 lazy rebase. The platform multiplier is global, but each wallet
-   * carries the multiplier its checkpoint was taken under. When they differ,
-   * freeze usage-to-date at the old rate and restart the meter at the new one,
-   * so a multiplier change only ever affects subsequent requests.
-   *
-   * `rawUsage` may be supplied by a caller that already fetched the key.
-   */
-  private syncUserCheckpoint = async (params: {
-    checkpoint: UsageMultiplierCheckpoint;
-    keyId: string | null | undefined;
-    rawUsage?: number | null;
-    userId: string;
-  }): Promise<{ bp: number; checkpoint: UsageMultiplierCheckpoint }> => {
-    const bp = await this.billingModel.getUsageMultiplierBp();
-    const currentBp = Number(params.checkpoint.checkpointMultiplierBp ?? bp);
-    if (currentBp === bp) return { bp, checkpoint: params.checkpoint };
-
-    const rawUsage = params.rawUsage ?? (await this.readRawKeyUsageMicro(params.keyId));
-
-    // Never rebase blind: without a usage reading we would zero the baseline and
-    // silently reprice everything spent so far.
-    if (rawUsage == null) return { bp: currentBp, checkpoint: params.checkpoint };
-
-    const rebased = rebaseCheckpoint({ checkpoint: params.checkpoint, nextBp: bp, rawUsage });
-    await this.billingModel.updateUserWalletCheckpoint({
-      billedUsageBeforeBaselineMicroUsd: rebased.billedUsageBeforeBaselineMicroUsd,
-      checkpointMultiplierBp: bp,
-      usageBaselineMicroUsd: rebased.usageBaselineMicroUsd,
-      userId: params.userId,
-    });
-
-    return { bp, checkpoint: { ...rebased, checkpointMultiplierBp: bp } };
-  };
-
-  /**
    * The raw OpenRouter counter that the member key's limit is enforced against.
    * Keys with a `limit_reset` are metered on the period counter, so the
    * multiplier checkpoint baseline must be period-scoped too — using lifetime
@@ -173,7 +124,11 @@ export class AicoOpenRouterKeyService {
     return Number(openRouterUsdToMicroFloor(source));
   };
 
-  /** Member-budget counterpart of `syncUserCheckpoint`. Cycle-scoped. */
+  /**
+   * AICO-180 lazy rebase for member budgets. A budget is an allowance rather
+   * than a payment, so it has no purchased capacity to fall back on: freeze
+   * usage-to-date at the old rate and restart the meter at the new one.
+   */
   private syncMemberCheckpoint = async (params: {
     checkpoint: UsageMultiplierCheckpoint;
     orgMemberId: string;
@@ -203,19 +158,11 @@ export class AicoOpenRouterKeyService {
       const wallet = await this.billingModel.getOrCreateUserWallet(userId);
       const balanceMicro = Number(wallet.balanceMicroUsd ?? 0);
 
-      // AICO-180: the wallet balance is what the user paid for (billed); the
-      // OpenRouter key limit is the raw spend that buys.
-      const { bp, checkpoint } = await this.syncUserCheckpoint({
-        checkpoint: wallet,
-        keyId: wallet.openrouterKeyId,
-        userId,
-      });
-      const limitMicro = keyLimitFromBilled({
-        balance: balanceMicro,
-        baselineRaw: Number(checkpoint.usageBaselineMicroUsd ?? 0),
-        billedBefore: Number(checkpoint.billedUsageBeforeBaselineMicroUsd ?? 0),
-        bp,
-      });
+      // AICO-184: every top-up already converted itself to raw spend at the
+      // rate in force when it was paid, so the key limit is simply the
+      // capacity bought. The current multiplier does not enter here — that is
+      // what stops a rate change from revaluing money already paid.
+      const limitMicro = Number(wallet.rawCapacityMicroUsd ?? 0);
       const limitUsd = microToOpenRouterLimitUsd(limitMicro);
 
       if (
@@ -602,29 +549,21 @@ export class AicoOpenRouterKeyService {
       const info = await this.client.getKey(wallet.openrouterKeyId);
       const rawUsageMicro = Number(openRouterUsdToMicroFloor(info.usage));
 
-      // AICO-180: this is the hot path after every chat, so it doubles as the
-      // lazy rebase point — the raw reading needed to roll the checkpoint
-      // forward is already in hand.
-      const { bp, checkpoint } = await this.syncUserCheckpoint({
-        checkpoint: wallet,
-        keyId: wallet.openrouterKeyId,
-        rawUsage: rawUsageMicro,
-        userId,
+      // AICO-184: bill raw usage at the blend of the rates this wallet's
+      // top-ups actually bought at, not at whatever the platform rate is now.
+      const rawCapacityMicro = Number(wallet.rawCapacityMicroUsd ?? 0);
+      const usageMicro = billedUsageFromCapacity({
+        balanceMicroUsd,
+        fallbackBp: await this.billingModel.getUsageMultiplierBp(),
+        rawCapacityMicroUsd: rawCapacityMicro,
+        rawUsageMicroUsd: rawUsageMicro,
       });
-
-      const usageMicro = billedUsageFromRaw({
-        baselineRaw: Number(checkpoint.usageBaselineMicroUsd ?? 0),
-        billedBefore: Number(checkpoint.billedUsageBeforeBaselineMicroUsd ?? 0),
-        bp,
-        rawUsage: rawUsageMicro,
-      });
-      // Prefer OpenRouter's enforced remaining (a pure delta, so it scales by M)
-      // over balance − usage, which drifts if the key limit is out of date.
-      const remaining =
-        info.limitRemaining == null
-          ? Math.max(0, balanceMicroUsd - usageMicro)
-          : applyMultiplierMicroUsd(Number(openRouterUsdToMicroFloor(info.limitRemaining)), bp);
-      return { remainingMicroUsd: Math.max(0, remaining), usageMicroUsd: usageMicro };
+      // `balance − usage` is exact here: both sides are cumulative and usage
+      // reaches the balance precisely when raw usage reaches capacity.
+      return {
+        remainingMicroUsd: Math.max(0, balanceMicroUsd - usageMicro),
+        usageMicroUsd: usageMicro,
+      };
     } catch {
       return { remainingMicroUsd: Math.max(0, balanceMicroUsd), usageMicroUsd: null };
     }

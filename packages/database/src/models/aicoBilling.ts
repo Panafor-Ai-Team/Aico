@@ -17,7 +17,11 @@ import {
 } from '../schemas/aicoOrganization';
 import { users } from '../schemas/user';
 import type { LobeChatDatabase } from '../type';
-import { assertValidMultiplierBp, DEFAULT_USAGE_MULTIPLIER_BP } from '../utils/aicoMoney';
+import {
+  assertValidMultiplierBp,
+  DEFAULT_USAGE_MULTIPLIER_BP,
+  rawCapacityFromDeposit,
+} from '../utils/aicoMoney';
 
 /**
  * Iranian mobile → E.164 normalization, duplicated (not imported) from
@@ -167,12 +171,19 @@ export class AicoBillingModel {
         const balanceBeforeMicroUsd = Number(before?.balanceMicroUsd ?? 0);
         const balanceBeforeToman = Number(before?.balanceToman ?? 0);
 
+        // AICO-184: the deposit buys raw upstream spend once, at the rate in
+        // force right now. Read inside the transaction so a concurrent
+        // multiplier change either applies to this top-up or does not.
+        const multiplierBp = await this.getUsageMultiplierBp(tx);
+        const rawCapacityAdded = rawCapacityFromDeposit(params.amountMicroUsd, multiplierBp);
+
         const [wallet] = await tx
           .update(userWallets)
           .set({
             balanceMicroUsd: sql`${userWallets.balanceMicroUsd} + ${params.amountMicroUsd}`,
             balanceToman: sql`${userWallets.balanceToman} + ${params.amountToman}`,
             isActive: true,
+            rawCapacityMicroUsd: sql`${userWallets.rawCapacityMicroUsd} + ${rawCapacityAdded}`,
           })
           .where(eq(userWallets.userId, params.userId))
           .returning();
@@ -191,6 +202,9 @@ export class AicoBillingModel {
             description: params.description ?? 'Manual credit',
             fxRateTomanPerUsd: params.fxRateTomanPerUsd,
             gatewayRefId: params.idempotencyKey ?? null,
+            // The rate this money was bought at — a later multiplier change
+            // must never be able to re-derive it.
+            metadata: { multiplierBp, rawCapacityAddedMicroUsd: rawCapacityAdded },
             type: 'manual_credit',
             userId: params.userId,
           })
@@ -251,24 +265,6 @@ export class AicoBillingModel {
    * platform multiplier changed since this wallet was last synced, so usage up
    * to `usageBaselineMicroUsd` keeps the rate it was billed at.
    */
-  updateUserWalletCheckpoint = async (params: {
-    billedUsageBeforeBaselineMicroUsd: number;
-    checkpointMultiplierBp: number;
-    usageBaselineMicroUsd: number;
-    userId: string;
-  }) => {
-    const [row] = await this.db
-      .update(userWallets)
-      .set({
-        billedUsageBeforeBaselineMicroUsd: params.billedUsageBeforeBaselineMicroUsd,
-        checkpointMultiplierBp: params.checkpointMultiplierBp,
-        usageBaselineMicroUsd: params.usageBaselineMicroUsd,
-      })
-      .where(eq(userWallets.userId, params.userId))
-      .returning();
-    return row;
-  };
-
   listUserTransactions = async (userId: string, limit = 50) => {
     return this.db.query.walletTransactions.findMany({
       where: eq(walletTransactions.userId, userId),
@@ -357,29 +353,29 @@ export class AicoBillingModel {
 
   // ─── Usage multiplier config (AICO-180) ────────────────────────────
 
-  getUsageMultiplierConfig = async () => {
-    const existing = await this.db.query.platformUsageMultiplierConfig.findFirst({
+  getUsageMultiplierConfig = async (db: LobeChatDatabase = this.db) => {
+    const existing = await db.query.platformUsageMultiplierConfig.findFirst({
       where: eq(platformUsageMultiplierConfig.id, 'default'),
     });
     if (existing) return existing;
 
-    const [created] = await this.db
+    const [created] = await db
       .insert(platformUsageMultiplierConfig)
       .values({ id: 'default', multiplierBp: DEFAULT_USAGE_MULTIPLIER_BP })
       .onConflictDoNothing()
       .returning();
     return (
       created ??
-      (await this.db.query.platformUsageMultiplierConfig.findFirst({
+      (await db.query.platformUsageMultiplierConfig.findFirst({
         where: eq(platformUsageMultiplierConfig.id, 'default'),
       }))!
     );
   };
 
   /** Basis-point multiplier in force right now. Never throws — billing must not wedge. */
-  getUsageMultiplierBp = async (): Promise<number> => {
+  getUsageMultiplierBp = async (db: LobeChatDatabase = this.db): Promise<number> => {
     try {
-      const config = await this.getUsageMultiplierConfig();
+      const config = await this.getUsageMultiplierConfig(db);
       const bp = Number(config?.multiplierBp ?? DEFAULT_USAGE_MULTIPLIER_BP);
       return Number.isFinite(bp) && bp > 0 ? bp : DEFAULT_USAGE_MULTIPLIER_BP;
     } catch {
