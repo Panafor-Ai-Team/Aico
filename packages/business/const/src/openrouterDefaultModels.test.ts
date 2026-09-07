@@ -82,6 +82,19 @@ describe('computeDefaultEnabledOpenRouterModelIds', () => {
     expect(enabled.has('openai/gpt-4o')).toBe(true);
   });
 
+  it('pins DEFAULT_MINI_MODEL (gpt-4o-mini) even when newer generations push it out of the newest 4', () => {
+    const enabled = computeDefaultEnabledOpenRouterModelIds([
+      { id: 'openai/gpt-4o-mini', releasedAt: '2024-07-18', type: 'chat' },
+      { id: 'openai/gpt-5', releasedAt: '2025-08-01', type: 'chat' },
+      { id: 'openai/gpt-5.1', releasedAt: '2025-11-01', type: 'chat' },
+      { id: 'openai/gpt-5.2', releasedAt: '2026-01-01', type: 'chat' },
+      { id: 'openai/gpt-5.3', releasedAt: '2026-03-01', type: 'chat' },
+      { id: 'openai/gpt-5.4', releasedAt: '2026-05-01', type: 'chat' },
+    ]);
+
+    expect(enabled.has('openai/gpt-4o-mini')).toBe(true);
+  });
+
   it('enables every catalog embedding model', () => {
     const enabled = computeDefaultEnabledOpenRouterModelIds([
       { id: 'openai/gpt-4o', releasedAt: '2025-01-01', type: 'chat' },
