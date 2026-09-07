@@ -16,6 +16,7 @@ import { formatPrice } from '@/utils/format';
 
 import { type UsageChartProps } from '../../../../types';
 import { GroupBy } from '../../../../types';
+import { isInnerRowProvider } from './innerRowDimension';
 
 interface WeightGroup {
   id: string;
@@ -98,17 +99,19 @@ const ModelTable = memo<UsageChartProps>(({ data, isLoading, groupBy, resolveUse
 
   // Sub-row column shows the "other" dimension. For Model→Provider,
   // Provider→Model, and User→Model.
-  const innerColumnKey =
-    (groupBy ?? GroupBy.Model) === GroupBy.Model
-      ? 'usage.activeModels.table.provider'
-      : 'usage.activeModels.table.model';
+  const innerColumnKey = isInnerRowProvider(groupBy ?? GroupBy.Model)
+    ? 'usage.activeModels.table.provider'
+    : 'usage.activeModels.table.model';
 
-  const renderInnerIcon = (id: string, color: string) => {
+  // Sub-rows carry whatever `innerKey` grouped them by: providers when the
+  // table is grouped by Model, models otherwise (Provider/User) — must match
+  // `innerIsProvider` below, since both describe the same inner-row dimension.
+  const renderInnerIcon = (id: string, color: string, isProvider: boolean) => {
     const baseStyle = {
       boxShadow: `0 0 0 2px ${cssVar.colorBgContainer}, 0 0 0 4px ${color}`,
       boxSizing: 'content-box' as const,
     };
-    return (groupBy ?? GroupBy.Model) === GroupBy.Provider ? (
+    return isProvider ? (
       <BrandedProviderIcon provider={id} style={baseStyle} />
     ) : (
       <BrandedModelIcon model={id} style={baseStyle} />
@@ -175,10 +178,10 @@ const ModelTable = memo<UsageChartProps>(({ data, isLoading, groupBy, resolveUse
                     dataIndex: 'id',
                     key: 'id',
                     render: (value, record, index) => {
-                      const innerIsProvider = (groupBy ?? GroupBy.Model) === GroupBy.Model;
+                      const innerIsProvider = isInnerRowProvider(groupBy ?? GroupBy.Model);
                       return (
                         <Flexbox horizontal align={'center'} gap={12} key={value}>
-                          {renderInnerIcon(record.id, themeColorRange[index])}
+                          {renderInnerIcon(record.id, themeColorRange[index], innerIsProvider)}
                           {innerIsProvider
                             ? formatBrandedProviderId(value)
                             : formatBrandedModelId(value)}

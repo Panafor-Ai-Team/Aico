@@ -4,6 +4,7 @@ import { Tabs } from '@lobehub/ui/base-ui';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { formatBrandedModelId, formatBrandedProviderId } from '@/components/Branding';
 import { type UsageLog, type UsageRecordItem } from '@/types/usage/usageRecord';
 import { formatNumber } from '@/utils/format';
 
@@ -18,12 +19,14 @@ const recordKey = (item: UsageRecordItem, groupBy: GroupBy): string => {
   return item.userId;
 };
 
-const categoryLabel = (
+export const categoryLabel = (
   key: string,
   groupBy: GroupBy,
   resolveUser?: UserDisplayResolver,
 ): string => {
   if (groupBy === GroupBy.User && resolveUser) return resolveUser(key).name;
+  if (groupBy === GroupBy.Model) return formatBrandedModelId(key);
+  if (groupBy === GroupBy.Provider) return formatBrandedProviderId(key);
   return key;
 };
 
