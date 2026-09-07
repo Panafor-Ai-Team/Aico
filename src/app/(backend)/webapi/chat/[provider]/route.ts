@@ -14,6 +14,7 @@ import {
   parseAicoBillingContext,
 } from '@/server/services/aico/billingContext';
 import { AicoManagedPolicy, AicoManagedPolicyError } from '@/server/services/aico/managedPolicy';
+import { resolveManagedPricingContext } from '@/server/services/aico/usageMultiplier';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 import { type ChatStreamPayload } from '@/types/openai/chat';
 import { createErrorResponse } from '@/utils/errorResponse';
@@ -124,6 +125,9 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
     const response = await modelRuntime.chat(data, {
       user: userId,
       ...traceOptions,
+      // Managed traffic is resold capacity: the cost reported alongside the
+      // stream must already carry the platform multiplier.
+      pricingContext: await resolveManagedPricingContext(serverDB),
       signal: req.signal,
     });
 

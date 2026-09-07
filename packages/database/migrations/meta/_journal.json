@@ -1029,6 +1029,13 @@
       "when": 1787028494381,
       "tag": "0146_aico_platform_admin_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1787900000000,
+      "tag": "0147_aico_usage_multiplier",
+      "breakpoints": true
     }
   ],
   "version": "6"

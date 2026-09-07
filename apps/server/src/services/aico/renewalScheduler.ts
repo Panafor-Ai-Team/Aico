@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, isNotNull, lte, ne, or, sql } from 'drizzle-orm';
 
+import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { OrganizationModel } from '@/database/models/organization';
 import {
   aicoKeyOutbox,
@@ -189,6 +190,9 @@ const renewOrg = async (params: {
     );
   }
   const grossRequiredMicroUsd = [...walletDebitByMember.values()].reduce((sum, v) => sum + v, 0);
+  // AICO-180: a fresh cycle meters from zero at whatever multiplier is in force
+  // now, so stamp it here rather than leaving a stale rate to trigger a rebase.
+  const currentMultiplierBp = await new AicoBillingModel(db).getUsageMultiplierBp();
 
   const budgetIds = budgets.map((b) => b.budgetId);
   const batch = await claimRenewalBatch({
@@ -362,6 +366,11 @@ const renewOrg = async (params: {
             renewalStatus: 'active',
             reservedMicroUsd: b.nextPeriodAmountMicroUsd,
             settledUsageMicroUsd: 0,
+            // AICO-180: the multiplier checkpoint is cycle-scoped — reset it with
+            // settled usage so the new cycle meters from zero at the current rate.
+            billedUsageBeforeBaselineMicroUsd: 0,
+            checkpointMultiplierBp: currentMultiplierBp,
+            usageBaselineMicroUsd: 0,
           })
           .where(eq(memberBudgets.id, b.budgetId));
 

@@ -4,6 +4,7 @@
 // @vitest-environment node
 import type { LobeChatDatabase } from '@lobechat/database';
 import { getTestDB } from '@lobechat/database/test-utils';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
@@ -85,12 +86,63 @@ describe('getUserRemaining', () => {
     const wallet = await billing.getUserWallet(userId);
     const keyHash = wallet!.openrouterKeyId!;
     const key = client.keys.get(keyHash);
+
+    // AICO-180: a $10 wallet buys $10 / 1.2 = $8.333333 of raw upstream spend.
+    expect(key.limit).toBeCloseTo(8.333_333, 6);
+
+    // $2.50 of raw usage bills as $3.00, leaving $7.00 of the $10 wallet.
     key.usage = 2.5;
-    key.limitRemaining = 7.5;
+    key.limitRemaining = key.limit - key.usage;
 
     const remaining = await keys.getUserRemaining(userId);
-    expect(remaining.remainingMicroUsd).toBe(7_500_000);
-    expect(remaining.usageMicroUsd).toBe(2_500_000);
+    expect(remaining.remainingMicroUsd).toBe(7_000_000);
+    expect(remaining.usageMicroUsd).toBe(3_000_000);
+  });
+
+  it('bills usage from before a multiplier change at the old rate', async () => {
+    const billing = new AicoBillingModel(db);
+    const client = new ControllableOpenRouterClient();
+    const keys = new AicoOpenRouterKeyService(db, client);
+
+    await billing.manualCreditUser({
+      amountMicroUsd: 12_000_000,
+      amountToman: 60_000,
+      createdByUserId: userId,
+      fxRateTomanPerUsd: 50_000,
+      userId,
+    });
+    await keys.ensureUserKey(userId);
+
+    // Stand the wallet up as if it had been metered at 1.0x until now: $5 of raw
+    // spend billed as $5. The platform multiplier row itself is global and other
+    // suites read it concurrently, so drive the change from the wallet side.
+    await db
+      .update(userWallets)
+      .set({ billedUsageBeforeBaselineMicroUsd: 0, checkpointMultiplierBp: 10_000 })
+      .where(eq(userWallets.userId, userId));
+
+    const keyHash = (await billing.getUserWallet(userId))!.openrouterKeyId!;
+    const key = client.keys.get(keyHash);
+    key.usage = 5;
+    key.limitRemaining = key.limit - key.usage;
+
+    // Reading rebases the checkpoint to the platform's 1.2x: the first $5 keeps
+    // its $5, and the meter restarts from there.
+    await expect(keys.getUserRemaining(userId)).resolves.toMatchObject({
+      usageMicroUsd: 5_000_000,
+    });
+    const rebased = await billing.getUserWallet(userId);
+    expect(Number(rebased!.usageBaselineMicroUsd)).toBe(5_000_000);
+    expect(Number(rebased!.billedUsageBeforeBaselineMicroUsd)).toBe(5_000_000);
+    expect(Number(rebased!.checkpointMultiplierBp)).toBe(12_000);
+
+    // $2 more of raw spend now bills at 1.2x -> $2.40, for $7.40 in total.
+    await keys.ensureUserKey(userId);
+    key.usage = 7;
+    key.limitRemaining = key.limit - key.usage;
+    await expect(keys.getUserRemaining(userId)).resolves.toMatchObject({
+      usageMicroUsd: 7_400_000,
+    });
   });
 
   it('falls back to deposit when OpenRouter key is missing', async () => {

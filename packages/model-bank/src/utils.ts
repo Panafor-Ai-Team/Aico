@@ -3,6 +3,8 @@ import type {
   AiModelType,
   LobeDefaultAiModelListItem,
   ModelSearchImplementType,
+  Pricing,
+  PricingUnit,
 } from './types';
 
 export interface ResolveSearchDecisionInput {
@@ -114,3 +116,89 @@ export const isProviderModelAvailable = (
       model.enabled !== false &&
       model.type === expectedType,
   );
+
+// ─── Usage multiplier (AICO-180) ───────────────────────────────────────
+
+const MULTIPLIER_BP_SCALE = 10_000;
+
+const scaleRate = (rate: number, bp: number): number => (rate * bp) / MULTIPLIER_BP_SCALE;
+
+const scaleOptionalRate = (rate: number | undefined, bp: number): number | undefined =>
+  typeof rate === 'number' ? scaleRate(rate, bp) : undefined;
+
+const scalePriceMap = (
+  prices: Record<string, number> | undefined,
+  bp: number,
+): Record<string, number> | undefined => {
+  if (!prices) return undefined;
+  return Object.fromEntries(
+    Object.entries(prices).map(([key, value]) => [key, scaleRate(value, bp)]),
+  );
+};
+
+const scaleUnit = (unit: PricingUnit, bp: number): PricingUnit => {
+  switch (unit.strategy) {
+    case 'fixed': {
+      return {
+        ...unit,
+        originalRate: scaleOptionalRate(unit.originalRate, bp),
+        rate: scaleRate(unit.rate, bp),
+      };
+    }
+    case 'tiered': {
+      return {
+        ...unit,
+        tiers: unit.tiers.map((tier) => ({
+          ...tier,
+          originalRate: scaleOptionalRate(tier.originalRate, bp),
+          rate: scaleRate(tier.rate, bp),
+        })),
+      };
+    }
+    case 'lookup': {
+      return {
+        ...unit,
+        lookup: {
+          ...unit.lookup,
+          originalPrices: scalePriceMap(unit.lookup.originalPrices, bp),
+          prices: scalePriceMap(unit.lookup.prices, bp) ?? {},
+        },
+      };
+    }
+    default: {
+      return unit;
+    }
+  }
+};
+
+/**
+ * Scale every price-bearing field of a `Pricing` by a basis-point multiplier.
+ *
+ * The unit type (millionTokens / image / video / second / megapixel) is
+ * irrelevant: every unit is `rate x quantity`, so scaling the rate scales the
+ * cost identically for token, per-image and per-second models alike.
+ *
+ * `originalRate` / `originalPrices` are display-only "before discount" mirrors
+ * and are scaled too — leaving them raw would render a struck-through real
+ * price next to a marked-up one and leak the underlying rate.
+ *
+ * Rates stay floating point (prices are small decimals, 0.01 -> 0.012);
+ * rounding happens only when a computed cost is converted to integer micro-USD.
+ */
+export const applyPricingMultiplier = <T extends Pricing | undefined>(
+  pricing: T,
+  bp: number | null | undefined,
+): T => {
+  if (!pricing) return pricing;
+  const multiplier = Math.trunc(Number(bp ?? MULTIPLIER_BP_SCALE));
+  if (!Number.isFinite(multiplier) || multiplier <= 0 || multiplier === MULTIPLIER_BP_SCALE) {
+    return pricing;
+  }
+
+  return {
+    ...pricing,
+    approximatePricePerImage: scaleOptionalRate(pricing.approximatePricePerImage, multiplier),
+    approximatePricePerVideo: scaleOptionalRate(pricing.approximatePricePerVideo, multiplier),
+    units: (pricing.units ?? []).map((unit) => scaleUnit(unit, multiplier)),
+  } as T;
+};

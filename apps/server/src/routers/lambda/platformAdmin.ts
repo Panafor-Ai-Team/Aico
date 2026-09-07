@@ -7,7 +7,10 @@ import { OrganizationModel } from '@/database/models/organization';
 import { PlatformAdminUserModel } from '@/database/models/platformAdminUser';
 import { session, users, userWallets } from '@/database/schemas';
 import {
+  DEFAULT_USAGE_MULTIPLIER_BP,
+  MAX_USAGE_MULTIPLIER_BP,
   microUsdToDecimalString,
+  MIN_USAGE_MULTIPLIER_BP,
   tomanString,
   usdDecimalStringToMicro,
 } from '@/database/utils/aicoMoney';
@@ -99,6 +102,40 @@ export const platformAdminRouter = router({
         source: 'admin' as const,
         tomanPerUsd: Math.round(Number(row.tomanPerUsd)),
       };
+    }),
+
+  /**
+   * Platform usage multiplier (AICO-180). One global value — per-user relief is
+   * expressed as a coupon on top, never as a second multiplier.
+   */
+  getUsageMultiplier: platformProcedure.query(async ({ ctx }) => {
+    const config = await ctx.billingModel.getUsageMultiplierConfig();
+    return {
+      multiplierBp: Number(config.multiplierBp ?? DEFAULT_USAGE_MULTIPLIER_BP),
+      updatedAt: config.updatedAt ?? null,
+    };
+  }),
+
+  updateUsageMultiplier: platformProcedure
+    .input(
+      z.object({
+        multiplierBp: z.number().int().min(MIN_USAGE_MULTIPLIER_BP).max(MAX_USAGE_MULTIPLIER_BP),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const row = await ctx.billingModel.updateUsageMultiplier({
+        multiplierBp: input.multiplierBp,
+      });
+      await recordAicoSecurityEvent(ctx.serverDB, {
+        action: 'platform.usageMultiplier.update',
+        actorAdminId: ctx.adminId,
+        ipAddress: ctx.clientIp,
+        metadata: { multiplierBp: Number(row.multiplierBp) },
+        targetId: 'default',
+        targetType: 'platform_usage_multiplier_config',
+        userAgent: ctx.userAgent,
+      });
+      return { multiplierBp: Number(row.multiplierBp) };
     }),
 
   listOrganizations: platformProcedure

@@ -119,6 +119,9 @@ describe('POST handler', () => {
       expect(mockRuntime.chat).toHaveBeenCalledWith(
         { aicoBilling: billing, ...mockChatPayload },
         {
+          // Managed traffic always carries the platform usage multiplier so the
+          // cost reported with the stream is the billed figure.
+          pricingContext: { costMultiplierBp: 12_000, plan: 'aico', scope: 'personal' },
           user: 'test-user-id',
           signal: expect.anything(),
         },
