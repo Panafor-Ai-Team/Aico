@@ -3,7 +3,8 @@ import type { LobeAgentAgencyConfig } from '@lobechat/types';
 
 export { DEFAULT_MINI_MODEL, DEFAULT_MODEL } from '@lobechat/business-const';
 
-export const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small';
+/** OpenRouter SKU (matches the catalog's `openai/`-namespaced chat model ids). */
+export const DEFAULT_EMBEDDING_MODEL = 'openai/text-embedding-3-small';
 
 /**
  * Default model for sub-agents spawned via `lobe-agent.callSubAgent`.

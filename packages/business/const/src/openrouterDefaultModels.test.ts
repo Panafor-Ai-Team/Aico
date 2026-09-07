@@ -4,6 +4,7 @@ import {
   computeDefaultEnabledOpenRouterModelIds,
   DEFAULT_AUTO_IMAGE_MODEL_ID,
   ensureOpenRouterAutoModel,
+  ensureOpenRouterModels,
   isDefaultAutoImageModelId,
   OPENROUTER_AUTO_MODEL_ID,
   pickPreferredDefaultOpenRouterModelId,
@@ -135,6 +136,22 @@ describe('ensureOpenRouterAutoModel', () => {
       id: OPENROUTER_AUTO_MODEL_ID,
     });
     expect(result).toHaveLength(1);
+  });
+});
+
+describe('ensureOpenRouterModels', () => {
+  it('injects every extra card missing from the snapshot', () => {
+    const result = ensureOpenRouterModels(
+      [{ id: 'openai/gpt-4o' }],
+      [{ id: 'openai/text-embedding-3-small' }, { id: 'openai/gpt-4o' }],
+    );
+    expect(result.map((m) => m.id)).toEqual(['openai/text-embedding-3-small', 'openai/gpt-4o']);
+  });
+
+  it('is a no-op when every extra card already exists', () => {
+    const models = [{ id: 'openai/gpt-4o' }, { id: 'openai/text-embedding-3-small' }];
+    const result = ensureOpenRouterModels(models, [{ id: 'openai/text-embedding-3-small' }]);
+    expect(result).toBe(models);
   });
 });
 

@@ -89,8 +89,8 @@ describe('OpenRouterModelCatalogModel', () => {
     expect(status).toMatchObject({
       lastStatus: 'success',
       lastTriggeredBy: 'manual:admin',
-      // Input models + product Auto
-      modelCount: 11,
+      // Input models + product Auto + injected embedding cards
+      modelCount: 12,
     });
   });
 
@@ -130,8 +130,8 @@ describe('OpenRouterModelCatalogModel', () => {
     expect(status).toMatchObject({
       lastStatus: 'success',
       lastTriggeredBy: 'cron',
-      // Remaining models + product Auto
-      modelCount: 4,
+      // Remaining models + product Auto + injected embedding cards
+      modelCount: 5,
     });
     expect(status.lastSyncedAt).toBeTruthy();
   });
@@ -151,8 +151,8 @@ describe('OpenRouterModelCatalogModel', () => {
       lastError: 'OpenRouter down',
       lastStatus: 'error',
       lastTriggeredBy: 'manual:ops',
-      // openai/x + product Auto
-      modelCount: 2,
+      // openai/x + product Auto + injected embedding cards
+      modelCount: 3,
     });
     expect(afterError.lastSyncedAt).toBeTruthy();
 
@@ -193,6 +193,27 @@ describe('OpenRouterModelCatalogModel', () => {
       removedModelIds: ['openai/a'],
       status: 'success',
       triggeredBy: 'manual:2',
+    });
+  });
+
+  it('injects the default embedding model even when the live sync omits it, and keeps it enabled', async () => {
+    await catalog.replaceCatalog({
+      models: [{ displayName: 'GPT-A', id: 'openai/gpt-a', type: 'chat' }],
+      triggeredBy: 'manual:admin',
+    });
+
+    const rows = await catalog.listAsProviderModels();
+    const embedding = rows.find((r) => r.id === 'openai/text-embedding-3-small');
+    expect(embedding).toMatchObject({ enabled: true, type: 'embedding' });
+
+    // Stays present and enabled across a re-sync too, same as product Auto.
+    await catalog.replaceCatalog({
+      models: [{ displayName: 'GPT-B', id: 'openai/gpt-b', type: 'chat' }],
+      triggeredBy: 'cron',
+    });
+    const rowsAfterResync = await catalog.listAsProviderModels();
+    expect(rowsAfterResync.find((r) => r.id === 'openai/text-embedding-3-small')).toMatchObject({
+      enabled: true,
     });
   });
 

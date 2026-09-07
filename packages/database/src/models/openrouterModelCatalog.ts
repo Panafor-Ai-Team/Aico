@@ -1,6 +1,7 @@
 import {
   computeDefaultEnabledOpenRouterModelIds,
   ensureOpenRouterAutoModel,
+  ensureOpenRouterModels,
   OPENROUTER_AUTO_DISPLAY_NAME,
   OPENROUTER_AUTO_MODEL_ID,
 } from '@lobechat/business-const';
@@ -60,6 +61,29 @@ const AUTO_CATALOG_CARD: OpenRouterCatalogModelInput = {
   id: OPENROUTER_AUTO_MODEL_ID,
   type: 'chat',
 };
+
+/**
+ * OpenRouter serves embeddings through a dedicated `/embeddings` endpoint, not
+ * through the general `/models` chat-completions listing this catalog syncs from
+ * — so embedding models never appear in a live sync snapshot on their own. Inject
+ * the ones the product relies on (system-agent memory embedding default) so they
+ * exist in the catalog and pick up `computeDefaultEnabledOpenRouterModelIds`'s
+ * "every catalog embedding model is enabled" rule instead of showing disabled.
+ */
+const EMBEDDING_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
+  {
+    contextWindowTokens: 8192,
+    description:
+      'An efficient, cost-effective next-generation embedding model for retrieval and RAG scenarios.',
+    displayName: 'Text Embedding 3 Small',
+    id: 'openai/text-embedding-3-small',
+    pricing: {
+      units: [{ name: 'textInput', rate: 0.02, strategy: 'fixed', unit: 'millionTokens' }],
+    },
+    releasedAt: '2024-01-25',
+    type: 'embedding',
+  },
+];
 
 export class OpenRouterModelCatalogModel {
   private db: LobeChatDatabase;
@@ -212,7 +236,10 @@ export class OpenRouterModelCatalogModel {
     triggeredBy: string;
   }): Promise<OpenRouterCatalogSyncStatus> => {
     const now = new Date();
-    const models = ensureOpenRouterAutoModel(params.models, AUTO_CATALOG_CARD);
+    const models = ensureOpenRouterModels(
+      ensureOpenRouterAutoModel(params.models, AUTO_CATALOG_CARD),
+      EMBEDDING_CATALOG_CARDS,
+    );
     const incomingIds = models.map((m) => m.id);
 
     const existing = await this.db

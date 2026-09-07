@@ -179,11 +179,23 @@ export const pickPreferredDefaultOpenRouterModelId = (
   return null;
 };
 
+/**
+ * Ensure specific catalog cards exist by id (inject any card whose id is missing
+ * from the snapshot, preserving the rest). Used for cards the live OpenRouter
+ * `/models` listing omits — the product Auto router, and embedding models (the
+ * OpenRouter embeddings API isn't covered by that listing endpoint).
+ */
+export const ensureOpenRouterModels = <T extends { id: string }>(
+  models: T[],
+  extraCards: T[],
+): T[] => {
+  const existingIds = new Set(models.map((m) => m.id));
+  const missing = extraCards.filter((card) => !existingIds.has(card.id));
+  return missing.length > 0 ? [...missing, ...models] : models;
+};
+
 /** Ensure the Auto router card exists in a catalog snapshot (inject if missing). */
 export const ensureOpenRouterAutoModel = <T extends { id: string }>(
   models: T[],
   autoCard: T,
-): T[] => {
-  if (models.some((m) => m.id === OPENROUTER_AUTO_MODEL_ID)) return models;
-  return [autoCard, ...models];
-};
+): T[] => ensureOpenRouterModels(models, [autoCard]);
