@@ -217,6 +217,37 @@ describe('OpenRouterModelCatalogModel', () => {
     });
   });
 
+  it('backfills the default embedding model on the serve path for catalogs synced before the injection', async () => {
+    const now = new Date();
+    // Simulate a catalog synced before the embedding injection: rows written
+    // directly, bypassing replaceCatalog, so no embedding row exists.
+    await db.insert(openrouterModelCatalog).values([
+      {
+        displayName: 'GPT-A',
+        enabled: true,
+        id: 'openai/gpt-a',
+        payload: {},
+        releasedAt: '2025-01-01',
+        syncedAt: now,
+        type: 'chat',
+      },
+      {
+        displayName: 'Panachat Auto',
+        enabled: true,
+        id: 'openrouter/auto',
+        payload: {},
+        syncedAt: now,
+        type: 'chat',
+      },
+    ]);
+
+    const rows = await catalog.listAsProviderModels();
+    expect(rows.find((r) => r.id === 'openai/text-embedding-3-small')).toMatchObject({
+      enabled: true,
+      type: 'embedding',
+    });
+  });
+
   it('reseeds default enabled flags from existing rows', async () => {
     const now = new Date();
     await db.insert(openrouterModelCatalog).values([

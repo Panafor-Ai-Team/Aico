@@ -53,7 +53,8 @@ describe('OpenRouterModelCatalogSyncService', () => {
     expect(status).toMatchObject({
       lastStatus: 'success',
       lastTriggeredBy: 'manual:admin-1',
-      modelCount: 3,
+      // Fetched models + injected default embedding card
+      modelCount: 4,
     });
 
     const catalog = new OpenRouterModelCatalogModel(db);
@@ -79,6 +80,12 @@ describe('OpenRouterModelCatalogSyncService', () => {
           id: 'google/gemini-3.1-flash-image-preview:image',
           parameters: { prompt: { default: '' } },
           type: 'image',
+        }),
+        expect.objectContaining({
+          displayName: 'Text Embedding 3 Small',
+          enabled: true,
+          id: 'openai/text-embedding-3-small',
+          type: 'embedding',
         }),
       ]),
     );

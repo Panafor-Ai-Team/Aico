@@ -85,6 +85,23 @@ const EMBEDDING_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
   },
 ];
 
+/**
+ * Serve-path twin of {@link EMBEDDING_CATALOG_CARDS}: the exact card
+ * `replaceCatalog` persists, so a stale catalog backfills byte-identical rows.
+ */
+const EMBEDDING_PROVIDER_CARDS: AiProviderModelListItem[] = EMBEDDING_CATALOG_CARDS.map((card) => ({
+  abilities: {},
+  contextWindowTokens: card.contextWindowTokens,
+  description: card.description,
+  displayName: card.displayName,
+  enabled: true,
+  id: card.id,
+  pricing: card.pricing,
+  releasedAt: card.releasedAt,
+  source: AiModelSourceEnum.Remote,
+  type: normalizeAiModelType(card.type),
+}));
+
 export class OpenRouterModelCatalogModel {
   private db: LobeChatDatabase;
 
@@ -166,7 +183,13 @@ export class OpenRouterModelCatalogModel {
       } as AiProviderModelListItem;
     });
 
-    if (mapped.some((m) => m.id === OPENROUTER_AUTO_MODEL_ID)) return mapped;
+    if (mapped.some((m) => m.id === OPENROUTER_AUTO_MODEL_ID)) {
+      // Serve path must be self-healing: a catalog synced before the embedding
+      // injection (or never re-synced) has no embedding rows, which leaves the
+      // memory-embedding default disabled. Backfill the same cards
+      // `replaceCatalog` injects at sync time.
+      return ensureOpenRouterModels(mapped, EMBEDDING_PROVIDER_CARDS);
+    }
 
     return [
       {
@@ -179,7 +202,7 @@ export class OpenRouterModelCatalogModel {
         source: AiModelSourceEnum.Remote,
         type: 'chat',
       } as AiProviderModelListItem,
-      ...mapped,
+      ...ensureOpenRouterModels(mapped, EMBEDDING_PROVIDER_CARDS),
     ];
   };
 
