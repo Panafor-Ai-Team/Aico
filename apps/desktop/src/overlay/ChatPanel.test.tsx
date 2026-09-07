@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { resolveOverlayModelSelectionPayload, shouldShowOverlayModelSelector } from './ChatPanel';
+import {
+  getOverlayModelLabel,
+  isOverlayModelBrandedIcon,
+  resolveOverlayModelSelectionPayload,
+  shouldShowOverlayModelSelector,
+} from './ChatPanel';
 import { resolvePanelPlacement } from './panelPlacement';
 
 vi.mock('./chatPanel.css.ts', () => new Proxy({}, { get: (_, key) => String(key) }));
@@ -83,5 +88,13 @@ describe('ChatPanel', () => {
       modelId: 'gpt-4.1',
       provider: 'openai',
     });
+  });
+
+  it('brands openrouter model ids and icons to the product, leaving other models untouched', () => {
+    expect(getOverlayModelLabel('openrouter/auto')).toBe('panachat/auto');
+    expect(isOverlayModelBrandedIcon('openrouter/auto')).toBe(true);
+
+    expect(getOverlayModelLabel('gpt-4.1')).toBe('gpt-4.1');
+    expect(isOverlayModelBrandedIcon('gpt-4.1')).toBe(false);
   });
 });
