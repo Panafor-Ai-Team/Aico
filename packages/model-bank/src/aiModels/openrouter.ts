@@ -3,7 +3,7 @@ import {
   nanoBananaParameters,
   nanoBananaProParameters,
 } from '../const/imageParameters';
-import type { AIChatModelCard, AIImageModelCard } from '../types/aiModel';
+import type { AIChatModelCard, AIEmbeddingModelCard, AIImageModelCard } from '../types/aiModel';
 
 // https://openrouter.ai/docs/api-reference/list-available-models
 const openrouterChatModels: AIChatModelCard[] = [
@@ -920,6 +920,50 @@ const openrouterImageModels: AIImageModelCard[] = [
   },
 ];
 
-export const allModels = [...openrouterChatModels, ...openrouterImageModels];
+/**
+ * Embedding siblings for the managed OpenRouter surface.
+ *
+ * Service Model memory-embedding (and knowledge base) default to
+ * `openai/text-embedding-3-small` under `provider=openrouter`. Without these
+ * static entries the managed provider has no `type: 'embedding'` cards until a
+ * remote catalog fetch runs, so the default renders as disabled out of the box.
+ */
+const openrouterEmbeddingModels: AIEmbeddingModelCard[] = [
+  {
+    contextWindowTokens: 8192,
+    description:
+      'An efficient, cost-effective next-generation embedding model for retrieval and RAG scenarios.',
+    displayName: 'Text Embedding 3 Small',
+    enabled: true,
+    id: 'openai/text-embedding-3-small',
+    maxDimension: 1536,
+    pricing: {
+      currency: 'USD',
+      units: [{ name: 'textInput', rate: 0.02, strategy: 'fixed', unit: 'millionTokens' }],
+    },
+    releasedAt: '2024-01-25',
+    type: 'embedding',
+  },
+  {
+    contextWindowTokens: 8192,
+    description: 'The most capable embedding model for English and non-English tasks.',
+    displayName: 'Text Embedding 3 Large',
+    enabled: true,
+    id: 'openai/text-embedding-3-large',
+    maxDimension: 3072,
+    pricing: {
+      currency: 'USD',
+      units: [{ name: 'textInput', rate: 0.13, strategy: 'fixed', unit: 'millionTokens' }],
+    },
+    releasedAt: '2024-01-25',
+    type: 'embedding',
+  },
+];
+
+export const allModels = [
+  ...openrouterChatModels,
+  ...openrouterImageModels,
+  ...openrouterEmbeddingModels,
+];
 
 export default allModels;

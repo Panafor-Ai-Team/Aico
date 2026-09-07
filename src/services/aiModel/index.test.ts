@@ -1,6 +1,6 @@
-import { DEFAULT_PROVIDER } from '@lobechat/business-const';
+import { DEFAULT_EMBEDDING_PROVIDER, DEFAULT_PROVIDER } from '@lobechat/business-const';
 import { DEFAULT_SETTINGS } from '@lobechat/config';
-import { DEFAULT_MINI_MODEL, DEFAULT_MODEL } from '@lobechat/const';
+import { DEFAULT_EMBEDDING_MODEL, DEFAULT_MINI_MODEL, DEFAULT_MODEL } from '@lobechat/const';
 import { LOBE_DEFAULT_MODEL_LIST } from 'model-bank';
 import { DEFAULT_MODEL_PROVIDER_LIST } from 'model-bank/modelProviders';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -131,5 +131,19 @@ describe('Default model configuration', () => {
       `DEFAULT_MINI_MODEL "${DEFAULT_MINI_MODEL}" not found in LOBE_DEFAULT_MODEL_LIST`,
     ).toBeDefined();
     expect(match!.enabled, `DEFAULT_MINI_MODEL "${DEFAULT_MINI_MODEL}" is not enabled`).toBe(true);
+  });
+
+  it('DEFAULT_EMBEDDING_MODEL should be enabled under DEFAULT_EMBEDDING_PROVIDER', () => {
+    const match = LOBE_DEFAULT_MODEL_LIST.find(
+      (m) => m.id === DEFAULT_EMBEDDING_MODEL && m.providerId === DEFAULT_EMBEDDING_PROVIDER,
+    );
+    expect(
+      match,
+      `DEFAULT_EMBEDDING_MODEL "${DEFAULT_EMBEDDING_PROVIDER}/${DEFAULT_EMBEDDING_MODEL}" not found in LOBE_DEFAULT_MODEL_LIST`,
+    ).toBeDefined();
+    expect(
+      match!.enabled,
+      `DEFAULT_EMBEDDING_MODEL "${DEFAULT_EMBEDDING_PROVIDER}/${DEFAULT_EMBEDDING_MODEL}" is not enabled`,
+    ).toBe(true);
   });
 });
