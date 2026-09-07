@@ -1,4 +1,5 @@
 import { BRANDING_NAME } from './branding';
+import { DEFAULT_MINI_MODEL } from './llm';
 
 /** Pinned OpenRouter auto-router id (UI brands as `{BRANDING_NAME}/auto`, e.g. panachat/auto). */
 export const OPENROUTER_AUTO_MODEL_ID = 'openrouter/auto';
@@ -17,9 +18,14 @@ export const DEFAULT_ENABLED_MODELS_PER_FAMILY = 4;
 /**
  * Chat models pinned on top of the newest-per-family curation, so widely used
  * models stay enabled even after newer generations push them out of the top 4
- * (e.g. `openai/gpt-4o`).
+ * (e.g. `openai/gpt-4o`). Includes {@link DEFAULT_MINI_MODEL} — most system-agent
+ * roles (topic naming, translation, prompt rewrite, ...) default to it, so it
+ * must stay enabled or those roles show a disabled model out of the box.
  */
-export const DEFAULT_ENABLED_OPENROUTER_PINNED_CHAT_MODEL_IDS = ['openai/gpt-4o'] as const;
+export const DEFAULT_ENABLED_OPENROUTER_PINNED_CHAT_MODEL_IDS = [
+  'openai/gpt-4o',
+  DEFAULT_MINI_MODEL,
+] as const;
 
 /**
  * Image Create defaults (OpenRouter Nano Banana family).
