@@ -1,10 +1,10 @@
 'use client';
 
-import { ModelIcon } from '@lobehub/icons';
 import { Flexbox } from '@lobehub/ui';
 import { memo } from 'react';
 import urlJoin from 'url-join';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
 import { OFFICIAL_URL } from '@/const/url';
 
 import ShareButton from '../../../../features/ShareButton';
@@ -18,7 +18,7 @@ const ActionButton = memo(() => {
       <ChatWithModel />
       <ShareButton
         meta={{
-          avatar: <ModelIcon model={identifier} size={64} type={'avatar'} />,
+          avatar: <BrandedModelIcon model={identifier} size={64} type={'avatar'} />,
           desc: description,
           hashtags: providers?.map((item) => item.name) || [],
           title: displayName || identifier,

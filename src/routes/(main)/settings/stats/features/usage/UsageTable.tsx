@@ -1,10 +1,11 @@
-import { ProviderIcon } from '@lobehub/icons';
 import { Flexbox, Text, Tooltip } from '@lobehub/ui';
 import { type TableColumnType } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { memo, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
+import { BrandedProviderIcon } from '@/components/Branding/BrandedProviderIcon';
 import InlineTable from '@/components/InlineTable';
 import SpendType, { type SpendTypeValue } from '@/components/SpendType';
 import TablePagination from '@/components/TablePagination';
@@ -110,7 +111,7 @@ const UsageTable = memo<UsageChartProps>(({ dateStrings }) => {
       key: 'model',
       render: (value, record) => (
         <Flexbox horizontal align={'center'} gap={16}>
-          <ProviderIcon
+          <BrandedProviderIcon
             provider={record.provider}
             size={18}
             style={{
@@ -119,8 +120,13 @@ const UsageTable = memo<UsageChartProps>(({ dateStrings }) => {
               marginRight: -8,
             }}
           />
-          <Tooltip title={value}>
-            <Text>{value?.length > 12 ? `${value.slice(0, 12)}...` : value}</Text>
+          <Tooltip title={formatBrandedModelId(value)}>
+            <Text>
+              {(() => {
+                const display = formatBrandedModelId(value);
+                return display?.length > 12 ? `${display.slice(0, 12)}...` : display;
+              })()}
+            </Text>
           </Tooltip>
         </Flexbox>
       ),

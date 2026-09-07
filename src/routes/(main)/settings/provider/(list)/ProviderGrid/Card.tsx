@@ -60,7 +60,7 @@ const ProviderCard = memo<ProviderCardProps>(
           >
             <Flexbox gap={12} width={'100%'}>
               <Flexbox horizontal align={'center'} justify={'space-between'}>
-                {isCustomBranding && (id === 'openrouter' || id === 'aico') ? (
+                {isCustomBranding && (id === 'openrouter' || id === 'aico' || id === 'lobehub') ? (
                   <Flexbox horizontal align={'center'} gap={8}>
                     <ProductLogo size={24} type={'flat'} />
                     <Text style={{ fontSize: 16, fontWeight: 'bold' }}>{BRANDING_NAME}</Text>

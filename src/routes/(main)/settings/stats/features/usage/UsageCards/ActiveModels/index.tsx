@@ -1,10 +1,11 @@
-import { ModelIcon, ProviderIcon } from '@lobehub/icons';
 import { ActionIcon, Avatar, Flexbox } from '@lobehub/ui';
 import { cssVar } from 'antd-style';
 import { MaximizeIcon } from 'lucide-react';
 import { memo, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import { BrandedProviderIcon } from '@/components/Branding/BrandedProviderIcon';
 import ImperativeModal from '@/components/ImperativeModal';
 import StatisticCard from '@/components/StatisticCard';
 import TitleWithPercentage from '@/components/StatisticCard/TitleWithPercentage';
@@ -89,9 +90,9 @@ const ActiveModels = memo<UsageChartProps>(({ data, isLoading, groupBy, resolveU
       );
     }
     return groupBy === GroupBy.Provider ? (
-      <ProviderIcon key={item} provider={item} size={18} style={baseStyle} />
+      <BrandedProviderIcon key={item} provider={item} size={18} style={baseStyle} />
     ) : (
-      <ModelIcon key={item} model={item} size={18} style={baseStyle} />
+      <BrandedModelIcon key={item} model={item} size={18} style={baseStyle} />
     );
   };
 

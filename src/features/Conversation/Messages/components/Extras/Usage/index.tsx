@@ -11,6 +11,7 @@ import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
 import { useAgentStore } from '@/store/agent';
 import { builtinAgentSelectors } from '@/store/agent/selectors';
 import { aiModelSelectors, useAiInfraStore } from '@/store/aiInfra';
@@ -80,7 +81,7 @@ const Usage = memo<UsageProps>(({ model, usage, performance, provider }) => {
           {heteroName || (
             <>
               <BrandedModelIcon model={model as string} type={'mono'} />
-              {modelCard?.displayName || model}
+              {modelCard?.displayName || formatBrandedModelId(model as string)}
             </>
           )}
         </Center>

@@ -1,12 +1,13 @@
 import { type ModelRankItem } from '@lobechat/types';
 import { BarList } from '@lobehub/charts';
-import { ModelIcon } from '@lobehub/icons';
 import { ActionIcon } from '@lobehub/ui';
 import { MaximizeIcon } from 'lucide-react';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import AsyncBoundary from '@/components/AsyncBoundary';
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
 import ImperativeModal from '@/components/ImperativeModal';
 import { useClientDataSWR } from '@/libs/swr';
 import { statsKeys } from '@/libs/swr/keys';
@@ -25,10 +26,10 @@ export const TopicsRank = memo(() => {
 
   const mapData = (item: ModelRankItem) => {
     return {
-      icon: <ModelIcon model={item.id as string} size={20} />,
+      icon: <BrandedModelIcon model={item.id as string} size={20} />,
       id: item.id,
 
-      name: item.id,
+      name: formatBrandedModelId(item.id as string),
       value: item.count,
     };
   };

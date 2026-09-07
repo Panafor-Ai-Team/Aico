@@ -1,12 +1,14 @@
 'use client';
 
-import { Github, ProviderCombine } from '@lobehub/icons';
+import { Github } from '@lobehub/icons';
 import { ActionIcon, Flexbox, stopPropagation } from '@lobehub/ui';
 import { cssVar, useResponsive } from 'antd-style';
 import { GlobeIcon } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import urlJoin from 'url-join';
+
+import { BrandedProviderCombine } from '@/components/Branding/BrandedProviderCombine';
 
 import { useDetailContext } from './DetailProvider';
 
@@ -28,7 +30,7 @@ const Header = memo<{ mobile?: boolean }>(({ mobile: isMobile }) => {
         }}
       >
         <Flexbox align={'flex-start'} width={'100%'}>
-          <ProviderCombine provider={identifier} size={mobile ? 32 : 48} />
+          <BrandedProviderCombine provider={identifier} size={mobile ? 32 : 48} />
           <Flexbox horizontal align={'center'} gap={4}>
             {Boolean(url || modelsUrl) ? (
               <a href={url || (modelsUrl as string)} rel="noreferrer" target="_blank">

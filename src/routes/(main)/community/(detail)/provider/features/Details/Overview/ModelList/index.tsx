@@ -1,6 +1,5 @@
 'use client';
 
-import { ModelIcon } from '@lobehub/icons';
 import { ActionIcon, Block, Flexbox, Tooltip, TooltipGroup } from '@lobehub/ui';
 import { cssVar } from 'antd-style';
 import { ChevronRightIcon } from 'lucide-react';
@@ -8,6 +7,8 @@ import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import urlJoin from 'url-join';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
 import InlineTable from '@/components/InlineTable';
 import { ModelInfoTags } from '@/components/ModelSelect';
 import WorkspaceLink from '@/features/Workspace/WorkspaceLink';
@@ -38,11 +39,11 @@ const ModelList = memo(() => {
                     to={urlJoin('/community/model', record.id)}
                   >
                     <Flexbox horizontal align="center" gap={8}>
-                      <ModelIcon model={record.id} size={24} type={'avatar'} />
+                      <BrandedModelIcon model={record.id} size={24} type={'avatar'} />
                       <Flexbox style={{ overflow: 'hidden' }}>
                         <div style={{ fontWeight: 500 }}>{record.displayName}</div>
                         <div style={{ color: cssVar.colorTextSecondary, fontSize: 12 }}>
-                          {record.id}
+                          {formatBrandedModelId(record.id)}
                         </div>
                       </Flexbox>
                     </Flexbox>

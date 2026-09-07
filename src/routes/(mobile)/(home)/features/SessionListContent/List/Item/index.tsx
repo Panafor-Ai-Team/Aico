@@ -1,8 +1,8 @@
-import { ModelTag } from '@lobehub/icons';
 import { Flexbox } from '@lobehub/ui';
 import React, { memo, useMemo, useState } from 'react';
 import { shallow } from 'zustand/shallow';
 
+import { BrandedModelTag } from '@/components/Branding/BrandedModelTag';
 import { DEFAULT_AVATAR } from '@/const/meta';
 import { INBOX_SESSION_ID } from '@/const/session';
 import { isDesktop } from '@/const/version';
@@ -91,7 +91,7 @@ const SessionItem = memo<SessionItemProps>(({ id }) => {
     () =>
       !showModel ? undefined : (
         <Flexbox horizontal gap={4} style={{ flexWrap: 'wrap' }}>
-          <ModelTag model={model} />
+          <BrandedModelTag model={model} />
         </Flexbox>
       ),
     [showModel, model],

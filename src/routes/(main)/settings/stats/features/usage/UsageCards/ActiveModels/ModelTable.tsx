@@ -1,10 +1,15 @@
 import { CategoryBar, useThemeColorRange } from '@lobehub/charts';
-import { ModelIcon, ProviderIcon } from '@lobehub/icons';
 import { Avatar, Collapse, Flexbox, Skeleton, Tag } from '@lobehub/ui';
 import { cssVar } from 'antd-style';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import {
+  formatBrandedModelId,
+  formatBrandedProviderId,
+} from '@/components/Branding/brandedModelId';
+import { BrandedProviderIcon } from '@/components/Branding/BrandedProviderIcon';
 import InlineTable from '@/components/InlineTable';
 import { type UsageLog, type UsageRecordItem } from '@/types/usage/usageRecord';
 import { formatPrice } from '@/utils/format';
@@ -104,9 +109,9 @@ const ModelTable = memo<UsageChartProps>(({ data, isLoading, groupBy, resolveUse
       boxSizing: 'content-box' as const,
     };
     return (groupBy ?? GroupBy.Model) === GroupBy.Provider ? (
-      <ProviderIcon provider={id} style={baseStyle} />
+      <BrandedProviderIcon provider={id} style={baseStyle} />
     ) : (
-      <ModelIcon model={id} style={baseStyle} />
+      <BrandedModelIcon model={id} style={baseStyle} />
     );
   };
 
@@ -129,11 +134,15 @@ const ModelTable = memo<UsageChartProps>(({ data, isLoading, groupBy, resolveUse
     return (
       <Flexbox horizontal align={'center'} gap={8}>
         {groupBy === GroupBy.Provider ? (
-          <ProviderIcon provider={key} size={24} />
-        ) : (
-          <ModelIcon model={key} size={24} />
-        )}
-        {key}
+          <BrandedProviderIcon provider={key} size={24} />
+        ) : groupBy === GroupBy.Model ? (
+          <BrandedModelIcon model={key} size={24} />
+        ) : null}
+        {groupBy === GroupBy.Provider
+          ? formatBrandedProviderId(key)
+          : groupBy === GroupBy.Model
+            ? formatBrandedModelId(key)
+            : key}
       </Flexbox>
     );
   };
@@ -166,10 +175,13 @@ const ModelTable = memo<UsageChartProps>(({ data, isLoading, groupBy, resolveUse
                     dataIndex: 'id',
                     key: 'id',
                     render: (value, record, index) => {
+                      const innerIsProvider = (groupBy ?? GroupBy.Model) === GroupBy.Model;
                       return (
                         <Flexbox horizontal align={'center'} gap={12} key={value}>
                           {renderInnerIcon(record.id, themeColorRange[index])}
-                          {value}
+                          {innerIsProvider
+                            ? formatBrandedProviderId(value)
+                            : formatBrandedModelId(value)}
                         </Flexbox>
                       );
                     },

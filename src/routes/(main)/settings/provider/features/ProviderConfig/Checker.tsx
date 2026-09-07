@@ -4,7 +4,6 @@ import { CheckCircleFilled } from '@ant-design/icons';
 import { type ChatMessageError } from '@lobechat/types';
 import { TraceNameMap } from '@lobechat/types';
 import { isRecord, pickTrimmedString } from '@lobechat/utils/object';
-import { ModelIcon } from '@lobehub/icons';
 import { Alert, Flexbox, Highlighter, Icon } from '@lobehub/ui';
 import { Button, Select } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
@@ -13,6 +12,8 @@ import { type ReactNode } from 'react';
 import { memo, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
 import { usePermission } from '@/hooks/usePermission';
 import { useProviderName } from '@/hooks/useProviderName';
 import { chatService } from '@/services/chat';
@@ -184,18 +185,21 @@ const Checker = memo<ConnectionCheckerProps>(
             virtual
             disabled={!canManageProvider}
             listItemHeight={36}
-            options={sortedModels.map((id) => ({ label: id, value: id }))}
             popupClassName={cx(styles.popup)}
             suffixIcon={isProviderConfigUpdating && <Icon spin icon={Loader2Icon} />}
             value={checkModel}
             optionRender={({ value }) => {
               return (
                 <Flexbox horizontal align={'center'} gap={6}>
-                  <ModelIcon model={value as string} size={20} />
-                  {value}
+                  <BrandedModelIcon model={value as string} size={20} />
+                  {formatBrandedModelId(value as string)}
                 </Flexbox>
               );
             }}
+            options={sortedModels.map((id) => ({
+              label: formatBrandedModelId(id),
+              value: id,
+            }))}
             style={{
               flex: 1,
               overflow: 'hidden',

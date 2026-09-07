@@ -1,6 +1,5 @@
 'use client';
 
-import { ProviderIcon } from '@lobehub/icons';
 import { DropdownMenu } from '@lobehub/ui';
 import { Button, SplitButton } from '@lobehub/ui/base-ui';
 import { createStaticStyles } from 'antd-style';
@@ -8,6 +7,7 @@ import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import urlJoin from 'url-join';
 
+import { BrandedProviderIcon } from '@/components/Branding/BrandedProviderIcon';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import WorkspaceLink from '@/features/Workspace/WorkspaceLink';
 
@@ -29,7 +29,7 @@ const ChatWithModel = memo(() => {
   const list = providers.filter((provider) => provider.id !== 'lobehub');
 
   const items = list.map((item) => ({
-    icon: <ProviderIcon provider={item.id} size={20} type={'avatar'} />,
+    icon: <BrandedProviderIcon provider={item.id} size={20} type={'avatar'} />,
     key: item.id,
     label: (
       <WorkspaceLink to={urlJoin('/community/provider', item.id)}>
