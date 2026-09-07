@@ -1,4 +1,6 @@
 import { Select } from '@base-ui/react/select';
+import { BRANDING_LOGO_URL, BRANDING_NAME } from '@lobechat/business-const';
+import { isCustomBranding } from '@lobechat/const';
 import type {
   OverlayCaptureUploadStatus,
   ScreenCaptureAgentOption,
@@ -74,6 +76,28 @@ export const resolveOverlayModelSelectionPayload = ({
   }
 
   return { modelId, provider: model?.provider };
+};
+
+// Mirrors `src/components/Branding/brandedModelId.ts` — duplicated here because this
+// overlay renderer resolves `@/*` against its own `apps/desktop` tsconfig, not the
+// main app's `src/`, so the shared helper isn't reachable from this bundle.
+const OPENROUTER_MODEL_ID_PATTERN = /^openrouter\b/i;
+
+/**
+ * Whether a model's icon should be swapped for the product logo instead of
+ * `ModelIcon`'s own OpenRouter fallback (which matches any `openrouter/*` id).
+ */
+export const isOverlayModelBrandedIcon = (modelId?: string | null): boolean =>
+  Boolean(isCustomBranding && modelId && OPENROUTER_MODEL_ID_PATTERN.test(modelId));
+
+/** Display label for a model id, branding OpenRouter-namespace ids to the product name. */
+export const getOverlayModelLabel = (modelId?: string | null): string | undefined => {
+  if (!modelId) return undefined;
+  if (!isOverlayModelBrandedIcon(modelId)) return modelId;
+
+  const slug = BRANDING_NAME.trim().toLowerCase();
+  const rest = modelId.replace(/^openrouter\/?/i, '');
+  return rest ? `${slug}/${rest}` : slug;
 };
 
 const formatBytes = (rect: Rect): string =>
@@ -540,14 +564,18 @@ const ChatPanel = memo<ChatPanelProps>(
                   >
                     {currentModel ? (
                       <span className={styles.modelIconBox}>
-                        <ModelIcon model={currentModel.id} size={16} />
+                        {isOverlayModelBrandedIcon(currentModel.id) ? (
+                          <img alt={BRANDING_NAME} height={16} src={BRANDING_LOGO_URL} width={16} />
+                        ) : (
+                          <ModelIcon model={currentModel.id} size={16} />
+                        )}
                       </span>
                     ) : (
                       <span className={styles.modelIconBoxFallback} />
                     )}
                     <Select.Value className={styles.chipLabel}>
                       {currentModel?.displayName ??
-                        currentModel?.id ??
+                        getOverlayModelLabel(currentModel?.id) ??
                         OVERLAY_COPY.modelSelectPlaceholder}
                     </Select.Value>
                     <ChevronDownIcon className={styles.chevron} size={12} strokeWidth={2} />
@@ -564,7 +592,9 @@ const ChatPanel = memo<ChatPanelProps>(
                             <Select.ItemIndicator className={styles.popupItemIndicator}>
                               <CheckIcon size={12} strokeWidth={2.4} />
                             </Select.ItemIndicator>
-                            <Select.ItemText>{item.displayName ?? item.id}</Select.ItemText>
+                            <Select.ItemText>
+                              {item.displayName ?? getOverlayModelLabel(item.id)}
+                            </Select.ItemText>
                           </Select.Item>
                         ))}
                       </Select.Popup>
