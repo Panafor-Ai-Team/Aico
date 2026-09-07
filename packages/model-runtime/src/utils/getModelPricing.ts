@@ -1,4 +1,5 @@
 import type { LobeDefaultAiModelListItem, Pricing } from 'model-bank';
+import { applyPricingMultiplier } from 'model-bank';
 
 import type { ModelPricingContext } from '../types';
 
@@ -24,12 +25,20 @@ export async function getModelPricing(
     (await import('@lobechat/business-model-bank/model-config')) as BusinessModelConfigModule;
   const models = await loadModels(pricingContext ? { pricingContext } : undefined);
 
+  // Managed Aico traffic resells upstream capacity: the caller passes the
+  // platform multiplier so every cost derived from this pricing is the billed
+  // amount. Raw rates stay server-side.
+  const withMultiplier = (pricing: Pricing): Pricing =>
+    pricingContext?.costMultiplierBp
+      ? applyPricingMultiplier(pricing, pricingContext.costMultiplierBp)
+      : pricing;
+
   // 1. First try to get pricing from the specified provider
   if (provider) {
     const exactMatch = models.find((m) => m.id === model && m.providerId === provider);
 
     if (exactMatch?.pricing) {
-      return exactMatch.pricing;
+      return withMultiplier(exactMatch.pricing);
     }
   }
 
@@ -37,7 +46,7 @@ export async function getModelPricing(
   const fallbackMatch = models.find((m) => m.id === model);
 
   if (fallbackMatch?.pricing) {
-    return fallbackMatch.pricing;
+    return withMultiplier(fallbackMatch.pricing);
   }
 
   // 3. Return undefined if no pricing information is found

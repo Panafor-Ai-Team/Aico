@@ -306,16 +306,20 @@ describe('Aico OpenRouter failure injection (Phase 2)', () => {
     await keys.ensureMemberKey(ownerMember.id);
     const budget = await orgModel.getMemberBudget(ownerMember.id);
     const keyHash = budget!.openrouterKeyId!;
-    // Simulate partial spend as OpenRouter would report it.
+    // Simulate partial spend as OpenRouter would report it. The key limit is
+    // the raw $20 / 1.2 the budget buys, so raw spend and raw remaining both
+    // convert back to billed amounts that add up to the $20 cap.
     const key = client.keys.get(keyHash);
+    // A daily budget is metered on OpenRouter's daily counter, so move both.
     key.usage = 8;
-    key.limitRemaining = 12;
+    key.usageDaily = 8;
+    key.limitRemaining = key.limit - key.usage;
 
     const reclaimed = await keys.reclaimMemberKey({
       orgId: org.id,
       orgMemberId: ownerMember.id,
     });
-    expect(reclaimed).toEqual({ remainingMicroUsd: 12_000_000, usageMicroUsd: 8_000_000 });
+    expect(reclaimed).toEqual({ remainingMicroUsd: 10_400_000, usageMicroUsd: 9_600_000 });
     expect(client.keys.get(keyHash).disabled).toBe(true);
 
     // Reclaiming again after disable must not throw or double-count.
@@ -323,7 +327,7 @@ describe('Aico OpenRouter failure injection (Phase 2)', () => {
       orgId: org.id,
       orgMemberId: ownerMember.id,
     });
-    expect(reclaimedAgain?.remainingMicroUsd).toBe(12_000_000);
+    expect(reclaimedAgain?.remainingMicroUsd).toBe(10_400_000);
   });
 
   it('disableAllOrgMemberKeys disables every member key in the org (suspend safety)', async () => {
@@ -410,8 +414,9 @@ describe('Aico OpenRouter failure injection (Phase 2)', () => {
     await keys.ensureMemberKey(ownerMember.id);
     const budget = await orgModel.getMemberBudget(ownerMember.id);
     const key = client.keys.get(budget!.openrouterKeyId!);
-    // Must be current-cycle $10, not reserved $40.
-    expect(key.limit).toBe(10);
+    // Must be current-cycle $10, not reserved $40 — divided by the 1.2x
+    // platform multiplier, since the cycle cap is a billed amount.
+    expect(key.limit).toBeCloseTo(8.333_333, 6);
   });
 
   it('syncMemberCycleUsage writes period usage, not lifetime OpenRouter usage', async () => {
@@ -454,7 +459,8 @@ describe('Aico OpenRouter failure injection (Phase 2)', () => {
 
     await keys.syncMemberCycleUsage(ownerMember.id);
     const budget = await orgModel.getMemberBudget(ownerMember.id);
-    expect(budget!.settledUsageMicroUsd).toBe(2_000_000);
+    // Daily raw usage of $2 (not the $50 lifetime figure), billed at 1.2x.
+    expect(budget!.settledUsageMicroUsd).toBe(2_400_000);
   });
 
   it('FIN-004: recreate after 404 disables/deletes the stale key hash', async () => {

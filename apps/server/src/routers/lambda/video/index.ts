@@ -39,6 +39,7 @@ import {
   toManagedGenerationModelId,
 } from '@/server/services/aico/generationBilling';
 import { AicoManagedPolicyError } from '@/server/services/aico/managedPolicy';
+import { resolveManagedPricingContext } from '@/server/services/aico/usageMultiplier';
 import { FileService } from '@/server/services/file';
 import { processBackgroundVideoPolling } from '@/server/services/generation/videoBackgroundPolling';
 import { after } from '@/server/utils/scheduleAfterResponse';
@@ -288,7 +289,11 @@ export const videoRouter = router({
             model: resolvedModelId,
             params: generationParams,
           },
-          { metadata: { trigger: RequestTrigger.Video } },
+          {
+            metadata: { trigger: RequestTrigger.Video },
+            // Per-second video rates carry the platform multiplier too.
+            pricingContext: await resolveManagedPricingContext(serverDB),
+          },
         );
 
         log('Video task submitted successfully, inferenceId: %s', response?.inferenceId);

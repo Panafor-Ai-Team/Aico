@@ -289,6 +289,15 @@ export default {
   'platform.fxSaved': 'Exchange rate updated',
   'platform.fxFailed': 'Failed to update exchange rate',
   'platform.fxCard': 'FX (toman/$1)',
+  'platform.multiplierTitle': 'Usage multiplier',
+  'platform.multiplierLabel': 'Multiplier',
+  'platform.multiplierHint':
+    'Applied to every model price and to usage billed against wallets. One shared value for all users — it takes effect for new requests only and never reprices past usage.',
+  'platform.multiplierSave': 'Save multiplier',
+  'platform.multiplierSaved': 'Usage multiplier updated',
+  'platform.multiplierFailed': 'Failed to update usage multiplier',
+  'platform.multiplierCard': 'Usage multiplier',
+  'platform.multiplierPreview': '$1.00 of upstream usage is billed as ${{value}}.',
   'platform.modelsCount': 'Models in catalog',
   'platform.modelsFetchNow': 'Fetch models now',
   'platform.modelsHint':

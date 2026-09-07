@@ -8,6 +8,7 @@ import {
   platformAdminUsers,
   platformFxConfig,
   platformTrialConfig,
+  platformUsageMultiplierConfig,
   trialAbuseBlocklist,
   usageLogs,
   userTrials,
@@ -16,6 +17,7 @@ import {
 } from '../schemas/aicoOrganization';
 import { users } from '../schemas/user';
 import type { LobeChatDatabase } from '../type';
+import { assertValidMultiplierBp, DEFAULT_USAGE_MULTIPLIER_BP } from '../utils/aicoMoney';
 
 /**
  * Iranian mobile → E.164 normalization, duplicated (not imported) from
@@ -244,6 +246,29 @@ export class AicoBillingModel {
     return row;
   };
 
+  /**
+   * Persist a rebased usage-multiplier checkpoint (AICO-180). Called when the
+   * platform multiplier changed since this wallet was last synced, so usage up
+   * to `usageBaselineMicroUsd` keeps the rate it was billed at.
+   */
+  updateUserWalletCheckpoint = async (params: {
+    billedUsageBeforeBaselineMicroUsd: number;
+    checkpointMultiplierBp: number;
+    usageBaselineMicroUsd: number;
+    userId: string;
+  }) => {
+    const [row] = await this.db
+      .update(userWallets)
+      .set({
+        billedUsageBeforeBaselineMicroUsd: params.billedUsageBeforeBaselineMicroUsd,
+        checkpointMultiplierBp: params.checkpointMultiplierBp,
+        usageBaselineMicroUsd: params.usageBaselineMicroUsd,
+      })
+      .where(eq(userWallets.userId, params.userId))
+      .returning();
+    return row;
+  };
+
   listUserTransactions = async (userId: string, limit = 50) => {
     return this.db.query.walletTransactions.findMany({
       where: eq(walletTransactions.userId, userId),
@@ -265,12 +290,15 @@ export class AicoBillingModel {
     completionTokens: number;
     costMicroUsd: number;
     modelId: string;
+    /** Multiplier in force; resolved from platform config when omitted. */
+    multiplierBp?: number;
     orgId?: string | null;
     orgMemberId?: string | null;
     promptTokens: number;
     totalTokens: number;
     userId: string;
   }) => {
+    const multiplierBp = params.multiplierBp ?? (await this.getUsageMultiplierBp());
     const [row] = await this.db
       .insert(usageLogs)
       .values({
@@ -278,6 +306,7 @@ export class AicoBillingModel {
         completionTokens: params.completionTokens,
         costMicroUsd: params.costMicroUsd,
         modelId: params.modelId,
+        multiplierBp,
         orgId: params.orgId ?? null,
         orgMemberId: params.orgMemberId ?? null,
         promptTokens: params.promptTokens,
@@ -322,6 +351,55 @@ export class AicoBillingModel {
         updatedByUserId: params.updatedByUserId,
       })
       .where(eq(platformFxConfig.id, 'default'))
+      .returning();
+    return row;
+  };
+
+  // ─── Usage multiplier config (AICO-180) ────────────────────────────
+
+  getUsageMultiplierConfig = async () => {
+    const existing = await this.db.query.platformUsageMultiplierConfig.findFirst({
+      where: eq(platformUsageMultiplierConfig.id, 'default'),
+    });
+    if (existing) return existing;
+
+    const [created] = await this.db
+      .insert(platformUsageMultiplierConfig)
+      .values({ id: 'default', multiplierBp: DEFAULT_USAGE_MULTIPLIER_BP })
+      .onConflictDoNothing()
+      .returning();
+    return (
+      created ??
+      (await this.db.query.platformUsageMultiplierConfig.findFirst({
+        where: eq(platformUsageMultiplierConfig.id, 'default'),
+      }))!
+    );
+  };
+
+  /** Basis-point multiplier in force right now. Never throws — billing must not wedge. */
+  getUsageMultiplierBp = async (): Promise<number> => {
+    try {
+      const config = await this.getUsageMultiplierConfig();
+      const bp = Number(config?.multiplierBp ?? DEFAULT_USAGE_MULTIPLIER_BP);
+      return Number.isFinite(bp) && bp > 0 ? bp : DEFAULT_USAGE_MULTIPLIER_BP;
+    } catch {
+      return DEFAULT_USAGE_MULTIPLIER_BP;
+    }
+  };
+
+  updateUsageMultiplier = async (params: {
+    multiplierBp: number;
+    updatedByUserId?: string | null;
+  }) => {
+    const bp = assertValidMultiplierBp(params.multiplierBp);
+    await this.getUsageMultiplierConfig();
+    const [row] = await this.db
+      .update(platformUsageMultiplierConfig)
+      .set({
+        multiplierBp: bp,
+        updatedByUserId: params.updatedByUserId,
+      })
+      .where(eq(platformUsageMultiplierConfig.id, 'default'))
       .returning();
     return row;
   };

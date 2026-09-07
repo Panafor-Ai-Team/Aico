@@ -23,6 +23,7 @@ import { asyncAuthedProcedure, asyncRouter as router } from '@/libs/trpc/async';
 import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
 import { parseAicoBillingContext } from '@/server/services/aico/billingContext';
 import { toManagedGenerationModelId } from '@/server/services/aico/generationBilling';
+import { resolveManagedPricingContext } from '@/server/services/aico/usageMultiplier';
 import { GenerationService } from '@/server/services/generation';
 import { sanitizeFileName } from '@/utils/sanitizeFileName';
 
@@ -184,6 +185,9 @@ export const imageRouter = router({
               taskId,
               trigger: RequestTrigger.Image,
             },
+            // Per-image / per-second prices are marked up the same way token
+            // prices are — the unit does not matter, the rate is what scales.
+            pricingContext: await resolveManagedPricingContext(ctx.serverDB),
           };
           const response = await modelRuntime.createImage!(
             {

@@ -1585,6 +1585,29 @@ export class OrganizationModel {
     return row;
   };
 
+  /**
+   * Persist a rebased usage-multiplier checkpoint (AICO-180) so a multiplier
+   * change only affects requests made after it. Scoped to the current cycle —
+   * renewal zeroes these alongside `settledUsageMicroUsd`.
+   */
+  updateMemberBudgetCheckpoint = async (params: {
+    billedUsageBeforeBaselineMicroUsd: number;
+    checkpointMultiplierBp: number;
+    orgMemberId: string;
+    usageBaselineMicroUsd: number;
+  }) => {
+    const [row] = await this.db
+      .update(memberBudgets)
+      .set({
+        billedUsageBeforeBaselineMicroUsd: params.billedUsageBeforeBaselineMicroUsd,
+        checkpointMultiplierBp: params.checkpointMultiplierBp,
+        usageBaselineMicroUsd: params.usageBaselineMicroUsd,
+      })
+      .where(eq(memberBudgets.orgMemberId, params.orgMemberId))
+      .returning();
+    return row;
+  };
+
   // ─── Public short codes ─────────────────────────────────────────────
 
   getUserPublicCode = async (userId: string): Promise<string | null> => {

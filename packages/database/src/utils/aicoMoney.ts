@@ -177,3 +177,132 @@ export const isStaleManagedKeyId = (keyId: string | null | undefined): boolean =
 
 export const hasValidManagedKeyId = (keyId: string | null | undefined): boolean =>
   Boolean(keyId) && !isStaleManagedKeyId(keyId);
+
+// ─── Usage multiplier (AICO-180) ───────────────────────────────────────
+//
+// Aico resells OpenRouter capacity at a platform-wide markup. Everything the
+// user sees — prices, per-message cost, wallet balance and remaining — is the
+// *billed* figure; OpenRouter's own numbers are *raw* and never leave the
+// server. `bp` is the multiplier in basis points (12000 = 1.20x).
+
+/** Default markup applied when no platform config row exists yet. */
+export const DEFAULT_USAGE_MULTIPLIER_BP = 12_000;
+
+const MULTIPLIER_BP_SCALE = 10_000;
+
+/** Accepted band for the platform multiplier: 1.00x – 3.00x. */
+export const MIN_USAGE_MULTIPLIER_BP = 10_000;
+export const MAX_USAGE_MULTIPLIER_BP = 30_000;
+
+export const assertValidMultiplierBp = (bp: number): number => {
+  const value = Math.trunc(Number(bp));
+  if (
+    !Number.isFinite(value) ||
+    value < MIN_USAGE_MULTIPLIER_BP ||
+    value > MAX_USAGE_MULTIPLIER_BP
+  ) {
+    throw new Error('INVALID_USAGE_MULTIPLIER');
+  }
+  return value;
+};
+
+/**
+ * Normalize an untrusted/stored bp value for *math* (not for validation).
+ * Legacy rows and missing config fall back to the default rather than throwing,
+ * so a bad row can never wedge billing.
+ */
+const safeBp = (bp: number | null | undefined): number => {
+  const value = Math.trunc(Number(bp ?? DEFAULT_USAGE_MULTIPLIER_BP));
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_USAGE_MULTIPLIER_BP;
+  return value;
+};
+
+/** Raw OpenRouter micro-USD → billed micro-USD. Ceil: never under-charge. */
+export const applyMultiplierMicroUsd = (micro: number, bp: number | null | undefined): number => {
+  const value = Math.trunc(Number(micro ?? 0));
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.ceil((value * safeBp(bp)) / MULTIPLIER_BP_SCALE);
+};
+
+/** Billed micro-USD → raw micro-USD. Floor: never hand out more headroom than paid for. */
+export const removeMultiplierMicroUsd = (micro: number, bp: number | null | undefined): number => {
+  const value = Math.trunc(Number(micro ?? 0));
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.floor((value * MULTIPLIER_BP_SCALE) / safeBp(bp));
+};
+
+/**
+ * Checkpoint carried on a wallet / member budget so a multiplier change never
+ * reprices usage that was already billed at the old rate.
+ *
+ * `baselineRaw` is OpenRouter's raw usage counter at the moment of the last
+ * change; `billedBefore` is what we had already billed by then.
+ */
+export type UsageMultiplierCheckpoint = {
+  billedUsageBeforeBaselineMicroUsd?: number | null;
+  checkpointMultiplierBp?: number | null;
+  usageBaselineMicroUsd?: number | null;
+};
+
+/**
+ * Billed usage from OpenRouter's raw counter:
+ *   billed = billedBefore + (rawUsage − baselineRaw) x M
+ *
+ * Usage below the baseline (an OpenRouter-side period reset) contributes
+ * nothing rather than going negative.
+ */
+export const billedUsageFromRaw = (params: {
+  baselineRaw: number;
+  billedBefore: number;
+  bp: number | null | undefined;
+  rawUsage: number;
+}): number => {
+  const baseline = Math.max(0, Math.trunc(Number(params.baselineRaw ?? 0)));
+  const billedBefore = Math.max(0, Math.trunc(Number(params.billedBefore ?? 0)));
+  const raw = Math.max(0, Math.trunc(Number(params.rawUsage ?? 0)));
+  const sinceBaseline = Math.max(0, raw - baseline);
+  return billedBefore + applyMultiplierMicroUsd(sinceBaseline, params.bp);
+};
+
+/**
+ * Inverse of `billedUsageFromRaw`, solved for the raw usage at which the billed
+ * amount reaches `balance` — i.e. the OpenRouter key limit:
+ *   keyLimit = baselineRaw + (balance − billedBefore) / M
+ *
+ * An over-spent wallet (billedBefore >= balance) still yields the baseline, so
+ * the limit never drops below usage OpenRouter has already recorded.
+ */
+export const keyLimitFromBilled = (params: {
+  balance: number;
+  baselineRaw: number;
+  billedBefore: number;
+  bp: number | null | undefined;
+}): number => {
+  const baseline = Math.max(0, Math.trunc(Number(params.baselineRaw ?? 0)));
+  const billedBefore = Math.max(0, Math.trunc(Number(params.billedBefore ?? 0)));
+  const balance = Math.trunc(Number(params.balance ?? 0));
+  if (!Number.isFinite(balance) || balance <= 0) return 0;
+  const headroom = Math.max(0, balance - billedBefore);
+  return baseline + removeMultiplierMicroUsd(headroom, params.bp);
+};
+
+/**
+ * Roll a checkpoint forward to `nextBp` at the current raw usage, so usage up to
+ * now keeps the rate it was billed at and only later usage uses the new rate.
+ */
+export const rebaseCheckpoint = (params: {
+  checkpoint: UsageMultiplierCheckpoint;
+  nextBp: number;
+  rawUsage: number;
+}): { billedUsageBeforeBaselineMicroUsd: number; usageBaselineMicroUsd: number } => {
+  const raw = Math.max(0, Math.trunc(Number(params.rawUsage ?? 0)));
+  return {
+    billedUsageBeforeBaselineMicroUsd: billedUsageFromRaw({
+      baselineRaw: Number(params.checkpoint.usageBaselineMicroUsd ?? 0),
+      billedBefore: Number(params.checkpoint.billedUsageBeforeBaselineMicroUsd ?? 0),
+      bp: params.checkpoint.checkpointMultiplierBp,
+      rawUsage: raw,
+    }),
+    usageBaselineMicroUsd: raw,
+  };
+};

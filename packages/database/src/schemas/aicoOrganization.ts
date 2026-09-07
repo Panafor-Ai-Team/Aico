@@ -298,6 +298,21 @@ export const memberBudgets = pgTable(
     settledUsageMicroUsd: bigint('settled_usage_micro_usd', { mode: 'number' })
       .notNull()
       .default(0),
+    /**
+     * AICO-180 usage-multiplier checkpoint, scoped to the current cycle.
+     * Renewal zeroes these alongside `settledUsageMicroUsd`.
+     */
+    usageBaselineMicroUsd: bigint('usage_baseline_micro_usd', { mode: 'number' })
+      .notNull()
+      .default(0),
+    billedUsageBeforeBaselineMicroUsd: bigint('billed_usage_before_baseline_micro_usd', {
+      mode: 'number',
+    })
+      .notNull()
+      .default(0),
+    checkpointMultiplierBp: bigint('checkpoint_multiplier_bp', { mode: 'number' })
+      .notNull()
+      .default(12_000),
     refundedMicroUsd: bigint('refunded_micro_usd', { mode: 'number' }).notNull().default(0),
     /** Pending period change applied at next renewal boundary. */
     pendingPeriod: text('pending_period'),
@@ -345,6 +360,23 @@ export const userWallets = pgTable(
     isActive: boolean('is_active').notNull().default(true),
     /** Soft-delete freeze of non-zero personal balance pending refund/recovery. */
     frozenMicroUsd: bigint('frozen_micro_usd', { mode: 'number' }).notNull().default(0),
+    /**
+     * AICO-180 usage-multiplier checkpoint. `usageBaselineMicroUsd` is
+     * OpenRouter's raw usage counter at the last multiplier change and
+     * `billedUsageBeforeBaselineMicroUsd` what had been billed by then, so a
+     * multiplier change never reprices usage already charged at the old rate.
+     */
+    usageBaselineMicroUsd: bigint('usage_baseline_micro_usd', { mode: 'number' })
+      .notNull()
+      .default(0),
+    billedUsageBeforeBaselineMicroUsd: bigint('billed_usage_before_baseline_micro_usd', {
+      mode: 'number',
+    })
+      .notNull()
+      .default(0),
+    checkpointMultiplierBp: bigint('checkpoint_multiplier_bp', { mode: 'number' })
+      .notNull()
+      .default(12_000),
     lastSyncedAt: timestamptz('last_synced_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -561,6 +593,8 @@ export const usageLogs = pgTable(
     totalTokens: integer('total_tokens').notNull().default(0),
     /** Locally observed cost (micro-USD); may be pending. */
     costMicroUsd: bigint('cost_micro_usd', { mode: 'number' }).notNull().default(0),
+    /** Usage multiplier (basis points) in force when this row was recorded. */
+    multiplierBp: bigint('multiplier_bp', { mode: 'number' }).notNull().default(12_000),
     /** pending | synchronized | stale | failed */
     settlementStatus: text('settlement_status').notNull().default('pending'),
     createdAt: createdAt(),
@@ -616,6 +650,25 @@ export const platformFxConfig = pgTable('platform_fx_config', {
 
 export type PlatformFxConfigItem = typeof platformFxConfig.$inferSelect;
 export type NewPlatformFxConfig = typeof platformFxConfig.$inferInsert;
+
+/**
+ * Platform usage multiplier (AICO-180). Single-row config edited by platform
+ * admins. Everything the user sees is raw OpenRouter cost x this multiplier;
+ * changes apply to new requests only (wallets carry a usage checkpoint).
+ */
+export const platformUsageMultiplierConfig = pgTable('platform_usage_multiplier_config', {
+  id: text('id').notNull().primaryKey().default('default'),
+  /** Multiplier in basis points (12000 = 1.20x). Band enforced at 10000-30000. */
+  multiplierBp: bigint('multiplier_bp', { mode: 'number' }).notNull().default(12_000),
+  updatedByUserId: text('updated_by_user_id').references(() => users.id, {
+    onDelete: 'set null',
+  }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export type PlatformUsageMultiplierConfigItem = typeof platformUsageMultiplierConfig.$inferSelect;
+export type NewPlatformUsageMultiplierConfig = typeof platformUsageMultiplierConfig.$inferInsert;
 
 export const userTrials = pgTable(
   'user_trials',
