@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 
 import { toastAicoError } from '@/business/client/resolveAicoErrorMessage';
 import ActionDropdown from '@/features/ChatInput/ActionBar/components/ActionDropdown';
+import { type LooseTFunction } from '@/types/looseTranslation';
 
 import { type AicoBillingContext, type AicoBillingSource, formatRemainingUsd } from './types';
 import { useAicoBillingSources } from './useAicoBillingSources';
@@ -60,10 +61,7 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   `,
 }));
 
-const sourceLabel = (
-  source: AicoBillingSource,
-  t: (key: string, opts?: Record<string, string>) => string,
-): string => {
+const sourceLabel = (source: AicoBillingSource, t: LooseTFunction): string => {
   if (source.source === 'personal') return t('billing.personal');
   return source.organizationName || t('billing.organization');
 };

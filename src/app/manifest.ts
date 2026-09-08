@@ -30,6 +30,9 @@ const manifest = async (): Promise<MetadataRoute.Manifest> => {
       import('@/libs/metadata/manifest'),
     ]);
 
+  // Next's MetadataRoute.Manifest omits several values the web-app-manifest spec
+  // allows (notably display_override: 'tabbed' and cache_busting_mode), so the
+  // generated manifest is wider than its type.
   return manifestModule.generate({
     description: `${BRANDING_NAME} is a work-and-lifestyle space to find, build, and collaborate with agent teams that grow with you.`,
     icons: [
@@ -100,7 +103,7 @@ const manifest = async (): Promise<MetadataRoute.Manifest> => {
             url: '/screenshots/shot-5.desktop.png',
           },
         ],
-  });
+  }) as MetadataRoute.Manifest;
 };
 
 export default manifest;

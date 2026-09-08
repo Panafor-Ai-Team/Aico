@@ -74,7 +74,7 @@ describe('MessageService.updateMessageError + superjson', () => {
 
     const payload = vi.mocked(lambdaClient.message.update.mutate).mock.calls[0][0];
     const roundTripped = superjson.deserialize(superjson.serialize(payload)) as typeof payload;
-    expect(roundTripped.value.error.type).toBe('InvalidProviderAPIKey');
+    expect(roundTripped.value.error!.type).toBe('InvalidProviderAPIKey');
   });
 
   it('normalizes error on updateMessage so optimistic paths stay safe', async () => {

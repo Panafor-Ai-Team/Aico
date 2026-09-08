@@ -29,7 +29,7 @@ export const Footer: FC<FooterProps> = ({ onOpenChange }) => {
 
   return (
     <Flexbox className={styles.footer} padding={8}>
-      <Button block icon={<Icon icon={PlusIcon} />} variant="filled" onClick={handleAddModel}>
+      <Button block icon={<Icon icon={PlusIcon} />} type="fill" onClick={handleAddModel}>
         {t('ModelSwitchPanel.addModel.button')}
       </Button>
     </Flexbox>

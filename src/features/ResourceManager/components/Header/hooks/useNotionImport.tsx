@@ -32,7 +32,11 @@ const useNotionImport = ({
   const handleOpenNotionGuide = useCallback(() => {
     createGuideModal({
       cancelText: t('header.actions.notionGuide.cancel'),
-      cover: <GuideVideo height={269} src={FILE_URL.importFromNotionGuide} width={358} />,
+      // The guide video is optional branding asset — omit the cover when unset
+      // rather than rendering a video with no source.
+      cover: FILE_URL.importFromNotionGuide ? (
+        <GuideVideo height={269} src={FILE_URL.importFromNotionGuide} width={358} />
+      ) : undefined,
       desc: t('header.actions.notionGuide.desc'),
       okText: t('header.actions.notionGuide.ok'),
       onOk: () => {

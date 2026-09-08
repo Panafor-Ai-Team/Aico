@@ -707,8 +707,11 @@ const processModelCard = (
  * @param provider Provider type (optional, used to prioritize matching corresponding local configuration, will only attempt to override enabled from local configuration when provider is provided)
  * @returns Processed model card list
  */
-export const processModelList = async (
-  modelList: Array<{ [key: string]: unknown; id: string }>,
+export const processModelList = async <T extends { id: string }>(
+  // Generic rather than an index-signature shape: `interface` declarations have
+  // no implicit index signature, so provider model-card interfaces are not
+  // assignable to `{ [key: string]: unknown; id: string }`.
+  modelList: T[],
   config: ModelProcessorConfig,
   provider?: ModelProviderKey,
 ): Promise<ChatModelCard[]> => {
@@ -764,8 +767,10 @@ export const processModelList = async (
  * @param providerid Optional provider ID, used to get its local configuration file
  * @returns Processed model card list
  */
-export const processMultiProviderModelList = async (
-  modelList: Array<{ [key: string]: unknown; id: string }>,
+export const processMultiProviderModelList = async <T extends { id: string }>(
+  // Generic for the same reason as processModelList: `interface` declarations
+  // carry no implicit index signature.
+  modelList: T[],
   providerid?: ModelProviderKey,
 ): Promise<ChatModelCard[]> => {
   const { loadModels } =

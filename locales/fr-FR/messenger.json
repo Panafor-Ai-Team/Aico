@@ -192,7 +192,7 @@
   "verify.error.unlinkBeforeRelink": "Ce compte Panachat est déjà lié à un autre compte Telegram. Déconnectez-le dans Paramètres → Messagerie avant d'en lier un nouveau.",
   "verify.signInCta": "Connectez-vous pour continuer",
   "verify.signInRequired": "Veuillez vous connecter à Panachat pour confirmer la liaison.",
-  "verify.success.backTo{{appName}}": "Retour à Panachat",
+  "verify.success.backToApp": "Retour à {{appName}}",
   "verify.success.description": "Votre compte est maintenant connecté à {{platform}}. Ouvrez {{platform}} et envoyez votre premier message.",
   "verify.success.openBot": "Ouvrir dans {{platform}}",
   "verify.success.title": "Liaison réussie !"

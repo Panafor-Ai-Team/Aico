@@ -14,8 +14,8 @@ describe('resolvePreferredImageModel', () => {
     const list: EnabledProviderWithModels[] = [
       {
         children: [
-          { displayName: 'Other', id: 'black-forest-labs/flux' },
-          { displayName: 'Nano Banana 2', id: DEFAULT_AI_IMAGE_MODEL },
+          { abilities: {}, displayName: 'Other', id: 'black-forest-labs/flux' },
+          { abilities: {}, displayName: 'Nano Banana 2', id: DEFAULT_AI_IMAGE_MODEL },
         ],
         id: 'openrouter',
         name: 'OpenRouter',
@@ -34,8 +34,8 @@ describe('resolvePreferredImageModel', () => {
     const list: EnabledProviderWithModels[] = [
       {
         children: [
-          { displayName: 'Flux', id: 'flux/schnell' },
-          { displayName: 'Nano Banana', id: 'custom/nano-banana:image' },
+          { abilities: {}, displayName: 'Flux', id: 'flux/schnell' },
+          { abilities: {}, displayName: 'Nano Banana', id: 'custom/nano-banana:image' },
         ],
         id: 'fal',
         name: 'Fal',
@@ -52,7 +52,7 @@ describe('resolvePreferredImageModel', () => {
   it('falls back to the first enabled model when nothing Nano Banana-like exists', () => {
     const list: EnabledProviderWithModels[] = [
       {
-        children: [{ displayName: 'Flux', id: 'flux/schnell' }],
+        children: [{ abilities: {}, displayName: 'Flux', id: 'flux/schnell' }],
         id: 'fal',
         name: 'Fal',
         source: 'builtin',

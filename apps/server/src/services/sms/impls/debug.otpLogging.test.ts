@@ -31,6 +31,6 @@ describe('SmsService AUTH_SMS_DEBUG_OTP production gate (MON-001)', () => {
     vi.stubEnv('AUTH_SMS_DEBUG_OTP', '1');
     const { SmsService } = await import('../index');
     const service = new SmsService();
-    expect((service as { debugMirror: unknown }).debugMirror).toBeNull();
+    expect((service as unknown as { debugMirror: unknown }).debugMirror).toBeNull();
   });
 });

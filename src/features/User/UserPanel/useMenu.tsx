@@ -123,7 +123,7 @@ export const useMenu = () => {
     },
 
     ...(isLogin ? settings : []),
-    ...businessMenuItems,
+    ...(businessMenuItems ?? []),
     ...(userPanel.showDataImporter && isLogin
       ? [
           {

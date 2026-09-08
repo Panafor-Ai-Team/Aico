@@ -99,7 +99,9 @@ const EMBEDDING_PROVIDER_CARDS: AiProviderModelListItem[] = EMBEDDING_CATALOG_CA
   pricing: card.pricing,
   releasedAt: card.releasedAt,
   source: AiModelSourceEnum.Remote,
-  type: normalizeAiModelType(card.type),
+  // These are embedding cards by construction; normalizeAiModelType widens to
+  // `string | undefined` for unrecognised input.
+  type: (normalizeAiModelType(card.type) ?? 'embedding') as AiProviderModelListItem['type'],
 }));
 
 export class OpenRouterModelCatalogModel {

@@ -29,6 +29,7 @@ import { useClientDataSWR } from '@/libs/swr';
 import { lambdaClient } from '@/libs/trpc/client';
 import { useUserStore } from '@/store/user';
 import { userProfileSelectors } from '@/store/user/selectors';
+import { type LooseTFunction } from '@/types/looseTranslation';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   sourceActive: css`
@@ -64,7 +65,7 @@ const sourceToContext = (source: AicoBillingSource): AicoBillingContext =>
     ? { source: 'personal' }
     : { organizationId: source.organizationId, source: 'organization' };
 
-const sourceTitle = (source: AicoBillingSource, t: (key: string) => string): string => {
+const sourceTitle = (source: AicoBillingSource, t: LooseTFunction): string => {
   if (source.source === 'personal') return t('billing.personal');
   return source.organizationName || t('billing.organization');
 };

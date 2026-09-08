@@ -337,12 +337,12 @@ describe('Phase 3 Journey 7 — operational recovery probes', () => {
     });
     await keys.ensureUserKey(ownerId);
     const wallet = await billing.getOrCreateUserWallet(ownerId);
-    expect(wallet.openrouterKeyHash).toBeTruthy();
+    expect(wallet.openrouterKeyCiphertext).toBeTruthy();
 
     const prev = process.env.KEY_VAULTS_SECRET;
     process.env.KEY_VAULTS_SECRET = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZXc='; // different
     const keys2 = new AicoOpenRouterKeyService(testDB, client);
-    const plaintext = await keys2.decryptKey(wallet.openrouterKeyHash!);
+    const plaintext = await keys2.decryptKey(wallet.openrouterKeyCiphertext!);
     process.env.KEY_VAULTS_SECRET = prev;
     expect(plaintext).toBeNull();
   });
@@ -431,9 +431,12 @@ describe('Phase 3 Journey 3 — tRPC IDOR (attacker)', () => {
     });
     await expect(
       stranger.allocateMemberCredit({
-        amountUsd: 1,
+        // amountUsd is a decimal USD *string* throughout the billing surface.
+        amountUsd: '1',
         orgId: created.id,
         orgMemberId: 'fake',
+        // Required by the procedure — no silent default (AICO-140).
+        period: 'daily',
       }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });

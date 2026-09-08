@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import HomeEditorInput from './EditorInput';
 
-const getBusinessChatInputSendAreaPrefix = vi.fn(() => <div data-testid="aico-billing-switcher" />);
+const getBusinessChatInputSendAreaPrefix = vi.fn((..._args: unknown[]) => (
+  <div data-testid="aico-billing-switcher" />
+));
 const useBusinessChatInputAlerts = vi.fn(() => <div data-testid="aico-funds-blocked-alert" />);
 
 vi.mock('@/business/client/hooks/useBusinessChatInputSendAreaPrefix', () => ({

@@ -1,4 +1,5 @@
 import { APIError } from 'better-auth/api';
+import { type UserWithRole } from 'better-auth/plugins';
 import { type BetterAuthPlugin } from 'better-auth/types';
 
 /**
@@ -15,7 +16,12 @@ export const aicoBanMessage = (): BetterAuthPlugin => ({
             create: {
               async before(session, ctx) {
                 if (!ctx) return;
-                const user = await ctx.context.internalAdapter.findUserById(session.userId);
+                // findUserById is typed against better-auth's base User, which
+                // has no ban columns — those come from the admin plugin, whose
+                // UserWithRole declares them.
+                const user = (await ctx.context.internalAdapter.findUserById(
+                  session.userId,
+                )) as UserWithRole | null;
                 if (!user?.banned) return;
 
                 if (user.banExpires && new Date(user.banExpires).getTime() < Date.now()) {

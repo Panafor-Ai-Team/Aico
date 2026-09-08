@@ -19,7 +19,7 @@ export const authAbuseSignal = (): BetterAuthPlugin => ({
   hooks: {
     before: [
       {
-        matcher: (ctx) => OTP_VERIFY_PATHS.has(ctx.path),
+        matcher: (ctx) => !!ctx.path && OTP_VERIFY_PATHS.has(ctx.path),
         handler: createAuthMiddleware(async (ctx) => {
           const forwarded = ctx.headers?.get?.('x-forwarded-for');
           const ip =

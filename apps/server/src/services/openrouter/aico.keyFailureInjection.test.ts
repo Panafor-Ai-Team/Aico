@@ -267,7 +267,9 @@ describe('Aico OpenRouter failure injection (Phase 2)', () => {
       userId,
     });
     await billing.updateUserOpenRouterKey({
-      encryptedKey: 'not-valid-ciphertext',
+      // The field is `ciphertext`; `encryptedKey` was silently dropped, so the
+      // corrupt value never reached the wallet this test is probing.
+      ciphertext: 'not-valid-ciphertext',
       keyId: 'corrupt-id',
       userId,
     });
