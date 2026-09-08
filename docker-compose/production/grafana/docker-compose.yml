@@ -65,6 +65,13 @@ services:
 
 
   # version lock ref: https://github.com/lobehub/lobe-chat/pull/7331
+  #
+  # ⚠️ `init_data.json` ships with `YOUR_CASDOOR_*` placeholders, not working
+  # credentials — a committed admin password, client secret or JWT signing key
+  # would be public and forgeable by anyone with this repository. Before the
+  # first boot, replace every placeholder with values unique to your deployment
+  # (see docs/self-hosting/advanced/observability/grafana.mdx) and mirror the
+  # client id/secret into `AUTH_CASDOOR_ID` / `AUTH_CASDOOR_SECRET` in `.env`.
   casdoor:
     image: casbin/casdoor:v2.13.0
     container_name: lobe-casdoor
@@ -78,7 +85,7 @@ services:
       RUNNING_IN_DOCKER: 'true'
       driverName: 'postgres'
       dataSourceName: 'user=postgres password=${POSTGRES_PASSWORD} host=postgresql port=5432 sslmode=disable dbname=casdoor'
-      runmode: 'dev'
+      runmode: 'prod'
     volumes:
       - ./init_data.json:/init_data.json
     env_file:

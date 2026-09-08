@@ -32,11 +32,28 @@ LobeHub 支持通过开源工具实现自托管部署的高级可观测性：
 ```bash
 curl -O https://raw.githubusercontent.com/lobehub/lobehub/HEAD/docker-compose/production/grafana/docker-compose.yml
 curl -O https://raw.githubusercontent.com/lobehub/lobehub/HEAD/docker-compose/production/grafana/.env.example
+curl -O https://raw.githubusercontent.com/lobehub/lobehub/HEAD/docker-compose/production/grafana/init_data.json
 mv .env.example .env
 ```
 
 1. 根据需要修改 `.env` 文件中的密码和密钥。
-2. 使用如下命令启动服务：
+
+2. 将 `init_data.json` 中所有 `YOUR_CASDOOR_*` 占位符替换为你自己部署专用的值：
+
+   <Callout type={'warning'}>
+     `init_data.json` 用于在 Casdoor 首次启动时进行初始化，其中特意只包含占位符而非可用凭据。任何提交到公开仓库的值对所有人都是已知的
+     —— 共用的签名密钥会让任何人都能为你的实例伪造 Token。
+   </Callout>
+
+   - `YOUR_CASDOOR_ADMIN_PASSWORD` / `YOUR_CASDOOR_USER_PASSWORD`：设置你自己的强密码。
+   - `YOUR_CASDOOR_CLIENT_ID` / `YOUR_CASDOOR_CLIENT_SECRET`：随机生成的 id 与 secret，例如
+     `openssl rand -hex 10` 与 `openssl rand -hex 20`。请将同一组值填入 `.env` 中的
+     `AUTH_CASDOOR_ID` 与 `AUTH_CASDOOR_SECRET`。
+   - `YOUR_CASDOOR_CERTIFICATE` / `YOUR_CASDOOR_PRIVATE_KEY`：自行生成的证书与私钥，例如
+     `openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 7300 -nodes`。
+     粘贴时需将每个 PEM 作为单个 JSON 字符串，换行转义为 `\n`。
+
+3. 使用如下命令启动服务：
 
    ```sh
    docker compose up -d
