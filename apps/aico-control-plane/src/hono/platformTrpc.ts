@@ -2,19 +2,15 @@ import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import { Hono } from 'hono';
 import { NextRequest } from 'next/server';
 
-import { router } from '@/libs/trpc/lambda';
 import { createLambdaContext } from '@/libs/trpc/lambda/context';
 import { createTRPCErrorLogger } from '@/libs/trpc/utils/errorLogger';
 import { prepareRequestForTRPC } from '@/libs/trpc/utils/request-adapter';
 import { createResponseMeta } from '@/libs/trpc/utils/responseMeta';
-import { platformAdminRouter } from '@/server/routers/lambda/platformAdmin';
+// Single source of truth, shared with the SPA client — see the note there for
+// why the router is defined in apps/server rather than next to this handler.
+import { controlPlaneRouter } from '@/server/routers/controlPlane';
 
-/** Control-plane-only tRPC surface (platform admin + FX helper). */
-export const controlPlaneRouter = router({
-  platformAdmin: platformAdminRouter,
-});
-
-export type ControlPlaneRouter = typeof controlPlaneRouter;
+export { type ControlPlaneRouter, controlPlaneRouter } from '@/server/routers/controlPlane';
 
 export const createControlPlaneTrpcApp = () => {
   const app = new Hono();
