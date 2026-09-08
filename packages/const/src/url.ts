@@ -1,15 +1,24 @@
 import urlJoin from 'url-join';
 
-const readEnvUrl = (name: string, fallback: string) => {
-  const value = process.env[name] ?? process.env[`NEXT_PUBLIC_${name}`];
-  return value?.trim() || fallback;
-};
+/**
+ * Keys must be written out literally — a `process.env[name]` lookup with a
+ * variable key is not statically analysable, so esbuild leaves it as
+ * `({})[name]` in the SPA bundle and it always reads `undefined`. See the note
+ * in `@lobechat/business-const`'s `branding.ts` for the full explanation.
+ */
+const envUrl = (value: string | undefined, fallback: string) => value?.trim() || fallback;
 
 const defaultAppUrl =
   process.env.NODE_ENV === 'development' ? 'http://localhost:3010' : 'http://localhost:3210';
 
-export const OFFICIAL_URL = readEnvUrl('APP_URL', defaultAppUrl);
-export const OFFICIAL_SITE = readEnvUrl('BRANDING_SITE_URL', OFFICIAL_URL);
+export const OFFICIAL_URL = envUrl(
+  process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL,
+  defaultAppUrl,
+);
+export const OFFICIAL_SITE = envUrl(
+  process.env.BRANDING_SITE_URL ?? process.env.NEXT_PUBLIC_BRANDING_SITE_URL,
+  OFFICIAL_URL,
+);
 export const OFFICIAL_DOMAIN = (() => {
   try {
     return new URL(OFFICIAL_SITE).hostname;
