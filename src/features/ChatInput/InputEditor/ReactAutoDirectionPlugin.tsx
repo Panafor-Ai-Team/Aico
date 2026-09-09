@@ -1,11 +1,9 @@
 import { useLexicalComposerContext } from '@lobehub/editor';
-import { $getRoot, $isElementNode, type ElementNode } from 'lexical';
+import { $getRoot, $isElementNode, type ElementNode, ParagraphNode, TextNode } from 'lexical';
 import { type FC, useEffect } from 'react';
 
 import { getDocumentDirection } from '@/utils/client/applyDocumentDirection';
 import { resolveTextDirection, type TextDirection } from '@/utils/textDirection';
-
-const AUTO_DIR_TAG = 'chat-input-auto-direction';
 
 /**
  * The direction the editor should be in, and whether the current tree already
@@ -37,18 +35,44 @@ export const planEditorDirection = ({
   };
 };
 
+/** Applies {@link planEditorDirection} to the live tree. Must run inside an update. */
+const $syncRootDirection = (uiDirection: 'ltr' | 'rtl') => {
+  const root = $getRoot();
+  const blocks = root
+    .getChildren()
+    .filter((child): child is ElementNode => $isElementNode(child) && !child.isInline());
+
+  const plan = planEditorDirection({
+    blockDirections: blocks.map((block) => block.getDirection()),
+    rootDirection: root.getDirection(),
+    rootText: root.getTextContent(),
+    uiDirection,
+  });
+
+  if (!plan.needsUpdate) return;
+
+  if (root.getDirection() !== plan.rootDirection) {
+    root.setDirection(plan.rootDirection);
+  }
+
+  // Blocks inherit the root direction; a per-block direction is what used to
+  // split alignment line by line.
+  for (const block of blocks) {
+    if (block.getDirection() !== null) block.setDirection(null);
+  }
+};
+
 /**
  * Gives the whole input a single direction, taken from the first strong
- * character of the entire text — the behaviour Telegram and WhatsApp use.
+ * character of the entire text, falling back to the UI language while the input
+ * has no strong character yet — the behaviour Telegram and WhatsApp use.
  *
- * This deliberately does NOT set direction per block. Doing so made every line
- * pick its own alignment, so a Persian line and an English line in the same
- * message flew to opposite edges of the composer, and typing a Latin character
- * at the start of a line jumped that line across the box. Per-block directions
- * are cleared so blocks inherit the root instead.
- *
- * The root direction is also what clears the forced `ltr` that
- * \@lobehub/editor's inode defaults put on the root.
+ * This runs as a node transform rather than an update listener on purpose. An
+ * update listener fires *after* Lexical has reconciled the DOM, so the
+ * direction always described the previous keystroke: the first character you
+ * typed rendered with the old direction and only snapped into place on the
+ * second. Transforms run inside the same update, before reconciliation, so the
+ * very first character lands in the right place.
  */
 const ReactAutoDirectionPlugin: FC = () => {
   const [editor] = useLexicalComposerContext();
@@ -57,51 +81,16 @@ const ReactAutoDirectionPlugin: FC = () => {
     const lexicalEditor = editor.getLexicalEditor();
     if (!lexicalEditor) return;
 
-    return lexicalEditor.registerUpdateListener(({ editorState, tags }) => {
-      if (tags.has(AUTO_DIR_TAG)) return;
+    const sync = () => $syncRootDirection(getDocumentDirection());
 
-      let needsUpdate = false;
+    // Text edits dirty the TextNode; clearing the input (or first mount) dirties
+    // the paragraph, which is the only node left when there is no text.
+    const teardowns = [
+      lexicalEditor.registerNodeTransform(TextNode, sync),
+      lexicalEditor.registerNodeTransform(ParagraphNode, sync),
+    ];
 
-      editorState.read(() => {
-        const root = $getRoot();
-        needsUpdate = planEditorDirection({
-          blockDirections: root
-            .getChildren()
-            .filter((child) => $isElementNode(child) && !child.isInline())
-            .map((child) => (child as ElementNode).getDirection()),
-          rootDirection: root.getDirection(),
-          rootText: root.getTextContent(),
-          uiDirection: getDocumentDirection(),
-        }).needsUpdate;
-      });
-
-      if (!needsUpdate) return;
-
-      lexicalEditor.update(
-        () => {
-          const root = $getRoot();
-          const { rootDirection: next } = planEditorDirection({
-            blockDirections: [],
-            rootDirection: root.getDirection(),
-            rootText: root.getTextContent(),
-            uiDirection: getDocumentDirection(),
-          });
-          if (root.getDirection() !== next) {
-            root.setDirection(next);
-          }
-
-          // Blocks inherit the root direction; a per-block direction is what
-          // used to split alignment line by line.
-          for (const child of root.getChildren()) {
-            if (!$isElementNode(child) || child.isInline()) continue;
-            if (child.getDirection() !== null) {
-              child.setDirection(null);
-            }
-          }
-        },
-        { tag: AUTO_DIR_TAG },
-      );
-    });
+    return () => teardowns.forEach((teardown) => teardown());
   }, [editor]);
 
   return null;
