@@ -4,6 +4,9 @@ import { ArrowUpIcon, PlusIcon } from 'lucide-react';
 import { type ChangeEventHandler, type CompositionEventHandler, memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { getDocumentDirection } from '@/utils/client/applyDocumentDirection';
+import { resolveTextDirection } from '@/utils/textDirection';
+
 import type { HomeMode } from '../types';
 import {
   HOME_INPUT_ACTION_BAR_HEIGHT,
@@ -45,8 +48,9 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   textarea: css`
     resize: none;
 
-    /* dir="auto" below already gives the whole value one direction;
-       'unicode-bidi: plaintext' would re-split it per line. */
+    /* Direction comes from the dir prop below: first strong character, or the
+       UI language when empty. unicode-bidi: plaintext would re-split it per
+       line, sending Persian and English lines to opposite edges. */
     display: block;
     flex: 1;
 
@@ -107,7 +111,7 @@ const InputFallback = memo<InputFallbackProps>(
             autoFocus
             aria-label={placeholder}
             className={styles.textarea}
-            dir="auto"
+            dir={resolveTextDirection(value, getDocumentDirection())}
             placeholder={placeholder}
             value={value}
             onChange={handleChange}

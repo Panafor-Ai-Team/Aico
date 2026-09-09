@@ -14,13 +14,21 @@ import { planEditorDirection } from './ReactAutoDirectionPlugin';
 describe('planEditorDirection', () => {
   it('takes the direction from the first strong character of the whole text', () => {
     expect(
-      planEditorDirection({ blockDirections: [], rootDirection: null, rootText: 'سلام Hello دنیا' })
-        .rootDirection,
+      planEditorDirection({
+        blockDirections: [],
+        rootDirection: null,
+        rootText: 'سلام Hello دنیا',
+        uiDirection: 'ltr',
+      }).rootDirection,
     ).toBe('rtl');
 
     expect(
-      planEditorDirection({ blockDirections: [], rootDirection: null, rootText: 'Hello سلام' })
-        .rootDirection,
+      planEditorDirection({
+        blockDirections: [],
+        rootDirection: null,
+        rootText: 'Hello سلام',
+        uiDirection: 'rtl',
+      }).rootDirection,
     ).toBe('ltr');
   });
 
@@ -31,6 +39,7 @@ describe('planEditorDirection', () => {
         blockDirections: [null, null],
         rootDirection: null,
         rootText: 'سلام دنیا Hello world',
+        uiDirection: 'ltr',
       }).rootDirection,
     ).toBe('rtl');
   });
@@ -41,6 +50,7 @@ describe('planEditorDirection', () => {
         blockDirections: ['rtl', 'ltr'],
         rootDirection: 'rtl',
         rootText: 'سلام دنیا',
+        uiDirection: 'rtl',
       }).needsUpdate,
     ).toBe(true);
   });
@@ -51,18 +61,61 @@ describe('planEditorDirection', () => {
         blockDirections: [null, null],
         rootDirection: 'rtl',
         rootText: 'سلام دنیا',
+        uiDirection: 'rtl',
       }).needsUpdate,
     ).toBe(false);
   });
 
-  it('leaves direction unset for text with no strong character', () => {
-    const plan = planEditorDirection({
-      blockDirections: [],
-      rootDirection: null,
-      rootText: '123 ...',
-    });
+  // An empty input must follow the UI language. Leaving the root unset made
+  // Lexical fall back to dir="auto" per block, and dir="auto" on empty text
+  // resolves to ltr even in an rtl UI — caret on the wrong side for Persian.
+  it('falls back to the UI direction when there is no strong character', () => {
+    expect(
+      planEditorDirection({
+        blockDirections: [],
+        rootDirection: null,
+        rootText: '',
+        uiDirection: 'rtl',
+      }).rootDirection,
+    ).toBe('rtl');
 
-    expect(plan.rootDirection).toBeNull();
-    expect(plan.needsUpdate).toBe(false);
+    expect(
+      planEditorDirection({
+        blockDirections: [],
+        rootDirection: null,
+        rootText: '123 ...',
+        uiDirection: 'rtl',
+      }).rootDirection,
+    ).toBe('rtl');
+
+    expect(
+      planEditorDirection({
+        blockDirections: [],
+        rootDirection: null,
+        rootText: '',
+        uiDirection: 'ltr',
+      }).rootDirection,
+    ).toBe('ltr');
+  });
+
+  it('lets the text win over the UI language', () => {
+    // Persian text in an English UI, and English text in a Persian UI.
+    expect(
+      planEditorDirection({
+        blockDirections: [],
+        rootDirection: null,
+        rootText: 'سلام',
+        uiDirection: 'ltr',
+      }).rootDirection,
+    ).toBe('rtl');
+
+    expect(
+      planEditorDirection({
+        blockDirections: [],
+        rootDirection: null,
+        rootText: 'Hello',
+        uiDirection: 'rtl',
+      }).rootDirection,
+    ).toBe('ltr');
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getTextDirectionFromFirstStrong } from './textDirection';
+import { getTextDirectionFromFirstStrong, resolveTextDirection } from './textDirection';
 
 describe('getTextDirectionFromFirstStrong', () => {
   it('returns rtl when the first strong character is Persian/Arabic', () => {
@@ -26,5 +26,19 @@ describe('getTextDirectionFromFirstStrong', () => {
     expect(getTextDirectionFromFirstStrong('')).toBeNull();
     expect(getTextDirectionFromFirstStrong('   ')).toBeNull();
     expect(getTextDirectionFromFirstStrong('123')).toBeNull();
+  });
+});
+
+describe('resolveTextDirection', () => {
+  it('takes direction from the first strong character, whatever the UI language', () => {
+    expect(resolveTextDirection('سلام world', 'ltr')).toBe('rtl');
+    expect(resolveTextDirection('hello سلام', 'rtl')).toBe('ltr');
+  });
+
+  it('falls back to the UI language when there is no strong character', () => {
+    // Persian UI → right, English UI → left.
+    expect(resolveTextDirection('', 'rtl')).toBe('rtl');
+    expect(resolveTextDirection('', 'ltr')).toBe('ltr');
+    expect(resolveTextDirection('123 ...', 'rtl')).toBe('rtl');
   });
 });

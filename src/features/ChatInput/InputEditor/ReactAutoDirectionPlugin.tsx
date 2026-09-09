@@ -2,7 +2,8 @@ import { useLexicalComposerContext } from '@lobehub/editor';
 import { $getRoot, $isElementNode, type ElementNode } from 'lexical';
 import { type FC, useEffect } from 'react';
 
-import { getTextDirectionFromFirstStrong, type TextDirection } from '@/utils/textDirection';
+import { getDocumentDirection } from '@/utils/client/applyDocumentDirection';
+import { resolveTextDirection, type TextDirection } from '@/utils/textDirection';
 
 const AUTO_DIR_TAG = 'chat-input-auto-direction';
 
@@ -18,12 +19,17 @@ export const planEditorDirection = ({
   blockDirections,
   rootDirection,
   rootText,
+  uiDirection,
 }: {
   blockDirections: TextDirection[];
   rootDirection: TextDirection;
   rootText: string;
-}): { needsUpdate: boolean; rootDirection: TextDirection } => {
-  const next = getTextDirectionFromFirstStrong(rootText);
+  uiDirection: 'ltr' | 'rtl';
+}): { needsUpdate: boolean; rootDirection: 'ltr' | 'rtl' } => {
+  // Never null: leaving the root unset makes Lexical fall back to `dir="auto"`
+  // on each block, and `dir="auto"` on empty text resolves to ltr even in an
+  // rtl UI — which is what put the caret on the left in an empty Persian input.
+  const next = resolveTextDirection(rootText, uiDirection);
 
   return {
     needsUpdate: rootDirection !== next || blockDirections.some((dir) => dir !== null),
@@ -65,6 +71,7 @@ const ReactAutoDirectionPlugin: FC = () => {
             .map((child) => (child as ElementNode).getDirection()),
           rootDirection: root.getDirection(),
           rootText: root.getTextContent(),
+          uiDirection: getDocumentDirection(),
         }).needsUpdate;
       });
 
@@ -77,6 +84,7 @@ const ReactAutoDirectionPlugin: FC = () => {
             blockDirections: [],
             rootDirection: root.getDirection(),
             rootText: root.getTextContent(),
+            uiDirection: getDocumentDirection(),
           });
           if (root.getDirection() !== next) {
             root.setDirection(next);

@@ -16,3 +16,15 @@ export const getTextDirectionFromFirstStrong = (text: string): TextDirection => 
   }
   return null;
 };
+
+/**
+ * Direction for a text field, per the product rule:
+ * first strong character decides it, and an empty field follows the UI
+ * language (Persian → rtl, English → ltr).
+ *
+ * Note this cannot be expressed with `dir="auto"` alone: on an empty field
+ * `dir="auto"` resolves to ltr even inside an rtl UI, which puts the caret on
+ * the wrong side for Persian users.
+ */
+export const resolveTextDirection = (text: string, uiDirection: 'ltr' | 'rtl'): 'ltr' | 'rtl' =>
+  getTextDirectionFromFirstStrong(text) ?? uiDirection;
