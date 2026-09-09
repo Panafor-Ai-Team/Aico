@@ -133,14 +133,29 @@ describe('reconcileEditorDirection', () => {
     expect(readDirections(editor)).toEqual({ blocks: ['rtl'], root: null });
   });
 
-  it('leaves empty and neutral-only content directionless', async () => {
+  it('falls back to ltr for empty content on a left-to-right page', async () => {
     const editor = createTestEditor();
     setParagraphs(editor, ['', '123 ...']);
     resetDirections(editor, null, null);
 
-    expect(reconcileEditorDirection(editor)).toBe(false);
+    expect(reconcileEditorDirection(editor)).toBe(true);
     await flushUpdates();
-    expect(readDirections(editor)).toEqual({ blocks: [null, null], root: null });
+    expect(readDirections(editor)).toEqual({ blocks: ['ltr', 'ltr'], root: null });
+  });
+
+  it('aligns empty content to the right on a right-to-left page', async () => {
+    document.dir = 'rtl';
+    try {
+      const editor = createTestEditor();
+      setParagraphs(editor, ['']);
+      resetDirections(editor, null, null);
+
+      expect(reconcileEditorDirection(editor)).toBe(true);
+      await flushUpdates();
+      expect(readDirections(editor)).toEqual({ blocks: ['rtl'], root: null });
+    } finally {
+      document.dir = '';
+    }
   });
 
   it('is a no-op once settled', async () => {
