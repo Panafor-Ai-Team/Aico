@@ -1,65 +1,63 @@
 import { useLexicalComposerContext } from '@lobehub/editor';
-import { $getRoot, $isElementNode } from 'lexical';
+import type { LexicalEditor } from 'lexical';
 import { type FC, useEffect } from 'react';
 
-import { getTextDirectionFromFirstStrong } from '@/utils/textDirection';
-
-const AUTO_DIR_TAG = 'chat-input-auto-direction';
+import { AUTO_DIR_TAG, reconcileEditorDirection } from './reconcileEditorDirection';
 
 /**
- * Sets each top-level block's Lexical direction from the first strong character.
- * Also clears a forced root `ltr` (from @lobehub/editor inode defaults) so
- * paragraphs can use auto / explicit rtl without inheriting LTR.
+ * Keeps every top-level block's Lexical direction on its own first strong
+ * character (per-block first-strong, matching `unicode-bidi: plaintext` in
+ * CSS), and the root directionless — also clears the forced root `ltr` from
+ * @lobehub/editor inode defaults. See `./reconcileEditorDirection` for the rule.
+ *
+ * Wiring matters more than the rule here: the inner Lexical editor is created
+ * asynchronously (`setRootElement`, in another component's effect), so
+ * `getLexicalEditor()` is still null when this effect first runs. Attaching
+ * only when it is non-null would silently disable the plugin forever — every
+ * imported paragraph would keep the inode `ltr` default whatever language it
+ * starts with. Hence the `initialized` subscription below.
  */
 const ReactAutoDirectionPlugin: FC = () => {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
-    const lexicalEditor = editor.getLexicalEditor();
-    if (!lexicalEditor) return;
+    let detachUpdateListener: (() => void) | undefined;
 
-    return lexicalEditor.registerUpdateListener(({ editorState, tags }) => {
-      if (tags.has(AUTO_DIR_TAG)) return;
+    const attach = (lexicalEditor: LexicalEditor) => {
+      // Content applied before this point (initialContent, migrated home
+      // fallback value) never passed the listener — fix it up front so it
+      // does not wait for the next keystroke.
+      reconcileEditorDirection(lexicalEditor);
+      detachUpdateListener?.();
+      detachUpdateListener = lexicalEditor.registerUpdateListener(({ tags }) => {
+        if (tags.has(AUTO_DIR_TAG)) return;
 
-      let needsUpdate = false;
-
-      editorState.read(() => {
-        const root = $getRoot();
-        if (root.getDirection() !== null) {
-          needsUpdate = true;
-          return;
-        }
-
-        for (const child of root.getChildren()) {
-          if (!$isElementNode(child) || child.isInline()) continue;
-          const next = getTextDirectionFromFirstStrong(child.getTextContent());
-          if (child.getDirection() !== next) {
-            needsUpdate = true;
-            return;
-          }
-        }
+        reconcileEditorDirection(lexicalEditor);
       });
+    };
 
-      if (!needsUpdate) return;
+    const ready = editor.getLexicalEditor();
+    if (ready) {
+      attach(ready);
+    } else {
+      editor.once('initialized', attach);
+    }
 
-      lexicalEditor.update(
-        () => {
-          const root = $getRoot();
-          if (root.getDirection() !== null) {
-            root.setDirection(null);
-          }
+    // Programmatic content swaps (draft restore, saved state) go through
+    // `setDocument`, which must not depend on update-listener timing to end
+    // up with the right direction.
+    const handleDocumentChange = () => {
+      const lexicalEditor = editor.getLexicalEditor();
+      if (lexicalEditor) reconcileEditorDirection(lexicalEditor);
+    };
+    editor.on('documentChange', handleDocumentChange);
 
-          for (const child of root.getChildren()) {
-            if (!$isElementNode(child) || child.isInline()) continue;
-            const next = getTextDirectionFromFirstStrong(child.getTextContent());
-            if (child.getDirection() !== next) {
-              child.setDirection(next);
-            }
-          }
-        },
-        { tag: AUTO_DIR_TAG },
-      );
-    });
+    return () => {
+      // `once` auto-removes after firing; `off` is a no-op if it never did.
+      editor.off('initialized', attach);
+      editor.off('documentChange', handleDocumentChange);
+      detachUpdateListener?.();
+    };
   }, [editor]);
 
   return null;
