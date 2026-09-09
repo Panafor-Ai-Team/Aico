@@ -1,15 +1,48 @@
 import { useLexicalComposerContext } from '@lobehub/editor';
-import { $getRoot, $isElementNode } from 'lexical';
+import { $getRoot, $isElementNode, type ElementNode } from 'lexical';
 import { type FC, useEffect } from 'react';
 
-import { getTextDirectionFromFirstStrong } from '@/utils/textDirection';
+import { getTextDirectionFromFirstStrong, type TextDirection } from '@/utils/textDirection';
 
 const AUTO_DIR_TAG = 'chat-input-auto-direction';
 
 /**
- * Sets each top-level block's Lexical direction from the first strong character.
- * Also clears a forced root `ltr` (from @lobehub/editor inode defaults) so
- * paragraphs can use auto / explicit rtl without inheriting LTR.
+ * The direction the editor should be in, and whether the current tree already
+ * matches it. Extracted from the plugin so the rule is testable without a live
+ * Lexical editor.
+ *
+ * The rule: the root carries the direction for the whole text; no block carries
+ * one of its own.
+ */
+export const planEditorDirection = ({
+  blockDirections,
+  rootDirection,
+  rootText,
+}: {
+  blockDirections: TextDirection[];
+  rootDirection: TextDirection;
+  rootText: string;
+}): { needsUpdate: boolean; rootDirection: TextDirection } => {
+  const next = getTextDirectionFromFirstStrong(rootText);
+
+  return {
+    needsUpdate: rootDirection !== next || blockDirections.some((dir) => dir !== null),
+    rootDirection: next,
+  };
+};
+
+/**
+ * Gives the whole input a single direction, taken from the first strong
+ * character of the entire text — the behaviour Telegram and WhatsApp use.
+ *
+ * This deliberately does NOT set direction per block. Doing so made every line
+ * pick its own alignment, so a Persian line and an English line in the same
+ * message flew to opposite edges of the composer, and typing a Latin character
+ * at the start of a line jumped that line across the box. Per-block directions
+ * are cleared so blocks inherit the root instead.
+ *
+ * The root direction is also what clears the forced `ltr` that
+ * \@lobehub/editor's inode defaults put on the root.
  */
 const ReactAutoDirectionPlugin: FC = () => {
   const [editor] = useLexicalComposerContext();
@@ -25,19 +58,14 @@ const ReactAutoDirectionPlugin: FC = () => {
 
       editorState.read(() => {
         const root = $getRoot();
-        if (root.getDirection() !== null) {
-          needsUpdate = true;
-          return;
-        }
-
-        for (const child of root.getChildren()) {
-          if (!$isElementNode(child) || child.isInline()) continue;
-          const next = getTextDirectionFromFirstStrong(child.getTextContent());
-          if (child.getDirection() !== next) {
-            needsUpdate = true;
-            return;
-          }
-        }
+        needsUpdate = planEditorDirection({
+          blockDirections: root
+            .getChildren()
+            .filter((child) => $isElementNode(child) && !child.isInline())
+            .map((child) => (child as ElementNode).getDirection()),
+          rootDirection: root.getDirection(),
+          rootText: root.getTextContent(),
+        }).needsUpdate;
       });
 
       if (!needsUpdate) return;
@@ -45,15 +73,21 @@ const ReactAutoDirectionPlugin: FC = () => {
       lexicalEditor.update(
         () => {
           const root = $getRoot();
-          if (root.getDirection() !== null) {
-            root.setDirection(null);
+          const { rootDirection: next } = planEditorDirection({
+            blockDirections: [],
+            rootDirection: root.getDirection(),
+            rootText: root.getTextContent(),
+          });
+          if (root.getDirection() !== next) {
+            root.setDirection(next);
           }
 
+          // Blocks inherit the root direction; a per-block direction is what
+          // used to split alignment line by line.
           for (const child of root.getChildren()) {
             if (!$isElementNode(child) || child.isInline()) continue;
-            const next = getTextDirectionFromFirstStrong(child.getTextContent());
-            if (child.getDirection() !== next) {
-              child.setDirection(next);
+            if (child.getDirection() !== null) {
+              child.setDirection(null);
             }
           }
         },

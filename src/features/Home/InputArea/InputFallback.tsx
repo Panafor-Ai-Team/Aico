@@ -45,7 +45,8 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   textarea: css`
     resize: none;
 
-    unicode-bidi: plaintext;
+    /* dir="auto" below already gives the whole value one direction;
+       'unicode-bidi: plaintext' would re-split it per line. */
     display: block;
     flex: 1;
 

@@ -58,12 +58,20 @@ import { useMentionCategories } from './useMentionCategories';
 
 const className = cx(
   css`
-    /* Per-line first-strong direction for soft breaks; Lexical sets dir per paragraph. */
-    unicode-bidi: plaintext;
-
+    /*
+     * One direction for the whole input, set on the root by
+     * ReactAutoDirectionPlugin. No 'unicode-bidi: plaintext' here: that resolves
+     * direction per line, which made a Persian line and an English line in the
+     * same message align to opposite edges.
+     */
     p {
-      unicode-bidi: plaintext;
       margin-block-end: 0;
+    }
+
+    /* Nested blocks (lists, quotes) may still carry a Lexical dir — keep them
+       on the root's direction so nothing splits mid-message. */
+    [dir] {
+      direction: inherit;
     }
   `,
   mentionFilledClassName,

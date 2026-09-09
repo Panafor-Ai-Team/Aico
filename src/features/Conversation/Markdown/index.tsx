@@ -46,10 +46,9 @@ const MarkdownMessage = memo<MarkdownProps>(
         // Per-character stream spans break Arabic/Persian cursive joining.
         // Default to word granularity whenever fade-in animation is on.
         streamAnimationGranularity={streamAnimationGranularity ?? (animated ? 'word' : undefined)}
-        style={{
-          unicodeBidi: 'plaintext',
-          ...style,
-        }}
+        // No 'unicode-bidi: plaintext': `dir` above already gives the whole
+        // message one direction, and plaintext would re-split it per paragraph.
+        style={style}
       >
         {children}
       </Markdown>
