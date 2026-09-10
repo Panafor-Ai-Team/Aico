@@ -113,9 +113,18 @@ export const BRANDING_EMAIL = {
   ),
 };
 
+/**
+ * Provider **id** of the managed offering — compared against real provider keys,
+ * not a display name (that's {@link BRANDING_NAME}).
+ *
+ * Defaults to `aico`, the branded alias that `managedPolicy` / `chatGuard`
+ * resolve to `openrouter` and that `aicoBilling` persists as `providerId`. The
+ * previous default, `official`, matched no provider anywhere, so every
+ * `provider === BRANDING_PROVIDER` guard was permanently false.
+ */
 export const BRANDING_PROVIDER = brandingValue(
   process.env.BRANDING_PROVIDER ?? process.env.NEXT_PUBLIC_BRANDING_PROVIDER,
-  'official',
+  'aico',
 );
 
 export const APPLE_APP_STORE_ID = '';

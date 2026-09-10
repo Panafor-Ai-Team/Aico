@@ -1176,7 +1176,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
           payload: {
             messages: [{ content: 'Hello', role: 'user' }],
             model: 'deepseek-v4-pro',
-            provider: 'lobehub',
+            provider: BRANDING_PROVIDER,
             tools: [],
           },
           type: 'call_llm' as const,
@@ -1192,7 +1192,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         maxAttempts: 1,
         model: 'deepseek-v4-pro',
         outputTokens: 25_617,
-        provider: 'lobehub',
+        provider: BRANDING_PROVIDER,
         toolCallCount: 0,
       });
       expect(mockStreamManager.publishStreamEvent).not.toHaveBeenCalledWith(
@@ -2218,31 +2218,31 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
         expect(mockFindPlanDocuments).not.toHaveBeenCalled();
       });
 
-      it.each([
-        { items: [], updatedAt: 'canonical-clear' },
-        [],
-      ])('treats canonical and legacy empty message states as clear tombstones', async (todos) => {
-        mockFindPlanDocuments.mockResolvedValue([
-          {
-            metadata: {
-              todos: { items: [{ status: 'todo', text: 'Stale metadata task' }] },
+      it.each([{ items: [], updatedAt: 'canonical-clear' }, []])(
+        'treats canonical and legacy empty message states as clear tombstones',
+        async (todos) => {
+          mockFindPlanDocuments.mockResolvedValue([
+            {
+              metadata: {
+                todos: { items: [{ status: 'todo', text: 'Stale metadata task' }] },
+              },
+              updatedAt: new Date(),
             },
-            updatedAt: new Date(),
-          },
-        ]);
+          ]);
 
-        const content = await callWithMessages(
-          [
-            { content: 'cleared', pluginState: { todos }, role: 'tool' },
-            { content: 'Continue', role: 'user' },
-          ],
-          stateWithLobeAgent(),
-        );
+          const content = await callWithMessages(
+            [
+              { content: 'cleared', pluginState: { todos }, role: 'tool' },
+              { content: 'Continue', role: 'user' },
+            ],
+            stateWithLobeAgent(),
+          );
 
-        expect(content).not.toContain('<todo_context>');
-        expect(content).not.toContain('Stale metadata task');
-        expect(mockFindPlanDocuments).not.toHaveBeenCalled();
-      });
+          expect(content).not.toContain('<todo_context>');
+          expect(content).not.toContain('Stale metadata task');
+          expect(mockFindPlanDocuments).not.toHaveBeenCalled();
+        },
+      );
 
       it.each([
         {
@@ -5391,7 +5391,7 @@ describe('RuntimeExecutors', { timeout: 60_000 }, () => {
           messages: [{ content: 'Hello', role: 'user' }],
           model: 'gpt-4',
           parentMessageId: 'parent-msg-123',
-          provider: 'lobehub',
+          provider: BRANDING_PROVIDER,
           tools: [],
         },
         type: 'call_llm' as const,
