@@ -92,6 +92,8 @@ export const BudgetSweepModalContent: FC<BudgetSweepModalContentProps> = ({
     }
   };
 
+  const nothingToReclaim = preview?.rows.every((row) => Number(row.reclaimUsd) === 0) ?? false;
+
   if (result) {
     return (
       <Flexbox gap={16} paddingBlock={8} width={'100%'}>
@@ -116,7 +118,7 @@ export const BudgetSweepModalContent: FC<BudgetSweepModalContentProps> = ({
         <>
           <SweepPreviewTable preview={preview} />
 
-          {preview.rows.every((row) => Number(row.reclaimUsd) === 0) ? (
+          {nothingToReclaim ? (
             <Text type="secondary">{t('org.sweep.nothingToReclaim')}</Text>
           ) : (
             <Flexbox className={styles.warning} gap={8}>
@@ -134,17 +136,21 @@ export const BudgetSweepModalContent: FC<BudgetSweepModalContentProps> = ({
 
           <Flexbox horizontal gap={8} justify={'flex-end'} width={'100%'}>
             <Button disabled={running} type="default" onClick={() => close()}>
-              {t('org.sweep.cancel')}
+              {t(nothingToReclaim ? 'org.sweep.done' : 'org.sweep.cancel')}
             </Button>
-            <Button
-              danger
-              disabled={confirmName !== orgName}
-              loading={running}
-              type="primary"
-              onClick={() => void handleRun()}
-            >
-              {t('org.sweep.submit')}
-            </Button>
+            {/* Hidden rather than disabled when there is nothing to sweep: a
+                danger button that can never enable reads as a broken control. */}
+            {!nothingToReclaim && (
+              <Button
+                danger
+                disabled={running || confirmName !== orgName}
+                loading={running}
+                type="primary"
+                onClick={() => void handleRun()}
+              >
+                {t('org.sweep.submit')}
+              </Button>
+            )}
           </Flexbox>
         </>
       )}

@@ -210,6 +210,40 @@ describe('org budget sweep', () => {
   });
 
   describe('executeOrgBudgetSweep', () => {
+    it('reports what the ledger actually credited, not what was requested', async () => {
+      const { members, org } = await setupOrg({
+        members: [{ capUsd: 5, email: 'member-a@example.com', userId: memberAId }],
+        orgWalletUsd: 20,
+      });
+      // A fractional micro-USD is rejected by reclaimMemberRemainingCredit's
+      // integer guard, so the wallet is credited 0. The result row must say 0
+      // too — echoing the requested figure would report money that never moved.
+      const keyService = mockKeyService({
+        reclaimMemberKey: vi.fn(async () => ({
+          remainingMicroUsd: 4_000_000.5,
+          usageMicroUsd: usd(1),
+        })),
+      } as any);
+
+      const result = await executeOrgBudgetSweep({
+        batchId: 'sweep-fractional-amount',
+        db: serverDB,
+        keyService,
+        orgId: org.id,
+      });
+
+      const row = rowFor(result.rows, members[0].id);
+      expect(row.status).toBe('reclaimed');
+      expect(row.reclaimedMicroUsd).toBe(0);
+      expect(result.totalReclaimedMicroUsd).toBe(0);
+
+      const [fresh] = await serverDB
+        .select()
+        .from(organizations)
+        .where(eq(organizations.id, org.id));
+      expect(Number(fresh.walletBalanceMicroUsd)).toBe(result.orgBalanceMicroUsd);
+    });
+
     it('returns every member allowance to the org wallet and zeroes their budgets', async () => {
       const { members, org } = await setupOrg({
         members: [

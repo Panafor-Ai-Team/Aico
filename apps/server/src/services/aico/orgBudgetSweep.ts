@@ -310,7 +310,10 @@ export const executeOrgBudgetSweep = async ({
         remainingMicroUsd,
       });
       // A null transaction means the CAS lost — another sweep already settled it.
-      const credited = result.transaction ? remainingMicroUsd : 0;
+      // Report the ledger's own figure rather than what we asked for: the model
+      // sanitizes the amount (non-integer or negative becomes 0), so echoing the
+      // request could claim money moved that never did.
+      const credited = result.transaction ? Number(result.transaction.amountMicroUsd ?? 0) : 0;
       rows.push({
         ...base,
         reclaimedMicroUsd: credited,
