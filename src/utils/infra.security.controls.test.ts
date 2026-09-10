@@ -42,6 +42,26 @@ describe('infra security controls (AICO-109)', () => {
     expect(workflow).not.toContain('actions-cool/pr-welcome@');
   });
 
+  it('ships no usable Casdoor credentials in the production compose bundle', () => {
+    const initData = read('docker-compose/production/grafana/init_data.json');
+
+    // A committed admin password / client secret / JWT signing key is public,
+    // so anyone with this repo could sign in or forge tokens against a stack
+    // that boots on it. These must stay placeholders the operator replaces.
+    expect(initData).not.toContain('pswd123');
+    expect(initData).not.toContain('a387a4892ee19b1a2249');
+    expect(initData).not.toContain('dbf205949d704de81b0b5b3603174e23fbecc354');
+    expect(initData).not.toContain('BEGIN RSA PRIVATE KEY');
+    expect(initData).not.toContain('BEGIN CERTIFICATE');
+    expect(initData).toContain('YOUR_CASDOOR_ADMIN_PASSWORD');
+    expect(initData).toContain('YOUR_CASDOOR_PRIVATE_KEY');
+
+    // A directory named `production` must not run Casdoor in dev mode.
+    expect(read('docker-compose/production/grafana/docker-compose.yml')).not.toMatch(
+      /^\s*runmode:\s*'dev'/m,
+    );
+  });
+
   it('keeps deploy env examples free of concrete postgres passwords', () => {
     expect(read('docker-compose/deploy/.env.example')).not.toContain('uWNZugjBqixf8dxC');
     expect(read('docker-compose/production/grafana/.env.example')).not.toContain(

@@ -34,11 +34,29 @@ This guide will help you set up and use these tools to monitor your LobeHub inst
 ```bash
 curl -O https://raw.githubusercontent.com/lobehub/lobehub/HEAD/docker-compose/production/grafana/docker-compose.yml
 curl -O https://raw.githubusercontent.com/lobehub/lobehub/HEAD/docker-compose/production/grafana/.env.example
+curl -O https://raw.githubusercontent.com/lobehub/lobehub/HEAD/docker-compose/production/grafana/init_data.json
 mv .env.example .env
 ```
 
 1. Update the password & secrets in the `.env` file as needed.
-2. Start the stack with the correct profile:
+
+2. Replace every `YOUR_CASDOOR_*` placeholder in `init_data.json` with a value unique to your deployment:
+
+   <Callout type={'warning'}>
+     `init_data.json` seeds Casdoor on its first boot and ships with placeholders rather than
+     working credentials on purpose. Any value committed to a public repository is known to
+     everyone — a shared signing key would let anyone forge tokens for your instance.
+   </Callout>
+
+   - `YOUR_CASDOOR_ADMIN_PASSWORD` / `YOUR_CASDOOR_USER_PASSWORD` — your own strong passwords.
+   - `YOUR_CASDOOR_CLIENT_ID` / `YOUR_CASDOOR_CLIENT_SECRET` — a random id and secret, for example
+     `openssl rand -hex 10` and `openssl rand -hex 20`. Copy the same pair into `AUTH_CASDOOR_ID`
+     and `AUTH_CASDOOR_SECRET` in `.env`.
+   - `YOUR_CASDOOR_CERTIFICATE` / `YOUR_CASDOOR_PRIVATE_KEY` — a keypair you generate yourself, for
+     example with `openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 7300 -nodes`.
+     Paste each PEM in as a single JSON string with newlines escaped as `\n`.
+
+3. Start the stack with the correct profile:
 
    ```sh
    docker compose up -d
