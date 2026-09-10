@@ -93,6 +93,7 @@ export class ServerCallLlmAttempt {
   private readonly provider: string;
   private reasoning?: ModelReasoning;
   private readonly reasoningPartEvents: ContentPartData[] = [];
+  private resolvedModel?: string;
   private readonly resolved: ServerCallLlmTooling['resolved'];
   private speed?: ModelPerformance;
   private readonly streamSink: ServerCallLlmStreamSink;
@@ -170,6 +171,7 @@ export class ServerCallLlmAttempt {
           if (data.speed) this.speed = data.speed;
           if (data.finishReason) this.finishReason = data.finishReason;
           if (data.reasoning) this.reasoning = data.reasoning;
+          if (data.resolvedModel) this.resolvedModel = data.resolvedModel;
         },
         onContentPart: async (part) => {
           this.onFirstChunk();
@@ -287,6 +289,7 @@ export class ServerCallLlmAttempt {
       imageList: [...this.imageList],
       reasoning: this.reasoning,
       reasoningParts: [...this.streamSink.reasoningParts],
+      resolvedModel: this.resolvedModel,
       speed: this.speed,
       thinkingContent: this.streamSink.thinkingContent,
       toolCalls: [...this.toolCalls],

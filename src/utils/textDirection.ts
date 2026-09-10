@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 export type TextDirection = 'ltr' | 'rtl' | null;
 
 /**
@@ -15,4 +17,20 @@ export const getTextDirectionFromFirstStrong = (text: string): TextDirection => 
     if (LTR_STRONG.test(char)) return 'ltr';
   }
   return null;
+};
+
+/**
+ * Concatenate the text of a ReactNode tree (plain strings, arrays, fragments,
+ * elements such as stream-animation spans). Lets message-level `dir` resolve
+ * from the actual words even when children are not a single string — otherwise
+ * the direction silently falls back to the page direction mid-stream.
+ */
+export const extractTextFromReactNode = (node: ReactNode): string => {
+  if (node === null || node === undefined || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(extractTextFromReactNode).join('');
+  if (typeof node === 'object' && 'props' in node) {
+    return extractTextFromReactNode((node as { props?: { children?: ReactNode } }).props?.children);
+  }
+  return '';
 };

@@ -4,7 +4,7 @@ import { memo, useMemo } from 'react';
 
 import { useUserStore } from '@/store/user';
 import { userGeneralSettingsSelectors } from '@/store/user/selectors';
-import { getTextDirectionFromFirstStrong } from '@/utils/textDirection';
+import { extractTextFromReactNode, getTextDirectionFromFirstStrong } from '@/utils/textDirection';
 
 const MarkdownMessage = memo<MarkdownProps>(
   ({
@@ -20,10 +20,13 @@ const MarkdownMessage = memo<MarkdownProps>(
       userGeneralSettingsSelectors.config,
     );
 
-    // Match chat input: base direction from first strong char so Persian replies
-    // align RTL even when the UI locale is English (and vice versa).
+    // Match chat input: base direction from the first strong character so
+    // Persian replies align RTL even when the UI locale is English (and vice
+    // versa). Children can be span arrays mid-stream, so read the words out of
+    // the tree instead of only accepting a plain string — a missed direction
+    // here falls back to the page direction and the whole message jumps edge.
     const autoDir = useMemo(
-      () => (typeof children === 'string' ? getTextDirectionFromFirstStrong(children) : null),
+      () => getTextDirectionFromFirstStrong(extractTextFromReactNode(children)),
       [children],
     );
 

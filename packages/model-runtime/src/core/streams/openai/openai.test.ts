@@ -737,6 +737,66 @@ describe('OpenAIStream', () => {
     });
   });
 
+  describe('router alias resolution', () => {
+    const buildStream = (model: string) =>
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue({
+            choices: [{ delta: { content: 'Hi' }, index: 0 }],
+            id: 'chat-1',
+            model,
+          });
+          controller.enqueue({
+            choices: [{ delta: { content: '!' }, index: 0 }],
+            id: 'chat-1',
+            model,
+          });
+          controller.close();
+        },
+      });
+
+    const collect = async (protocolStream: ReadableStream) => {
+      const decoder = new TextDecoder();
+      const chunks: string[] = [];
+      // @ts-ignore async iteration over the protocol stream
+      for await (const chunk of protocolStream) {
+        chunks.push(decoder.decode(chunk, { stream: true }));
+      }
+      return chunks;
+    };
+
+    it('reports the model an auto router picked, once per stream', async () => {
+      const onFinal = vi.fn();
+
+      const chunks = await collect(
+        OpenAIStream(buildStream('openai/gpt-5'), {
+          callbacks: { onFinal },
+          payload: { model: 'openrouter/auto', provider: 'openrouter' },
+        }),
+      );
+
+      expect(chunks.filter((chunk) => chunk.includes('event: resolved_model'))).toHaveLength(1);
+      expect(chunks.join('')).toContain('data: "openai/gpt-5"');
+      expect(onFinal).toHaveBeenCalledWith(
+        expect.objectContaining({ resolvedModel: 'openai/gpt-5' }),
+      );
+    });
+
+    it('stays quiet for a direct model request, even when the provider answers with a dated snapshot id', async () => {
+      const onFinal = vi.fn();
+
+      const chunks = await collect(
+        OpenAIStream(buildStream('gpt-4o-2024-08-06'), {
+          callbacks: { onFinal },
+          payload: { model: 'gpt-4o', provider: 'openai' },
+        }),
+      );
+
+      expect(chunks.join('')).not.toContain('resolved_model');
+      expect(onFinal).toHaveBeenCalledWith(expect.objectContaining({ resolvedModel: undefined }));
+    });
+  });
+
   describe('Tools Calling', () => {
     it('should handle OpenAI official tool calls', async () => {
       const mockOpenAIStream = new ReadableStream({

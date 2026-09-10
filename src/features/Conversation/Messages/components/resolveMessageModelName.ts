@@ -5,6 +5,19 @@ import {
 
 import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
 
+/**
+ * Which model id the cost card should name. A router alias (`panachat/auto`)
+ * names the picker, not what ran — when the provider reported the model the
+ * router chose, the cost belongs to that one.
+ */
+export const resolveCostModelId = (
+  model: string | null | undefined,
+  metadata: Record<string, unknown> | null | undefined,
+): string | null | undefined => {
+  const resolved = metadata?.resolvedModel;
+  return typeof resolved === 'string' && resolved ? resolved : model;
+};
+
 interface MessageModelNameInput {
   /** `displayName` of the resolved model card, when the model is known locally. */
   displayName?: string;

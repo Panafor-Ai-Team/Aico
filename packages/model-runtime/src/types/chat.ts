@@ -257,6 +257,12 @@ export interface OnFinishData {
   finishReason?: string;
   grounding?: any;
   reasoning?: ModelReasoning;
+  /**
+   * The model a router alias actually dispatched to, when the request targeted
+   * one (e.g. `openrouter/auto` → `openai/gpt-4o`). Undefined for direct model
+   * requests, where the requested id already names what ran.
+   */
+  resolvedModel?: string;
   speed?: ModelPerformance;
   text: string;
   thinking?: string;

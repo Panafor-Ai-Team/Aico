@@ -56,6 +56,11 @@ export interface LLMAttemptOutput {
   /** Adapter-produced structured reasoning metadata such as duration and signature. */
   reasoning?: ModelReasoning;
   reasoningParts: LLMAttemptContentPart[];
+  /**
+   * The model a router alias actually dispatched to (`openrouter/auto` →
+   * `openai/gpt-4o`). Undefined for direct model requests.
+   */
+  resolvedModel?: string;
   speed?: ModelPerformance;
   /** Raw streamed thinking text; finalization converts it to the message reasoning object. */
   thinkingContent: string;

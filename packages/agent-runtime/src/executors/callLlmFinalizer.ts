@@ -63,6 +63,7 @@ const buildMessageMetadata = ({
   finishType,
   hasContentImages,
   interruptedMidStream,
+  resolvedModel,
 }: {
   answerSalvagedFromReasoning?: boolean;
   currentStepSpeed?: ModelPerformance;
@@ -70,10 +71,12 @@ const buildMessageMetadata = ({
   finishType?: string;
   hasContentImages?: boolean;
   interruptedMidStream?: boolean;
+  resolvedModel?: string;
 }): CallLlmMessageMetadata | undefined => {
   const metadata: CallLlmMessageMetadata = {
     ...(currentStepUsage && { ...currentStepUsage, usage: currentStepUsage }),
     ...(currentStepSpeed && { ...currentStepSpeed, performance: currentStepSpeed }),
+    ...(resolvedModel && { resolvedModel }),
     ...(finishType && { finishType }),
     ...(hasContentImages && { isMultimodal: true }),
     ...(answerSalvagedFromReasoning && { answerSalvagedFromReasoning: true }),
@@ -179,6 +182,7 @@ const persistFinalMessage = async ({
     currentStepUsage: output.usage,
     finishType: output.finishReason,
     hasContentImages: output.hasContentImages,
+    resolvedModel: output.resolvedModel,
   });
   const workAnchor = buildWorkAnchor({
     operationId: host.operation.operationId,
@@ -392,6 +396,7 @@ export const persistInterruptedCallLlmResult = async ({
         currentStepSpeed: output.speed,
         currentStepUsage: output.usage,
         interruptedMidStream: true,
+        resolvedModel: output.resolvedModel,
       }),
       reasoning: output.thinkingContent ? { content: output.thinkingContent } : undefined,
       tools: sanitizePersistedTools(output.toolsCalling),
