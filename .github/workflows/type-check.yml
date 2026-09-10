@@ -1,0 +1,43 @@
+name: Type Check
+
+# The only quality gate that runs on PRs in this fork: every upstream CI
+# workflow (test.yml, pr-build-*.yml) is workflow_dispatch-only here, which is
+# how the root type-check drifted to 201 errors across 76 files unnoticed.
+# Keep this green — a new type error must fail the PR, not accumulate.
+on:
+  pull_request:
+    branches:
+      - canary
+      - main
+  push:
+    branches:
+      - canary
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  type-check:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+
+      - name: Type check
+        run: pnpm type-check
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192

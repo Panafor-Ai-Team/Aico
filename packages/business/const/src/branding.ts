@@ -81,7 +81,21 @@ export const BRANDING_LOGO_URL = brandingValue(
   '/icons/icon-192x192.png',
 );
 
-export const BRANDING_URL = {
+/**
+ * Unset by default. Typed as optional strings rather than literal `undefined`
+ * so consumers can narrow them (`SOCIAL_URL.discord?.trim()`) and a white-label
+ * deployment can populate them — a literal `undefined` type collapses those
+ * expressions to `never`.
+ */
+type OptionalUrl = string | undefined;
+
+export const BRANDING_URL: {
+  help: OptionalUrl;
+  privacy: OptionalUrl;
+  subscription: OptionalUrl;
+  support: OptionalUrl;
+  terms: OptionalUrl;
+} = {
   help: undefined,
   privacy: undefined,
   subscription: undefined,
@@ -89,7 +103,13 @@ export const BRANDING_URL = {
   terms: undefined,
 };
 
-export const SOCIAL_URL = {
+export const SOCIAL_URL: {
+  discord: OptionalUrl;
+  github: OptionalUrl;
+  medium: OptionalUrl;
+  x: OptionalUrl;
+  youtube: OptionalUrl;
+} = {
   discord: undefined,
   github: undefined,
   medium: undefined,
@@ -97,15 +117,16 @@ export const SOCIAL_URL = {
   youtube: undefined,
 };
 
-export const FILE_URL = {
+export const FILE_URL: { importFromNotionGuide: OptionalUrl } = {
   importFromNotionGuide: undefined,
 };
 
-export const BRANDING_EMAIL = {
-  business: brandingValue(
-    process.env.BRANDING_BUSINESS_EMAIL ?? process.env.NEXT_PUBLIC_BRANDING_BUSINESS_EMAIL,
-    '',
-  ),
+export const BRANDING_EMAIL: {
+  business: string;
+  replyTo: OptionalUrl;
+  support: string;
+} = {
+  business: readBrandingEnv('BRANDING_BUSINESS_EMAIL', ''),
   replyTo: undefined,
   support: brandingValue(
     process.env.BRANDING_SUPPORT_EMAIL ?? process.env.NEXT_PUBLIC_BRANDING_SUPPORT_EMAIL,

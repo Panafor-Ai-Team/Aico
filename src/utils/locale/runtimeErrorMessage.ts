@@ -4,7 +4,10 @@ import { getErrorCodeSpec } from '@lobechat/model-runtime';
  * Loose `t` shape that accepts any key / vars — the type-safe key inference in
  * `i18next.CustomTypeOptions` doesn't help here because we look up dynamically.
  */
-type LooseT = (key: string, vars?: Record<string, unknown>) => string;
+// Parameters are intentionally loose: `TFunction<Ns>` narrows its key to that
+// namespace's literal union, so it is not assignable to `(key: string) => string`.
+
+type LooseT = (key: any, vars?: any) => string;
 
 /**
  * Resolve the localized message for an error type, routing between the new

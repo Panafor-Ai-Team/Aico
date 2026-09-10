@@ -103,7 +103,10 @@ const loadFaNamespace = async (ns: AuthI18nNamespace) => {
 };
 
 /** Exported for regression tests — auth SPA must load fa-IR / zh-CN, not fall back to English. */
-export const loadAuthNamespace = async (lng: string, ns: string) => {
+export const loadAuthNamespace = async (
+  lng: string,
+  ns: string,
+): Promise<Record<string, unknown>> => {
   const safeNamespace = isAllowedNamespace(ns) ? ns : 'auth';
   const normalizedLocale = normalizeLocale(lng);
   const english = defaultResources[safeNamespace] as Record<string, unknown>;

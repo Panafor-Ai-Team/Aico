@@ -8,6 +8,15 @@ import {
   RemoteOpenRouterManagementClient,
 } from './management';
 
+/**
+ * `aicoEnv` is a readonly t3-env object. These tests deliberately mutate it to
+ * exercise the product-vs-control-plane branches; the writes work at runtime,
+ * only the declared type forbids them. Mutability is confined to this view.
+ */
+const mutableAicoEnv = aicoEnv as {
+  -readonly [K in keyof typeof aicoEnv]: (typeof aicoEnv)[K];
+};
+
 vi.mock('@/envs/aico', () => ({
   aicoEnv: {
     AICO_CONTROL_PLANE_SERVICE_TOKEN: undefined as string | undefined,
@@ -112,11 +121,11 @@ describe('RemoteOpenRouterManagementClient', () => {
 describe('createOpenRouterManagementClient product / control-plane rules', () => {
   beforeEach(() => {
     __resetOpenRouterManagementClientForTests();
-    aicoEnv.AICO_CONTROL_PLANE_SERVICE_TOKEN = undefined;
-    aicoEnv.AICO_CONTROL_PLANE_URL = undefined;
-    aicoEnv.AICO_IS_CONTROL_PLANE = false;
-    aicoEnv.AICO_OPENROUTER_MOCK = false;
-    aicoEnv.OPENROUTER_MANAGEMENT_API_KEY = undefined;
+    mutableAicoEnv.AICO_CONTROL_PLANE_SERVICE_TOKEN = undefined;
+    mutableAicoEnv.AICO_CONTROL_PLANE_URL = undefined;
+    mutableAicoEnv.AICO_IS_CONTROL_PLANE = false;
+    mutableAicoEnv.AICO_OPENROUTER_MOCK = false;
+    mutableAicoEnv.OPENROUTER_MANAGEMENT_API_KEY = undefined;
   });
 
   afterEach(() => {
@@ -125,8 +134,8 @@ describe('createOpenRouterManagementClient product / control-plane rules', () =>
   });
 
   it('uses remote client when control plane URL + token are set', () => {
-    aicoEnv.AICO_CONTROL_PLANE_URL = 'http://localhost:3020';
-    aicoEnv.AICO_CONTROL_PLANE_SERVICE_TOKEN = 'tok';
+    mutableAicoEnv.AICO_CONTROL_PLANE_URL = 'http://localhost:3020';
+    mutableAicoEnv.AICO_CONTROL_PLANE_SERVICE_TOKEN = 'tok';
     const client = createOpenRouterManagementClient({});
     expect(client).toBeInstanceOf(RemoteOpenRouterManagementClient);
   });
@@ -135,7 +144,7 @@ describe('createOpenRouterManagementClient product / control-plane rules', () =>
     const prevNode = process.env.NODE_ENV;
     try {
       (process.env as { NODE_ENV?: string }).NODE_ENV = 'production';
-      aicoEnv.OPENROUTER_MANAGEMENT_API_KEY = 'sk-or-v1-should-not-be-here';
+      mutableAicoEnv.OPENROUTER_MANAGEMENT_API_KEY = 'sk-or-v1-should-not-be-here';
       expect(() => createOpenRouterManagementClient({})).toThrow(
         /must not be set on the product server/,
       );
@@ -148,7 +157,7 @@ describe('createOpenRouterManagementClient product / control-plane rules', () =>
     const prevNode = process.env.NODE_ENV;
     try {
       (process.env as { NODE_ENV?: string }).NODE_ENV = 'development';
-      aicoEnv.OPENROUTER_MANAGEMENT_API_KEY = 'sk-or-v1-should-not-be-here';
+      mutableAicoEnv.OPENROUTER_MANAGEMENT_API_KEY = 'sk-or-v1-should-not-be-here';
       expect(() => createOpenRouterManagementClient({})).toThrow(
         /must not be set on the product server/,
       );
@@ -168,8 +177,8 @@ describe('createOpenRouterManagementClient product / control-plane rules', () =>
   });
 
   it('control plane may use local management key', () => {
-    aicoEnv.AICO_IS_CONTROL_PLANE = true;
-    aicoEnv.OPENROUTER_MANAGEMENT_API_KEY = 'sk-or-v1-control';
+    mutableAicoEnv.AICO_IS_CONTROL_PLANE = true;
+    mutableAicoEnv.OPENROUTER_MANAGEMENT_API_KEY = 'sk-or-v1-control';
     const client = createOpenRouterManagementClient({});
     expect(client.constructor.name).toContain('Http');
   });

@@ -26,6 +26,42 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 const About = memo<{ mobile?: boolean }>(({ mobile }) => {
   const { t } = useTranslation('common');
 
+  // SOCIAL_URL entries are undefined unless a deployment configures them, so
+  // filter before rendering — an unbranded build must not show dead links to
+  // upstream's social accounts.
+  const socialItems = [
+    {
+      href: BLOG,
+      icon: SiRss,
+      label: t('blog'),
+      value: 'blog',
+    },
+    {
+      href: SOCIAL_URL.github,
+      icon: SiGithub,
+      label: 'GitHub',
+      value: 'feedback',
+    },
+    {
+      href: SOCIAL_URL.discord,
+      icon: SiDiscord,
+      label: 'Discord',
+      value: 'discord',
+    },
+    {
+      href: SOCIAL_URL.x,
+      icon: SiX as any,
+      label: 'X / Twitter',
+      value: 'x',
+    },
+
+    {
+      href: SOCIAL_URL.youtube,
+      icon: SiYoutube,
+      label: 'YouTube',
+      value: 'youtube',
+    },
+  ].filter((item): item is typeof item & { href: string } => !!item.href);
   return (
     <Form.Group
       collapsible={false}
@@ -37,43 +73,7 @@ const About = memo<{ mobile?: boolean }>(({ mobile }) => {
       <Flexbox gap={20} paddingBlock={20} width={'100%'}>
         <Version mobile={mobile} />
         <Divider style={{ marginBlock: 0 }} />
-        <AboutList
-          grid
-          ItemRender={ItemCard}
-          items={[
-            {
-              href: BLOG,
-              icon: SiRss,
-              label: t('blog'),
-              value: 'blog',
-            },
-            {
-              href: SOCIAL_URL.github,
-              icon: SiGithub,
-              label: 'GitHub',
-              value: 'feedback',
-            },
-            {
-              href: SOCIAL_URL.discord,
-              icon: SiDiscord,
-              label: 'Discord',
-              value: 'discord',
-            },
-            {
-              href: SOCIAL_URL.x,
-              icon: SiX as any,
-              label: 'X / Twitter',
-              value: 'x',
-            },
-
-            {
-              href: SOCIAL_URL.youtube,
-              icon: SiYoutube,
-              label: 'YouTube',
-              value: 'youtube',
-            },
-          ]}
-        />
+        <AboutList grid ItemRender={ItemCard} items={socialItems} />
         <Divider style={{ marginBlock: 0 }} />
         <div className={styles.title}>{t('contact')}</div>
         <AboutList

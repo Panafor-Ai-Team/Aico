@@ -7,6 +7,8 @@ import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
+import { type LooseTFunction } from '@/types/looseTranslation';
+
 const styles = createStaticStyles(({ css, cssVar }) => ({
   back: css`
     display: inline-block;
@@ -96,6 +98,9 @@ const LegalDocument = memo<LegalDocumentProps>(({ kind }) => {
     orgName: ORG_NAME,
     supportEmail: BRANDING_EMAIL.support || undefined,
   };
+  // Section keys are built at runtime from `kind`/`section`, so they are not in
+  // the namespace's literal key union that `TFunction` requires.
+  const translate = t as LooseTFunction;
 
   return (
     <Flexbox className={styles.shell} gap={24}>
@@ -130,9 +135,9 @@ const LegalDocument = memo<LegalDocumentProps>(({ kind }) => {
         return (
           <section className={styles.section} key={section}>
             <Text strong style={{ fontSize: 16 }}>
-              {t(titleKey, vars)}
+              {translate(titleKey, vars)}
             </Text>
-            <p className={styles.body}>{t(bodyKey, vars)}</p>
+            <p className={styles.body}>{translate(bodyKey, vars)}</p>
           </section>
         );
       })}

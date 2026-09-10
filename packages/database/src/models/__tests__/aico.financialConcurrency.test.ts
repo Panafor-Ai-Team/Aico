@@ -123,13 +123,15 @@ describe('Aico financial concurrency & money invariants (Phase 2)', () => {
     (serverDB as { transaction: typeof serverDB.transaction }).transaction = async (fn) =>
       originalTransaction(async (tx) => {
         const originalFindFirst = tx.query.organizations.findFirst.bind(tx.query.organizations);
-        tx.query.organizations.findFirst = async (opts) => {
+        // Monkeypatching drizzle's overloaded query builder — the stub only
+        // needs to satisfy the runtime call, not the full generic signature.
+        tx.query.organizations.findFirst = (async (opts: never) => {
           const row = await originalFindFirst(opts);
           if (row && row.id === org.id) {
             return { ...row, walletBalanceMicroUsd: usd(100) };
           }
           return row;
-        };
+        }) as typeof tx.query.organizations.findFirst;
         return fn(tx);
       });
 
@@ -550,7 +552,7 @@ describe('AICO-105 FIN-003 credit/allocate idempotency keys', () => {
       orgId: org.id,
     });
 
-    expect(second.transaction.id).toBe(first.transaction.id);
+    expect(second.transaction!.id).toBe(first.transaction!.id);
     expect(Number(second.organization.walletBalanceMicroUsd)).toBe(usd(10));
   });
 
@@ -575,7 +577,7 @@ describe('AICO-105 FIN-003 credit/allocate idempotency keys', () => {
       periodAmountMicroUsd: usd(10),
     });
 
-    expect(second.transaction.id).toBe(first.transaction.id);
+    expect(second.transaction!.id).toBe(first.transaction!.id);
     const orgRow = await orgModel.getById(org.id);
     expect(Number(orgRow?.walletBalanceMicroUsd)).toBe(usd(40));
     const budget = await orgModel.getMemberBudget(memberA.id);
@@ -619,8 +621,8 @@ describe('AICO-105 FIN-005 wallet tx balance audit trail', () => {
       period: 'daily',
       periodAmountMicroUsd: usd(20),
     });
-    expect(allocated.transaction.balanceBeforeMicroUsd).toBe(usd(50));
-    expect(allocated.transaction.balanceAfterMicroUsd).toBe(usd(30));
+    expect(allocated.transaction!.balanceBeforeMicroUsd).toBe(usd(50));
+    expect(allocated.transaction!.balanceAfterMicroUsd).toBe(usd(30));
 
     const reclaimed = await orgModel.reclaimMemberRemainingCredit({
       createdByUserId: ownerId,

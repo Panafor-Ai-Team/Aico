@@ -1,4 +1,4 @@
-import type { Pricing } from 'model-bank';
+import type { Pricing, PricingUnit } from 'model-bank';
 
 export interface ImageSinglePriceResult {
   approximatePrice?: number;
@@ -49,7 +49,10 @@ export const resolveImageSinglePrice = (pricing?: Pricing): ImageSinglePriceResu
   // Estimate a rough per-image cost so Create still shows *something* instead
   // of nothing; this is deliberately an approximation, never an exact price.
   const imageOutputUnit = pricing.units.find(
-    (unit) => unit.name === 'imageOutput' && unit.strategy === 'fixed',
+    // Predicate form so the result narrows to the fixed-rate variant; a plain
+    // boolean callback leaves the union intact and `rate` unreachable.
+    (unit): unit is Extract<PricingUnit, { strategy: 'fixed' }> =>
+      unit.name === 'imageOutput' && unit.strategy === 'fixed',
   );
   if (imageOutputUnit && imageOutputUnit.unit === 'millionTokens') {
     return {

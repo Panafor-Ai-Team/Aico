@@ -27,11 +27,27 @@ import { controlPlaneClient } from '@/libs/trpc/client/controlPlane';
 
 const usd = (n: number | string | undefined | null) => `$${Number(n ?? 0).toFixed(2)}`;
 
+/**
+ * Row shape for the audit-log table. Declared once because the columns array
+ * infers its record type from the first column that annotates one — annotating
+ * two columns with different partial shapes made them conflict.
+ */
+interface AuditRow {
+  orgId?: string | null;
+  userId?: string | null;
+}
+
 export const PlatformAdminPanel = () => {
   const { t } = useTranslation('aico');
   const [tab, setTab] = useState('overview');
   const [createForm] = Form.useForm<{ managerEmail: string; name: string }>();
-  const [creditForm] = Form.useForm<FxTopupFormValues & { description?: string; orgId: string }>();
+  // Extra fields are optional so this stays assignable to
+  // `FormInstance<FxTopupFormValues>` for <FxTopupFields> — FormInstance is
+  // invariant, so a required extra field makes the whole instance incompatible
+  // even though the child only touches the shared amount fields. Matches
+  // userCreditForm below. `orgId` is enforced by the Form.Item rule and the
+  // guard in onFinish.
+  const [creditForm] = Form.useForm<FxTopupFormValues & { description?: string; orgId?: string }>();
   const [creditChargeField, setCreditChargeField] = useState<FxTopupChargeField>('toman');
   const [userCreditForm] = Form.useForm<
     FxTopupFormValues & { description?: string; email?: string; userId?: string }
@@ -95,7 +111,10 @@ export const PlatformAdminPanel = () => {
         durationDays: trialConfig.durationDays,
         enabled: trialConfig.enabled,
         maxRequests: trialConfig.maxRequests,
-        trialBudgetUsd: trialConfig.trialBudgetUsd,
+        // The server carries USD as a decimal *string* (microUsdToDecimalString)
+        // while the control is an InputNumber, so convert at the boundary.
+        trialBudgetUsd:
+          trialConfig.trialBudgetUsd === undefined ? undefined : Number(trialConfig.trialBudgetUsd),
       });
     }
   }, [trialConfig, trialForm]);
@@ -324,14 +343,14 @@ export const PlatformAdminPanel = () => {
                     dataIndex: 'orgName',
                     ellipsis: true,
                     title: t('platform.columns.org'),
-                    render: (v: string | null, row: { orgId?: string | null }) =>
+                    render: (v: string | null, row: AuditRow) =>
                       v || (row.orgId ? row.orgId.slice(0, 12) : '—'),
                   },
                   {
                     dataIndex: 'userEmail',
                     ellipsis: true,
                     title: t('platform.columns.userId'),
-                    render: (v: string | null, row: { userId?: string | null }) =>
+                    render: (v: string | null, row: AuditRow) =>
                       v || (row.userId ? row.userId.slice(0, 12) : '—'),
                   },
                   {
@@ -671,7 +690,12 @@ export const PlatformAdminPanel = () => {
                     durationDays: values.durationDays,
                     enabled: values.enabled,
                     maxRequests: values.maxRequests ?? null,
-                    trialBudgetUsd: values.trialBudgetUsd,
+                    // updateTrialConfig takes `z.string().optional()` — sending the
+                    // raw InputNumber value failed zod validation at runtime.
+                    trialBudgetUsd:
+                      values.trialBudgetUsd === undefined
+                        ? undefined
+                        : String(values.trialBudgetUsd),
                   });
                   toast.success(t('platform.trialSaved'));
                   await mutateTrial();
@@ -903,7 +927,7 @@ export const PlatformAdminPanel = () => {
                 layout="vertical"
                 onFinish={async (values) => {
                   const payload = resolveFxTopupPayload(values, creditChargeField);
-                  if (!payload) return;
+                  if (!payload || !values.orgId) return;
                   setBusy(true);
                   try {
                     await controlPlaneClient.platformAdmin.addManualCredit.mutate({
@@ -999,7 +1023,6 @@ export const PlatformAdminPanel = () => {
                     <Select
                       allowClear
                       showSearch
-                      optionFilterProp="label"
                       placeholder={t('platform.userIdPlaceholder')}
                       style={{ width: '100%' }}
                       options={(userWallets || []).map((w) => ({

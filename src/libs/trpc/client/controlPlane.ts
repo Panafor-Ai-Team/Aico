@@ -1,12 +1,7 @@
 import { createTRPCClient, httpBatchLink, httpLink, splitLink } from '@trpc/client';
 import superjson from 'superjson';
 
-import type { PlatformAdminRouter } from '@/server/routers/lambda/platformAdmin';
-
-/** Control-plane tRPC surface (platform admin only). */
-export type ControlPlaneRouter = {
-  platformAdmin: PlatformAdminRouter;
-};
+import type { ControlPlaneRouter } from '@/server/routers/controlPlane';
 
 /**
  * tRPC client for the Aico control plane.

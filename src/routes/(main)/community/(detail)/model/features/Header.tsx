@@ -34,12 +34,16 @@ const Header = memo<{ mobile?: boolean }>(({ mobile: isMobile }) => {
   const { description, identifier, releasedAt, displayName, type, abilities, contextWindowTokens } =
     useDetailContext();
   const { mobile = isMobile } = useResponsive();
+  // `identifier` is optional on the detail context but always present for a
+  // rendered model page; fall back to an empty id rather than passing undefined
+  // into helpers that require a string.
+  const modelId = identifier ?? '';
   const { t } = useTranslation('models');
 
   return (
     <Flexbox gap={12}>
       <Flexbox horizontal align={'flex-start'} gap={16} width={'100%'}>
-        <BrandedModelIcon model={identifier} size={mobile ? 48 : 64} />
+        <BrandedModelIcon model={modelId} size={mobile ? 48 : 64} />
         <Flexbox
           flex={1}
           gap={4}
@@ -71,9 +75,9 @@ const Header = memo<{ mobile?: boolean }>(({ mobile: isMobile }) => {
                 as={'h1'}
                 ellipsis={{ rows: 1 }}
                 style={{ fontSize: mobile ? 18 : 24, margin: 0 }}
-                title={identifier}
+                title={modelId}
               >
-                {displayName || formatBrandedModelId(identifier)}
+                {displayName || formatBrandedModelId(modelId)}
               </Text>
             </Flexbox>
             <Flexbox horizontal align={'center'} gap={6}>
@@ -81,7 +85,7 @@ const Header = memo<{ mobile?: boolean }>(({ mobile: isMobile }) => {
             </Flexbox>
           </Flexbox>
           <Flexbox horizontal align={'center'} gap={4}>
-            <span>{formatBrandedModelId(identifier)}</span>
+            <span>{formatBrandedModelId(modelId)}</span>
             <Icon icon={DotIcon} />
             <ModelInfoTags
               directionReverse

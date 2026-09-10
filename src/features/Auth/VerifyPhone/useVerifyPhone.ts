@@ -11,6 +11,7 @@ import {
   formatIranianPhoneForDisplay,
   normalizeIranianPhoneNumber,
 } from '@/libs/better-auth/phone';
+import { type LooseTFunction } from '@/types/looseTranslation';
 import { sanitizeRedirectPath } from '@/utils/onboardingRedirect';
 
 type Step = 'phone' | 'otp';
@@ -24,7 +25,7 @@ type SessionUserPhone = {
   phoneNumberVerified?: boolean | null;
 };
 
-const mapOtpError = (code: string | undefined, fallback: string, t: (key: string) => string) => {
+const mapOtpError = (code: string | undefined, fallback: string, t: LooseTFunction) => {
   switch (code) {
     case 'INVALID_OTP': {
       return t('betterAuth.verifyPhone.errors.invalidOtp');

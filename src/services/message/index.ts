@@ -14,6 +14,7 @@ import {
   type UpdateMessageRAGParams,
   type UpdateMessageResult,
 } from '@lobechat/types';
+import { ChatErrorType } from '@lobechat/types';
 import { type HeatmapsProps } from '@lobehub/charts';
 
 import { lambdaClient } from '@/libs/trpc/client';
@@ -44,7 +45,10 @@ export const toPlainChatMessageError = (
     return {
       body: value instanceof Error ? { message: value.message, name: value.name } : value,
       message: typeof raw.message === 'string' ? raw.message : undefined,
-      type: 'ApplicationRuntimeError',
+      // 'ApplicationRuntimeError' was not a member of ChatErrorType — it exists
+      // nowhere else in the codebase, so this fallback emitted a type no consumer
+      // could match. UnknownChatFetchError is the canonical catch-all.
+      type: ChatErrorType.UnknownChatFetchError,
     };
   }
 

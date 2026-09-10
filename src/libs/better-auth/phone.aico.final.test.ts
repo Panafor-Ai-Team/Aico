@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { normalizeIranianPhoneNumber } from '../phone';
+import { normalizeIranianPhoneNumber } from './phone';
 
 describe('normalizeIranianPhoneNumber (final remediation)', () => {
   it('accepts UI local form 09…', () => {

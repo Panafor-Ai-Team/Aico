@@ -38,7 +38,9 @@ export default function AccountDeletion() {
   return (
     <Flexbox gap={12} style={{ maxWidth: 420 }}>
       <Text strong>{t('accountDeletion.title')}</Text>
-      <Text type="secondary">{t('accountDeletion.desc')}</Text>
+      <Text type="secondary">
+        Deleting your account blocks reusing the same phone/email for another free trial.
+      </Text>
       <Input
         placeholder={t('accountDeletion.emailPlaceholder')}
         value={email}
