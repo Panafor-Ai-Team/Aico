@@ -13,7 +13,7 @@ import { systemStatusSelectors } from '@/store/global/selectors';
 import { formatNumber } from '@/utils/format';
 
 import { formatMessageCostUsd, resolveMessageCost } from './resolveMessageCost';
-import { resolveMessageModelName } from './resolveMessageModelName';
+import { resolveCostModelId, resolveMessageModelName } from './resolveMessageModelName';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   chip: css`
@@ -143,7 +143,10 @@ const MessageCostBadge = memo<MessageCostBadgeProps>(
   ({ usage, metadata, performance, model, provider }) => {
     const { t } = useTranslation('chat');
     const isShowCredit = useGlobalStore(systemStatusSelectors.isShowCredit);
-    const modelCard = useAiInfraStore(aiModelSelectors.getModelCard(model ?? '', provider ?? ''));
+    const costModel = resolveCostModelId(model, metadata);
+    const modelCard = useAiInfraStore(
+      aiModelSelectors.getModelCard(costModel ?? '', provider ?? ''),
+    );
 
     const cost = useMemo(() => resolveMessageCost(usage, metadata), [usage, metadata]);
     const detailRows = useMemo(
@@ -159,7 +162,7 @@ const MessageCostBadge = memo<MessageCostBadgeProps>(
 
     const { name: modelName, showIcon } = resolveMessageModelName({
       displayName: modelCard?.displayName,
-      model,
+      model: costModel,
       provider,
     });
 
@@ -174,7 +177,7 @@ const MessageCostBadge = memo<MessageCostBadgeProps>(
                 they belong to. */}
             {modelName && (
               <div className={styles.modelRow}>
-                {showIcon && <BrandedModelIcon model={model!} size={16} type={'mono'} />}
+                {showIcon && <BrandedModelIcon model={costModel!} size={16} type={'mono'} />}
                 <span className={styles.modelName}>{modelName}</span>
               </div>
             )}

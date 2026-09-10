@@ -66,6 +66,8 @@ export interface FinishData {
   grounding?: GroundingData;
   observationId?: string | null;
   reasoning?: ModelReasoning;
+  /** Model a router alias (e.g. `openrouter/auto`) actually dispatched to. */
+  resolvedModel?: string;
   speed?: ModelPerformance;
   toolCalls?: MessageToolCall[];
   traceId?: string | null;
