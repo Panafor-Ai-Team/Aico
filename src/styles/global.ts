@@ -129,14 +129,26 @@ const genGlobalStyle = ({ token }: { prefixCls: string; token: Theme }) => css`
    * Deliberately NOT extended to \`textarea\`: plaintext resolves per LINE, which
    * would let one message split across both edges. Multi-line surfaces carry
    * \`dir="auto"\` instead, which reads the whole value.
-   *
-   * A value with no strong character at all — a phone number, an OTP, password
-   * dots — resolves LTR, which is how numbers read anyway. Only a genuinely
-   * empty field falls through to \`direction\`, keeping its placeholder on the
-   * UI's side.
    */
   input {
     unicode-bidi: plaintext;
+  }
+
+  /**
+   * Numeric fields opt back out. Digits are not a strong character, so both
+   * \`plaintext\` and \`dir="auto"\` resolve them LTR and pin a phone number or a
+   * row of password dots to the left of an otherwise Persian form. There is no
+   * way to say "fall back to the page direction" in either mechanism, so say it
+   * per field type instead: these are numeric by declaration, and keep the UI's
+   * side.
+   */
+  input[type='password'],
+  input[type='tel'],
+  input[type='number'],
+  input[inputmode='tel'],
+  input[inputmode='numeric'],
+  input[inputmode='decimal'] {
+    unicode-bidi: normal;
   }
 `;
 

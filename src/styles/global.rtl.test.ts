@@ -43,6 +43,14 @@ describe('global RTL control fixes', () => {
     expect(source).toMatch(/\binput\s*\{[^}]*unicode-bidi:\s*plaintext/);
   });
 
+  it('keeps numeric fields on the UI side, where digits would otherwise go LTR', () => {
+    // Digits are not a strong character, so plaintext (and dir="auto") resolve
+    // them LTR — a phone number or password dots stranded left in a Persian form.
+    expect(source).toMatch(/input\[type='password'\]/);
+    expect(source).toMatch(/input\[inputmode='tel'\]/);
+    expect(source).toMatch(/unicode-bidi:\s*normal/);
+  });
+
   it('does not extend plaintext to textarea, which would resolve per line', () => {
     // Per-line resolution splits one message across both edges; multi-line
     // surfaces use dir="auto" so the whole value decides.
