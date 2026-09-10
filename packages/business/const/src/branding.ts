@@ -126,7 +126,10 @@ export const BRANDING_EMAIL: {
   replyTo: OptionalUrl;
   support: string;
 } = {
-  business: readBrandingEnv('BRANDING_BUSINESS_EMAIL', ''),
+  business: brandingValue(
+    process.env.BRANDING_BUSINESS_EMAIL ?? process.env.NEXT_PUBLIC_BRANDING_BUSINESS_EMAIL,
+    '',
+  ),
   replyTo: undefined,
   support: brandingValue(
     process.env.BRANDING_SUPPORT_EMAIL ?? process.env.NEXT_PUBLIC_BRANDING_SUPPORT_EMAIL,
