@@ -67,7 +67,9 @@ export class AicoOpenRouterKeyService {
     }
     if (this._client) return this._client;
     const created = createOpenRouterManagementClient();
-    (this as { _client: OpenRouterManagementClient })._client = created;
+    // Lazily memoise onto the private field; cast through `unknown` because a
+    // private member never structurally overlaps a public one.
+    (this as unknown as { _client: OpenRouterManagementClient })._client = created;
     return created;
   }
 

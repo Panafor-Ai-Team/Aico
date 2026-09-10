@@ -26,6 +26,9 @@ class ControllableOpenRouterClient implements OpenRouterManagementClient {
       limitRemaining: params.limitUsd,
       name: params.name,
       usage: 0,
+      usageDaily: 0,
+      usageMonthly: 0,
+      usageWeekly: 0,
     };
     this.keys.set(hash, row);
     return { ...row };

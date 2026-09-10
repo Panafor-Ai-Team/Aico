@@ -3,10 +3,12 @@ import { type ModelUsage } from '@lobechat/types';
 /** Prefer structured `usage.cost`; fall back to deprecated flat `metadata.cost`. */
 export const resolveMessageCost = (
   usage?: ModelUsage,
-  metadata?: Record<string, unknown> | null,
+  // `object` rather than `Record<string, unknown>`: callers pass the
+  // `MessageMetadata` interface, which carries no implicit index signature.
+  metadata?: object | null,
 ): number | undefined => {
   if (typeof usage?.cost === 'number' && Number.isFinite(usage.cost)) return usage.cost;
-  const legacy = metadata?.cost;
+  const legacy = (metadata as { cost?: unknown } | null | undefined)?.cost;
   if (typeof legacy === 'number' && Number.isFinite(legacy)) return legacy;
   return undefined;
 };

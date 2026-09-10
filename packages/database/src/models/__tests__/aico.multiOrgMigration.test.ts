@@ -176,8 +176,10 @@ describe('Aico migration & schema safety (Phase 2)', () => {
 
   it('AICO-P1-015: recordUsage can write rows but chat path does not call it (probe after manual record)', async () => {
     await billing.recordUsage({
+      billingSource: 'personal',
       completionTokens: 10,
-      costUsd: 0.01,
+      // recordUsage takes micro-USD, not USD: 0.01 USD = 10_000 micro-USD.
+      costMicroUsd: 10_000,
       modelId: 'openai/gpt-4o-mini',
       promptTokens: 5,
       totalTokens: 15,

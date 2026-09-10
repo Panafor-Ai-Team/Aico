@@ -25,7 +25,7 @@ export const passwordPolicy = (): BetterAuthPlugin => ({
   hooks: {
     before: [
       {
-        matcher: (ctx) => PASSWORD_PATHS.has(ctx.path),
+        matcher: (ctx) => !!ctx.path && PASSWORD_PATHS.has(ctx.path),
         handler: createAuthMiddleware(async (ctx) => {
           const password = passwordFromBody(ctx.body as Record<string, unknown> | undefined);
           if (password === null) return;

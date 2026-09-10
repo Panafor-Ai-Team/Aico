@@ -473,7 +473,8 @@ describe('createLambdaContext', () => {
       mockId: process.env.MOCK_DEV_USER_ID,
       nodeEnv: process.env.NODE_ENV,
     };
-    process.env.NODE_ENV = 'development';
+    // NODE_ENV is readonly in the ambient types; the write works at runtime.
+    (process.env as { NODE_ENV?: string }).NODE_ENV = 'development';
     process.env.AICO_IS_CONTROL_PLANE = '1';
     process.env.ENABLE_MOCK_DEV_USER = '1';
     process.env.MOCK_DEV_USER_ID = 'user_mock_admin';
@@ -488,7 +489,7 @@ describe('createLambdaContext', () => {
       expect(context.adminId).toBeNull();
       expect(mockGetSession).not.toHaveBeenCalled();
     } finally {
-      process.env.NODE_ENV = prev.nodeEnv;
+      (process.env as { NODE_ENV?: string }).NODE_ENV = prev.nodeEnv;
       if (prev.isCp === undefined) delete process.env.AICO_IS_CONTROL_PLANE;
       else process.env.AICO_IS_CONTROL_PLANE = prev.isCp;
       if (prev.mock === undefined) delete process.env.ENABLE_MOCK_DEV_USER;

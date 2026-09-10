@@ -1,15 +1,15 @@
 import { resolveAicoErrorCode } from '@lobechat/business-const';
-import type { TFunction } from 'i18next';
 
 import { resolveAicoErrorMessage } from '@/business/client/resolveAicoErrorMessage';
 import type { AicoBillingChatBlockReason, AicoBillingSource } from '@/features/AicoBilling/types';
+import { type LooseTFunction } from '@/types/looseTranslation';
 
 export const resolveManagedKeyErrorDescription = (params: {
   activeSource: AicoBillingSource | undefined;
   blockReason: AicoBillingChatBlockReason | null;
   serverErrorCode?: string;
   showTrialCta: boolean;
-  t: TFunction<'aico'>;
+  t: LooseTFunction;
 }): string => {
   const { activeSource, blockReason, serverErrorCode, showTrialCta, t } = params;
 

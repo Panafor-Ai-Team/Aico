@@ -127,7 +127,8 @@ const searchUserMemories = async (
     getServerDefaultFilesConfig().embeddingModel || DEFAULT_USER_MEMORY_EMBEDDING_MODEL_ITEM;
   const billingModel = new AicoBillingModel(ctx.serverDB);
   const billingContext = await resolvePreferredGenerationBilling(
-    (userId) => billingModel.getUserWallet(userId),
+    // getUserWallet resolves `undefined` when absent; the helper's contract is `null`.
+    async (userId) => (await billingModel.getUserWallet(userId)) ?? null,
     ctx.userId,
   );
   const modelRuntime = await initModelRuntimeFromDB(ctx.serverDB, ctx.userId, provider, undefined, {
@@ -176,7 +177,7 @@ const getEmbeddingRuntime = async (serverDB: LobeChatDatabase, userId: string) =
   const resolvedProvider = ENABLE_BUSINESS_FEATURES ? BRANDING_PROVIDER : provider;
   const billingModel = new AicoBillingModel(serverDB);
   const billingContext = await resolvePreferredGenerationBilling(
-    (uid) => billingModel.getUserWallet(uid),
+    async (uid) => (await billingModel.getUserWallet(uid)) ?? null,
     userId,
   );
   const agentRuntime = await initModelRuntimeFromDB(serverDB, userId, resolvedProvider, undefined, {

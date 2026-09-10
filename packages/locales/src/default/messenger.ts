@@ -256,7 +256,7 @@ export default {
     'This {{appName}} account is already linked to another account on this platform. Disconnect it in Settings → Messenger before linking a new one.',
   'verify.signInCta': 'Sign in to continue',
   'verify.signInRequired': 'Please sign in to {{appName}} to confirm the link.',
-  'verify.success.backTo{{appName}}': 'Back to {{appName}}',
+  'verify.success.backToApp': 'Back to {{appName}}',
   'verify.success.description':
     'Your account is now connected to {{platform}}. Open {{platform}} and send your first message.',
   'verify.success.openBot': 'Open in {{platform}}',

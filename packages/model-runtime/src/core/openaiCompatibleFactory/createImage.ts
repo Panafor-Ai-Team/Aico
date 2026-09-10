@@ -331,7 +331,7 @@ async function generateByChatModel(
     }
   }
 
-  const response = await client.chat.completions.create({
+  const response = (await client.chat.completions.create({
     messages: [
       {
         content,
@@ -348,7 +348,12 @@ async function generateByChatModel(
     // cost badge (which reads modelUsage.cost) has something to show. Ignored
     // by OpenAI-compatible endpoints that don't recognize the field.
     usage: { include: true },
-  } as Parameters<typeof client.chat.completions.create>[0]);
+    // `stream: false` above is erased by the params cast, so the overload
+    // resolves to `ChatCompletion | Stream<ChatCompletionChunk>`. This call is
+    // non-streaming by construction.
+  } as Parameters<
+    typeof client.chat.completions.create
+  >[0])) as OpenAI.Chat.Completions.ChatCompletion;
 
   log('Chat API response: %O', response);
 

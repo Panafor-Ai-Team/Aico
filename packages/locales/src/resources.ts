@@ -132,7 +132,9 @@ export const localeOptions: LocaleOptions = [
 ] as LocaleOptions;
 
 export const visibleLocaleOptions = localeOptions.filter((option) =>
-  VISIBLE_LOCALES.includes(option.value),
+  // VISIBLE_LOCALES is a narrow tuple, so `includes` would only accept its own
+  // members; widen it to test membership across all locale options.
+  (VISIBLE_LOCALES as readonly string[]).includes(option.value),
 );
 
 export const supportLocales: string[] = [...locales, 'en', 'zh'];

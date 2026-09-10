@@ -275,7 +275,15 @@ const Footer = memo<FooterProps>(
                   components={{ bold: <strong /> }}
                   i18nKey="channel.endpointUrlHint"
                   ns="agent"
-                  values={{ fieldName: 'Event Subscription URL', name: platformDef.name }}
+                  // i18next types `values` as an intersection of every key's
+                  // params in the namespace, so a per-key object never satisfies
+                  // it. This key only interpolates fieldName and name.
+                  values={
+                    {
+                      fieldName: 'Event Subscription URL',
+                      name: platformDef.name,
+                    } as never
+                  }
                 />
               }
             />

@@ -10,6 +10,7 @@ import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
 import { aiModelSelectors, useAiInfraStore } from '@/store/aiInfra';
 import { useGlobalStore } from '@/store/global';
 import { systemStatusSelectors } from '@/store/global/selectors';
+import { type LooseTFunction } from '@/types/looseTranslation';
 import { formatNumber } from '@/utils/format';
 
 import { formatMessageCostUsd, resolveMessageCost } from './resolveMessageCost';
@@ -82,7 +83,7 @@ type DetailRow = { key: string; label: string; value: string };
 const buildUsageDetailRows = (
   usage: ModelUsage | undefined,
   performance: ModelPerformance | undefined,
-  t: (key: string) => string,
+  t: LooseTFunction,
 ): DetailRow[] => {
   if (!usage) return [];
 
@@ -132,7 +133,9 @@ const buildUsageDetailRows = (
 };
 
 interface MessageCostBadgeProps {
-  metadata?: Record<string, unknown> | null;
+  // Callers pass `MessageMetadata`, an interface — interfaces have no implicit
+  // index signature, so `Record<string, unknown>` does not accept them.
+  metadata?: object | null;
   model?: string | null;
   performance?: ModelPerformance;
   provider?: string | null;

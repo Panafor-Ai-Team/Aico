@@ -281,13 +281,16 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
           type: 'string',
         },
       },
+      // `fields` is typed against better-auth's base User columns only, so the
+      // phoneNumber plugin's field is not in the allowed key union even though
+      // the mapping is honoured at runtime.
       fields: {
         image: 'avatar',
         // NOTE: use drizzle filed instead of db field, so use fullName instead of full_name
         name: 'fullName',
         // phoneNumber plugin field → existing users.phone column (see migration 0055)
         phoneNumber: 'phone',
-      },
+      } as Record<string, string>,
       modelName: 'users',
     },
 

@@ -346,6 +346,9 @@ interface VideoSkuRate {
   score: number;
 }
 
+/** A SKU row before the rate has been proven numeric. */
+type VideoSkuCandidate = Omit<VideoSkuRate, 'rate'> & { rate: number | undefined };
+
 const comboKey = (resolution?: string, generateAudio?: boolean) =>
   `${resolution ?? ''}|${generateAudio === undefined ? '' : String(generateAudio)}`;
 
@@ -455,9 +458,12 @@ export const resolveOpenRouterVideoPricing = (
   const entries = Object.entries(model.pricing_skus ?? {});
   const defaultResolution = getDefaultVideoResolution(model.supported_resolutions);
 
-  const secondCandidates: VideoSkuRate[] = entries
+  // Typed as candidates, not VideoSkuRate: `rate` is only proven numeric by the
+  // predicate filter below, and the optional props must stay optional for that
+  // predicate to be assignable to its parameter.
+  const secondCandidates = entries
     .filter(([key]) => isVideoSecondSku(key))
-    .map(([key, value]) => ({
+    .map(([key, value]): VideoSkuCandidate => ({
       generateAudio: extractSkuAudio(key),
       rate: priceFromVideoSecondSku(key, value),
       resolution: extractSkuResolution(key),
@@ -481,9 +487,9 @@ export const resolveOpenRouterVideoPricing = (
     };
   }
 
-  const tokenCandidates: VideoSkuRate[] = entries
+  const tokenCandidates = entries
     .filter(([key]) => isVideoTokenSku(key))
-    .map(([key, value]) => ({
+    .map(([key, value]): VideoSkuCandidate => ({
       generateAudio: extractSkuAudio(key),
       rate: formatPrice(value),
       resolution: extractSkuResolution(key),

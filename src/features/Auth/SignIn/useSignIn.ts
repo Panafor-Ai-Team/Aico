@@ -19,6 +19,7 @@ import {
   normalizeIranianPhoneNumber,
 } from '@/libs/better-auth/phone';
 import { isBuiltinProvider, normalizeProviderId } from '@/libs/better-auth/utils/client';
+import { type LooseTFunction } from '@/types/looseTranslation';
 import { buildOnboardingRedirectUrl, sanitizeRedirectPath } from '@/utils/onboardingRedirect';
 
 import { EMAIL_REGEX, USERNAME_REGEX } from './SignInEmailStep';
@@ -42,11 +43,7 @@ interface ResolvedEmailResult {
   identifierType: 'email' | 'username';
 }
 
-const mapPhoneOtpError = (
-  code: string | undefined,
-  fallback: string,
-  t: (key: string) => string,
-) => {
+const mapPhoneOtpError = (code: string | undefined, fallback: string, t: LooseTFunction) => {
   switch (code) {
     case 'INVALID_OTP': {
       return t('betterAuth.verifyPhone.errors.invalidOtp');

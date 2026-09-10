@@ -7,7 +7,17 @@ import { toast } from '@lobehub/ui/base-ui';
 
 import { buildPhoneVerifyRedirectUrl } from '@/libs/better-auth/phone';
 
-type LooseT = (key: string, options?: { defaultValue?: string }) => string;
+/**
+ * Structural stand-in for react-i18next's `TFunction`.
+ *
+ * `TFunction<Ns>` is a heavily overloaded type whose key parameter is a literal
+ * union of that namespace's keys, so it is not assignable to a plain
+ * `(key: string) => string`. These helpers only ever forward a key and options
+ * through, and are called from many namespaces, so the parameters are
+ * intentionally loose — the useful contract is the `string` return.
+ */
+
+type LooseT = (key: any, options?: any) => string;
 
 /** Pull a likely error-code string out of TRPC / Error / ChatMessageError shapes. */
 export const extractErrorCodeCandidate = (error: unknown): string => {

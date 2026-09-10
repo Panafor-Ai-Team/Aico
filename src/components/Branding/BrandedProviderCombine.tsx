@@ -19,7 +19,10 @@ type BrandedProviderCombineProps = ComponentProps<typeof ProviderCombine> & {
  * Every other provider keeps its own vendor wordmark.
  */
 export const BrandedProviderCombine = memo<BrandedProviderCombineProps>(
-  ({ provider, size = 24, ...rest }) => {
+  // `type` is pulled out of rest: ProviderCombine accepts 'color', which
+  // ProductLogo does not, and forwarding it would also override the 'flat' we
+  // deliberately pass below.
+  ({ provider, size = 24, type: _type, ...rest }) => {
     const branded =
       isBrandedOpenRouterProvider(provider) ||
       Boolean(isCustomBranding && provider && provider.trim().toLowerCase() === 'lobehub');

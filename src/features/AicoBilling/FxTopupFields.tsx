@@ -6,6 +6,8 @@ import { type FormInstance } from 'antd/es/form';
 import { createStaticStyles } from 'antd-style';
 import { useTranslation } from 'react-i18next';
 
+import { type LooseTFunction } from '@/types/looseTranslation';
+
 import { groupedNumberInputProps } from './groupedNumberInput';
 
 export type FxTopupChargeField = 'toman' | 'usd';
@@ -99,6 +101,8 @@ export const FxTopupFields = ({
   usdLabelKey = 'wallet.amountUsd',
 }: FxTopupFieldsProps) => {
   const { t } = useTranslation('aico');
+  // Label keys arrive as props, so they are not in the namespace's literal key union.
+  const translate = t as LooseTFunction;
   const amountToman = Form.useWatch('amountToman', form);
   const amountUsd = Form.useWatch('amountUsd', form);
 
@@ -111,7 +115,7 @@ export const FxTopupFields = ({
         {fxSource ? <span className={styles.fxSource}>{fxSource}</span> : null}
       </div>
       <div className={styles.row}>
-        <Form.Item label={t(tomanLabelKey)} name="amountToman" style={{ marginBottom: 0 }}>
+        <Form.Item label={translate(tomanLabelKey)} name="amountToman" style={{ marginBottom: 0 }}>
           <InputNumber
             {...groupedNumberInputProps}
             disabled={disabled}
@@ -121,12 +125,12 @@ export const FxTopupFields = ({
             onChange={(value) => {
               onChargeFieldChange('toman');
               if (value != null && fxRate) {
-                form.setFieldValue('amountUsd', Number((value / fxRate).toFixed(6)));
+                form.setFieldValue('amountUsd', Number((Number(value) / fxRate).toFixed(6)));
               }
             }}
           />
         </Form.Item>
-        <Form.Item label={t(usdLabelKey)} name="amountUsd" style={{ marginBottom: 0 }}>
+        <Form.Item label={translate(usdLabelKey)} name="amountUsd" style={{ marginBottom: 0 }}>
           <InputNumber
             {...groupedNumberInputProps}
             disabled={disabled}
@@ -136,7 +140,7 @@ export const FxTopupFields = ({
             onChange={(value) => {
               onChargeFieldChange('usd');
               if (value != null && fxRate) {
-                form.setFieldValue('amountToman', Math.floor(value * fxRate));
+                form.setFieldValue('amountToman', Math.floor(Number(value) * fxRate));
               }
             }}
           />

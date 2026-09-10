@@ -9,14 +9,14 @@ describe('createSmsServiceImpl production fail-closed', () => {
   it('throws in production without KAVENEGAR_API_KEY', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('KAVENEGAR_API_KEY', '');
-    const { createSmsServiceImpl } = await import('./impls/index');
+    const { createSmsServiceImpl } = await import('./index');
     expect(() => createSmsServiceImpl()).toThrow(/KAVENEGAR_API_KEY/);
   });
 
   it('refuses Debug impl in production', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('KAVENEGAR_API_KEY', 'test-key');
-    const { createSmsServiceImpl, SmsImplType } = await import('./impls/index');
+    const { createSmsServiceImpl, SmsImplType } = await import('./index');
     expect(() => createSmsServiceImpl(SmsImplType.Debug)).toThrow(/SMS_DEBUG_FORBIDDEN/);
   });
 });

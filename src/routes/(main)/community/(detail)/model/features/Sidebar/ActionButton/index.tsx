@@ -18,7 +18,7 @@ const ActionButton = memo(() => {
       <ChatWithModel />
       <ShareButton
         meta={{
-          avatar: <BrandedModelIcon model={identifier} size={64} type={'avatar'} />,
+          avatar: <BrandedModelIcon model={identifier ?? ''} size={64} type={'avatar'} />,
           desc: description,
           hashtags: providers?.map((item) => item.name) || [],
           title: displayName || identifier,

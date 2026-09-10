@@ -192,7 +192,7 @@
   "verify.error.unlinkBeforeRelink": "این حساب پاناچت قبلاً به یک حساب تلگرام دیگر متصل شده است. ابتدا آن را در تنظیمات → پیام‌رسان قطع کنید تا بتوانید حساب جدیدی را متصل کنید.",
   "verify.signInCta": "برای ادامه وارد شوید",
   "verify.signInRequired": "لطفاً وارد پاناچت شوید تا لینک را تأیید کنید.",
-  "verify.success.backTo{{appName}}": "بازگشت به پاناچت",
+  "verify.success.backToApp": "بازگشت به {{appName}}",
   "verify.success.description": "حساب شما اکنون به {{platform}} متصل شده است. {{platform}} را باز کنید و اولین پیام خود را ارسال کنید.",
   "verify.success.openBot": "باز کردن در {{platform}}",
   "verify.success.title": "با موفقیت لینک شد!"

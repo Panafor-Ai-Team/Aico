@@ -60,7 +60,9 @@ describe('LobeOpenRouterAI - custom features', () => {
       // Deliberately NOT a custom createImage: the factory does not forward
       // `pricingContext` to custom impls, so routing through the shared
       // createOpenAICompatibleImage is what keeps billing behaviour identical.
-      expect(params.createImage).toBeUndefined();
+      // Accessed through a widened view: the property is intentionally absent
+      // from the params type, which is exactly what this asserts.
+      expect((params as { createImage?: unknown }).createImage).toBeUndefined();
     });
 
     it('should have chatCompletion configuration', () => {

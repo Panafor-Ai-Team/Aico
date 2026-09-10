@@ -4,13 +4,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useFundsBlockedComposerCue } from './useFundsBlockedComposerCue';
 
 const playFundsBlockedSound = vi.fn();
-const useAicoBillingChatGate = vi.fn(() => ({
-  blocked: false,
-  blockReason: null,
-  showTrialCta: false,
-  trialActive: false,
-  trialAvailable: false,
-}));
+const useAicoBillingChatGate = vi.fn(
+  (): {
+    blocked: boolean;
+    // Widened from the default-return `null` so tests can supply a real reason.
+    blockReason: string | null;
+    showTrialCta: boolean;
+    trialActive: boolean;
+    trialAvailable: boolean;
+  } => ({
+    blocked: false,
+    blockReason: null,
+    showTrialCta: false,
+    trialActive: false,
+    trialAvailable: false,
+  }),
+);
 const useFundsBlockedSoundEnabled = vi.fn(() => false);
 const syncFundsBlockedSoundFlagFromUrl = vi.fn();
 

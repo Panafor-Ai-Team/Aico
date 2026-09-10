@@ -474,9 +474,15 @@ export class OrganizationModel {
     });
   };
 
+  /**
+   * Adds or re-roles a member. Despite the name this is the only membership
+   * creation path, so the role accepts the full OrgMemberRole union (matching
+   * updateMemberRole) rather than just the manager roles; it already writes
+   * whatever role is passed and defaults to 'admin'.
+   */
   assignManager = async (params: {
     orgId: string;
-    role?: 'owner' | 'admin';
+    role?: OrgMemberRole;
     userId: string;
   }): Promise<OrganizationMemberItem> => {
     const role = params.role ?? 'admin';
