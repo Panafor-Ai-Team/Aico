@@ -1465,10 +1465,18 @@ export class OrganizationModel {
    *
    * Idempotent (FIN-002): a second reclaim on an already-settled budget is a
    * no-op and must not credit the org wallet again.
+   *
+   * The period cap is zeroed alongside the reservation. Leaving a stale
+   * `periodAmountMicroUsd` behind would make a later `allocateMemberCredit` for
+   * the same period compute `delta = 0` and re-activate a fully funded budget
+   * without ever debiting the org wallet. Usage history
+   * (`settledUsageMicroUsd`, multiplier checkpoint) is deliberately preserved.
    */
   reclaimMemberRemainingCredit = async (params: {
     /** Null when reclaim runs from the background key outbox rather than a manager action. */
     createdByUserId?: string | null;
+    /** Overrides the default ledger description — the bulk sweep stamps its batch id here. */
+    description?: string;
     orgId: string;
     orgMemberId: string;
     remainingMicroUsd: number;
@@ -1504,6 +1512,8 @@ export class OrganizationModel {
             openrouterKeyId: null,
             pendingPeriod: null,
             pendingPeriodAmountMicroUsd: null,
+            // Zeroed so a later re-allocation debits the wallet in full (see above).
+            periodAmountMicroUsd: 0,
             renewalStatus: 'settled',
             reservedMicroUsd: 0,
           })
@@ -1551,7 +1561,8 @@ export class OrganizationModel {
           balanceAfterMicroUsd: Number(organization.walletBalanceMicroUsd ?? 0),
           balanceBeforeMicroUsd,
           createdByUserId: params.createdByUserId ?? null,
-          description: `Reclaim remaining credit from member ${params.orgMemberId}`,
+          description:
+            params.description ?? `Reclaim remaining credit from member ${params.orgMemberId}`,
           orgId: params.orgId,
           orgMemberId: params.orgMemberId,
           type: 'reclaim',

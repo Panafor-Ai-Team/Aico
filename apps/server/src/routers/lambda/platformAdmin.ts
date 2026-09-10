@@ -24,6 +24,12 @@ import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { getTomanPerUsd } from '@/server/services/aico/fxService';
 import { refreshAicoMasterMonitorState } from '@/server/services/aico/masterMonitor';
 import {
+  executeOrgBudgetSweep,
+  previewOrgBudgetSweep,
+  serializeSweepPreview,
+  serializeSweepResult,
+} from '@/server/services/aico/orgBudgetSweep';
+import {
   resolveTopupAmount,
   topupAmountInputSchema,
 } from '@/server/services/aico/resolveTopupAmount';
@@ -355,6 +361,74 @@ export const platformAdminRouter = router({
           message: error instanceof Error ? error.message : 'Failed to add credit',
         });
       }
+    }),
+
+  /**
+   * Operator-side dry run of the org budget sweep. Read-only — no key is
+   * disabled, so an operator can inspect an org and walk away.
+   */
+  previewOrgBudgetSweep: platformProcedure
+    .input(z.object({ orgId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        return serializeSweepPreview(
+          await previewOrgBudgetSweep({ db: ctx.serverDB, orgId: input.orgId }),
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'PREVIEW_FAILED';
+        if (message === 'ORG_NOT_FOUND') throw new TRPCError({ code: 'NOT_FOUND', message });
+        throw new TRPCError({ cause: error, code: 'INTERNAL_SERVER_ERROR', message });
+      }
+    }),
+
+  /**
+   * Operator-side bulk reclaim of every member allowance in an org back to the
+   * org wallet. Same service as the manager-facing `sweepAllMemberBudgets`;
+   * only the recorded actor differs.
+   */
+  sweepOrgMemberBudgets: platformProcedure
+    .input(
+      z.object({
+        confirm: z.literal(true),
+        idempotencyKey: z.string().min(8).max(128),
+        orgId: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      let result;
+      try {
+        result = await executeOrgBudgetSweep({
+          // Control-plane operators have no product user id; the audit row below
+          // carries `actorAdminId` instead, and the ledger rows stay actor-less.
+          actorUserId: null,
+          batchId: input.idempotencyKey,
+          db: ctx.serverDB,
+          orgId: input.orgId,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'SWEEP_FAILED';
+        if (message === 'ORG_NOT_FOUND') throw new TRPCError({ code: 'NOT_FOUND', message });
+        throw new TRPCError({ cause: error, code: 'INTERNAL_SERVER_ERROR', message });
+      }
+
+      await recordAicoSecurityEvent(ctx.serverDB, {
+        action: 'platform.org.budget_sweep',
+        actorAdminId: ctx.adminId,
+        ipAddress: ctx.clientIp,
+        metadata: {
+          batchId: result.batchId,
+          deferredCount: result.deferredCount,
+          reclaimedCount: result.reclaimedCount,
+          skippedCount: result.skippedCount,
+          totalReclaimedMicroUsd: result.totalReclaimedMicroUsd,
+        },
+        organizationId: input.orgId,
+        targetId: input.orgId,
+        targetType: 'organization',
+        userAgent: ctx.userAgent,
+      });
+
+      return serializeSweepResult(result);
     }),
 
   addManualUserCredit: platformProcedure

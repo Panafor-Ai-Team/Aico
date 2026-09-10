@@ -431,3 +431,139 @@ describe('AicoBillingModel', () => {
     ).rejects.toThrow('ORG_ALREADY_DELETED');
   });
 });
+
+describe('OrganizationModel.reclaimMemberRemainingCredit', () => {
+  /** Org funded with $20, one member accepted into it. */
+  const setupFundedOrgWithMember = async () => {
+    const org = await orgModel.createOrganization({ name: 'Reclaim Co', ownerUserId: ownerId });
+    await orgModel.addManualCredit({
+      amountMicroUsd: 20_000_000,
+      amountToman: 100_000,
+      createdByUserId: ownerId,
+      fxRateTomanPerUsd: 5000,
+      orgId: org.id,
+    });
+    const invite = await orgModel.createInvite({
+      identifierType: 'email',
+      identifierValue: 'member@example.com',
+      invitedByUserId: ownerId,
+      orgId: org.id,
+      role: 'member',
+    });
+    const { member } = await orgModel.acceptInvite({
+      email: 'member@example.com',
+      token: invite.token,
+      userId: memberId,
+    });
+    return { member, org };
+  };
+
+  it('zeroes the period cap alongside the reservation and preserves usage history', async () => {
+    const { member, org } = await setupFundedOrgWithMember();
+    await orgModel.allocateMemberCredit({
+      createdByUserId: ownerId,
+      orgId: org.id,
+      orgMemberId: member.id,
+      period: 'daily',
+      periodAmountMicroUsd: 10_000_000,
+    });
+    await orgModel.syncMemberBudgetUsage({
+      orgMemberId: member.id,
+      settledUsageMicroUsd: 4_000_000,
+    });
+
+    const { budget, organization } = await orgModel.reclaimMemberRemainingCredit({
+      createdByUserId: ownerId,
+      orgId: org.id,
+      orgMemberId: member.id,
+      remainingMicroUsd: 6_000_000,
+    });
+
+    expect(Number(budget!.periodAmountMicroUsd)).toBe(0);
+    expect(Number(budget!.reservedMicroUsd)).toBe(0);
+    expect(budget!.isActive).toBe(false);
+    expect(budget!.renewalStatus).toBe('settled');
+    // Usage history is not money and must survive the reclaim.
+    expect(Number(budget!.settledUsageMicroUsd)).toBe(4_000_000);
+    expect(Number(organization.walletBalanceMicroUsd)).toBe(16_000_000);
+  });
+
+  it('debits the wallet in full when the same cap is re-allocated after a reclaim', async () => {
+    // Regression: a stale `periodAmountMicroUsd` made allocate compute delta = 0
+    // and hand out a fully funded budget without touching the org wallet.
+    const { member, org } = await setupFundedOrgWithMember();
+    await orgModel.allocateMemberCredit({
+      createdByUserId: ownerId,
+      orgId: org.id,
+      orgMemberId: member.id,
+      period: 'daily',
+      periodAmountMicroUsd: 10_000_000,
+    });
+    await orgModel.reclaimMemberRemainingCredit({
+      createdByUserId: ownerId,
+      orgId: org.id,
+      orgMemberId: member.id,
+      remainingMicroUsd: 10_000_000,
+    });
+
+    const { budget, organization, transaction } = await orgModel.allocateMemberCredit({
+      createdByUserId: ownerId,
+      orgId: org.id,
+      orgMemberId: member.id,
+      period: 'daily',
+      periodAmountMicroUsd: 10_000_000,
+    });
+
+    expect(Number(budget.periodAmountMicroUsd)).toBe(10_000_000);
+    expect(transaction).not.toBeNull();
+    expect(Number(transaction!.amountMicroUsd)).toBe(10_000_000);
+    // $20 funded, $10 allocated, $10 reclaimed, $10 allocated again → $10 left.
+    expect(Number(organization.walletBalanceMicroUsd)).toBe(10_000_000);
+  });
+
+  it('is a no-op on a second reclaim and never credits the wallet twice', async () => {
+    const { member, org } = await setupFundedOrgWithMember();
+    await orgModel.allocateMemberCredit({
+      createdByUserId: ownerId,
+      orgId: org.id,
+      orgMemberId: member.id,
+      period: 'daily',
+      periodAmountMicroUsd: 10_000_000,
+    });
+    await orgModel.reclaimMemberRemainingCredit({
+      orgId: org.id,
+      orgMemberId: member.id,
+      remainingMicroUsd: 10_000_000,
+    });
+
+    const second = await orgModel.reclaimMemberRemainingCredit({
+      orgId: org.id,
+      orgMemberId: member.id,
+      remainingMicroUsd: 10_000_000,
+    });
+
+    expect(second.transaction).toBeNull();
+    expect(Number(second.organization.walletBalanceMicroUsd)).toBe(20_000_000);
+  });
+
+  it('stamps a caller-supplied description onto the ledger row', async () => {
+    const { member, org } = await setupFundedOrgWithMember();
+    await orgModel.allocateMemberCredit({
+      createdByUserId: ownerId,
+      orgId: org.id,
+      orgMemberId: member.id,
+      period: 'daily',
+      periodAmountMicroUsd: 5_000_000,
+    });
+
+    const { transaction } = await orgModel.reclaimMemberRemainingCredit({
+      description: 'Sweep sweep-batch-1: reclaim',
+      orgId: org.id,
+      orgMemberId: member.id,
+      remainingMicroUsd: 5_000_000,
+    });
+
+    expect(transaction!.description).toBe('Sweep sweep-batch-1: reclaim');
+    expect(transaction!.type).toBe('reclaim');
+  });
+});

@@ -14,6 +14,12 @@ import { appEnv } from '@/envs/app';
 import { normalizeIranianPhoneNumber } from '@/libs/better-auth/phone';
 import { authedProcedure, router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
+import {
+  executeOrgBudgetSweep,
+  previewOrgBudgetSweep,
+  serializeSweepPreview,
+  serializeSweepResult,
+} from '@/server/services/aico/orgBudgetSweep';
 import { recordAicoSecurityEvent } from '@/server/services/aico/securityAudit';
 import { EmailService } from '@/server/services/email';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
@@ -487,6 +493,87 @@ export const organizationRouter = router({
         reclaimedMicroUsd: String(reclaimed.remainingMicroUsd),
         reclaimedUsd: microUsdToDecimalString(reclaimed.remainingMicroUsd),
       };
+    }),
+
+  /**
+   * Dry run for {@link sweepAllMemberBudgets}. Read-only — opening the preview
+   * and then cancelling must leave every member able to keep chatting.
+   */
+  previewMemberBudgetSweep: orgProcedure
+    .input(z.object({ orgId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      await requireOrgManager(ctx.organizationModel, ctx.userId, input.orgId);
+      try {
+        return serializeSweepPreview(
+          await previewOrgBudgetSweep({ db: ctx.serverDB, orgId: input.orgId }),
+        );
+      } catch (error) {
+        if (error instanceof Error && error.message === 'ORG_NOT_FOUND') {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Organization not found' });
+        }
+        throw new TRPCError({
+          cause: error,
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to preview budget sweep',
+        });
+      }
+    }),
+
+  /**
+   * Reclaims every member's remaining org-funded credit back to the org wallet
+   * and stops their recurring charges. Personal wallets are untouched, and the
+   * ledger is only appended to.
+   */
+  sweepAllMemberBudgets: orgProcedure
+    .input(
+      z.object({
+        // Forces the client through the confirmation gate: this moves money for
+        // the whole roster and cannot be undone from the panel.
+        confirm: z.literal(true),
+        idempotencyKey: z.string().min(8).max(128),
+        orgId: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireOrgManager(ctx.organizationModel, ctx.userId, input.orgId);
+
+      let result;
+      try {
+        result = await executeOrgBudgetSweep({
+          actorUserId: ctx.userId,
+          batchId: input.idempotencyKey,
+          db: ctx.serverDB,
+          orgId: input.orgId,
+        });
+      } catch (error) {
+        if (error instanceof Error && error.message === 'ORG_NOT_FOUND') {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Organization not found' });
+        }
+        throw new TRPCError({
+          cause: error,
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to sweep member budgets',
+        });
+      }
+
+      await recordAicoSecurityEvent(ctx.serverDB, {
+        action: 'org.budget.sweep_all',
+        actorUserId: ctx.userId,
+        ipAddress: ctx.clientIp,
+        metadata: {
+          batchId: result.batchId,
+          deferredCount: result.deferredCount,
+          reclaimedCount: result.reclaimedCount,
+          skippedCount: result.skippedCount,
+          totalReclaimedMicroUsd: result.totalReclaimedMicroUsd,
+        },
+        organizationId: input.orgId,
+        targetId: input.orgId,
+        targetType: 'organization',
+        userAgent: ctx.userAgent,
+      });
+
+      return serializeSweepResult(result);
     }),
 
   revokeInvite: orgProcedure
