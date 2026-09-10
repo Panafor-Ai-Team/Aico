@@ -1,7 +1,25 @@
 import { createElement, Fragment } from 'react';
 import { describe, expect, it } from 'vitest';
 
-import { extractTextFromReactNode, getTextDirectionFromFirstStrong } from './textDirection';
+import {
+  extractTextFromReactNode,
+  getTextDirectionFromFirstStrong,
+  resolveTextDirection,
+} from './textDirection';
+
+describe('resolveTextDirection', () => {
+  it('takes direction from the first strong character, whatever the UI language', () => {
+    expect(resolveTextDirection('سلام world', 'ltr')).toBe('rtl');
+    expect(resolveTextDirection('hello سلام', 'rtl')).toBe('ltr');
+  });
+
+  it('falls back to the UI language when there is no strong character', () => {
+    // Persian UI → right, English UI → left.
+    expect(resolveTextDirection('', 'rtl')).toBe('rtl');
+    expect(resolveTextDirection('', 'ltr')).toBe('ltr');
+    expect(resolveTextDirection('123 ...', 'rtl')).toBe('rtl');
+  });
+});
 
 describe('getTextDirectionFromFirstStrong', () => {
   it('returns rtl when the first strong character is Persian/Arabic', () => {

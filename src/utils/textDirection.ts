@@ -20,6 +20,18 @@ export const getTextDirectionFromFirstStrong = (text: string): TextDirection => 
 };
 
 /**
+ * Direction for a text field, per the product rule: the first strong character
+ * decides it, and a field with none yet follows the UI language (Persian → rtl,
+ * English → ltr).
+ *
+ * This cannot be expressed with `dir="auto"` alone: on empty text `dir="auto"`
+ * resolves to ltr even inside an rtl UI, which puts the caret on the wrong side
+ * for Persian users.
+ */
+export const resolveTextDirection = (text: string, uiDirection: 'ltr' | 'rtl'): 'ltr' | 'rtl' =>
+  getTextDirectionFromFirstStrong(text) ?? uiDirection;
+
+/**
  * Concatenate the text of a ReactNode tree (plain strings, arrays, fragments,
  * elements such as stream-animation spans). Lets message-level `dir` resolve
  * from the actual words even when children are not a single string — otherwise
