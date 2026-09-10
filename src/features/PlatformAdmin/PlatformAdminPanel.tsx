@@ -22,6 +22,7 @@ import {
 } from '@/features/AicoBilling/FxTopupFields';
 import { groupedNumberInputProps } from '@/features/AicoBilling/groupedNumberInput';
 import { AICO_TABLE_SCROLL, aicoPanelStyles } from '@/features/AicoPanels';
+import { createBudgetSweepModal } from '@/features/OrgAdmin/BudgetSweepModal';
 import { useClientDataSWR } from '@/libs/swr';
 import { controlPlaneClient } from '@/libs/trpc/client/controlPlane';
 
@@ -544,6 +545,28 @@ export const PlatformAdminPanel = () => {
                               {t('platform.activate')}
                             </Button>
                           )}
+                          <Button
+                            danger
+                            size="small"
+                            onClick={() =>
+                              createBudgetSweepModal({
+                                executeSweep: (batchId) =>
+                                  controlPlaneClient.platformAdmin.sweepOrgMemberBudgets.mutate({
+                                    confirm: true,
+                                    idempotencyKey: batchId,
+                                    orgId: row.id,
+                                  }),
+                                loadPreview: () =>
+                                  controlPlaneClient.platformAdmin.previewOrgBudgetSweep.query({
+                                    orgId: row.id,
+                                  }),
+                                onCompleted: () => void mutate(),
+                                orgName: row.name,
+                              })
+                            }
+                          >
+                            {t('org.sweep.open')}
+                          </Button>
                         </Flexbox>
                       ),
                     },

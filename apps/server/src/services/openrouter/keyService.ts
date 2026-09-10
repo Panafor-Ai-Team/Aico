@@ -354,14 +354,15 @@ export class AicoOpenRouterKeyService {
   };
 
   /**
-   * Authoritative settlement helpers for removal / period close.
-   * Returns micro-USD usage/remaining from OpenRouter (floored).
-   * Requires orgId so a foreign orgMemberId cannot disable another tenant's key.
+   * Read-only half of {@link reclaimMemberKey}: what a reclaim *would* return,
+   * without disabling the key. Used by the org budget sweep preview, which must
+   * never leave a key disabled for a sweep the manager then cancels.
+   * Requires orgId so a foreign orgMemberId cannot read another tenant's key.
    */
-  reclaimMemberKey = async (params: {
+  peekMemberRemaining = async (params: {
     orgId: string;
     orgMemberId: string;
-  }): Promise<{ remainingMicroUsd: number; usageMicroUsd: number } | null> => {
+  }): Promise<{ keyId: string; remainingMicroUsd: number; usageMicroUsd: number } | null> => {
     const budget = await this.orgModel.getMemberBudgetForOrg(params);
     if (!budget?.openrouterKeyId) return null;
 
@@ -387,14 +388,30 @@ export class AicoOpenRouterKeyService {
             Number(budget.checkpointMultiplierBp ?? bp),
           );
 
-    await this.client.updateKey({ disabled: true, hash: budget.openrouterKeyId });
-
     // Pending next-period reservation was never spendable on the OR key (FIN-001) —
     // reclaim it from the wallet reservation in full.
     return {
+      keyId: budget.openrouterKeyId,
       remainingMicroUsd: Math.max(0, remainingFromOr) + pendingHeld,
       usageMicroUsd: usageMicro,
     };
+  };
+
+  /**
+   * Authoritative settlement helpers for removal / period close.
+   * Returns micro-USD usage/remaining from OpenRouter (floored).
+   * Requires orgId so a foreign orgMemberId cannot disable another tenant's key.
+   */
+  reclaimMemberKey = async (params: {
+    orgId: string;
+    orgMemberId: string;
+  }): Promise<{ remainingMicroUsd: number; usageMicroUsd: number } | null> => {
+    const peeked = await this.peekMemberRemaining(params);
+    if (!peeked) return null;
+
+    await this.client.updateKey({ disabled: true, hash: peeked.keyId });
+
+    return { remainingMicroUsd: peeked.remainingMicroUsd, usageMicroUsd: peeked.usageMicroUsd };
   };
 
   /**

@@ -20,6 +20,7 @@ import {
 } from '@/features/AicoBilling/FxTopupFields';
 import { groupedNumberInputProps } from '@/features/AicoBilling/groupedNumberInput';
 import { AICO_TABLE_SCROLL, aicoPanelStyles } from '@/features/AicoPanels';
+import { createBudgetSweepModal } from '@/features/OrgAdmin/BudgetSweepModal';
 import { presentInviteLink } from '@/features/OrgAdmin/InviteLinkModal';
 import { TeamModelsForm } from '@/features/OrgAdmin/TeamModelsForm';
 import { buildPhoneVerifyRedirectUrl, isValidIranianPhoneNumber } from '@/libs/better-auth/phone';
@@ -1054,6 +1055,36 @@ export const OrgAdminMembers = () => {
               </Form>
             </Flexbox>
           </Block>
+
+          <Flexbox className={styles.dangerCard} gap={12}>
+            <Text strong>{t('org.sweep.cardTitle')}</Text>
+            <Text type="secondary">{t('org.sweep.cardHint')}</Text>
+            <Flexbox horizontal>
+              <Button
+                danger
+                disabled={readOnly || !currentOrg}
+                onClick={() => {
+                  if (!currentOrg) return;
+                  createBudgetSweepModal({
+                    executeSweep: (batchId) =>
+                      lambdaClient.organization.sweepAllMemberBudgets.mutate({
+                        confirm: true,
+                        idempotencyKey: batchId,
+                        orgId: currentOrg.id,
+                      }),
+                    loadPreview: () =>
+                      lambdaClient.organization.previewMemberBudgetSweep.query({
+                        orgId: currentOrg.id,
+                      }),
+                    onCompleted: () => void refreshAll(),
+                    orgName: currentOrg.name,
+                  });
+                }}
+              >
+                {t('org.sweep.open')}
+              </Button>
+            </Flexbox>
+          </Flexbox>
 
           <Block className={aicoPanelStyles.section} variant="outlined">
             <Flexbox gap={12}>
