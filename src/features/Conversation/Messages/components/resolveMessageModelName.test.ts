@@ -1,6 +1,26 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveMessageModelName } from './resolveMessageModelName';
+import { resolveCostModelId, resolveMessageModelName } from './resolveMessageModelName';
+
+describe('resolveCostModelId', () => {
+  it('names the model the Auto router picked, not the alias', () => {
+    expect(
+      resolveCostModelId('openrouter/auto', { cost: 0.002, resolvedModel: 'openai/gpt-5' }),
+    ).toBe('openai/gpt-5');
+  });
+
+  it('keeps the requested model when the provider reported no router pick', () => {
+    expect(resolveCostModelId('openai/gpt-5', { cost: 0.002 })).toBe('openai/gpt-5');
+  });
+
+  it('ignores a non-string resolvedModel', () => {
+    expect(resolveCostModelId('openrouter/auto', { resolvedModel: 42 })).toBe('openrouter/auto');
+  });
+
+  it('tolerates missing metadata', () => {
+    expect(resolveCostModelId('openrouter/auto', null)).toBe('openrouter/auto');
+  });
+});
 
 describe('resolveMessageModelName', () => {
   it('prefers the model card display name', () => {

@@ -212,6 +212,7 @@ export const MessageMetadataSchema = ModelUsageSchema.merge(ModelPerformanceSche
   // (e.g. messageService.updateMessage, used by the heterogeneous-agent executor).
   performance: ModelPerformanceSchema.optional(),
   reactions: z.array(EmojiReactionSchema).optional(),
+  resolvedModel: z.string().optional(),
   scope: z.string().optional(),
   // External-signal lineage for Monitor-style callback turns ().
   signal: MessageSignalSchema.optional(),
@@ -407,6 +408,12 @@ export interface MessageMetadata {
   reactions?: EmojiReaction[];
   /** @deprecated use the top-level message `usage` field instead */
   rejectedPredictionTokens?: number;
+  /**
+   * The model a router alias actually dispatched to, reported by the provider
+   * (`openrouter/auto` → `openai/gpt-4o`). The message `model` keeps the alias
+   * the user selected; this names what ran, for cost attribution.
+   */
+  resolvedModel?: string;
   /**
    * Message scope - indicates the context in which this message was created
    * Used by conversation-flow to determine how to handle message grouping and display

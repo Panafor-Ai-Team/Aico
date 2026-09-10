@@ -264,12 +264,23 @@ export class ClientLLMTransport implements LLMTransport {
           },
           onFinish: async (
             _content,
-            { traceId, observationId, toolCalls, reasoning, grounding, usage, speed, type },
+            {
+              traceId,
+              observationId,
+              toolCalls,
+              reasoning,
+              grounding,
+              usage,
+              speed,
+              type,
+              resolvedModel,
+            },
           ) => {
             finishData = {
               grounding,
               observationId,
               reasoning,
+              resolvedModel,
               speed,
               toolCalls,
               traceId,
@@ -415,6 +426,7 @@ export class ClientLLMTransport implements LLMTransport {
       observationId: finishData.observationId ?? undefined,
       reasoning,
       reasoningParts: handler.getReasoningParts(),
+      resolvedModel: finishData.resolvedModel,
       speed: result.metadata.performance,
       thinkingContent,
       toolCalls: result.toolCalls ?? [],

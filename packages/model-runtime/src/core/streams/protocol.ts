@@ -32,6 +32,12 @@ export interface StreamContext {
   chunkIndex?: number;
   id: string;
   /**
+   * Model id the provider reported for this response. Only set when the request
+   * targeted a router alias (e.g. `openrouter/auto`), so it names the model the
+   * router actually picked. Tracked here to emit the chunk only once per stream.
+   */
+  resolvedModel?: string;
+  /**
    * As pplx citations is in every chunk, but we only need to return it once
    * this flag is used to check if the pplx citation is returned,and then not return it again.
    * Same as Hunyuan and Wenxin
@@ -134,6 +140,8 @@ export interface StreamProtocolChunk {
     | 'error'
     // token usage
     | 'usage'
+    // model a router alias (e.g. `openrouter/auto`) actually dispatched to
+    | 'resolved_model'
     // performance monitor
     | 'speed'
     // unknown data result
@@ -453,6 +461,7 @@ export function createCallbacksTransformer(
   const reasoningResponseItems: ModelReasoningResponseItem[] = [];
   let usage: ModelUsage | undefined;
   let speed: ModelPerformance | undefined;
+  let resolvedModel: string | undefined;
   let grounding: any;
   let toolsCalling: any;
   let streamError: any;
@@ -481,6 +490,7 @@ export function createCallbacksTransformer(
         error: streamError,
         finishReason,
         grounding,
+        resolvedModel,
         speed,
         text: aggregatedText,
         thinking: reasoningContent,
@@ -613,6 +623,11 @@ export function createCallbacksTransformer(
 
           case 'speed': {
             speed = data;
+            break;
+          }
+
+          case 'resolved_model': {
+            if (typeof data === 'string' && data) resolvedModel = data;
             break;
           }
 

@@ -27,6 +27,8 @@ export type OnFinishHandler = (
     images?: ChatImageChunk[];
     observationId?: string | null;
     reasoning?: ModelReasoning;
+    /** Model a router alias (e.g. `openrouter/auto`) actually dispatched to. */
+    resolvedModel?: string;
     speed?: ModelPerformance;
     toolCalls?: MessageToolCall[];
     traceId?: string | null;
@@ -317,6 +319,7 @@ export const fetchSSE = async (url: string, options: RequestInit & FetchSSEOptio
   let usage: ModelUsage | undefined = undefined;
   const images: ChatImageChunk[] = [];
   let speed: ModelPerformance | undefined = undefined;
+  let resolvedModel: string | undefined = undefined;
 
   await fetchEventSource(url, {
     body: options.body,
@@ -433,6 +436,11 @@ export const fetchSSE = async (url: string, options: RequestInit & FetchSSEOptio
         case 'speed': {
           speed = data;
           options.onMessageHandle?.({ speed: data, type: 'speed' });
+          break;
+        }
+
+        case 'resolved_model': {
+          if (typeof data === 'string' && data) resolvedModel = data;
           break;
         }
 
@@ -588,6 +596,7 @@ export const fetchSSE = async (url: string, options: RequestInit & FetchSSEOptio
               }
             : undefined;
         })(),
+        resolvedModel,
         speed,
         toolCalls,
         traceId,

@@ -679,6 +679,35 @@ const transformOpenAIStream = (
   }
 };
 
+/**
+ * Router aliases (`openrouter/auto`, and any `<vendor>/auto`) do not name a real
+ * model — the router picks one per request and reports it back on every chunk.
+ * Direct model requests are excluded on purpose: providers often answer with a
+ * dated snapshot id (`gpt-4o-2024-08-06`), which is the same model and would
+ * only make the UI less readable.
+ */
+const isRouterAliasModel = (model: string | undefined): boolean =>
+  !!model && /\/auto$/i.test(model.trim());
+
+/**
+ * Emits the router-picked model once per stream, so the persisted message can
+ * name what actually ran instead of the alias the user selected.
+ */
+const readResolvedRouterModel = (
+  chunk: OpenAI.ChatCompletionChunk,
+  streamContext: StreamContext,
+  payload: ChatPayloadForTransformStream | undefined,
+): string | undefined => {
+  if (streamContext.resolvedModel) return undefined;
+  if (!isRouterAliasModel(payload?.model)) return undefined;
+
+  const { model } = chunk;
+  if (typeof model !== 'string' || !model || model === payload?.model) return undefined;
+
+  streamContext.resolvedModel = model;
+  return model;
+};
+
 export interface OpenAIStreamOptions {
   bizErrorTypeTransformer?: (error: {
     message: string;
@@ -704,8 +733,19 @@ export const OpenAIStream = (
     id: '',
   };
 
-  const transformWithProvider = (chunk: OpenAI.ChatCompletionChunk, streamContext: StreamContext) =>
-    transformOpenAIStream(chunk, streamContext, payload);
+  const transformWithProvider = (
+    chunk: OpenAI.ChatCompletionChunk,
+    streamContext: StreamContext,
+  ): StreamProtocolChunk | StreamProtocolChunk[] => {
+    const result = transformOpenAIStream(chunk, streamContext, payload);
+    const resolvedModel = readResolvedRouterModel(chunk, streamContext, payload);
+    if (!resolvedModel) return result;
+
+    return [
+      { data: resolvedModel, id: chunk.id, type: 'resolved_model' },
+      ...(Array.isArray(result) ? result : [result]),
+    ];
+  };
 
   const readableStream =
     stream instanceof ReadableStream
