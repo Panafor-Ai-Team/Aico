@@ -417,6 +417,7 @@ export const Content = memo<ContentProps>(({ user, onSuccess }) => {
         >
           <TextArea
             showCount
+            dir="auto"
             maxLength={200}
             placeholder={t('user.workspaceProfile.fields.description.placeholder')}
             rows={3}

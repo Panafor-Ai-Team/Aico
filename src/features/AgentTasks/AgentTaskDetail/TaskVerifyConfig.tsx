@@ -591,6 +591,7 @@ const TaskVerifyConfig = memo(() => {
           </Text>
           <TextArea
             autoSize={{ maxRows: 4, minRows: 2 }}
+            dir="auto"
             placeholder={t('verifyConfig.requirementPlaceholder')}
             value={requirement}
             onChange={(e) => handleRequirementChange(e.target.value)}
@@ -676,6 +677,7 @@ const TaskVerifyConfig = memo(() => {
           {editing ? (
             <TextArea
               autoSize={{ maxRows: 4, minRows: 1 }}
+              dir="auto"
               placeholder={t('verifyConfig.requirementPlaceholder')}
               value={requirement}
               onBlur={() => commit(drafts, { requirement })}

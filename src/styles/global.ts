@@ -114,6 +114,25 @@ const genGlobalStyle = ({ token }: { prefixCls: string; token: Theme }) => css`
   html[dir='rtl'] [data-orientation='horizontal'] > [aria-hidden='true']:first-of-type {
     inset-inline-start: calc(100% - var(--active-item-left) - var(--active-item-width));
   }
+
+  /**
+   * Every single-line field takes its side from what is typed in it: an English
+   * value runs left, a Persian value stays right, and an empty one keeps the
+   * placeholder on the UI's side. That is the whole of \`unicode-bidi: plaintext\`
+   * — the field's own first strong character decides, with the \`direction\`
+   * property as the fallback when there is none.
+   *
+   * Applied globally rather than per field: a Persian UI has hundreds of inputs
+   * (search, titles, names, email), and every one of them otherwise inherits the
+   * page direction and pins Latin text to the wrong edge.
+   *
+   * Deliberately NOT extended to \`textarea\`: plaintext resolves per LINE, which
+   * would let one message split across both edges. Multi-line surfaces carry
+   * \`dir="auto"\` instead, which reads the whole value.
+   */
+  input {
+    unicode-bidi: plaintext;
+  }
 `;
 
 export default genGlobalStyle;

@@ -98,7 +98,7 @@ const CodeEditorPane = memo<CodeEditorPaneProps>(
 
     return (
       <div className={`${styles} ${className ?? ''}`.trim()} ref={containerRef} style={style}>
-        <textarea className={'cm-textarea'} ref={textareaRef} />
+        <textarea className={'cm-textarea'} dir="auto" ref={textareaRef} />
       </div>
     );
   },

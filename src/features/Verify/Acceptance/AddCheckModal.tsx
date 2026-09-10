@@ -83,6 +83,7 @@ const AddCheckContent = memo<AddCheckContentProps>(({ existingIds, onSubmit }) =
             </Text>
             <TextArea
               autoSize={{ maxRows: 4, minRows: 2 }}
+              dir="auto"
               placeholder={tv('acceptance.tray.editModal.methodPlaceholder')}
               value={method}
               onChange={(event) => setMethod(event.target.value)}

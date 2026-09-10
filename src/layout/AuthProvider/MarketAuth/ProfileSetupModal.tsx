@@ -469,6 +469,7 @@ const ProfileSetupModal = memo<ProfileSetupModalProps>(
           >
             <TextArea
               showCount
+              dir="auto"
               maxLength={200}
               placeholder={t('profileSetup.fields.description.placeholder')}
               rows={3}

@@ -350,6 +350,7 @@ const CheckRejectContent = memo<CheckRejectModalProps>(
         </span>
         <TextArea
           autoSize={{ maxRows: 5, minRows: 1 }}
+          dir="auto"
           style={{ flex: 1 }}
           value={annotation.comment}
           placeholder={translate('acceptance.review.annotationPlaceholder', {
@@ -441,6 +442,7 @@ const CheckRejectContent = memo<CheckRejectModalProps>(
             )}
             <TextArea
               autoSize={{ maxRows: 6, minRows: hasEvidence ? 2 : 3 }}
+              dir="auto"
               placeholder={translate('acceptance.review.rejectPlaceholder')}
               value={comment}
               onChange={(event) => setComment(event.target.value)}

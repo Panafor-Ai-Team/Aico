@@ -569,6 +569,7 @@ const CommunityWorkspaceSettings = memo(() => {
           >
             <TextArea
               showCount
+              dir="auto"
               disabled={!canEdit}
               maxLength={DESCRIPTION_MAX}
               rows={3}

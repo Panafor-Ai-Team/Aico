@@ -106,6 +106,7 @@ const CreateNewProviderContent = memo(() => {
           style={itemStyle}
         >
           <TextArea
+            dir="auto"
             placeholder={t('createNewAiProvider.description.placeholder')}
             style={{ minHeight: 72 }}
             variant={'filled'}

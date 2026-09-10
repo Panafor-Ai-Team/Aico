@@ -72,6 +72,7 @@ export const VerifyCriterionEditor = ({
         </Text>
         <TextArea
           autoSize={{ maxRows: 6, minRows: 2 }}
+          dir="auto"
           placeholder={t('verifyConfig.detail.descriptionPlaceholder')}
           value={description}
           onChange={(e) => setDescription(e.target.value)}

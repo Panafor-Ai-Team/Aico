@@ -56,6 +56,7 @@ const EditContent = memo<EditContentProps>(({ initial, onRemove, onSubmit }) => 
         </Text>
         <TextArea
           autoSize={{ maxRows: 4, minRows: 2 }}
+          dir="auto"
           placeholder={tv('acceptance.tray.editModal.methodPlaceholder')}
           value={method}
           onChange={(e) => setMethod(e.target.value)}

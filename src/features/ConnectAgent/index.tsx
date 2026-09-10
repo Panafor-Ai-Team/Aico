@@ -920,6 +920,7 @@ const ConnectAgentContent = memo<ConnectAgentContentProps>(
           </Flexbox>
           <TextArea
             autoSize={{ maxRows: 4, minRows: 2 }}
+            dir="auto"
             maxLength={200}
             placeholder={t('connectAgent.create.descriptionPlaceholder')}
             value={description}

@@ -61,6 +61,7 @@ export const GoalContent = memo<GoalContentProps>(({ initialGoal, onDelete, onSu
       </Text>
       <TextArea
         autoSize={{ maxRows: 5, minRows: 3 }}
+        dir="auto"
         placeholder={tv('acceptance.tray.goalModal.placeholder')}
         value={goal}
         onChange={(e) => setGoal(e.target.value)}

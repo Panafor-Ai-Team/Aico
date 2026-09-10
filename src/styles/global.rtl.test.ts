@@ -37,6 +37,18 @@ describe('global RTL control fixes', () => {
     );
   });
 
+  it('lets every single-line field take its side from its own first strong character', () => {
+    // English value runs left, Persian stays right, empty keeps the placeholder
+    // on the UI's side — all of it native, so no field has to opt in.
+    expect(source).toMatch(/\binput\s*\{[^}]*unicode-bidi:\s*plaintext/);
+  });
+
+  it('does not extend plaintext to textarea, which would resolve per line', () => {
+    // Per-line resolution splits one message across both edges; multi-line
+    // surfaces use dir="auto" so the whole value decides.
+    expect(source).not.toMatch(/\btextarea\s*\{[^}]*unicode-bidi:\s*plaintext/);
+  });
+
   it('does not rely on approaches that cannot work for absolutely positioned indicators', () => {
     // `direction: ltr` on the indicator itself is ignored: logical insets map
     // through the containing block's direction.

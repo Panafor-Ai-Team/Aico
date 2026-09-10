@@ -237,6 +237,7 @@ const ConvertToSkillContent = memo<ConvertToSkillContentProps>(
           <Text type={'secondary'}>{tChat('workingPanel.skills.convert.descriptionLabel')}</Text>
           <TextArea
             autoSize={{ maxRows: 4, minRows: 2 }}
+            dir="auto"
             disabled={generating}
             placeholder={tChat('workingPanel.skills.convert.descriptionPlaceholder')}
             value={description}

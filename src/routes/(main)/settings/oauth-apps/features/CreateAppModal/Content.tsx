@@ -76,7 +76,7 @@ const CreateAppModalContent: FC<CreateAppModalContentProps> = ({ onSubmit }) => 
           name={'description'}
           style={itemStyle}
         >
-          <TextArea placeholder={t('oauthApp.form.description.placeholder')} rows={3} />
+          <TextArea dir="auto" placeholder={t('oauthApp.form.description.placeholder')} rows={3} />
         </Form.Item>
 
         <Button block htmlType={'submit'} loading={loading} type={'primary'}>

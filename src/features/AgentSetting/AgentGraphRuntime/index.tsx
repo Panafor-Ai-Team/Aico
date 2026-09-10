@@ -137,6 +137,7 @@ const AgentGraphRuntime = memo(() => {
         </Flexbox>
         <TextArea
           className={styles.editor}
+          dir="auto"
           disabled={disabled}
           placeholder={t('settingGraphRuntime.snapshot.placeholder')}
           rows={16}

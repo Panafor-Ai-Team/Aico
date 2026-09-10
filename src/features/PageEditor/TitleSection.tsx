@@ -118,6 +118,7 @@ const TitleSection = memo(() => {
       ) : (
         <TextArea
           autoSize={{ minRows: 1 }}
+          dir="auto"
           placeholder={t('pageEditor.titlePlaceholder')}
           {...getTitleTextAreaInteractionProps(canEdit)}
           value={title}

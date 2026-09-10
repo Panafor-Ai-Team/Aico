@@ -224,6 +224,7 @@ const ForwardModal = memo<ForwardModalProps>(({ open, onClose }) => {
             <TextArea
               autoSize={{ maxRows: 4, minRows: 2 }}
               className={styles.note}
+              dir="auto"
               placeholder={t('messageForward.modal.notePlaceholder')}
               resize={false}
               value={note}

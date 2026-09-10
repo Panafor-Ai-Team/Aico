@@ -322,6 +322,7 @@ const CheckerDock = memo<CheckerDockProps>(({ operationId, embedded }) => {
           <div className={styles.inputPanel}>
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{t('input.label')}</div>
             <TextArea
+              dir="auto"
               placeholder={t('input.placeholder')}
               rows={2}
               value={inputText}

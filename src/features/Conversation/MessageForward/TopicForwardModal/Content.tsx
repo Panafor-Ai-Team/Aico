@@ -149,6 +149,7 @@ export const TopicForwardContent = ({
         </Flexbox>
         <TextArea
           autoSize={{ maxRows: 4, minRows: 2 }}
+          dir="auto"
           placeholder={t('messageForward.modal.notePlaceholder')}
           resize={false}
           value={note}

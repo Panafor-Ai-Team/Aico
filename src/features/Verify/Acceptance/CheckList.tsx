@@ -1238,6 +1238,7 @@ const CheckRow = memo<{
                 )}
                 <TextArea
                   autoSize={{ maxRows: 8, minRows: 3 }}
+                  dir="auto"
                   placeholder={t('acceptance.review.detailPlaceholder')}
                   value={reviewComment}
                   onChange={(event) => setReviewComment(event.target.value)}

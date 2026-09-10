@@ -121,6 +121,7 @@ const RejectContent = memo<RejectContentProps>(({ onConfirm }) => {
       </Text>
       <TextArea
         autoSize={{ maxRows: 6, minRows: 3 }}
+        dir="auto"
         placeholder={translate('acceptance.reject.placeholder')}
         value={comment}
         onChange={(event) => setComment(event.target.value)}
@@ -188,6 +189,7 @@ const GroupFeedbackContent = memo<GroupFeedbackContentProps>(({ groupLabel, onCo
       <Flexbox gap={8}>
         <TextArea
           autoSize={{ maxRows: 8, minRows: 3 }}
+          dir="auto"
           placeholder={translate('acceptance.group.feedbackPlaceholder')}
           value={comment}
           onChange={(event) => setComment(event.target.value)}

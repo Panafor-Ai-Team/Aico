@@ -72,6 +72,7 @@ const CreateForm = memo<CreateFormProps>(({ id, initialValues, onClose, onSucces
       <Flexbox gap={8}>
         <label style={{ fontSize: 14 }}>{t('createNew.description.label')}</label>
         <TextArea
+          dir="auto"
           placeholder={t('createNew.description.placeholder')}
           style={{ minHeight: 120 }}
           value={description}

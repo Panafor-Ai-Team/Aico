@@ -189,7 +189,7 @@ const DatasetCreateContent: FC<DatasetCreateContentProps> = ({
       </Form.Item>
 
       <Form.Item label={t('dataset.create.description.label')} name="description">
-        <TextArea placeholder={t('dataset.create.description.placeholder')} rows={3} />
+        <TextArea dir="auto" placeholder={t('dataset.create.description.placeholder')} rows={3} />
       </Form.Item>
 
       <Form.Item extra={t('dataset.evalMode.hint')} label={t('evalMode.label')} name="evalMode">
@@ -215,7 +215,7 @@ const DatasetCreateContent: FC<DatasetCreateContentProps> = ({
 
       {evalModeValue === 'llm-rubric' && (
         <Form.Item label={t('evalMode.prompt.label')} name={['evalConfig', 'judgePrompt']}>
-          <TextArea placeholder={t('evalMode.prompt.placeholder')} rows={3} />
+          <TextArea dir="auto" placeholder={t('evalMode.prompt.placeholder')} rows={3} />
         </Form.Item>
       )}
 

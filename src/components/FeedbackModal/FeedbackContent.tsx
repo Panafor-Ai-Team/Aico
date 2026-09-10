@@ -145,6 +145,7 @@ const FeedbackContent = memo<FeedbackContentProps>(({ initialValues }) => {
         >
           <TextArea
             showCount
+            dir="auto"
             maxLength={5000}
             placeholder={t('feedback.fields.message.placeholder')}
             rows={6}

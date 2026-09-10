@@ -81,6 +81,7 @@ const TestCaseCreateContent: FC<TestCaseCreateContentProps> = ({
       <Form.Item label={t('testCase.create.input.label')} name="input" rules={[{ required: true }]}>
         <TextArea
           autoSize={{ maxRows: 6, minRows: 3 }}
+          dir="auto"
           placeholder={t('testCase.create.input.placeholder')}
         />
       </Form.Item>
@@ -91,6 +92,7 @@ const TestCaseCreateContent: FC<TestCaseCreateContentProps> = ({
       >
         <TextArea
           autoSize={{ maxRows: 6, minRows: 2 }}
+          dir="auto"
           placeholder={t('testCase.create.expected.placeholder')}
         />
       </Form.Item>
@@ -120,6 +122,7 @@ const TestCaseCreateContent: FC<TestCaseCreateContentProps> = ({
         <Form.Item label={t('evalMode.prompt.label')} name={['evalConfig', 'judgePrompt']}>
           <TextArea
             autoSize={{ maxRows: 8, minRows: 3 }}
+            dir="auto"
             placeholder={t('evalMode.prompt.placeholder')}
           />
         </Form.Item>

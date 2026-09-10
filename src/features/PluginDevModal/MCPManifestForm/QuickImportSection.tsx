@@ -117,6 +117,7 @@ const QuickImportSection = ({
       )}
       <TextArea
         autoSize={{ maxRows: 15, minRows: 10 }}
+        dir="auto"
         value={jsonInput}
         placeholder={`{
   "mcpServers": {

@@ -167,7 +167,7 @@ const DatasetEditContent: FC<DatasetEditContentProps> = ({
       </Form.Item>
 
       <Form.Item label={t('dataset.create.description.label')} name="description">
-        <TextArea placeholder={t('dataset.create.description.placeholder')} rows={3} />
+        <TextArea dir="auto" placeholder={t('dataset.create.description.placeholder')} rows={3} />
       </Form.Item>
 
       <Form.Item extra={t('dataset.evalMode.hint')} label={t('evalMode.label')} name="evalMode">
@@ -195,19 +195,27 @@ const DatasetEditContent: FC<DatasetEditContentProps> = ({
       {(evalModeValue === 'llm-rubric' || evalModeValue === 'answer-relevance') && (
         <>
           <Form.Item initialValue="aihubmix" label={'Provider'} name={['evalConfig', 'provider']}>
-            <TextArea placeholder={'LLM provider (e.g. openai, azure)'} rows={1} />
+            <TextArea dir="auto" placeholder={'LLM provider (e.g. openai, azure)'} rows={1} />
           </Form.Item>
           <Form.Item initialValue="gpt-5-nano" label={'Model'} name={['evalConfig', 'model']}>
-            <TextArea placeholder={'LLM model to use for evaluation (e.g. gpt-4)'} rows={1} />
+            <TextArea
+              dir="auto"
+              placeholder={'LLM model to use for evaluation (e.g. gpt-4)'}
+              rows={1}
+            />
           </Form.Item>
           <Form.Item label={'System Prompt'} name={['evalConfig', 'systemRole']}>
-            <TextArea placeholder={'Optional system prompt for the LLM judge'} rows={3} />
+            <TextArea
+              dir="auto"
+              placeholder={'Optional system prompt for the LLM judge'}
+              rows={3}
+            />
           </Form.Item>
           <Form.Item label={'Eval Prompt'} name={['evalConfig', 'criteria']}>
-            <TextArea placeholder={'Prompt template for the LLM judge'} rows={3} />
+            <TextArea dir="auto" placeholder={'Prompt template for the LLM judge'} rows={3} />
           </Form.Item>
           <Form.Item label={t('evalMode.prompt.label')} name={['evalConfig', 'judgePrompt']}>
-            <TextArea placeholder={t('evalMode.prompt.placeholder')} rows={3} />
+            <TextArea dir="auto" placeholder={t('evalMode.prompt.placeholder')} rows={3} />
           </Form.Item>
         </>
       )}

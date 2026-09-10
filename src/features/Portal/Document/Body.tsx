@@ -185,6 +185,7 @@ const SkillFrontmatterBlock = memo<SkillFrontmatterBlockProps>(({ documentId, fr
           <TextArea
             autoSize={{ maxRows: 12, minRows: 4 }}
             className={styles.textArea}
+            dir="auto"
             value={draft}
             variant="borderless"
             onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {

@@ -68,6 +68,7 @@ const GenerationPromptInput = memo<GenerationPromptInputProps>(
       <TextArea
         autoSize={{ maxRows, minRows }}
         className={styles.textarea}
+        dir="auto"
         disabled={disabled}
         placeholder={placeholder}
         value={value}

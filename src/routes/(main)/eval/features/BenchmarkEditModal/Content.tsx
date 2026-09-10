@@ -105,7 +105,7 @@ const BenchmarkEditContent: FC<BenchmarkEditContentProps> = ({
       </Form.Item>
 
       <Form.Item label={t('benchmark.create.description.label')} name="description">
-        <TextArea placeholder={t('benchmark.create.description.placeholder')} rows={3} />
+        <TextArea dir="auto" placeholder={t('benchmark.create.description.placeholder')} rows={3} />
       </Form.Item>
 
       <Form.Item label={t('benchmark.create.tags.label')} name="tags" style={{ marginBottom: 0 }}>

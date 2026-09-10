@@ -83,7 +83,7 @@ const EditForm: FC<EditFormProps> = ({ canEdit, detail, onSubmit }) => {
           name={'description'}
           style={{ marginBottom: 0 }}
         >
-          <TextArea placeholder={t('oauthApp.form.description.placeholder')} rows={3} />
+          <TextArea dir="auto" placeholder={t('oauthApp.form.description.placeholder')} rows={3} />
         </Form.Item>
 
         <Flexbox horizontal justify={'flex-end'}>

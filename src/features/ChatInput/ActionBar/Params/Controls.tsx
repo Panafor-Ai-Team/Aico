@@ -850,6 +850,7 @@ const Controls = memo<ControlsProps>(({ setUpdating, updating, variant = 'popove
               tooltip={t('settingChat.inputTemplate.desc')}
             >
               <TextArea
+                dir="auto"
                 placeholder={t('settingChat.inputTemplate.placeholder')}
                 value={typeof inputTemplateValue === 'string' ? inputTemplateValue : ''}
                 onChange={(e) => {
