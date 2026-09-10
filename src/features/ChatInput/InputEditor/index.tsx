@@ -50,6 +50,7 @@ import { createInputCompletionError, isInputCompletionAbortError } from './input
 import InputHistoryPopup, { getHistoryPreviewText } from './InputHistoryPopup';
 import { INSERT_LOCAL_FILE_TAG_COMMAND } from './LocalFileTag';
 import { mentionFilledClassName } from './mentionStyle';
+import { NESTED_BLOCK_DIRECTION_SELECTOR } from './nestedBlockDirectionSelector';
 import Placeholder, { type PlaceholderVariant } from './Placeholder';
 import { CHAT_INPUT_EMBED_PLUGINS, createChatInputRichPlugins } from './plugins';
 import { INSERT_REFER_TOPIC_COMMAND } from './ReferTopic';
@@ -69,8 +70,11 @@ const className = cx(
     }
 
     /* Nested blocks (lists, quotes) may still carry a Lexical dir — keep them
-       on the root's direction so nothing splits mid-message. */
-    [dir] {
+       on the root's direction so nothing splits mid-message. Excludes the
+       editor root itself: it also matches [dir] (ReactAutoDirectionPlugin
+       sets its dir from the first strong character), and forcing that back
+       to 'inherit' would discard the very value the plugin just computed. */
+    ${NESTED_BLOCK_DIRECTION_SELECTOR} {
       direction: inherit;
     }
   `,
