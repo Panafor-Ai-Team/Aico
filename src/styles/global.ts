@@ -129,6 +129,11 @@ const genGlobalStyle = ({ token }: { prefixCls: string; token: Theme }) => css`
    * Deliberately NOT extended to \`textarea\`: plaintext resolves per LINE, which
    * would let one message split across both edges. Multi-line surfaces carry
    * \`dir="auto"\` instead, which reads the whole value.
+   *
+   * A value with no strong character at all — a phone number, an OTP, password
+   * dots — resolves LTR, which is how numbers read anyway. Only a genuinely
+   * empty field falls through to \`direction\`, keeping its placeholder on the
+   * UI's side.
    */
   input {
     unicode-bidi: plaintext;

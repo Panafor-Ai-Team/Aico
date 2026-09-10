@@ -5,8 +5,11 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 /**
- * Regression: Persian signup must keep name fields RTL-aligned and show the
- * email placeholder on the right (not pinned left by type=email / UA LTR).
+ * Persian is the primary language here, so every field on this form takes its
+ * side from what is typed in it. That rule is global now (`input` carries
+ * `unicode-bidi: plaintext` in styles/global.ts) — these guard the two things
+ * the form itself can still get wrong: pinning a direction of its own, and
+ * letting `type="email"` hand the empty field to the UA's LTR default.
  */
 describe('BetterAuthSignUpForm RTL field alignment', () => {
   const source = readFileSync(
@@ -20,14 +23,15 @@ describe('BetterAuthSignUpForm RTL field alignment', () => {
     expect(source).not.toMatch(/<Input[\s\S]*?type=["']email["']/);
   });
 
-  it('forces RTL placeholder alignment for the email field under dir=rtl', () => {
-    expect(source).toContain("html[dir='rtl'] &:placeholder-shown");
-    expect(source).toContain('direction: rtl');
-    expect(source).toContain('text-align: start');
+  it('pins no direction of its own, so each field follows its own text', () => {
+    // A hardcoded direction here beats the global rule and sends one language to
+    // the wrong edge: an English name stuck on the right, or a Persian address
+    // snapped left on the first character typed.
+    expect(source).not.toMatch(/direction:\s*(rtl|ltr)/);
+    expect(source).not.toMatch(/unicode-bidi/);
   });
 
-  it('keeps name inputs RTL under dir=rtl and prevents grid overflow clipping', () => {
-    expect(source).toContain('nameInput');
+  it('keeps name inputs from clipping Persian labels in half-width columns', () => {
     expect(source).toContain('min-width: 0');
     expect(source).toMatch(/\.ant-form-item-label\s*\{[\s\S]*?text-align:\s*start/);
     expect(source).toMatch(/\.ant-form-item-label > label\s*\{[\s\S]*?width:\s*100%/);
