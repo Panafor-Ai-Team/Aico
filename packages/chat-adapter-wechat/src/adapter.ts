@@ -332,7 +332,9 @@ async function loadAttachmentBuffer(
   }
   if (typeof attachment.fetchData === 'function') {
     try {
-      return await attachment.fetchData();
+      // `chat` widened this to `ArrayBuffer | Buffer` in a 4.x minor, and the
+      // repo installs the newest match for `^4.31.0`, so both shapes are live.
+      return blobOrBufferToBuffer(await attachment.fetchData());
     } catch (error) {
       logger?.warn?.('Attachment fetchData failed: %s', error);
     }

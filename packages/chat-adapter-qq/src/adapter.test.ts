@@ -423,7 +423,9 @@ describe('QQAdapter', () => {
       const data = await message.attachments[0].fetchData!();
 
       expect(data).toBeInstanceOf(Buffer);
-      expect(data.length).toBe(4);
+      // `byteLength` reads the same on Buffer and ArrayBuffer; `length` does
+      // not exist on the latter, which `chat` may now return.
+      expect(data.byteLength).toBe(4);
 
       vi.unstubAllGlobals();
     });
