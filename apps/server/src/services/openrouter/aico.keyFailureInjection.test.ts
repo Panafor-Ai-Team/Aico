@@ -465,6 +465,141 @@ describe('Aico OpenRouter failure injection (Phase 2)', () => {
     expect(budget!.settledUsageMicroUsd).toBe(2_400_000);
   });
 
+  describe('FIN-014 a missing period counter must never fall back to lifetime usage', () => {
+    const seedDailyBudget = async (
+      keyId: string,
+      keyInfo: Record<string, unknown>,
+      budgetOverrides: Record<string, unknown> = {},
+    ) => {
+      const { OrganizationModel } = await import('@/database/models/organization');
+      const orgModel = new OrganizationModel(db);
+      const org = await orgModel.createOrganization({
+        name: `FIN014 ${keyId}`,
+        ownerUserId: userId,
+      });
+      const members = await orgModel.listMembers(org.id);
+      const ownerMember = members[0];
+
+      const client = new ControllableOpenRouterClient();
+      const keys = new AicoOpenRouterKeyService(db, client);
+
+      await db.insert(memberBudgets).values({
+        isActive: true,
+        openrouterKeyCiphertext: 'enc',
+        openrouterKeyId: keyId,
+        orgId: org.id,
+        orgMemberId: ownerMember.id,
+        period: 'daily',
+        periodAmountMicroUsd: 10_000_000,
+        reservedMicroUsd: 10_000_000,
+        settledUsageMicroUsd: 0,
+        ...budgetOverrides,
+      });
+
+      client.keys.set(keyId, {
+        disabled: false,
+        hash: keyId,
+        key: `${FAKE_SECRET}-${keyId}`,
+        limit: 10,
+        name: 'test',
+        ...keyInfo,
+      });
+
+      return { client, keys, orgModel, ownerMember };
+    };
+
+    it('does not stamp the checkpoint baseline with lifetime usage, so the key limit stays at the funded cap', async () => {
+      // A stale checkpoint rate forces the rebase path, and OpenRouter reports
+      // no daily counter. Before the fix the $500 lifetime figure became the
+      // baseline, and the key was then pushed a $500 limit against a $10/day cap.
+      const { client, keys, orgModel, ownerMember } = await seedDailyBudget(
+        'ctrl_fin014_rebase',
+        { limitRemaining: 8, usage: 500, usageDaily: null, usageMonthly: null, usageWeekly: null },
+        { checkpointMultiplierBp: 11_000 },
+      );
+
+      await keys.syncMemberCycleUsage(ownerMember.id);
+
+      const budget = await orgModel.getMemberBudget(ownerMember.id);
+      expect(Number(budget!.usageBaselineMicroUsd ?? 0)).toBe(0);
+      expect(Number(budget!.checkpointMultiplierBp)).toBe(11_000);
+
+      await keys.ensureMemberKey(ownerMember.id);
+      const key = client.keys.get('ctrl_fin014_rebase');
+      // $10 cycle cap ÷ the 1.2x platform multiplier — never the lifetime figure.
+      expect(key.limit).toBeCloseTo(8.333_333, 6);
+      expect(key.limit).toBeLessThan(10);
+    });
+
+    it('holds settled usage at the last known value instead of saturating the cap', async () => {
+      // Neither `limit_remaining` nor a period counter is available. Converting
+      // lifetime usage here would bill $50 against a $10 cap, clamp to the cap
+      // and strand the member for the rest of the day.
+      const { keys, orgModel, ownerMember } = await seedDailyBudget(
+        'ctrl_fin014_settle',
+        {
+          limitRemaining: null,
+          usage: 50,
+          usageDaily: null,
+          usageMonthly: null,
+          usageWeekly: null,
+        },
+        { settledUsageMicroUsd: 1_000_000 },
+      );
+
+      await keys.syncMemberCycleUsage(ownerMember.id);
+
+      const budget = await orgModel.getMemberBudget(ownerMember.id);
+      expect(Number(budget!.settledUsageMicroUsd)).toBe(1_000_000);
+    });
+
+    it('records the degraded sync so the gap is visible to operators', async () => {
+      const { keys, orgModel, ownerMember } = await seedDailyBudget(
+        'ctrl_fin014_status',
+        { limitRemaining: 8, usage: 500, usageDaily: null, usageMonthly: null, usageWeekly: null },
+        { checkpointMultiplierBp: 11_000 },
+      );
+
+      await keys.syncMemberCycleUsage(ownerMember.id);
+
+      const budget = await orgModel.getMemberBudget(ownerMember.id);
+      expect(budget!.lastSyncStatus).toBe('degraded');
+      expect(budget!.lastSyncError).toMatch(/period usage counter/i);
+    });
+
+    it('still reads the lifetime counter for a legacy total budget', async () => {
+      // `total` budgets are created without `limit_reset`, so OpenRouter meters
+      // them on the lifetime counter and it remains the correct source.
+      const { keys, orgModel, ownerMember } = await seedDailyBudget(
+        'ctrl_fin014_total',
+        { limitRemaining: null, usage: 2, usageDaily: null, usageMonthly: null, usageWeekly: null },
+        { period: 'total', settledUsageMicroUsd: 0 },
+      );
+
+      await keys.syncMemberCycleUsage(ownerMember.id);
+
+      const budget = await orgModel.getMemberBudget(ownerMember.id);
+      expect(Number(budget!.settledUsageMicroUsd)).toBe(2_400_000);
+      expect(budget!.lastSyncStatus).toBe('synced');
+    });
+
+    it('still uses the period counter when OpenRouter reports one', async () => {
+      const { keys, orgModel, ownerMember } = await seedDailyBudget('ctrl_fin014_happy', {
+        limitRemaining: 8,
+        usage: 50,
+        usageDaily: 2,
+        usageMonthly: 50,
+        usageWeekly: 50,
+      });
+
+      await keys.syncMemberCycleUsage(ownerMember.id);
+
+      const budget = await orgModel.getMemberBudget(ownerMember.id);
+      expect(Number(budget!.settledUsageMicroUsd)).toBe(2_400_000);
+      expect(budget!.lastSyncStatus).toBe('synced');
+    });
+  });
+
   it('FIN-004: recreate after 404 disables/deletes the stale key hash', async () => {
     const billing = new AicoBillingModel(db);
     const client = new ControllableOpenRouterClient();

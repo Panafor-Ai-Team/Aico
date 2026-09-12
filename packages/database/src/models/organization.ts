@@ -1617,10 +1617,21 @@ export class OrganizationModel {
     return row;
   };
 
-  syncMemberBudgetUsage = async (params: { orgMemberId: string; settledUsageMicroUsd: number }) => {
+  syncMemberBudgetUsage = async (params: {
+    orgMemberId: string;
+    settledUsageMicroUsd: number;
+    /** Why the figure is not fully trusted, when `syncStatus` is `degraded`. */
+    syncError?: string | null;
+    syncStatus?: 'synced' | 'degraded';
+  }) => {
     const [row] = await this.db
       .update(memberBudgets)
-      .set({ lastSyncedAt: new Date(), settledUsageMicroUsd: params.settledUsageMicroUsd })
+      .set({
+        lastSyncError: params.syncError ?? null,
+        lastSyncStatus: params.syncStatus ?? 'synced',
+        lastSyncedAt: new Date(),
+        settledUsageMicroUsd: params.settledUsageMicroUsd,
+      })
       .where(eq(memberBudgets.orgMemberId, params.orgMemberId))
       .returning();
     return row;

@@ -8,6 +8,7 @@ import {
   type BudgetPeriod,
   currentCycleLimitMicroUsd,
   DEFAULT_USAGE_MULTIPLIER_BP,
+  isPeriodScopedBudget,
   isStaleManagedKeyId,
   keyLimitFromBilled,
   microUsdToDecimalString,
@@ -23,6 +24,9 @@ import {
   type OpenRouterKeyLimitReset,
   type OpenRouterManagementClient,
 } from './management';
+
+const MISSING_PERIOD_COUNTER =
+  'OpenRouter reported no period usage counter for this budget; usage held at the last settled value';
 
 const locks = new Map<string, Promise<unknown>>();
 const runExclusive = <T>(key: string, fn: () => Promise<T>): Promise<T> => {
@@ -104,6 +108,12 @@ export class AicoOpenRouterKeyService {
    * multiplier checkpoint baseline must be period-scoped too — using lifetime
    * `info.usage` here would leave the baseline and the metered value in
    * different units and corrupt every subsequent conversion.
+   *
+   * Returns `null` when a period-scoped budget has no period counter to read.
+   * OpenRouter genuinely omits `usage_daily`/`usage_weekly`/`usage_monthly` for
+   * some key shapes, and substituting lifetime usage there is what corrupted
+   * the checkpoint and pushed key limits far above the funded cap. Callers must
+   * degrade rather than guess.
    */
   private rawMeteredUsageMicro = (
     budget: { period?: string | null },
@@ -113,17 +123,22 @@ export class AicoOpenRouterKeyService {
       usageMonthly?: number | null;
       usageWeekly?: number | null;
     },
-  ): number => {
+  ): number | null => {
+    // A `total` budget has no `limit_reset`, so OpenRouter meters it on the
+    // lifetime counter and that counter is the correct source.
+    if (!isPeriodScopedBudget(budget.period)) {
+      return Number(openRouterUsdToMicroFloor(info.usage ?? 0));
+    }
+
     const periodUsageUsd =
       budget.period === 'daily'
         ? info.usageDaily
         : budget.period === 'weekly'
           ? info.usageWeekly
-          : budget.period === 'monthly'
-            ? info.usageMonthly
-            : null;
-    const source = periodUsageUsd ?? info.usage ?? 0;
-    return Number(openRouterUsdToMicroFloor(source));
+          : info.usageMonthly;
+
+    if (periodUsageUsd == null) return null;
+    return Number(openRouterUsdToMicroFloor(periodUsageUsd));
   };
 
   /**
@@ -134,11 +149,23 @@ export class AicoOpenRouterKeyService {
   private syncMemberCheckpoint = async (params: {
     checkpoint: UsageMultiplierCheckpoint;
     orgMemberId: string;
-    rawUsage: number;
-  }): Promise<{ bp: number; checkpoint: UsageMultiplierCheckpoint }> => {
+    rawUsage: number | null;
+  }): Promise<{ bp: number; checkpoint: UsageMultiplierCheckpoint; degraded: boolean }> => {
     const bp = await this.billingModel.getUsageMultiplierBp();
     const currentBp = Number(params.checkpoint.checkpointMultiplierBp ?? bp);
-    if (currentBp === bp) return { bp, checkpoint: params.checkpoint };
+    if (currentBp === bp) {
+      return { bp, checkpoint: params.checkpoint, degraded: params.rawUsage === null };
+    }
+
+    // The rebase stamps the baseline with the raw counter, and the key limit is
+    // derived from that baseline. Rebasing against an unknown counter is what
+    // let a lifetime figure become the baseline of a daily budget and push a
+    // limit orders of magnitude above the funded cap — hold the old checkpoint
+    // (and its rate, since usage is still expressed in it) until a real counter
+    // arrives.
+    if (params.rawUsage === null) {
+      return { bp: currentBp, checkpoint: params.checkpoint, degraded: true };
+    }
 
     const rebased = rebaseCheckpoint({
       checkpoint: params.checkpoint,
@@ -152,7 +179,7 @@ export class AicoOpenRouterKeyService {
       usageBaselineMicroUsd: rebased.usageBaselineMicroUsd,
     });
 
-    return { bp, checkpoint: { ...rebased, checkpointMultiplierBp: bp } };
+    return { bp, checkpoint: { ...rebased, checkpointMultiplierBp: bp }, degraded: false };
   };
 
   ensureUserKey = async (userId: string) => {
@@ -372,12 +399,18 @@ export class AicoOpenRouterKeyService {
     // same counter the key limit is enforced against, since the checkpoint
     // baseline is expressed in those units.
     const bp = await this.billingModel.getUsageMultiplierBp();
-    const usageMicro = billedUsageFromRaw({
-      baselineRaw: Number(budget.usageBaselineMicroUsd ?? 0),
-      billedBefore: Number(budget.billedUsageBeforeBaselineMicroUsd ?? 0),
-      bp: Number(budget.checkpointMultiplierBp ?? bp),
-      rawUsage: this.rawMeteredUsageMicro(budget, info),
-    });
+    const rawUsage = this.rawMeteredUsageMicro(budget, info);
+    // With no period counter the last settled figure is the most we can honestly
+    // claim was spent; lifetime usage would over-state it and under-refund the org.
+    const usageMicro =
+      rawUsage === null
+        ? Math.max(0, Number(budget.settledUsageMicroUsd ?? 0))
+        : billedUsageFromRaw({
+            baselineRaw: Number(budget.usageBaselineMicroUsd ?? 0),
+            billedBefore: Number(budget.billedUsageBeforeBaselineMicroUsd ?? 0),
+            bp: Number(budget.checkpointMultiplierBp ?? bp),
+            rawUsage,
+          });
     const currentCycle = currentCycleLimitMicroUsd(budget);
     const pendingHeld = Math.max(0, Number(budget.pendingPeriodAmountMicroUsd ?? 0));
     const remainingFromOr =
@@ -496,7 +529,16 @@ export class AicoOpenRouterKeyService {
     } else if (periodUsageMicro != null) {
       usageMicro = Math.min(currentCycle, Math.max(0, periodUsageMicro));
       remainingMicro = Math.max(0, currentCycle - usageMicro);
+    } else if (isPeriodScopedBudget(budget.period)) {
+      // Neither `limit_remaining` nor the period counter is available. Lifetime
+      // `info.usage` spans earlier cycles, so converting it here saturates
+      // usage at the cap and strands the member for the rest of the period —
+      // which is also what the docstring above promises never to do. Hold the
+      // last settled figure until a real counter arrives.
+      usageMicro = Math.min(currentCycle, priorSettled);
+      remainingMicro = Math.max(0, currentCycle - usageMicro);
     } else {
+      // A `total` budget is metered on the lifetime counter, so it is correct here.
       usageMicro = toBilledUsage(Number(openRouterUsdToMicroFloor(info.usage ?? 0)));
       usageMicro = Math.min(currentCycle, Math.max(0, usageMicro));
       remainingMicro = Math.max(0, currentCycle - usageMicro);
@@ -523,7 +565,7 @@ export class AicoOpenRouterKeyService {
     if (!budget?.openrouterKeyId) return null;
 
     const info = await this.client.getKey(budget.openrouterKeyId);
-    const { bp, checkpoint } = await this.syncMemberCheckpoint({
+    const { bp, checkpoint, degraded } = await this.syncMemberCheckpoint({
       checkpoint: budget,
       orgMemberId,
       rawUsage: this.rawMeteredUsageMicro(budget, info),
@@ -537,6 +579,8 @@ export class AicoOpenRouterKeyService {
     await this.orgModel.syncMemberBudgetUsage({
       orgMemberId,
       settledUsageMicroUsd: usageMicroUsd,
+      syncError: degraded ? MISSING_PERIOD_COUNTER : null,
+      syncStatus: degraded ? 'degraded' : 'synced',
     });
 
     return { remainingMicroUsd, usageMicroUsd };
@@ -597,7 +641,7 @@ export class AicoOpenRouterKeyService {
     if (!budget?.openrouterKeyId || isStaleManagedKeyId(budget.openrouterKeyId)) return null;
 
     const info = await this.client.getKey(budget.openrouterKeyId);
-    const { bp, checkpoint } = await this.syncMemberCheckpoint({
+    const { bp, checkpoint, degraded } = await this.syncMemberCheckpoint({
       checkpoint: budget,
       orgMemberId,
       rawUsage: this.rawMeteredUsageMicro(budget, info),
@@ -610,6 +654,8 @@ export class AicoOpenRouterKeyService {
     return this.orgModel.syncMemberBudgetUsage({
       orgMemberId,
       settledUsageMicroUsd: usageMicroUsd,
+      syncError: degraded ? MISSING_PERIOD_COUNTER : null,
+      syncStatus: degraded ? 'degraded' : 'synced',
     });
   };
 
