@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { OrganizationModel } from '@/database/models/organization';
 import { PlatformAdminUserModel } from '@/database/models/platformAdminUser';
-import { session, users, userWallets } from '@/database/schemas';
+import { aicoKeyOutbox, session, users, userWallets } from '@/database/schemas';
 import {
   DEFAULT_USAGE_MULTIPLIER_BP,
   MAX_USAGE_MULTIPLIER_BP,
@@ -306,61 +306,71 @@ export const platformAdminRouter = router({
     .input(
       topupAmountInputSchema.extend({
         description: z.string().max(500).optional(),
-        idempotencyKey: z.string().min(8).max(128).optional(),
+        // FIN-013: required, not optional. A null gateway_ref_id skips the
+        // partial unique index entirely, which left every manual credit
+        // replayable by a simple retry.
+        idempotencyKey: z.string().min(8).max(128),
         orgId: z.string().min(1),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      let amountMicroUsd: number;
+      let amountToman: number;
+      let result: Awaited<ReturnType<typeof ctx.organizationModel.addManualCredit>>;
+
       try {
         const fxConfig = await ctx.billingModel.getFxConfig();
-        const { amountMicroUsd, amountToman, fxRateTomanPerUsd } = await resolveTopupAmount(input, {
-          adminRate: fxConfig.tomanPerUsd,
-        });
-        const result = await ctx.organizationModel.addManualCredit({
+        const amounts = await resolveTopupAmount(input, { adminRate: fxConfig.tomanPerUsd });
+        amountMicroUsd = amounts.amountMicroUsd;
+        amountToman = amounts.amountToman;
+        result = await ctx.organizationModel.addManualCredit({
           amountMicroUsd,
           amountToman,
           createdByAdminId: ctx.adminId,
           description: input.description,
-          fxRateTomanPerUsd,
+          fxRateTomanPerUsd: amounts.fxRateTomanPerUsd,
           idempotencyKey: input.idempotencyKey,
           orgId: input.orgId,
           type: 'manual_credit',
         });
-        await recordAicoSecurityEvent(ctx.serverDB, {
-          action: 'platform.credit.org_add',
-          actorAdminId: ctx.adminId,
-          ipAddress: ctx.clientIp,
-          metadata: {
-            amountMicroUsd,
-            amountToman,
-            idempotencyKey: input.idempotencyKey ?? null,
-            transactionId: result.transaction.id,
-          },
-          organizationId: input.orgId,
-          targetId: result.transaction.id,
-          targetType: 'wallet_transaction',
-          userAgent: ctx.userAgent,
-        });
-        return {
-          organization: {
-            ...result.organization,
-            walletBalanceMicroUsd: String(result.organization.walletBalanceMicroUsd ?? 0),
-            walletBalanceUsd: microUsdToDecimalString(
-              result.organization.walletBalanceMicroUsd ?? 0,
-            ),
-          },
-          transaction: {
-            ...result.transaction,
-            amountMicroUsd: String(result.transaction.amountMicroUsd ?? 0),
-            amountUsd: microUsdToDecimalString(result.transaction.amountMicroUsd ?? 0),
-          },
-        };
       } catch (error) {
+        // Nothing committed on this path — a retry is safe.
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: error instanceof Error ? error.message : 'Failed to add credit',
         });
       }
+
+      // FIN-013: the money has moved; a failure below must not be reported as a
+      // failed credit, or the admin's retry credits the org a second time.
+      await recordAicoSecurityEvent(ctx.serverDB, {
+        action: 'platform.credit.org_add',
+        actorAdminId: ctx.adminId,
+        ipAddress: ctx.clientIp,
+        metadata: {
+          amountMicroUsd,
+          amountToman,
+          idempotencyKey: input.idempotencyKey,
+          transactionId: result.transaction.id,
+        },
+        organizationId: input.orgId,
+        targetId: result.transaction.id,
+        targetType: 'wallet_transaction',
+        userAgent: ctx.userAgent,
+      }).catch((error) => console.error('[aico] failed to record credit audit event', error));
+
+      return {
+        organization: {
+          ...result.organization,
+          walletBalanceMicroUsd: String(result.organization.walletBalanceMicroUsd ?? 0),
+          walletBalanceUsd: microUsdToDecimalString(result.organization.walletBalanceMicroUsd ?? 0),
+        },
+        transaction: {
+          ...result.transaction,
+          amountMicroUsd: String(result.transaction.amountMicroUsd ?? 0),
+          amountUsd: microUsdToDecimalString(result.transaction.amountMicroUsd ?? 0),
+        },
+      };
     }),
 
   /**
@@ -436,7 +446,8 @@ export const platformAdminRouter = router({
       topupAmountInputSchema.extend({
         description: z.string().max(500).optional(),
         email: z.string().email().optional(),
-        idempotencyKey: z.string().min(8).max(128).optional(),
+        // FIN-013: required — see addManualCredit above.
+        idempotencyKey: z.string().min(8).max(128),
         publicCode: z.string().min(1).max(32).optional(),
         userId: z.string().min(1).optional(),
       }),
@@ -456,61 +467,81 @@ export const platformAdminRouter = router({
         });
       }
 
+      let amountMicroUsd: number;
+      let amountToman: number;
+      let result: Awaited<ReturnType<typeof ctx.billingModel.manualCreditUser>>;
+
       try {
         const fxConfig = await ctx.billingModel.getFxConfig();
-        const { amountMicroUsd, amountToman, fxRateTomanPerUsd } = await resolveTopupAmount(input, {
-          adminRate: fxConfig.tomanPerUsd,
-        });
-        const result = await ctx.billingModel.manualCreditUser({
+        const amounts = await resolveTopupAmount(input, { adminRate: fxConfig.tomanPerUsd });
+        amountMicroUsd = amounts.amountMicroUsd;
+        amountToman = amounts.amountToman;
+        result = await ctx.billingModel.manualCreditUser({
           amountMicroUsd,
           amountToman,
           createdByAdminId: ctx.adminId,
           description: input.description,
-          fxRateTomanPerUsd,
+          fxRateTomanPerUsd: amounts.fxRateTomanPerUsd,
           idempotencyKey: input.idempotencyKey,
           userId,
         });
-
-        // Ensure the user can spend the new balance via a managed key.
-        const keyService = new AicoOpenRouterKeyService(ctx.serverDB);
-        await keyService.ensureUserKey(userId);
-
-        await recordAicoSecurityEvent(ctx.serverDB, {
-          action: 'platform.credit.user_add',
-          actorAdminId: ctx.adminId,
-          ipAddress: ctx.clientIp,
-          metadata: {
-            amountMicroUsd,
-            amountToman,
-            idempotencyKey: input.idempotencyKey ?? null,
-            targetUserId: userId,
-            transactionId: result.transaction.id,
-          },
-          targetId: userId,
-          targetType: 'user',
-          userAgent: ctx.userAgent,
-        });
-
-        return {
-          transaction: {
-            ...result.transaction,
-            amountMicroUsd: String(result.transaction.amountMicroUsd ?? 0),
-            amountToman: tomanString(result.transaction.amountToman ?? 0),
-            amountUsd: microUsdToDecimalString(result.transaction.amountMicroUsd ?? 0),
-          },
-          userId,
-          wallet: {
-            balanceMicroUsd: String(result.wallet.balanceMicroUsd ?? 0),
-            balanceToman: tomanString(result.wallet.balanceToman ?? 0),
-            balanceUsd: microUsdToDecimalString(result.wallet.balanceMicroUsd ?? 0),
-          },
-        };
       } catch (error) {
+        // Nothing has been committed on this path, so reporting a failure here
+        // is honest and a retry is safe.
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: error instanceof Error ? error.message : 'Failed to add user credit',
         });
       }
+
+      // FIN-013: the money has moved. Nothing below may turn this into a reported
+      // failure — an admin who sees "credit failed" over a committed credit
+      // retries, and the retry credits the wallet a second time.
+      try {
+        // Push the new balance to the managed key so the user can spend it.
+        await new AicoOpenRouterKeyService(ctx.serverDB).ensureUserKey(userId);
+      } catch (error) {
+        console.error('[aico] user credit committed but OpenRouter key push failed', error);
+        // Without a retry the wallet stays funded behind a stale key limit until
+        // an operator re-runs the credit by hand.
+        await ctx.serverDB
+          .insert(aicoKeyOutbox)
+          .values({ action: 'sync_user_key', nextAttemptAt: new Date(), status: 'pending', userId })
+          .catch((enqueueError) =>
+            console.error('[aico] failed to enqueue sync_user_key retry', enqueueError),
+          );
+      }
+
+      await recordAicoSecurityEvent(ctx.serverDB, {
+        action: 'platform.credit.user_add',
+        actorAdminId: ctx.adminId,
+        ipAddress: ctx.clientIp,
+        metadata: {
+          amountMicroUsd,
+          amountToman,
+          idempotencyKey: input.idempotencyKey,
+          targetUserId: userId,
+          transactionId: result.transaction.id,
+        },
+        targetId: userId,
+        targetType: 'user',
+        userAgent: ctx.userAgent,
+      }).catch((error) => console.error('[aico] failed to record credit audit event', error));
+
+      return {
+        transaction: {
+          ...result.transaction,
+          amountMicroUsd: String(result.transaction.amountMicroUsd ?? 0),
+          amountToman: tomanString(result.transaction.amountToman ?? 0),
+          amountUsd: microUsdToDecimalString(result.transaction.amountMicroUsd ?? 0),
+        },
+        userId,
+        wallet: {
+          balanceMicroUsd: String(result.wallet.balanceMicroUsd ?? 0),
+          balanceToman: tomanString(result.wallet.balanceToman ?? 0),
+          balanceUsd: microUsdToDecimalString(result.wallet.balanceMicroUsd ?? 0),
+        },
+      };
     }),
 
   addPlatformAdmin: platformProcedure

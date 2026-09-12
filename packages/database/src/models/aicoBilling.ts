@@ -76,9 +76,19 @@ export const normalizeIranianPhoneForFingerprint = (raw: string): string => {
   throw new Error('INVALID_PHONE');
 };
 
-/** Postgres unique_violation. */
-const isUniqueConstraintViolation = (error: unknown): boolean =>
-  Boolean(error && typeof error === 'object' && (error as { code?: string }).code === '23505');
+/**
+ * Postgres unique_violation. Drizzle wraps driver errors in a `Failed query:`
+ * Error and hangs the original off `cause`, so the code is not always on the
+ * error we are handed.
+ */
+const isUniqueConstraintViolation = (error: unknown): boolean => {
+  let current = error;
+  for (let depth = 0; current && typeof current === 'object' && depth < 5; depth += 1) {
+    if ((current as { code?: string }).code === '23505') return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+};
 
 export const fingerprintPhone = (phone: string): string =>
   createHash('sha256')
@@ -159,12 +169,12 @@ export class AicoBillingModel {
       }
     }
 
-    return this.db.transaction(async (tx) => {
-      await tx.insert(userWallets).values({ userId: params.userId }).onConflictDoNothing({
-        target: userWallets.userId,
-      });
+    const applyCredit = () =>
+      this.db.transaction(async (tx) => {
+        await tx.insert(userWallets).values({ userId: params.userId }).onConflictDoNothing({
+          target: userWallets.userId,
+        });
 
-      try {
         const before = await tx.query.userWallets.findFirst({
           where: eq(userWallets.userId, params.userId),
         });
@@ -211,14 +221,26 @@ export class AicoBillingModel {
           .returning();
 
         return { transaction: txRow, wallet };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (params.idempotencyKey && /gateway_ref|unique|duplicate/i.test(message)) {
-          throw new Error('IDEMPOTENCY_KEY_CONFLICT', { cause: error });
-        }
-        throw error;
+      });
+
+    if (!params.idempotencyKey) return applyCredit();
+
+    try {
+      return await applyCredit();
+    } catch (error) {
+      // FIN-013: a concurrent submit carrying the same key won the race. The
+      // credit it committed is the one this caller asked for, so return it —
+      // surfacing an error here is what makes an admin retry into a double credit.
+      if (!isUniqueConstraintViolation(error)) throw error;
+      const existingTx = await this.db.query.walletTransactions.findFirst({
+        where: eq(walletTransactions.gatewayRefId, params.idempotencyKey),
+      });
+      if (!existingTx) throw error;
+      if (existingTx.userId !== params.userId || existingTx.type !== 'manual_credit') {
+        throw new Error('IDEMPOTENCY_KEY_CONFLICT', { cause: error });
       }
-    });
+      return { transaction: existingTx, wallet: await this.getOrCreateUserWallet(params.userId) };
+    }
   };
 
   /**

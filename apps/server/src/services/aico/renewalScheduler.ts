@@ -546,6 +546,15 @@ const runOutboxAction = async (params: {
       return;
     }
 
+    // FIN-013: a credit commits before its key limit is pushed. When that push
+    // fails the wallet is funded behind a stale limit, so the retry lands here
+    // rather than being reported to the admin as a failed credit.
+    case 'sync_user_key': {
+      if (!row.userId) throw new Error('USER_ID_REQUIRED');
+      await keyService.ensureUserKey(row.userId);
+      return;
+    }
+
     case 'reclaim_member': {
       if (!row.orgMemberId || !row.orgId) throw new Error('ORG_MEMBER_ID_REQUIRED');
       const reclaimed = await keyService.reclaimMemberKey({

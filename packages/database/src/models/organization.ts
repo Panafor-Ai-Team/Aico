@@ -88,9 +88,19 @@ export const seedDefaultTeamModels = async (
     .returning();
 };
 
-/** Postgres unique_violation. */
-const isUniqueConstraintViolation = (error: unknown): boolean =>
-  Boolean(error && typeof error === 'object' && (error as { code?: string }).code === '23505');
+/**
+ * Postgres unique_violation. Drizzle wraps driver errors in a `Failed query:`
+ * Error and hangs the original off `cause`, so the code is not always on the
+ * error we are handed.
+ */
+const isUniqueConstraintViolation = (error: unknown): boolean => {
+  let current = error;
+  for (let depth = 0; current && typeof current === 'object' && depth < 5; depth += 1) {
+    if ((current as { code?: string }).code === '23505') return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+};
 
 /**
  * UTC period-window computation — intentionally duplicated (not imported)
@@ -578,8 +588,8 @@ export class OrganizationModel {
       }
     }
 
-    return this.db.transaction(async (tx) => {
-      try {
+    const applyCredit = () =>
+      this.db.transaction(async (tx) => {
         const before = await tx.query.organizations.findFirst({
           where: eq(organizations.id, params.orgId),
         });
@@ -617,14 +627,28 @@ export class OrganizationModel {
           .returning();
 
         return { organization: org, transaction: txRow };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (params.idempotencyKey && /gateway_ref|unique|duplicate/i.test(message)) {
-          throw new Error('IDEMPOTENCY_KEY_CONFLICT', { cause: error });
-        }
-        throw error;
+      });
+
+    if (!params.idempotencyKey) return applyCredit();
+
+    try {
+      return await applyCredit();
+    } catch (error) {
+      // FIN-013: a concurrent submit carrying the same key won the race. Return
+      // the credit it committed rather than an error the admin would retry into
+      // a second credit.
+      if (!isUniqueConstraintViolation(error)) throw error;
+      const existingTx = await this.db.query.walletTransactions.findFirst({
+        where: eq(walletTransactions.gatewayRefId, params.idempotencyKey),
+      });
+      if (!existingTx) throw error;
+      if (existingTx.orgId !== params.orgId || existingTx.type !== type) {
+        throw new Error('IDEMPOTENCY_KEY_CONFLICT', { cause: error });
       }
-    });
+      const organization = await this.getById(params.orgId);
+      if (!organization) throw new Error('ORG_NOT_FOUND', { cause: error });
+      return { organization, transaction: existingTx };
+    }
   };
 
   // ─── Members ───────────────────────────────────────────────────────
