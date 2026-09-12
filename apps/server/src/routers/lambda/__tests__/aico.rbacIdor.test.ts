@@ -85,6 +85,7 @@ const cleanup = async () => {
     platformAdmins,
     platformAdminSessions,
     platformAdminUsers,
+    aicoKeyOutbox,
     platformTrialConfig,
     trialAbuseBlocklist,
     usageLogs,
@@ -93,6 +94,7 @@ const cleanup = async () => {
     walletTransactions,
   } = await import('@/database/schemas/aicoOrganization');
   const { users } = await import('@/database/schemas');
+  await testDB.delete(aicoKeyOutbox);
   await testDB.delete(usageLogs);
   await testDB.delete(trialAbuseBlocklist);
   await testDB.delete(userTrials);
@@ -238,6 +240,7 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
     await platformCaller.addManualCredit({
       amountToman: 25_000,
       description: 'analytics seed',
+      idempotencyKey: 'rbac-analytics-seed',
       orgId: created.id,
     });
 
@@ -284,6 +287,7 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
     await platformCaller.addManualCredit({
       amountToman: 1_000_000,
       description: 'tenant isolation seed',
+      idempotencyKey: 'rbac-tenant-isolation-seed',
       orgId: orgB.id,
     });
 
@@ -339,13 +343,88 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
     await expect(caller.suspendOrganization({ orgId: 'any' })).rejects.toMatchObject({
       code: 'UNAUTHORIZED',
     });
-    await expect(caller.addManualCredit({ amountToman: 1000, orgId: 'any' })).rejects.toMatchObject(
-      { code: 'UNAUTHORIZED' },
-    );
     await expect(
-      caller.addManualUserCredit({ amountToman: 1000, email: 'stranger@rbac.test' }),
+      caller.addManualCredit({
+        amountToman: 1000,
+        idempotencyKey: 'rbac-unauthorized-org',
+        orgId: 'any',
+      }),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await expect(
+      caller.addManualUserCredit({
+        amountToman: 1000,
+        email: 'stranger@rbac.test',
+        idempotencyKey: 'rbac-unauthorized-user',
+      }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     await expect(caller.listUserWallets()).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  });
+
+  describe('FIN-013 a committed credit is never reported as a failure', () => {
+    it('reports success and queues a key retry when the OpenRouter push fails', async () => {
+      ensureUserKeyMock.mockRejectedValueOnce(new Error('OpenRouter Management API 503'));
+      const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+
+      // Before the fix this threw BAD_REQUEST over a wallet that had already
+      // been credited, which is what made an admin retry into a double credit.
+      const result = await platformCaller.addManualUserCredit({
+        amountToman: 30_000,
+        description: 'key push fails',
+        idempotencyKey: 'fin013-key-push-fails',
+        userId: strangerId,
+      });
+
+      expect(result.userId).toBe(strangerId);
+      expect(Number(result.wallet.balanceToman)).toBe(30_000);
+
+      const { aicoKeyOutbox } = await import('@/database/schemas/aicoOrganization');
+      const queued = await testDB.select().from(aicoKeyOutbox);
+      expect(queued).toHaveLength(1);
+      expect(queued[0]).toMatchObject({
+        action: 'sync_user_key',
+        status: 'pending',
+        userId: strangerId,
+      });
+    });
+
+    it('credits once when the admin retries with the same key', async () => {
+      const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+      const args = {
+        amountToman: 30_000,
+        description: 'retried credit',
+        idempotencyKey: 'fin013-router-retry',
+        userId: strangerId,
+      };
+
+      const first = await platformCaller.addManualUserCredit(args);
+      const second = await platformCaller.addManualUserCredit(args);
+
+      expect(second.transaction.id).toBe(first.transaction.id);
+      expect(Number(second.wallet.balanceToman)).toBe(30_000);
+
+      const wallets = await platformCaller.listUserWallets();
+      expect(Number(wallets.find((w) => w.userId === strangerId)?.balanceToman)).toBe(30_000);
+    });
+
+    it('credits an org wallet once when the admin retries with the same key', async () => {
+      const ownerCaller = organizationRouter.createCaller(createTestContext(ownerId));
+      const org = await ownerCaller.create({ name: 'FIN-013 Org' });
+      const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+      const args = {
+        amountToman: 40_000,
+        description: 'retried org credit',
+        idempotencyKey: 'fin013-org-retry',
+        orgId: org.id,
+      };
+
+      const first = await platformCaller.addManualCredit(args);
+      const second = await platformCaller.addManualCredit(args);
+
+      expect(second.transaction.id).toBe(first.transaction.id);
+      expect(Number(second.organization.walletBalanceMicroUsd)).toBe(
+        Number(first.organization.walletBalanceMicroUsd),
+      );
+    });
   });
 
   it('platform admin can manually credit a B2C user wallet by email', async () => {
@@ -354,6 +433,7 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
       amountToman: 50_000,
       description: 'Support credit',
       email: 'stranger@rbac.test',
+      idempotencyKey: 'rbac-support-credit',
     });
     expect(result.userId).toBe(strangerId);
     expect(result.transaction.type).toBe('manual_credit');
@@ -400,6 +480,7 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
     await platformCaller.addManualUserCredit({
       amountToman: 50_000,
       description: 'seed for publicCode',
+      idempotencyKey: 'rbac-publiccode-seed',
       userId: strangerId,
     });
     const strangerCaller = aicoBillingRouter.createCaller(createTestContext(strangerId));

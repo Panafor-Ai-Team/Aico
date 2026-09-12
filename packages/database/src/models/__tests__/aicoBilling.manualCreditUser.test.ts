@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { getTestDB } from '../../core/getTestDB';
@@ -93,5 +94,86 @@ describe('AicoBillingModel.manualCreditUser', () => {
     expect(rows[0]?.actorAdminEmail).toBe('operator@manual-credit.test');
     expect(rows[0]?.userEmail).toBe('user@manual-credit.test');
     expect(rows[0]?.description).toBe('Ops credit');
+  });
+
+  describe('FIN-013 idempotency', () => {
+    const credit = (idempotencyKey: string) =>
+      billingModel.manualCreditUser({
+        amountMicroUsd: 2_000_000,
+        amountToman: 10_000,
+        createdByAdminId: operatorId,
+        fxRateTomanPerUsd: 5000,
+        idempotencyKey,
+        userId,
+      });
+
+    it('credits balance and capacity exactly once when the same key is retried', async () => {
+      const first = await credit('fin013-sequential-retry');
+      const second = await credit('fin013-sequential-retry');
+
+      expect(second.transaction.id).toBe(first.transaction.id);
+
+      const [wallet] = await serverDB
+        .select()
+        .from(userWallets)
+        .where(eq(userWallets.userId, userId));
+      expect(Number(wallet.balanceMicroUsd)).toBe(2_000_000);
+      expect(Number(wallet.balanceToman)).toBe(10_000);
+      // The OpenRouter key limit is pushed from capacity, so a double-credit
+      // here would hand out spend the user never paid for.
+      expect(Number(wallet.rawCapacityMicroUsd)).toBeGreaterThan(0);
+      const capacityAfterRetry = Number(wallet.rawCapacityMicroUsd);
+
+      const rows = await serverDB
+        .select()
+        .from(walletTransactions)
+        .where(eq(walletTransactions.gatewayRefId, 'fin013-sequential-retry'));
+      expect(rows).toHaveLength(1);
+
+      const third = await credit('fin013-sequential-retry');
+      expect(third.transaction.id).toBe(first.transaction.id);
+      const [afterThird] = await serverDB
+        .select()
+        .from(userWallets)
+        .where(eq(userWallets.userId, userId));
+      expect(Number(afterThird.rawCapacityMicroUsd)).toBe(capacityAfterRetry);
+    });
+
+    it('resolves concurrent submits of one key to a single credit', async () => {
+      // Both callers clear the pre-check before either commits, so the unique
+      // index is what separates them. The loser must return the winner's
+      // transaction rather than an error the admin would retry.
+      const [a, b] = await Promise.all([credit('fin013-concurrent'), credit('fin013-concurrent')]);
+
+      expect(a.transaction.id).toBe(b.transaction.id);
+
+      const [wallet] = await serverDB
+        .select()
+        .from(userWallets)
+        .where(eq(userWallets.userId, userId));
+      expect(Number(wallet.balanceMicroUsd)).toBe(2_000_000);
+
+      const rows = await serverDB
+        .select()
+        .from(walletTransactions)
+        .where(eq(walletTransactions.gatewayRefId, 'fin013-concurrent'));
+      expect(rows).toHaveLength(1);
+    });
+
+    it('rejects a key already used for a different user', async () => {
+      await credit('fin013-cross-user');
+      await serverDB.insert(users).values({ email: 'other@manual-credit.test', id: 'other-user' });
+
+      await expect(
+        billingModel.manualCreditUser({
+          amountMicroUsd: 2_000_000,
+          amountToman: 10_000,
+          createdByAdminId: operatorId,
+          fxRateTomanPerUsd: 5000,
+          idempotencyKey: 'fin013-cross-user',
+          userId: 'other-user',
+        }),
+      ).rejects.toThrow('IDEMPOTENCY_KEY_CONFLICT');
+    });
   });
 });

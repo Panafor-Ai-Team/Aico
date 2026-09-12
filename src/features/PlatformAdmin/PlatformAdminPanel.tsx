@@ -5,11 +5,12 @@
  * Talks to `@aico/control-plane` via `controlPlaneClient` (not the product lambda).
  */
 
+import { uuid } from '@lobechat/utils';
 import { Block, Flexbox, Tag, Text } from '@lobehub/ui';
 import { Button, Select, Switch, Tabs, toast } from '@lobehub/ui/base-ui';
 import { Form, Input, InputNumber, Table } from 'antd';
 import { Building2Icon, RefreshCwIcon, ShieldIcon, WalletIcon } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { toastAicoError } from '@/business/client/resolveAicoErrorMessage';
@@ -50,10 +51,17 @@ export const PlatformAdminPanel = () => {
   // guard in onFinish.
   const [creditForm] = Form.useForm<FxTopupFormValues & { description?: string; orgId?: string }>();
   const [creditChargeField, setCreditChargeField] = useState<FxTopupChargeField>('toman');
+  /**
+   * FIN-013: one key per in-flight credit attempt, held until the credit is
+   * known to have landed. A retry after a failure reuses it, so the second
+   * attempt resolves to the same transaction instead of crediting again.
+   */
+  const creditIdempotencyKeyRef = useRef<string | null>(null);
   const [userCreditForm] = Form.useForm<
     FxTopupFormValues & { description?: string; email?: string; userId?: string }
   >();
   const [userCreditChargeField, setUserCreditChargeField] = useState<FxTopupChargeField>('toman');
+  const userCreditIdempotencyKeyRef = useRef<string | null>(null);
   const [assignForm] = Form.useForm<{
     managerEmail: string;
     orgId: string;
@@ -951,14 +959,17 @@ export const PlatformAdminPanel = () => {
                 onFinish={async (values) => {
                   const payload = resolveFxTopupPayload(values, creditChargeField);
                   if (!payload || !values.orgId) return;
+                  creditIdempotencyKeyRef.current ??= uuid();
                   setBusy(true);
                   try {
                     await controlPlaneClient.platformAdmin.addManualCredit.mutate({
                       ...payload,
                       description: values.description,
+                      idempotencyKey: creditIdempotencyKeyRef.current,
                       orgId: values.orgId,
                     });
                     toast.success(t('platform.credited'));
+                    creditIdempotencyKeyRef.current = null;
                     creditForm.resetFields(['amountToman', 'amountUsd', 'description']);
                     await Promise.all([mutate(), mutateFinancials()]);
                   } catch (err) {
@@ -966,6 +977,11 @@ export const PlatformAdminPanel = () => {
                   } finally {
                     setBusy(false);
                   }
+                }}
+                // Editing the form starts a new logical credit, so the held key
+                // cannot make the next submit resolve to the previous amount.
+                onValuesChange={() => {
+                  creditIdempotencyKeyRef.current = null;
                 }}
               >
                 <Form.Item label={t('platform.orgId')} name="orgId" rules={[{ required: true }]}>
@@ -1011,15 +1027,18 @@ export const PlatformAdminPanel = () => {
                   }
                   const payload = resolveFxTopupPayload(values, userCreditChargeField);
                   if (!payload) return;
+                  userCreditIdempotencyKeyRef.current ??= uuid();
                   setBusy(true);
                   try {
                     await controlPlaneClient.platformAdmin.addManualUserCredit.mutate({
                       ...payload,
                       description: values.description,
                       email: values.email || undefined,
+                      idempotencyKey: userCreditIdempotencyKeyRef.current,
                       userId: values.userId || undefined,
                     });
                     toast.success(t('platform.userCredited'));
+                    userCreditIdempotencyKeyRef.current = null;
                     userCreditForm.resetFields(['amountToman', 'amountUsd', 'description']);
                     await Promise.all([mutateUserWallets(), mutateFinancials()]);
                   } catch (err) {
@@ -1027,6 +1046,9 @@ export const PlatformAdminPanel = () => {
                   } finally {
                     setBusy(false);
                   }
+                }}
+                onValuesChange={() => {
+                  userCreditIdempotencyKeyRef.current = null;
                 }}
               >
                 <div className={aicoPanelStyles.formRow}>

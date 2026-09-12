@@ -505,7 +505,7 @@ export const aicoKeyOutbox = pgTable(
       .$defaultFn(() => idGenerator('keyOutbox'))
       .notNull()
       .primaryKey(),
-    /** disable_member_key | reclaim_member | disable_user_key | disable_trial_keys */
+    /** disable_member_key | reclaim_member | disable_user_key | disable_trial_keys | sync_user_key */
     action: text('action').notNull(),
     orgId: text('org_id').references(() => organizations.id, { onDelete: 'set null' }),
     orgMemberId: text('org_member_id').references(() => organizationMembers.id, {
