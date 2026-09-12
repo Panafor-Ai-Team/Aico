@@ -33,7 +33,12 @@ jobs:
         uses: ./.github/actions/setup-env
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        # This repo is deliberately lockfile-free: `pnpm-lock.yaml` is gitignored
+        # and `pnpm-workspace.yaml` sets `lockfile: false`. There is nothing to
+        # freeze against, so `--frozen-lockfile` only ever compares the config
+        # against a stale lockfile restored from the runner cache and fails with
+        # ERR_PNPM_LOCKFILE_CONFIG_MISMATCH.
+        run: pnpm install --no-frozen-lockfile
         env:
           NODE_OPTIONS: --max-old-space-size=8192
 
