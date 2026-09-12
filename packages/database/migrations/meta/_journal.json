@@ -1043,6 +1043,13 @@
       "when": 1788000000000,
       "tag": "0148_aico_wallet_raw_capacity",
       "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1788100000000,
+      "tag": "0149_aico_wallet_frozen_capacity",
+      "breakpoints": true
     }
   ],
   "version": "6"

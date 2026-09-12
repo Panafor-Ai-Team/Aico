@@ -11,13 +11,7 @@ import {
   normalizeIranianPhoneForFingerprint,
 } from '@/database/models/aicoBilling';
 import { OrganizationModel } from '@/database/models/organization';
-import {
-  aicoAccountTombs,
-  aicoKeyOutbox,
-  organizationMembers,
-  userWallets,
-  users,
-} from '@/database/schemas';
+import { aicoAccountTombs, aicoKeyOutbox, organizationMembers, users } from '@/database/schemas';
 import type { LobeChatDatabase } from '@/database/type';
 
 export class AicoSoftDeleteService {
@@ -36,10 +30,7 @@ export class AicoSoftDeleteService {
    * 3. Anonymize email/phone; retain irreversible fingerprints in tomb
    * 4. Caller must also invalidate Better Auth sessions
    */
-  softDeleteUser = async (params: {
-    deletedByUserId?: string | null;
-    userId: string;
-  }) => {
+  softDeleteUser = async (params: { deletedByUserId?: string | null; userId: string }) => {
     const user = await this.db.query.users.findFirst({ where: eq(users.id, params.userId) });
     if (!user) throw new Error('USER_NOT_FOUND');
 
@@ -71,14 +62,13 @@ export class AicoSoftDeleteService {
     const wallet = await this.billingModel.getUserWallet(params.userId);
     const personalMicro = Number(wallet?.balanceMicroUsd ?? 0);
     if (wallet) {
-      await this.db
-        .update(userWallets)
-        .set({
-          balanceMicroUsd: personalMicro > 0 ? 0 : Number(wallet.balanceMicroUsd ?? 0),
-          frozenMicroUsd: personalMicro > 0 ? personalMicro : Number(wallet.frozenMicroUsd ?? 0),
-          isActive: false,
-        })
-        .where(eq(userWallets.userId, params.userId));
+      // Parks the balance *and* the capacity it bought, and writes the
+      // `personal_freeze` ledger row this move never used to leave behind.
+      await this.billingModel.freezePersonalWallet({
+        createdByUserId: params.deletedByUserId ?? null,
+        description: 'Frozen on account deletion',
+        userId: params.userId,
+      });
     }
 
     await this.db.insert(aicoKeyOutbox).values({

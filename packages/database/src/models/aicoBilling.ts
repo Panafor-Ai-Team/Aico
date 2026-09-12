@@ -178,6 +178,11 @@ export class AicoBillingModel {
         const before = await tx.query.userWallets.findFirst({
           where: eq(userWallets.userId, params.userId),
         });
+        // FIN-015: crediting used to flip `isActive` back on, silently
+        // resurrecting a soft-deleted or deactivated wallet — and, before the
+        // capacity fix, handing back its pre-freeze spend limit for free.
+        // Restoring an account is now an explicit, ledgered step.
+        if (before && !before.isActive) throw new Error('WALLET_INACTIVE');
         const balanceBeforeMicroUsd = Number(before?.balanceMicroUsd ?? 0);
         const balanceBeforeToman = Number(before?.balanceToman ?? 0);
 
@@ -192,7 +197,6 @@ export class AicoBillingModel {
           .set({
             balanceMicroUsd: sql`${userWallets.balanceMicroUsd} + ${params.amountMicroUsd}`,
             balanceToman: sql`${userWallets.balanceToman} + ${params.amountToman}`,
-            isActive: true,
             rawCapacityMicroUsd: sql`${userWallets.rawCapacityMicroUsd} + ${rawCapacityAdded}`,
           })
           .where(eq(userWallets.userId, params.userId))
@@ -241,6 +245,118 @@ export class AicoBillingModel {
       }
       return { transaction: existingTx, wallet: await this.getOrCreateUserWallet(params.userId) };
     }
+  };
+
+  /**
+   * Park a personal balance and the capacity it bought while the account is
+   * disabled, and record the move on the ledger.
+   *
+   * Balance and capacity must travel together: `rawCapacityMicroUsd` is pushed
+   * to OpenRouter as the key limit, so capacity left behind on a zeroed wallet
+   * is handed back free by the next credit (FIN-015). `balanceToman` is a
+   * paid-in mirror and deliberately untouched, as it was before.
+   */
+  freezePersonalWallet = async (params: {
+    createdByAdminId?: string | null;
+    createdByUserId?: string | null;
+    description?: string;
+    userId: string;
+  }) => {
+    return this.db.transaction(async (tx) => {
+      const before = await tx.query.userWallets.findFirst({
+        where: eq(userWallets.userId, params.userId),
+      });
+      if (!before) return null;
+
+      const balanceMicroUsd = Number(before.balanceMicroUsd ?? 0);
+      const rawCapacityMicroUsd = Number(before.rawCapacityMicroUsd ?? 0);
+
+      const [wallet] = await tx
+        .update(userWallets)
+        .set({
+          balanceMicroUsd: 0,
+          frozenMicroUsd: sql`${userWallets.frozenMicroUsd} + ${balanceMicroUsd}`,
+          frozenRawCapacityMicroUsd: sql`${userWallets.frozenRawCapacityMicroUsd} + ${rawCapacityMicroUsd}`,
+          isActive: false,
+          rawCapacityMicroUsd: 0,
+        })
+        .where(eq(userWallets.userId, params.userId))
+        .returning();
+
+      if (balanceMicroUsd === 0) return { transaction: null, wallet };
+
+      const [transaction] = await tx
+        .insert(walletTransactions)
+        .values({
+          // Negative, so `balance_after - balance_before == amount` still holds
+          // for anyone reconstructing a wallet from its ledger.
+          amountMicroUsd: -balanceMicroUsd,
+          // `balanceToman` is a paid-in mirror and does not move on a freeze.
+          amountToman: 0,
+          balanceAfterMicroUsd: 0,
+          balanceBeforeMicroUsd: balanceMicroUsd,
+          createdByAdminId: params.createdByAdminId ?? null,
+          createdByUserId: params.createdByUserId ?? null,
+          description: params.description ?? 'Personal balance frozen',
+          metadata: { frozenRawCapacityMicroUsd: rawCapacityMicroUsd },
+          type: 'personal_freeze',
+          userId: params.userId,
+        })
+        .returning();
+
+      return { transaction, wallet };
+    });
+  };
+
+  /** Reverse of {@link freezePersonalWallet}: return parked funds and capacity. */
+  unfreezePersonalWallet = async (params: {
+    createdByAdminId?: string | null;
+    createdByUserId?: string | null;
+    description?: string;
+    userId: string;
+  }) => {
+    return this.db.transaction(async (tx) => {
+      const before = await tx.query.userWallets.findFirst({
+        where: eq(userWallets.userId, params.userId),
+      });
+      if (!before) return null;
+
+      const frozenMicroUsd = Number(before.frozenMicroUsd ?? 0);
+      const frozenRawCapacityMicroUsd = Number(before.frozenRawCapacityMicroUsd ?? 0);
+      const balanceBeforeMicroUsd = Number(before.balanceMicroUsd ?? 0);
+
+      const [wallet] = await tx
+        .update(userWallets)
+        .set({
+          balanceMicroUsd: sql`${userWallets.balanceMicroUsd} + ${frozenMicroUsd}`,
+          frozenMicroUsd: 0,
+          frozenRawCapacityMicroUsd: 0,
+          isActive: true,
+          rawCapacityMicroUsd: sql`${userWallets.rawCapacityMicroUsd} + ${frozenRawCapacityMicroUsd}`,
+        })
+        .where(eq(userWallets.userId, params.userId))
+        .returning();
+
+      if (frozenMicroUsd === 0) return { transaction: null, wallet };
+
+      const [transaction] = await tx
+        .insert(walletTransactions)
+        .values({
+          amountMicroUsd: frozenMicroUsd,
+          amountToman: 0,
+          balanceAfterMicroUsd: Number(wallet?.balanceMicroUsd ?? 0),
+          balanceBeforeMicroUsd,
+          createdByAdminId: params.createdByAdminId ?? null,
+          createdByUserId: params.createdByUserId ?? null,
+          description: params.description ?? 'Personal balance restored',
+          metadata: { restoredRawCapacityMicroUsd: frozenRawCapacityMicroUsd },
+          type: 'personal_unfreeze',
+          userId: params.userId,
+        })
+        .returning();
+
+      return { transaction, wallet };
+    });
   };
 
   /**
