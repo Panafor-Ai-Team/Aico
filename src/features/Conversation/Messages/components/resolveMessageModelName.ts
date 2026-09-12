@@ -12,9 +12,12 @@ import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
  */
 export const resolveCostModelId = (
   model: string | null | undefined,
-  metadata: Record<string, unknown> | null | undefined,
+  // Callers hold `MessageMetadata`, an interface, and interfaces have no
+  // implicit index signature — so `Record<string, unknown>` rejects them.
+  // Accept the wider type and narrow to the one field actually read.
+  metadata: object | null | undefined,
 ): string | null | undefined => {
-  const resolved = metadata?.resolvedModel;
+  const resolved = (metadata as { resolvedModel?: unknown } | null | undefined)?.resolvedModel;
   return typeof resolved === 'string' && resolved ? resolved : model;
 };
 
