@@ -738,6 +738,9 @@ table member_budgets {
   renewal_status text [not null, default: 'active']
   reserved_micro_usd bigint [not null, default: 0]
   settled_usage_micro_usd bigint [not null, default: 0]
+  usage_baseline_micro_usd bigint [not null, default: 0]
+  billed_usage_before_baseline_micro_usd bigint [not null, default: 0]
+  checkpoint_multiplier_bp bigint [not null, default: 12000]
   refunded_micro_usd bigint [not null, default: 0]
   pending_period text
   pending_period_amount_micro_usd bigint
@@ -971,6 +974,14 @@ table platform_trial_config {
   updated_at "timestamp with time zone" [not null, default: `now()`]
 }
 
+table platform_usage_multiplier_config {
+  id text [pk, not null, default: 'default']
+  multiplier_bp bigint [not null, default: 12000]
+  updated_by_user_id text
+  created_at "timestamp with time zone" [not null, default: `now()`]
+  updated_at "timestamp with time zone" [not null, default: `now()`]
+}
+
 table trial_abuse_blocklist {
   id text [pk, not null]
   fingerprint_type text [not null]
@@ -994,6 +1005,7 @@ table usage_logs {
   completion_tokens integer [not null, default: 0]
   total_tokens integer [not null, default: 0]
   cost_micro_usd bigint [not null, default: 0]
+  multiplier_bp bigint [not null, default: 12000]
   settlement_status text [not null, default: 'pending']
   created_at "timestamp with time zone" [not null, default: `now()`]
 
@@ -1034,6 +1046,8 @@ table user_wallets {
   openrouter_key_ciphertext text
   is_active boolean [not null, default: true]
   frozen_micro_usd bigint [not null, default: 0]
+  raw_capacity_micro_usd bigint [not null, default: 0]
+  frozen_raw_capacity_micro_usd bigint [not null, default: 0]
   last_synced_at "timestamp with time zone"
   created_at "timestamp with time zone" [not null, default: `now()`]
   updated_at "timestamp with time zone" [not null, default: `now()`]

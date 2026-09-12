@@ -793,15 +793,23 @@ export const platformAdminRouter = router({
         })
         .where(eq(users.id, input.userId));
 
-      await ctx.serverDB
-        .update(userWallets)
-        .set({ isActive: true })
-        .where(eq(userWallets.userId, input.userId));
+      // FIN-015: flipping `isActive` alone left the balance parked in
+      // `frozenMicroUsd` with no way back, so a "reactivated" user had no
+      // spendable funds and a key that stayed disabled. Restore the money and
+      // the capacity it bought, on the ledger, then push the limit.
+      const restored = await ctx.billingModel.unfreezePersonalWallet({
+        createdByAdminId: ctx.adminId,
+        description: 'Restored on account reactivation',
+        userId: input.userId,
+      });
 
       const keyService = new AicoOpenRouterKeyService(ctx.serverDB);
       await keyService.ensureUserKey(input.userId);
 
-      return { ok: true as const };
+      return {
+        ok: true as const,
+        restoredMicroUsd: String(restored?.transaction?.amountMicroUsd ?? 0),
+      };
     }),
 
   getOpenRouterModelSyncStatus: platformProcedure.query(async ({ ctx }) => {

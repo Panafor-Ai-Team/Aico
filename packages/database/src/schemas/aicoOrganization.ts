@@ -358,7 +358,11 @@ export const userWallets = pgTable(
     openrouterKeyId: text('openrouter_key_id'),
     openrouterKeyCiphertext: text('openrouter_key_ciphertext'),
     isActive: boolean('is_active').notNull().default(true),
-    /** Soft-delete freeze of non-zero personal balance pending refund/recovery. */
+    /**
+     * Soft-delete freeze of non-zero personal balance pending refund/recovery.
+     * Restored to `balanceMicroUsd` by an explicit unfreeze — money parked here
+     * is not spendable and not lost.
+     */
     frozenMicroUsd: bigint('frozen_micro_usd', { mode: 'number' }).notNull().default(0),
     /**
      * AICO-184. Raw upstream spend this wallet has bought, accumulated as
@@ -367,6 +371,15 @@ export const userWallets = pgTable(
      * revalue money already paid. Doubles as the OpenRouter key limit.
      */
     rawCapacityMicroUsd: bigint('raw_capacity_micro_usd', { mode: 'number' }).notNull().default(0),
+    /**
+     * Capacity counterpart of `frozenMicroUsd`. A freeze must move capacity out
+     * alongside the balance: `rawCapacityMicroUsd` is pushed to OpenRouter as
+     * the key limit, so capacity left behind on a zeroed wallet is re-granted
+     * free by the next credit.
+     */
+    frozenRawCapacityMicroUsd: bigint('frozen_raw_capacity_micro_usd', { mode: 'number' })
+      .notNull()
+      .default(0),
     lastSyncedAt: timestamptz('last_synced_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -420,7 +433,7 @@ export const walletTransactions = pgTable(
     /**
      * topup | manual_credit | refund | allocate | period_reservation |
      * period_settlement | period_refund | period_renewal | renewal_failure |
-     * adjustment | reclaim | personal_freeze
+     * adjustment | reclaim | personal_freeze | personal_unfreeze
      */
     type: text('type').notNull(),
     amountToman: bigint('amount_toman', { mode: 'number' }).notNull().default(0),
