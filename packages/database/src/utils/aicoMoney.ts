@@ -31,6 +31,16 @@ export const isBudgetPeriod = (value: string): value is BudgetPeriod =>
 export const isProductBudgetPeriod = (value: string): value is ProductBudgetPeriod =>
   (PRODUCT_BUDGET_PERIODS as readonly string[]).includes(value);
 
+/**
+ * Whether OpenRouter meters this budget on a period counter rather than the
+ * lifetime one. A `total` budget — and a legacy row with no period at all — is
+ * created without `limit_reset`, so lifetime `usage` is its correct counter;
+ * for every other period the lifetime counter is in different units than the
+ * cycle and must never be substituted for a missing period counter.
+ */
+export const isPeriodScopedBudget = (period: string | null | undefined): boolean =>
+  !!period && isProductBudgetPeriod(period);
+
 /** OpenRouter Management API `limit_reset` mapping (midnight UTC; weeks Mon–Sun). */
 export const periodToOpenRouterLimitReset = (
   period: BudgetPeriod,
