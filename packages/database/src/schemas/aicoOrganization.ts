@@ -380,7 +380,21 @@ export const userWallets = pgTable(
     frozenRawCapacityMicroUsd: bigint('frozen_raw_capacity_micro_usd', { mode: 'number' })
       .notNull()
       .default(0),
+    /**
+     * FIN-018. Last derived billed usage for this wallet, persisted so an
+     * OpenRouter outage degrades to the last known figure instead of silently
+     * reporting the full balance as spendable. Mirrors
+     * `member_budgets.settled_usage_micro_usd`; never authoritative on its own —
+     * the live key reading wins whenever it is available.
+     */
+    settledUsageMicroUsd: bigint('settled_usage_micro_usd', { mode: 'number' })
+      .notNull()
+      .default(0),
     lastSyncedAt: timestamptz('last_synced_at'),
+    /** never | synced | degraded — mirrors `member_budgets.last_sync_status`. */
+    lastSyncStatus: text('last_sync_status').notNull().default('never'),
+    /** Why the figure is not trusted, when `lastSyncStatus` is `degraded`. */
+    lastSyncError: text('last_sync_error'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

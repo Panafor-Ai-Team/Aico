@@ -12,7 +12,11 @@ import { Link } from 'react-router';
 
 import { toastAicoError } from '@/business/client/resolveAicoErrorMessage';
 import StatisticCard from '@/components/StatisticCard';
-import type { AicoBillingContext, AicoBillingSource } from '@/features/AicoBilling';
+import type {
+  AicoBillingContext,
+  AicoBillingSource,
+  AicoPersonalBillingSource,
+} from '@/features/AicoBilling';
 import {
   AICO_MY_WALLET_SWR_KEY,
   formatRemainingUsd,
@@ -30,6 +34,8 @@ import { lambdaClient } from '@/libs/trpc/client';
 import { useUserStore } from '@/store/user';
 import { userProfileSelectors } from '@/store/user/selectors';
 import { type LooseTFunction } from '@/types/looseTranslation';
+
+import { resolveWalletDisplay } from './resolveWalletDisplay';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   sourceActive: css`
@@ -96,9 +102,28 @@ export const AicoWallet = () => {
   );
 
   const { canSwitch, data: billingSources, isSelected, selectSource } = useAicoBillingSources();
-  const personalRemainingUsd = billingSources?.sources.find(
-    (source) => source.source === 'personal',
-  )?.remainingUsd;
+  const personalSource = billingSources?.sources.find(
+    (source): source is AicoPersonalBillingSource => source.source === 'personal',
+  );
+
+  const display = resolveWalletDisplay({
+    paidInToman: wallet?.balanceToman,
+    paidInUsd: wallet?.balanceUsd,
+    personal: personalSource,
+  });
+
+  const cardFooter = (paidIn: string) => (
+    <Flexbox gap={2}>
+      <Text fontSize={12} type="secondary">
+        {t('wallet.paidInHint', { value: paidIn })}
+      </Text>
+      {display.stale ? (
+        <Text fontSize={12} type="warning">
+          {t('wallet.remainingStale')}
+        </Text>
+      ) : null}
+    </Flexbox>
+  );
 
   return (
     <Flexbox className={aicoPanelStyles.page} gap={20}>
@@ -114,14 +139,18 @@ export const AicoWallet = () => {
 
       <div className={aicoPanelStyles.grid}>
         <StatisticCard
-          title={t('wallet.balanceUsd')}
+          title={t('wallet.remainingUsd')}
           statistic={{
-            value: `$${Number(personalRemainingUsd ?? wallet?.balanceUsd ?? 0).toFixed(4)}`,
+            description: cardFooter(display.paidInUsd),
+            value: display.remainingUsd ?? t('wallet.remainingUnknown'),
           }}
         />
         <StatisticCard
-          statistic={{ value: Number(wallet?.balanceToman ?? 0).toLocaleString() }}
-          title={t('wallet.balanceToman')}
+          title={t('wallet.remainingToman')}
+          statistic={{
+            description: cardFooter(display.paidInToman),
+            value: display.remainingToman ?? t('wallet.remainingUnknown'),
+          }}
         />
         <StatisticCard
           title={t('wallet.provider')}

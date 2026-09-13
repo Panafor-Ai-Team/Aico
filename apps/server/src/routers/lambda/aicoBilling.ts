@@ -10,6 +10,7 @@ import {
   cycleRemainingMicroUsd,
   hasValidManagedKeyId,
   microUsdToDecimalString,
+  remainingTomanFromBalance,
 } from '@/database/utils/aicoMoney';
 import { aicoEnv } from '@/envs/aico';
 import { authedProcedure, router } from '@/libs/trpc/lambda';
@@ -104,18 +105,42 @@ export const aicoBillingRouter = router({
     const trialAvailable = trialEnabled && !trialRow;
 
     const keyService = ctx.keyService;
-    const personalRemaining = (
-      await keyService.getUserRemaining(ctx.userId).catch(() => ({
-        remainingMicroUsd: Number(wallet.balanceMicroUsd ?? 0),
-      }))
-    ).remainingMicroUsd;
+    // FIN-018: `getUserRemaining` already degrades honestly and holds the last
+    // settled usage. This catch is only for a failure in that path itself —
+    // which must still be logged and reported as unknown, never as an unspent
+    // wallet.
+    const personalReading = await keyService
+      .getUserRemaining(ctx.userId, { persist: true })
+      .catch((error) => {
+        console.warn('[aicoBilling] personal remaining lookup failed', {
+          error,
+          userId: ctx.userId,
+        });
+        const settled = Math.max(0, Number(wallet.settledUsageMicroUsd ?? 0));
+        return {
+          remainingMicroUsd: Math.max(0, Number(wallet.balanceMicroUsd ?? 0) - settled),
+          usageKnown: false,
+        };
+      });
+    const personalRemaining = personalReading.remainingMicroUsd;
 
     const personal = {
       hasManagedKey: hasValidManagedKeyId(wallet.openrouterKeyId),
       isActive: Boolean(wallet.isActive),
       remainingMicroUsd: String(personalRemaining),
+      // FIN-016: the toman card had no `remaining` counterpart at any layer, so
+      // the primary currency for the fa-IR user base could never move.
+      remainingToman: String(
+        remainingTomanFromBalance({
+          balanceMicroUsd: wallet.balanceMicroUsd,
+          balanceToman: wallet.balanceToman,
+          remainingMicroUsd: personalRemaining,
+        }),
+      ),
       remainingUsd: microUsdToDecimalString(personalRemaining),
       source: 'personal' as const,
+      /** False when `remaining*` is a held fallback rather than a live reading. */
+      usageKnown: personalReading.usageKnown,
     };
 
     const organizationSources = (

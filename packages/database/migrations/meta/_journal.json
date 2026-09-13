@@ -1050,6 +1050,13 @@
       "when": 1788100000000,
       "tag": "0149_aico_wallet_frozen_capacity",
       "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "7",
+      "when": 1788200000000,
+      "tag": "0150_aico_wallet_usage_sync",
+      "breakpoints": true
     }
   ],
   "version": "6"

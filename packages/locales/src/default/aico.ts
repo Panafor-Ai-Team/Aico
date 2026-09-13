@@ -408,8 +408,7 @@ export default {
 
   'wallet.amountToman': 'Amount (toman)',
   'wallet.amountUsd': 'Amount (USD)',
-  'wallet.balanceToman': 'Paid-in (toman)',
-  'wallet.balanceUsd': 'Balance (USD)',
+  'wallet.paidInHint': 'Paid in: {{value}}',
   'wallet.columns.date': 'Date',
   'wallet.columns.toman': 'Toman',
   'wallet.columns.type': 'Type',
@@ -428,6 +427,11 @@ export default {
   'wallet.onlineTopupSubmit': 'Pay online',
   'wallet.onlineTopupTitle': 'Online top-up',
   'wallet.provider': 'AI provider',
+  'wallet.remainingStale':
+    'Provider unreachable — this is the last figure we could confirm, so any spending since then is not included yet.',
+  'wallet.remainingToman': 'Remaining (toman)',
+  'wallet.remainingUnknown': '—',
+  'wallet.remainingUsd': 'Remaining (USD)',
   'wallet.subtitle': 'Your USD wallet. Managed keys stay server-side.',
   'wallet.title': 'Panachat wallet',
   'wallet.transactions': 'Recent transactions',

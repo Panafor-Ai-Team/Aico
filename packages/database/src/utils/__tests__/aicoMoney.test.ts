@@ -9,6 +9,7 @@ import {
   microUsdToDecimalString,
   openRouterUsdToMicroFloor,
   periodToOpenRouterLimitReset,
+  remainingTomanFromBalance,
   tomanToMicroUsd,
   usdDecimalStringToMicro,
 } from '../aicoMoney';
@@ -79,5 +80,54 @@ describe('aicoMoney (final remediation)', () => {
     expect(isStaleManagedKeyId(null)).toBe(true);
     expect(isStaleManagedKeyId('mock_abc')).toBe(true);
     expect(isStaleManagedKeyId('ctrl_realhash')).toBe(false);
+  });
+
+  describe('remainingTomanFromBalance (FIN-016)', () => {
+    // 500,000 toman bought $10 of credit. The toman view of what is left must
+    // track spend, which the cumulative `balance_toman` column never did.
+    const paid = { balanceMicroUsd: 10_000_000, balanceToman: 500_000 };
+
+    it('tracks spend rather than staying at the deposited figure', () => {
+      expect(remainingTomanFromBalance({ ...paid, remainingMicroUsd: 10_000_000 })).toBe(500_000);
+      expect(remainingTomanFromBalance({ ...paid, remainingMicroUsd: 9_520_000 })).toBe(476_000);
+      expect(remainingTomanFromBalance({ ...paid, remainingMicroUsd: 0 })).toBe(0);
+    });
+
+    it('floors, so the toman figure is never optimistic', () => {
+      // 1/3 of 100 toman is 33.33 — the user is shown 33.
+      expect(
+        remainingTomanFromBalance({
+          balanceMicroUsd: 3_000_000,
+          balanceToman: 100,
+          remainingMicroUsd: 1_000_000,
+        }),
+      ).toBe(33);
+    });
+
+    it('never exceeds what was paid in, and survives an empty wallet', () => {
+      expect(remainingTomanFromBalance({ ...paid, remainingMicroUsd: 99_000_000 })).toBe(500_000);
+      expect(
+        remainingTomanFromBalance({
+          balanceMicroUsd: 0,
+          balanceToman: 0,
+          remainingMicroUsd: 0,
+        }),
+      ).toBe(0);
+      expect(
+        remainingTomanFromBalance({
+          balanceMicroUsd: null,
+          balanceToman: undefined,
+          remainingMicroUsd: 5_000_000,
+        }),
+      ).toBe(0);
+    });
+
+    it('does not move when the FX rate moves', () => {
+      // The whole point of pro-rating instead of converting at today's rate.
+      const first = remainingTomanFromBalance({ ...paid, remainingMicroUsd: 6_000_000 });
+      const second = remainingTomanFromBalance({ ...paid, remainingMicroUsd: 6_000_000 });
+      expect(first).toBe(second);
+      expect(first).toBe(300_000);
+    });
   });
 });

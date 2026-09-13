@@ -28,6 +28,9 @@ import {
 const MISSING_PERIOD_COUNTER =
   'OpenRouter reported no period usage counter for this budget; usage held at the last settled value';
 
+const STALE_MANAGED_KEY =
+  'Wallet carries a placeholder OpenRouter key id; usage cannot be read and is held at the last settled value';
+
 const locks = new Map<string, Promise<unknown>>();
 const runExclusive = <T>(key: string, fn: () => Promise<T>): Promise<T> => {
   const tail = locks.get(key) ?? Promise.resolve();
@@ -594,18 +597,61 @@ export class AicoOpenRouterKeyService {
   resolveUserApiKey = async (_userId: string): Promise<string | null> => null;
 
   /**
-   * Spendable remaining for a personal wallet. Prefers OpenRouter
-   * `limit_remaining` (enforced spend left on the managed key); falls back to
-   * deposited `balanceMicroUsd` when no key exists or OR is unreachable.
+   * Spendable remaining for a personal wallet, derived from the managed key's
+   * OpenRouter usage.
+   *
+   * FIN-018: every failure here used to collapse to "you have spent nothing" —
+   * the full deposited balance, `usageMicroUsd: null`, and no log. Five distinct
+   * paths produced that, and none was distinguishable from a genuinely unspent
+   * wallet. Now the reading carries `usageKnown`, a degraded read holds the last
+   * persisted usage instead of forgetting it, and the failure is logged.
+   *
+   * `persist` is opt-in because the chat hot path calls this per request and
+   * must not take a write; dashboards pass it so the fallback figure stays
+   * fresh and operators can see the sync status.
    */
   getUserRemaining = async (
     userId: string,
-  ): Promise<{ remainingMicroUsd: number; usageMicroUsd: number | null }> => {
+    options?: { persist?: boolean },
+  ): Promise<{
+    remainingMicroUsd: number;
+    /** Last known billed usage. `null` only when nothing has ever been metered. */
+    usageMicroUsd: number | null;
+    /** False when the figure is a fallback, not a live reading. Never present it as current. */
+    usageKnown: boolean;
+  }> => {
     const wallet = await this.billingModel.getOrCreateUserWallet(userId);
     const balanceMicroUsd = Number(wallet.balanceMicroUsd ?? 0);
+    const lastSettledMicroUsd = Math.max(0, Number(wallet.settledUsageMicroUsd ?? 0));
 
-    if (!wallet.openrouterKeyId || isStaleManagedKeyId(wallet.openrouterKeyId)) {
-      return { remainingMicroUsd: Math.max(0, balanceMicroUsd), usageMicroUsd: null };
+    // No key was ever provisioned, so no spend was ever possible through us.
+    // That is a known zero, not an unknown — the wallet is fully spendable.
+    if (!wallet.openrouterKeyId) {
+      return {
+        remainingMicroUsd: Math.max(0, balanceMicroUsd),
+        usageKnown: true,
+        usageMicroUsd: 0,
+      };
+    }
+
+    // A `mock_` hash cannot authenticate upstream, so usage is unreadable —
+    // and the wallet may well have spent against a real key before the hash
+    // was replaced. Unknown, not zero.
+    if (isStaleManagedKeyId(wallet.openrouterKeyId)) {
+      console.warn('[aico] personal remaining is degraded: stale managed key id', {
+        keyId: wallet.openrouterKeyId,
+        userId,
+      });
+      if (options?.persist) {
+        await this.billingModel
+          .syncUserWalletUsage({ syncError: STALE_MANAGED_KEY, syncStatus: 'degraded', userId })
+          .catch(() => null);
+      }
+      return {
+        remainingMicroUsd: Math.max(0, balanceMicroUsd - lastSettledMicroUsd),
+        usageKnown: false,
+        usageMicroUsd: lastSettledMicroUsd,
+      };
     }
 
     try {
@@ -621,14 +667,45 @@ export class AicoOpenRouterKeyService {
         rawCapacityMicroUsd: rawCapacityMicro,
         rawUsageMicroUsd: rawUsageMicro,
       });
+      if (options?.persist) {
+        await this.billingModel
+          .syncUserWalletUsage({
+            settledUsageMicroUsd: usageMicro,
+            syncStatus: 'synced',
+            userId,
+          })
+          .catch(() => null);
+      }
+
       // `balance − usage` is exact here: both sides are cumulative and usage
       // reaches the balance precisely when raw usage reaches capacity.
       return {
         remainingMicroUsd: Math.max(0, balanceMicroUsd - usageMicro),
+        usageKnown: true,
         usageMicroUsd: usageMicro,
       };
-    } catch {
-      return { remainingMicroUsd: Math.max(0, balanceMicroUsd), usageMicroUsd: null };
+    } catch (error) {
+      // Do not report the full balance as spendable. Hold the last figure we
+      // could trust and say plainly that it is stale.
+      console.warn('[aico] personal remaining is degraded: OpenRouter key read failed', {
+        error,
+        keyId: wallet.openrouterKeyId,
+        userId,
+      });
+      if (options?.persist) {
+        await this.billingModel
+          .syncUserWalletUsage({
+            syncError: error instanceof Error ? error.message : String(error),
+            syncStatus: 'degraded',
+            userId,
+          })
+          .catch(() => null);
+      }
+      return {
+        remainingMicroUsd: Math.max(0, balanceMicroUsd - lastSettledMicroUsd),
+        usageKnown: false,
+        usageMicroUsd: lastSettledMicroUsd,
+      };
     }
   };
 

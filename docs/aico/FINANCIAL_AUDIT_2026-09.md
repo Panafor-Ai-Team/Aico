@@ -1,6 +1,6 @@
 # Aico Credit & Financial System — Audit Findings
 
-**Date:** 2026-09-12 · **Branch audited:** `canary` @ `85a8545f92` · **Migration head:** `0148`
+**Date:** 2026-09-12 · **Branch audited:** `canary` @ `85a8545f92` · **Migration head:** `0148` (now `0150`)
 **Scope:** personal wallets, org member budgets, top-up, renewal, reclaim/sweep, trial, generation billing, and the read/display path.
 **Status:** findings only. No fixes applied, no production writes performed.
 
@@ -24,7 +24,7 @@ The second number matters far more than the first. Because OpenRouter's key limi
 - **FIN-013 (P0) — FIXED 2026-09-12.** Neither manual-credit UI sent an idempotency key, and a post-commit key-push failure was reported to the admin as _"credit failed"_. An admin retry double-credited both the balance **and** the purchased capacity, doubling the user's OpenRouter spend limit. This affected both money-entry points into the platform.
 - **FIN-014 (P0) — FIXED 2026-09-12.** For period-scoped member budgets, a missing OpenRouter period counter silently fell back to the **lifetime** usage figure, corrupting the multiplier checkpoint and pushing a key limit that could exceed the funded cap by orders of magnitude. The fix also closes FIN-020, which is the same fallback in the settle path.
 - **FIN-015 (P0) — FIXED 2026-09-12.** Account freeze zeroed `balance_micro_usd` but left `raw_capacity_micro_usd` intact and wrote no ledger row. Any later credit silently reactivated the wallet and granted the pre-freeze capacity for free.
-- **FIN-016 (P1)** — The wallet page's Toman figure — the primary currency for the fa-IR user base — is raw cumulative deposits with **no `remaining` counterpart at all**. It can never move. This is the most likely direct explanation of the reported incident.
+- **FIN-016 (P1) — FIXED 2026-09-13.** The wallet page's Toman figure — the primary currency for the fa-IR user base — was raw cumulative deposits with **no `remaining` counterpart at all**. It could never move. This is the most likely direct explanation of the reported incident. Fixed together with **FIN-018 (P1)**, the silent fallback that fed it: `getUserRemaining` swallowed every failure and returned the full balance, unlogged.
 
 **What is working:** the money _storage_ layer is sound (integer micro-USD, atomic SQL increments, conditional `WHERE balance >= amount` guards, real DB transactions). Double-reclaim and sweep-then-remove are correctly guarded. Trial uniqueness is atomically enforced. Orphaned keys are retired on persist failure. Several suspicions raised during triage were investigated and **refuted** — they are recorded in §7 so nobody re-litigates them.
 
@@ -70,7 +70,7 @@ Org budgets are the same shape with a **period-scoped** key (`limit_reset` mirro
 | **INV-5** | `org_wallet.balance + Σ reserved == Σ credits − Σ settled`                      | Not yet probed                                   |
 | **INV-6** | `balance_after − balance_before == amount`, contiguous per wallet               | **Violated** — FIN-021                           |
 | **INV-7** | `Σ usage_logs.cost ≈ OpenRouter spend`                                          | **Violated by construction** — FIN-017           |
-| **INV-8** | Every user-visible credit figure derives from `remaining`                       | **Violated** — FIN-016                           |
+| **INV-8** | Every user-visible credit figure derives from `remaining`                       | **Holds** — FIN-016/FIN-018 fixed 2026-09-13     |
 
 ### Severity rubric
 
@@ -87,9 +87,9 @@ Modifiers applied after the base grade: **+1 if silent**, **+1 if it scales with
 | [FIN-013](#fin-013) | ~~**P0**~~ **FIXED** | Manual credit is not idempotent and reports success as failure → double-credit        | platform-loses                | Confirmed |
 | [FIN-014](#fin-014) | **P0**               | Lifetime-usage fallback corrupts period checkpoint → key limit exceeds funded cap     | platform-loses + user blocked | Confirmed |
 | [FIN-015](#fin-015) | **P0**               | Freeze strands funds, leaves capacity, and a later credit grants it free              | platform-loses + user-loses   | Confirmed |
-| [FIN-016](#fin-016) | P1                   | Wallet UI shows cumulative deposits, not remaining (Toman has no `remaining` at all)  | neither (trust)               | Confirmed |
+| [FIN-016](#fin-016) | ~~P1~~ **FIXED**     | Wallet UI shows cumulative deposits, not remaining (Toman has no `remaining` at all)  | neither (trust)               | Confirmed |
 | [FIN-017](#fin-017) | P1                   | `usage_logs` records hardcoded zeros, fire-and-forget, never settled                  | neither (attribution)         | Confirmed |
-| [FIN-018](#fin-018) | P1                   | `getUserRemaining` swallows every failure and returns the full balance, unlogged      | neither (trust)               | Confirmed |
+| [FIN-018](#fin-018) | ~~P1~~ **FIXED**     | `getUserRemaining` swallows every failure and returns the full balance, unlogged      | neither (trust)               | Confirmed |
 | [FIN-019](#fin-019) | P1                   | Key push runs outside the credit transaction with no outbox retry                     | user blocked / org-loses      | Confirmed |
 | [FIN-020](#fin-020) | P1                   | `computeCycleUsageFromKeyInfo` writes lifetime usage, contradicting its own docstring | user-loses                    | Confirmed |
 | [FIN-021](#fin-021) | P1                   | `balance_before` read without lock → ledger rows where `before + amount ≠ after`      | neither (audit)               | Confirmed |
@@ -206,6 +206,8 @@ The user can spend the pre-freeze capacity again without paying for it. `blended
 
 ### <a id="fin-016"></a>FIN-016 · P1 · The wallet UI shows cumulative deposits, not remaining — and Toman has no `remaining` at all
 
+> **FIXED 2026-09-13.** `getMyBillingSources` now returns `remainingToman` for the personal source and the wallet page reads its credit figures from `remaining` only. The toman figure is pro-rated from what was paid in (`remainingTomanFromBalance` in `aicoMoney.ts`) rather than re-converted at today's FX rate: the toman a user handed over bought a fixed amount of USD credit at the rate in force that day, so converting live would make the number drift on every FX tick — and would inherit the silent env-rate fallback of FIN-038 — while a pro-rated figure moves only when the user actually spends and lands exactly on zero when the wallet is spent out. The `?? wallet?.balanceUsd` fallback is gone: `resolveWalletDisplay` returns `null` for a remaining figure it could not compute and the card renders an explicit unknown, so a deposit can never be redisplayed as credit. Both deposit figures survive under an explicit "paid in" label. Regression tests: `resolveWalletDisplay.test.ts`, `aicoMoney.test.ts` (`remainingTomanFromBalance (FIN-016)`), and `aico.rbacIdor.test.ts` (`getMyBillingSources`).
+
 **Invariant:** INV-8 · **Category:** ux-truthfulness · **Direction:** neither (but destroys user trust), silent
 **This is the most likely direct explanation of the reported incident.**
 
@@ -258,6 +260,8 @@ The richer hook that _does_ accept real costs — `AicoChatGuard.afterManagedCha
 ---
 
 ### <a id="fin-018"></a>FIN-018 · P1 · `getUserRemaining` swallows every failure and returns the full balance, with no log
+
+> **FIXED 2026-09-13.** `getUserRemaining` now returns a `usageKnown` discriminator and every degraded path is logged. The five collapsing paths are separated: a wallet with no key at all is a _known_ zero (no spend was ever possible through us), while a `mock_` hash or a failed `getKey` is _unknown_ — and an unknown read no longer reports the full balance as spendable. It holds the last figure we could trust, persisted on the wallet by the new `settled_usage_micro_usd` / `last_sync_status` / `last_sync_error` columns (migration `0150`, `syncUserWalletUsage`), mirroring what the org path already did. A degraded sync deliberately does not overwrite the held usage. Persistence is opt-in (`{ persist: true }`) so the chat hot path still takes no write; `getMyBillingSources` passes it, and its own second swallow at `aicoBilling.ts:107` now logs and degrades instead of resetting to the balance. The UI renders the stale state rather than presenting a held figure as current (FIN-016). Regression tests: `getUserRemaining.test.ts` (`FIN-018 …`), `resolveWalletDisplay.test.ts`.
 
 **Invariant:** INV-8 · **Category:** ux-truthfulness, config-fragility · **Direction:** neither, **silent to users and operators alike**
 
@@ -579,14 +583,14 @@ That covers INV-2, INV-3, INV-6, INV-7 plus the mock-key and zero-capacity scree
 
 Ordered by (risk reduced ÷ effort). Findings **subsumed** by the metering rewrite are marked so triage does not fund them twice.
 
-**Stage 0 — make the system observable (hours, no behaviour change).**
+**Stage 0 — make the system observable (hours, no behaviour change). DONE 2026-09-13.**
 Log the bare catch at `keyService.ts:586` and the caller at `aicoBilling.ts:107`. Add the `usageKnown` discriminator. **Nothing else in this list can be measured until this lands.**
 
 **Stage 1 — stop the confirmed P0s (days).**
 FIN-013 (require the idempotency key; stop reporting committed credits as failures) · FIN-014 (null-out the lifetime fallback) · FIN-015 (ledger the freeze, quarantine capacity, add unfreeze).
 
 **Stage 2 — restore truthfulness (days).**
-FIN-016 (Toman `remaining`, relabel cumulative figures) · FIN-018 (persist derived usage + sync status on the personal wallet, mirroring the org path) · FIN-027 (`hasValidManagedKeyId` + personal self-repair).
+~~FIN-016 (Toman `remaining`, relabel cumulative figures)~~ **done** · ~~FIN-018 (persist derived usage + sync status on the personal wallet, mirroring the org path)~~ **done** · FIN-027 (`hasValidManagedKeyId` + personal self-repair) — **still open, and the last item in this stage.**
 
 **Stage 3 — durability of the money moves (1–2 weeks).**
 FIN-019 (outbox action for the key push) · FIN-021 (`FOR UPDATE`) · FIN-028 (real CAS) · FIN-033 (CAS on sync writes) · FIN-032.

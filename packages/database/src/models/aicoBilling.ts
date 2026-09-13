@@ -399,6 +399,38 @@ export class AicoBillingModel {
   };
 
   /**
+   * FIN-018. Persist the derived billed usage for a personal wallet, mirroring
+   * `OrganizationModel.syncMemberBudgetUsage`. A `degraded` status means the
+   * figure is the last one we could trust, not a fresh reading — callers must
+   * surface that rather than presenting it as current.
+   *
+   * A degraded sync deliberately does not move `settledUsageMicroUsd`: the
+   * whole point is to hold the last known usage instead of implying that none
+   * has happened since.
+   */
+  syncUserWalletUsage = async (params: {
+    settledUsageMicroUsd?: number;
+    syncError?: string | null;
+    syncStatus: 'synced' | 'degraded';
+    userId: string;
+  }) => {
+    await this.getOrCreateUserWallet(params.userId);
+    const [row] = await this.db
+      .update(userWallets)
+      .set({
+        lastSyncError: params.syncError ?? null,
+        lastSyncStatus: params.syncStatus,
+        lastSyncedAt: new Date(),
+        ...(params.settledUsageMicroUsd == null
+          ? {}
+          : { settledUsageMicroUsd: params.settledUsageMicroUsd }),
+      })
+      .where(eq(userWallets.userId, params.userId))
+      .returning();
+    return row;
+  };
+
+  /**
    * Persist a rebased usage-multiplier checkpoint (AICO-180). Called when the
    * platform multiplier changed since this wallet was last synced, so usage up
    * to `usageBaselineMicroUsd` keeps the rate it was billed at.

@@ -16,8 +16,10 @@ const billingSources: AicoBillingSourcesResponse = {
       hasManagedKey: true,
       isActive: true,
       remainingMicroUsd: '2000000',
+      remainingToman: '100000',
       remainingUsd: '2.000000',
       source: 'personal',
+      usageKnown: true,
     },
     {
       hasManagedKey: true,
