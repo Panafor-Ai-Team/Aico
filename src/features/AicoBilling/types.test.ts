@@ -16,8 +16,10 @@ const sources: AicoBillingSource[] = [
     hasManagedKey: true,
     isActive: true,
     remainingMicroUsd: '1500000',
+    remainingToman: '75000',
     remainingUsd: '1.500000',
     source: 'personal',
+    usageKnown: true,
   },
   {
     hasManagedKey: true,
@@ -105,8 +107,10 @@ describe('AicoBilling types helpers', () => {
       hasManagedKey: true,
       isActive: true,
       remainingMicroUsd: '0',
+      remainingToman: '0',
       remainingUsd: '0.000000',
       source: 'personal',
+      usageKnown: true,
     };
 
     it('blocks personal $0 without trial', () => {

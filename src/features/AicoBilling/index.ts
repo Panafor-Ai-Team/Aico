@@ -22,6 +22,7 @@ export type {
   AicoBillingContext,
   AicoBillingSource,
   AicoBillingSourcesResponse,
+  AicoPersonalBillingSource,
 } from './types';
 export {
   billingContextKey,

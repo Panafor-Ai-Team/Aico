@@ -5,8 +5,16 @@ export type AicoPersonalBillingSource = {
   hasManagedKey: boolean;
   isActive: boolean;
   remainingMicroUsd: string;
+  /** FIN-016: toman still spendable, pro-rated from what was paid in. */
+  remainingToman: string;
   remainingUsd: string;
   source: 'personal';
+  /**
+   * FIN-018: false when the remaining figures are the last trusted reading
+   * rather than a live one. Render an explicit stale state — never pass a held
+   * figure off as current.
+   */
+  usageKnown: boolean;
 };
 
 export type AicoOrganizationBillingSource = {

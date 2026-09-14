@@ -134,6 +134,40 @@ export const microUsdToToman = (
   return (microValue * rate) / MICRO_USD_PER_USD;
 };
 
+/**
+ * Toman still spendable on a personal wallet (FIN-016).
+ *
+ * Deliberately *not* `microUsdToToman(remaining, currentRate)`. The toman a user
+ * paid bought a fixed amount of USD credit at the rate in force that day, so the
+ * toman view of what is left is that same money pro-rated by how much of the
+ * balance survives — not a fresh conversion at today's rate. Converting live
+ * would make the number drift every time the FX feed moves (and inherit the
+ * silent env-rate fallback, FIN-038), so a user who spent nothing would still
+ * watch their credit change.
+ *
+ * Floors, so the toman figure is never optimistic, and reaches exactly 0 when
+ * the balance is spent out.
+ */
+export const remainingTomanFromBalance = (wallet: {
+  balanceMicroUsd: bigint | number | string | null | undefined;
+  balanceToman: bigint | number | string | null | undefined;
+  remainingMicroUsd: bigint | number | string | null | undefined;
+}): number => {
+  const toBig = (value: bigint | number | string | null | undefined): bigint => {
+    if (value == null) return 0n;
+    return typeof value === 'bigint' ? value : BigInt(Math.trunc(Number(value) || 0));
+  };
+
+  const balance = toBig(wallet.balanceMicroUsd);
+  const paidToman = toBig(wallet.balanceToman);
+  const remaining = toBig(wallet.remainingMicroUsd);
+
+  if (balance <= 0n || paidToman <= 0n || remaining <= 0n) return 0;
+  if (remaining >= balance) return Number(paidToman);
+
+  return Number((paidToman * remaining) / balance);
+};
+
 /** Confirmed unused reservation: never negative; floor already implied by integer subtraction. */
 export const confirmedUnusedMicro = (reserved: bigint, authoritativeUsage: bigint): bigint => {
   const unused = reserved - authoritativeUsage;

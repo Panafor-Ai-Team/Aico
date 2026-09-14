@@ -47,7 +47,9 @@ const {
   disableUserKeyMock: vi.fn().mockResolvedValue(null),
   ensureMemberKeyMock: vi.fn().mockResolvedValue({ created: false, keyId: null }),
   ensureUserKeyMock: vi.fn().mockResolvedValue({ created: false, keyId: null }),
-  getUserRemainingMock: vi.fn().mockResolvedValue({ remainingMicroUsd: 0, usageMicroUsd: null }),
+  getUserRemainingMock: vi
+    .fn()
+    .mockResolvedValue({ remainingMicroUsd: 0, usageKnown: true, usageMicroUsd: 0 }),
   reclaimMemberKeyMock: vi.fn().mockResolvedValue(null),
   syncMemberCycleUsageMock: vi.fn().mockResolvedValue(null),
 }));
@@ -593,7 +595,8 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
     await testDB
       .update(userWallets)
       .set({
-        balanceMicroUsd: 1_500_000,
+        // $3.00 paid in as 100,000 toman; half of it is still unspent below.
+        balanceMicroUsd: 3_000_000,
         balanceToman: 100_000,
         openrouterKeyId: 'pers-key',
       })
@@ -601,7 +604,8 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
 
     getUserRemainingMock.mockResolvedValue({
       remainingMicroUsd: 1_500_000,
-      usageMicroUsd: null,
+      usageKnown: true,
+      usageMicroUsd: 1_500_000,
     });
 
     const org = await ownerCaller.create({ name: 'Billing Sources Co' });
@@ -628,8 +632,15 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
     });
 
     const sources = await billingCaller.getMyBillingSources();
-    expect(sources.sources[0]?.source).toBe('personal');
-    expect(sources.sources[0]?.remainingUsd).toBe('1.500000');
+    const personalSource = sources.sources[0];
+    expect(personalSource?.source).toBe('personal');
+    expect(personalSource?.remainingUsd).toBe('1.500000');
+
+    // FIN-016: the toman figure the fa-IR user base reads as "my credit" must
+    // come from `remaining`. 100,000 toman bought $3.00 of balance, of which
+    // $1.50 is left — so half the toman is left too, not all of it.
+    expect(personalSource).toMatchObject({ remainingToman: '50000', usageKnown: true });
+    expect(personalSource).not.toMatchObject({ remainingToman: '100000' });
 
     const orgSource = sources.sources.find(
       (s) => s.source === 'organization' && s.organizationId === org.id,
