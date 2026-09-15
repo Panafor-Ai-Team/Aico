@@ -6,6 +6,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   uniqueIndex,
   varchar,
@@ -320,6 +321,32 @@ export const memberBudgets = pgTable(
     openrouterKeyId: text('openrouter_key_id'),
     /** AES-GCM ciphertext (KeyVaultsGateKeeper); never returned to SPA. */
     openrouterKeyCiphertext: text('openrouter_key_ciphertext'),
+    /**
+     * Mint-time limit of the managed key, in RAW micro-USD (the units of
+     * `usageBaselineMicroUsd`, not billed micro-USD).
+     *
+     * Recorded because CheapVibeCode reports only a key's *remaining* allowance:
+     * spend is `managedKeyLimitMicroUsd - remaining`, and the limit is knowable
+     * only to us since there is no endpoint to read it back. OpenRouter reports
+     * usage directly and leaves this NULL.
+     *
+     * NULL means unknown, never zero — see `rawUsageFromRemaining`.
+     */
+    managedKeyLimitMicroUsd: bigint('managed_key_limit_micro_usd', { mode: 'number' }),
+    /**
+     * Which gateway minted the key held here.
+     *
+     * Without it a provider cutover would hand an OpenRouter secret to
+     * CheapVibeCode: the key columns are non-empty, so the ensure path concludes
+     * a live key already exists. A key stamped with a gateway that is no longer
+     * active counts as absent — a replacement is minted from the subject's
+     * *billed* balance (no money revalued) and the old key is left alive
+     * upstream, which is what keeps rollback to an env change.
+     *
+     * NULL only on rows minted before the column existed, which can only be
+     * OpenRouter; migration 0154 backfills them.
+     */
+    managedKeyProviderId: text('managed_key_provider_id'),
     isActive: boolean('is_active').notNull().default(true),
     lastSyncedAt: timestamptz('last_synced_at'),
     lastSyncStatus: text('last_sync_status').notNull().default('never'),
@@ -357,6 +384,44 @@ export const userWallets = pgTable(
     }),
     openrouterKeyId: text('openrouter_key_id'),
     openrouterKeyCiphertext: text('openrouter_key_ciphertext'),
+    /**
+     * Mint-time limit of the managed key, in RAW micro-USD (the units of
+     * `usageBaselineMicroUsd`, not billed micro-USD).
+     *
+     * Recorded because CheapVibeCode reports only a key's *remaining* allowance:
+     * spend is `managedKeyLimitMicroUsd - remaining`, and the limit is knowable
+     * only to us since there is no endpoint to read it back. OpenRouter reports
+     * usage directly and leaves this NULL.
+     *
+     * NULL means unknown, never zero — see `rawUsageFromRemaining`.
+     */
+    managedKeyLimitMicroUsd: bigint('managed_key_limit_micro_usd', { mode: 'number' }),
+    /**
+     * Raw spend on keys this wallet has already retired. A member budget keeps
+     * the same fact in its checkpoint; a wallet has none, so without this a key
+     * rotation (which an immutable-limit provider forces on every top-up) would
+     * forget everything spent on the old key and re-grant it.
+     *
+     * Total raw spend is
+     * `rawUsageBeforeKeyMicroUsd + (managedKeyLimitMicroUsd - remaining)`.
+     */
+    rawUsageBeforeKeyMicroUsd: bigint('raw_usage_before_key_micro_usd', { mode: 'number' })
+      .notNull()
+      .default(0),
+    /**
+     * Which gateway minted the key held here.
+     *
+     * Without it a provider cutover would hand an OpenRouter secret to
+     * CheapVibeCode: the key columns are non-empty, so the ensure path concludes
+     * a live key already exists. A key stamped with a gateway that is no longer
+     * active counts as absent — a replacement is minted from the subject's
+     * *billed* balance (no money revalued) and the old key is left alive
+     * upstream, which is what keeps rollback to an env change.
+     *
+     * NULL only on rows minted before the column existed, which can only be
+     * OpenRouter; migration 0154 backfills them.
+     */
+    managedKeyProviderId: text('managed_key_provider_id'),
     isActive: boolean('is_active').notNull().default(true),
     /**
      * Soft-delete freeze of non-zero personal balance pending refund/recovery.
@@ -669,9 +734,14 @@ export type PlatformFxConfigItem = typeof platformFxConfig.$inferSelect;
 export type NewPlatformFxConfig = typeof platformFxConfig.$inferInsert;
 
 /**
- * Platform usage multiplier (AICO-180). Single-row config edited by platform
- * admins. Everything the user sees is raw OpenRouter cost x this multiplier;
- * changes apply to new requests only (wallets carry a usage checkpoint).
+ * Platform usage multiplier (AICO-180), keyed by managed provider (AICO-186).
+ * Edited by platform admins. Everything the user sees is raw upstream cost x
+ * this multiplier; changes apply to new requests only (wallets and member
+ * budgets carry a usage checkpoint recording the rate money was bought at).
+ *
+ * `id` is the managed provider id — `openrouter` (1.20x) or `cheapvibecode`
+ * (1.25x). The legacy `'default'` row is retained as the fallback for a
+ * deployment whose provider has no row of its own.
  */
 export const platformUsageMultiplierConfig = pgTable('platform_usage_multiplier_config', {
   id: text('id').notNull().primaryKey().default('default'),
@@ -686,6 +756,60 @@ export const platformUsageMultiplierConfig = pgTable('platform_usage_multiplier_
 
 export type PlatformUsageMultiplierConfigItem = typeof platformUsageMultiplierConfig.$inferSelect;
 export type NewPlatformUsageMultiplierConfig = typeof platformUsageMultiplierConfig.$inferInsert;
+
+/**
+ * Per-model coefficient overrides (AICO-187), edited by platform admins.
+ *
+ * Kept out of `openrouterModelCatalog` on purpose: `replaceCatalog` rewrites
+ * `pricing` and `payload` from the upstream snapshot on every sync, drops rows
+ * for models that disappear, and truncates on an empty snapshot — an override
+ * stored there would not survive a cron run.
+ *
+ * An override corrects a *published* coefficient we have measured to be wrong
+ * (CheapVibeCode bills some models for reasoning tokens twice, and nothing in
+ * `/v1/models` flags which). It moves the price in the model picker and the
+ * per-message cost estimate ONLY. It deliberately does not move the wallet
+ * debit, which is derived from the upstream key's balance delta and is
+ * aggregate rather than per-model — so an override makes display agree with
+ * what is actually charged instead of diverging from it. Do not "fix" this by
+ * wiring it into the debit path.
+ */
+export const platformModelMultiplierOverrides = pgTable(
+  'platform_model_multiplier_overrides',
+  {
+    /** Managed provider id, matching `platform_usage_multiplier_config.id`. */
+    providerId: text('provider_id').notNull(),
+    /** Upstream model id as it appears in the catalog, e.g. `deepseek-v4.1-flash`. */
+    modelId: text('model_id').notNull(),
+    /** Effective coefficient in basis points (10000 = 1.00x). Band 1000-100000. */
+    multiplierBp: bigint('multiplier_bp', { mode: 'number' }).notNull(),
+    /** Why the override exists, e.g. "measured x0.433 vs published x0.3". */
+    note: text('note'),
+    /**
+     * A `users.id`, mirroring `platform_usage_multiplier_config`. Do NOT write
+     * `ctx.adminId` here — that is a `platform_admin_users.id` and would violate
+     * this FK at runtime. Admin attribution lives in `aico_security_events`
+     * (`actorAdminId`), which the edit procedures already record.
+     */
+    updatedByUserId: text('updated_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({
+      columns: [t.providerId, t.modelId],
+      name: 'platform_model_multiplier_overrides_pk',
+    }),
+    index('platform_model_multiplier_overrides_provider_idx').on(t.providerId),
+  ],
+);
+
+export type PlatformModelMultiplierOverrideItem =
+  typeof platformModelMultiplierOverrides.$inferSelect;
+export type NewPlatformModelMultiplierOverride =
+  typeof platformModelMultiplierOverrides.$inferInsert;
 
 export const userTrials = pgTable(
   'user_trials',

@@ -6,6 +6,8 @@ import {
   ensureOpenRouterAutoModel,
   ensureOpenRouterModels,
   isDefaultAutoImageModelId,
+  isManagedAutoModelId,
+  MANAGED_AUTO_MODEL_ID,
   OPENROUTER_AUTO_MODEL_ID,
   pickPreferredDefaultOpenRouterModelId,
 } from './openrouterDefaultModels';
@@ -169,5 +171,35 @@ describe('isDefaultAutoImageModelId', () => {
     ]);
 
     expect(enabled.has(DEFAULT_AUTO_IMAGE_MODEL_ID)).toBe(true);
+  });
+});
+
+describe('isManagedAutoModelId', () => {
+  it.each([
+    OPENROUTER_AUTO_MODEL_ID,
+    MANAGED_AUTO_MODEL_ID,
+    'cheapvibecode/auto',
+    'aico/auto',
+    'OpenRouter/AUTO',
+    '  openrouter/auto ',
+    'auto',
+  ])('accepts %s', (id) => {
+    expect(isManagedAutoModelId(id)).toBe(true);
+  });
+
+  it.each([
+    'openai/gpt-4o',
+    'openrouter/autopilot',
+    'someoneelse/auto',
+    'auto/openrouter',
+    '',
+    null,
+    undefined,
+  ])('rejects %s', (id) => {
+    expect(isManagedAutoModelId(id)).toBe(false);
+  });
+
+  it('keeps the storage id stable — agent configs and the pinned catalog row hold it', () => {
+    expect(MANAGED_AUTO_MODEL_ID).toBe('openrouter/auto');
   });
 });

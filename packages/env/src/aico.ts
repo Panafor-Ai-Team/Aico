@@ -21,12 +21,32 @@ declare global {
        */
       AICO_CONTROL_PLANE_URL?: string;
       /**
+       * CheapVibeCode tokens per 1 USD of raw upstream capacity. CVC prices in its
+       * own tokens and publishes no USD rate, so this is the only bridge between
+       * their unit and our micro-USD ledger. Default 25,000,000 (the rate we buy
+       * at). Changing it re-denominates every CVC key limit written after the
+       * change; it does NOT revalue limits already pushed upstream.
+       */
+      AICO_CVC_TOKENS_PER_USD?: string;
+      /**
        * When `1`, this process is the control plane (may hold `OPENROUTER_MANAGEMENT_API_KEY`).
        * Product servers must leave this unset.
        */
       AICO_IS_CONTROL_PLANE?: string;
       /**
-       * When `1`, OpenRouter management calls are mocked in-process (local QA).
+       * Which upstream gateway backs the managed (`BRANDING_PROVIDER`) experience:
+       * `openrouter` (default) or `cheapvibecode`. This is the rollback lever — both
+       * implementations stay live and switching is an env change, not a restore.
+       *
+       * Exactly ONE managed provider is live per deployment, and that is load-bearing:
+       * `user_wallets.raw_capacity_micro_usd` is a single blended pool denominated in
+       * the active provider's raw USD, bought at whatever multiplier was in force at
+       * top-up time. Never run two managed providers at once without first splitting
+       * wallet capacity per provider.
+       */
+      AICO_MANAGED_PROVIDER?: string;
+      /**
+       * When `1`, managed-provider calls are mocked in-process (local QA).
        * Ignored in production — see `createOpenRouterManagementClient`.
        */
       AICO_OPENROUTER_MOCK?: string;
@@ -41,6 +61,19 @@ declare global {
        * platform admin panel (platform_fx_config).
        */
       AICO_TOMAN_PER_USD?: string;
+      /**
+       * CheapVibeCode API origin, no trailing slash. Their docs describe a
+       * Primary/Fallback domain switch as the remedy for an outage, so this is a
+       * comma-separated list tried in order.
+       */
+      CHEAPVIBECODE_BASE_URL?: string;
+      /**
+       * CheapVibeCode primary key (sk-cvc-…). Unlike OpenRouter's, this single
+       * credential is BOTH the management API key and a fully funded inference
+       * key — a leak spends the account float directly, it does not merely mint
+       * keys. Control plane only; product servers must NOT set this.
+       */
+      CHEAPVIBECODE_MANAGEMENT_API_KEY?: string;
       /**
        * OpenRouter Management API key (sk-or-…). Creates per-user keys.
        * Never expose to the client. Product servers must NOT set this — only the control plane.
@@ -57,7 +90,11 @@ export const getAicoConfig = () => {
       AICO_CONTROL_PLANE_SERVICE_TOKEN: z.string().optional(),
       AICO_CONTROL_PLANE_URL: z.string().url().optional(),
       AICO_IS_CONTROL_PLANE: z.boolean().optional().default(false),
+      AICO_MANAGED_PROVIDER: z.enum(['openrouter', 'cheapvibecode']).default('openrouter'),
+      AICO_CVC_TOKENS_PER_USD: z.coerce.number().positive().int().default(25_000_000),
       AICO_OPENROUTER_MOCK: z.boolean().optional().default(false),
+      CHEAPVIBECODE_BASE_URL: z.string().default('https://cheapvibecode.ru'),
+      CHEAPVIBECODE_MANAGEMENT_API_KEY: z.string().optional(),
       AICO_SECURITY_ALERT_WEBHOOK_URL: z.string().url().optional(),
       AICO_TOMAN_PER_USD: z.coerce.number().positive().int().default(187_400),
       OPENROUTER_MANAGEMENT_API_KEY: z.string().optional(),
@@ -67,7 +104,11 @@ export const getAicoConfig = () => {
       AICO_CONTROL_PLANE_SERVICE_TOKEN: process.env.AICO_CONTROL_PLANE_SERVICE_TOKEN,
       AICO_CONTROL_PLANE_URL: process.env.AICO_CONTROL_PLANE_URL,
       AICO_IS_CONTROL_PLANE: process.env.AICO_IS_CONTROL_PLANE === '1',
+      AICO_MANAGED_PROVIDER: process.env.AICO_MANAGED_PROVIDER || 'openrouter',
+      AICO_CVC_TOKENS_PER_USD: process.env.AICO_CVC_TOKENS_PER_USD,
       AICO_OPENROUTER_MOCK: process.env.AICO_OPENROUTER_MOCK === '1',
+      CHEAPVIBECODE_BASE_URL: process.env.CHEAPVIBECODE_BASE_URL || 'https://cheapvibecode.ru',
+      CHEAPVIBECODE_MANAGEMENT_API_KEY: process.env.CHEAPVIBECODE_MANAGEMENT_API_KEY,
       AICO_SECURITY_ALERT_WEBHOOK_URL: process.env.AICO_SECURITY_ALERT_WEBHOOK_URL || undefined,
       AICO_TOMAN_PER_USD: process.env.AICO_TOMAN_PER_USD,
       OPENROUTER_MANAGEMENT_API_KEY: process.env.OPENROUTER_MANAGEMENT_API_KEY,

@@ -1,3 +1,5 @@
+import { MANAGED_PROVIDER_IDS, type ManagedProviderId } from '@lobechat/business-const';
+
 import { lambdaClient } from '@/libs/trpc/client';
 
 import { getAicoBillingContext, setAicoBillingContext } from './store';
@@ -9,8 +11,11 @@ import {
   preferenceToBillingContext,
 } from './types';
 
+// Mirrors `AicoManagedPolicy.isManagedProvider` on the server: every gateway we
+// mint keys against is managed, so a deployment mid-switch keeps billing context
+// attached to requests naming the provider it is moving away from.
 const isManagedProvider = (provider: string): boolean =>
-  provider === 'aico' || provider === 'openrouter';
+  provider === 'aico' || MANAGED_PROVIDER_IDS.includes(provider as ManagedProviderId);
 
 export const resolveAicoBillingForRequest = async (
   provider: string,

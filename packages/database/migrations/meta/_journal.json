@@ -1057,6 +1057,34 @@
       "when": 1788200000000,
       "tag": "0150_aico_wallet_usage_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 1788300000000,
+      "tag": "0151_aico_per_provider_usage_multiplier",
+      "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1788400000000,
+      "tag": "0152_aico_model_multiplier_overrides",
+      "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1788500000000,
+      "tag": "0153_aico_managed_key_limit",
+      "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 1788600000000,
+      "tag": "0154_aico_managed_key_provider",
+      "breakpoints": true
     }
   ],
   "version": "6"

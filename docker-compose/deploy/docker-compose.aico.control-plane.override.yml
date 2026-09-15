@@ -22,6 +22,7 @@ services:
       AICO_CONTROL_PLANE_UI_URL: ${AICO_CONTROL_PLANE_PUBLIC_URL:-http://localhost:${AICO_CONTROL_PLANE_PORT:-3020}}
       # Clear management key on the product container even if present in env_file.
       OPENROUTER_MANAGEMENT_API_KEY: ''
+      CHEAPVIBECODE_MANAGEMENT_API_KEY: ''
       # Local moz is HTTP; don't force __Secure- cookies that browsers drop on http://
       AICO_INSECURE_AUTH_COOKIES: '1'
 
@@ -42,6 +43,7 @@ services:
       HONO_HOST: '0.0.0.0'
       AICO_CONTROL_PLANE_SERVICE_TOKEN: ${AICO_CONTROL_PLANE_SERVICE_TOKEN:?set AICO_CONTROL_PLANE_SERVICE_TOKEN}
       OPENROUTER_MANAGEMENT_API_KEY: ${OPENROUTER_MANAGEMENT_API_KEY:-}
+      CHEAPVIBECODE_MANAGEMENT_API_KEY: ${CHEAPVIBECODE_MANAGEMENT_API_KEY:-}
       # Prefer the compose network DB/Redis, not host-only URLs from repo .env
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgresql:5432/${LOBE_DB_NAME}
       # env_file can leak DATABASE_DRIVER=neon; Neon WS fails against compose Postgres.

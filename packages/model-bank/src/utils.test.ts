@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Pricing } from './types/aiModel';
 import {
   applyPricingMultiplier,
+  composeMultiplierBp,
   resolveModelSearchDefaultSettings,
   resolveSearchDecision,
 } from './utils';
@@ -188,5 +189,29 @@ describe('applyPricingMultiplier', () => {
     expect(applyPricingMultiplier(pricing, 0)).toBe(pricing);
     expect(applyPricingMultiplier(pricing, undefined)).toBe(pricing);
     expect(applyPricingMultiplier(undefined, bp)).toBeUndefined();
+  });
+});
+
+describe('composeMultiplierBp', () => {
+  it('multiplies the platform rate by the per-model correction', () => {
+    expect(composeMultiplierBp(12_500, 14_400)).toBe(18_000); // 1.25x * 1.44x
+    expect(composeMultiplierBp(12_000, 5_000)).toBe(6_000); // an override may discount
+  });
+
+  it('returns the platform rate untouched when no override applies', () => {
+    expect(composeMultiplierBp(12_500, 10_000)).toBe(12_500);
+    expect(composeMultiplierBp(12_500, undefined)).toBe(12_500);
+    expect(composeMultiplierBp(12_500, null)).toBe(12_500);
+  });
+
+  it('falls back to 1.00x rather than zeroing a price on bad input', () => {
+    expect(composeMultiplierBp(undefined, undefined)).toBe(10_000);
+    expect(composeMultiplierBp(0, 12_000)).toBe(12_000);
+    expect(composeMultiplierBp(12_000, Number.NaN)).toBe(12_000);
+  });
+
+  it('rounds the composed rate to whole basis points', () => {
+    // 1.25x * 1.443x = 1.80375x -> 18038 bp, one rounding, one price path.
+    expect(composeMultiplierBp(12_500, 14_430)).toBe(18_038);
   });
 });

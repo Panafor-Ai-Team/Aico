@@ -1,3 +1,4 @@
+import { MANAGED_PROVIDER_ID } from '@lobechat/business-const';
 import { fetchOpenRouterModels } from '@lobechat/model-runtime';
 import type { ChatModelCard } from '@lobechat/types';
 import type { ModelAbilities } from 'model-bank';
@@ -8,6 +9,7 @@ import {
   OpenRouterModelCatalogModel,
 } from '@/database/models/openrouterModelCatalog';
 import type { LobeChatDatabase } from '@/database/type';
+import { getManagedProviderClient } from '@/server/services/managedProvider';
 
 const toAbilities = (model: ChatModelCard): ModelAbilities => {
   const abilities: ModelAbilities = {};
@@ -19,6 +21,28 @@ const toAbilities = (model: ChatModelCard): ModelAbilities => {
   if (model.video) abilities.video = true;
   if (model.vision) abilities.vision = true;
   return abilities;
+};
+
+/**
+ * The live catalog of whichever gateway `AICO_MANAGED_PROVIDER` makes active.
+ *
+ * OpenRouter's `/models` is public, so it is fetched directly. Every other
+ * managed provider goes through the provider client, which for CheapVibeCode
+ * means the control-plane proxy — listing models there needs the primary
+ * credential, and that credential never reaches this process.
+ *
+ * A provider that cannot list models throws rather than returning `[]`: an empty
+ * snapshot would be recorded as a successful sync of nothing, and the served
+ * catalog would silently fall back to the static model-bank file.
+ */
+const fetchManagedCatalog = async (): Promise<ChatModelCard[]> => {
+  if (MANAGED_PROVIDER_ID === 'openrouter') return fetchOpenRouterModels();
+
+  const client = getManagedProviderClient();
+  if (!client.listModels) {
+    throw new Error(`Managed provider ${client.providerId} cannot list models`);
+  }
+  return client.listModels();
 };
 
 export class OpenRouterModelCatalogSyncService {
@@ -34,6 +58,11 @@ export class OpenRouterModelCatalogSyncService {
 
   listHistory = async (limit = 20): Promise<OpenRouterCatalogSyncRun[]> => {
     return this.catalog.listSyncRuns(limit);
+  };
+
+  /** Per-model published coefficients for the admin override table (AICO-187). */
+  listCatalogCoefficients = async () => {
+    return this.catalog.listCoefficients();
   };
 
   /**
@@ -58,7 +87,7 @@ export class OpenRouterModelCatalogSyncService {
    */
   sync = async (triggeredBy: string): Promise<OpenRouterCatalogSyncStatus> => {
     try {
-      const models = await fetchOpenRouterModels();
+      const models = await fetchManagedCatalog();
 
       return await this.catalog.replaceCatalog({
         models: models.map((model) => ({

@@ -65,6 +65,9 @@ export const getLLMConfig = () => {
       ENABLED_GITHUB: z.boolean(),
       GITHUB_TOKEN: z.string().optional(),
 
+      ENABLED_CHEAPVIBECODE: z.boolean(),
+      CHEAPVIBECODE_API_KEY: z.string().optional(),
+
       ENABLED_OPENROUTER: z.boolean(),
       OPENROUTER_API_KEY: z.string().optional(),
 
@@ -296,6 +299,9 @@ export const getLLMConfig = () => {
 
       ENABLED_MISTRAL: !!process.env.MISTRAL_API_KEY,
       MISTRAL_API_KEY: process.env.MISTRAL_API_KEY,
+
+      ENABLED_CHEAPVIBECODE: !!process.env.CHEAPVIBECODE_API_KEY,
+      CHEAPVIBECODE_API_KEY: process.env.CHEAPVIBECODE_API_KEY,
 
       ENABLED_OPENROUTER: !!process.env.OPENROUTER_API_KEY,
       OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,

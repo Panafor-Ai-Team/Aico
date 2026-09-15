@@ -70,6 +70,39 @@ describe('getModelPricing', () => {
     });
   });
 
+  it('marks the reported cost up by the platform multiplier', async () => {
+    const result = await getModelPricing('gpt-4o', 'openai', {
+      costMultiplierBp: 12_500,
+      plan: 'aico',
+      scope: 'personal',
+    });
+
+    expect(result?.units[0]).toMatchObject({ rate: 3.125 });
+  });
+
+  it('composes a per-model correction on top, so the cost chip matches the picker', async () => {
+    const result = await getModelPricing('gpt-4o', 'openai', {
+      costMultiplierBp: 12_500,
+      modelCostMultiplierBp: { 'gpt-4o': 14_400 },
+      plan: 'aico',
+      scope: 'personal',
+    });
+
+    // 2.5 x (1.25 x 1.44) = 4.5
+    expect(result?.units[0]).toMatchObject({ rate: 4.5 });
+  });
+
+  it('leaves another model untouched by an override', async () => {
+    const result = await getModelPricing('gpt-4o', 'openai', {
+      costMultiplierBp: 12_500,
+      modelCostMultiplierBp: { 'some-other-model': 14_400 },
+      plan: 'aico',
+      scope: 'personal',
+    });
+
+    expect(result?.units[0]).toMatchObject({ rate: 3.125 });
+  });
+
   it('should pass explicit pricing context to loadModels', async () => {
     await getModelPricing('gpt-4o', 'openai', { plan: 'premium', scope: 'personal' });
 

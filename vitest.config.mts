@@ -40,17 +40,22 @@ const alias = {
   // that reports no active workspace so workspace-aware nav helpers behave
   // like plain react-router.
   '@/store/workspace': resolve(__dirname, './tests/mocks/storeWorkspace.ts'),
+  // `apps/aico-control-plane/**` is outside the root tsconfig's `include`, so
+  // vite-tsconfig-paths never applies the `@/server/*` mapping to its files even
+  // though the control plane's own tsconfig declares it. Mirror the mapping here
+  // so control-plane tests can import server services the way the app does.
+  '@/server': resolve(__dirname, './apps/server/src'),
   '~test-utils': resolve(__dirname, './tests/utils.tsx'),
   'lru_map': resolve(__dirname, './tests/mocks/lru_map'),
 };
 
 export default defineConfig({
   define: {
-    '__CI__': process.env.CI === 'true' ? 'true' : 'false',
-    '__DEV__': process.env.NODE_ENV !== 'production' ? 'true' : 'false',
-    '__ELECTRON__': 'false',
-    '__MOBILE__': 'false',
-    '__TEST__': 'true',
+    __CI__: process.env.CI === 'true' ? 'true' : 'false',
+    __DEV__: process.env.NODE_ENV !== 'production' ? 'true' : 'false',
+    __ELECTRON__: 'false',
+    __MOBILE__: 'false',
+    __TEST__: 'true',
   },
   optimizeDeps: {
     exclude: ['crypto', 'util', 'tty'],
@@ -63,8 +68,7 @@ export default defineConfig({
     {
       name: 'raw-md',
       transform(_, id) {
-        if (id.endsWith('.md'))
-          return { code: 'export default ""', map: null };
+        if (id.endsWith('.md')) return { code: 'export default ""', map: null };
       },
     },
     /**
@@ -146,6 +150,11 @@ export default defineConfig({
       '**/security-audit-reports/**',
     ],
     globals: true,
+    // A `getTestDB()` fixture replays every migration into an in-memory PGlite,
+    // which already costs several seconds and grows with each new migration.
+    // Vitest's 10s default left no headroom under a parallel run, so DB-backed
+    // suites timed out in their `beforeEach` rather than on anything they test.
+    hookTimeout: 60_000,
     server: {
       deps: {
         inline: [

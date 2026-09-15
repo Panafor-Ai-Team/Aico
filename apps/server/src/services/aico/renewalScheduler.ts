@@ -26,6 +26,12 @@ const OUTBOX_BASE_DELAY_MS = 60_000;
 const OUTBOX_MAX_DELAY_MS = 6 * 60 * 60 * 1000;
 const OUTBOX_MAX_ATTEMPTS = 12;
 const OUTBOX_DEFAULT_BATCH = 25;
+/**
+ * How long a row waits when the managed provider has no route for its action.
+ * That is not a failure — nothing was attempted — so the row keeps its attempt
+ * count and its place in the queue rather than burning retries towards an alert.
+ */
+const OUTBOX_DEFER_MS = 24 * 60 * 60 * 1000;
 
 export interface RenewalOptions {
   keyService?: AicoOpenRouterKeyService;
@@ -265,9 +271,14 @@ const renewOrg = async (params: {
   // 1. Authoritative settlement of the closing period (OpenRouter is the source
   //    of truth for spend). Any read failure fails the batch — never guess usage.
   const refunds = new Map<string, number>();
+  // Where each member's meter restarts. Zero on a provider whose key counters
+  // reset at the boundary; the counter's settled value on one whose do not —
+  // see `AicoOpenRouterKeyService.settleMemberPeriod`.
+  const nextBaselines = new Map<string, number>();
   try {
     for (const b of budgets) {
       const settled = await keyService.settleMemberPeriod(b.memberId);
+      nextBaselines.set(b.memberId, settled?.nextCycleBaselineMicroUsd ?? 0);
       const usage = BigInt(settled?.usageMicroUsd ?? 0);
       // Never refund from reserved (may include pending). Prefer OR remaining;
       // fall back to current-cycle cap − usage only.
@@ -370,7 +381,7 @@ const renewOrg = async (params: {
             // settled usage so the new cycle meters from zero at the current rate.
             billedUsageBeforeBaselineMicroUsd: 0,
             checkpointMultiplierBp: currentMultiplierBp,
-            usageBaselineMicroUsd: 0,
+            usageBaselineMicroUsd: nextBaselines.get(b.memberId) ?? 0,
           })
           .where(eq(memberBudgets.id, b.budgetId));
 
@@ -444,6 +455,8 @@ const renewOrg = async (params: {
 };
 
 export interface OutboxRunResult {
+  /** Parked because the live provider cannot perform the action yet. */
+  deferred: number;
   failed: number;
   processed: number;
   succeeded: number;
@@ -474,6 +487,7 @@ export const processKeyOutbox = async (
   let processed = 0;
   let succeeded = 0;
   let failed = 0;
+  let deferred = 0;
 
   for (const candidate of candidates) {
     // Claim with a compare-and-swap so parallel workers never double-process.
@@ -486,7 +500,23 @@ export const processKeyOutbox = async (
 
     processed += 1;
     try {
-      await runOutboxAction({ keyService, orgModel, row });
+      const outcome = await runOutboxAction({ keyService, orgModel, row });
+
+      if (outcome === 'deferred') {
+        // Hand the attempt back: the row is a standing record of work the
+        // provider cannot do yet, not a failing job.
+        await db
+          .update(aicoKeyOutbox)
+          .set({
+            attempts: sql`greatest(${aicoKeyOutbox.attempts} - 1, 0)`,
+            nextAttemptAt: new Date(now.getTime() + OUTBOX_DEFER_MS),
+            status: 'pending',
+          })
+          .where(eq(aicoKeyOutbox.id, row.id));
+        deferred += 1;
+        continue;
+      }
+
       await db
         .update(aicoKeyOutbox)
         .set({ lastError: null, status: 'succeeded' })
@@ -522,28 +552,44 @@ export const processKeyOutbox = async (
     }
   }
 
-  return { failed, processed, succeeded };
+  return { deferred, failed, processed, succeeded };
 };
 
+/**
+ * `'deferred'` means the action is still owed but the live managed provider has
+ * no route for it — see `OUTBOX_DEFER_MS`.
+ */
 const runOutboxAction = async (params: {
   keyService: AicoOpenRouterKeyService;
   orgModel: OrganizationModel;
   row: typeof aicoKeyOutbox.$inferSelect;
-}): Promise<void> => {
+}): Promise<'done' | 'deferred'> => {
   const { keyService, orgModel, row } = params;
 
   switch (row.action) {
     case 'disable_member_key': {
       if (!row.orgMemberId) throw new Error('ORG_MEMBER_ID_REQUIRED');
       await keyService.disableMemberKey(row.orgMemberId);
-      return;
+      return 'done';
+    }
+
+    /**
+     * A key we stopped using but could not revoke, recorded by
+     * `retireManagedKey`. CheapVibeCode exposes no delete route, so these rows
+     * sit deferred — a standing inventory of spendable credentials that only our
+     * own gate keeps unused — and drain by themselves if a revoke ever ships.
+     */
+    case 'revoke_managed_key': {
+      if (!row.openrouterKeyId) throw new Error('MANAGED_KEY_ID_REQUIRED');
+      const revoked = await keyService.revokeManagedKeyById(row.openrouterKeyId);
+      return revoked ? 'done' : 'deferred';
     }
 
     // OR-001: soft-delete enqueues disable_user_key; must actually disable the personal OR key.
     case 'disable_user_key': {
       if (!row.userId) throw new Error('USER_ID_REQUIRED');
       await keyService.disableUserKey(row.userId);
-      return;
+      return 'done';
     }
 
     // FIN-013: a credit commits before its key limit is pushed. When that push
@@ -552,7 +598,7 @@ const runOutboxAction = async (params: {
     case 'sync_user_key': {
       if (!row.userId) throw new Error('USER_ID_REQUIRED');
       await keyService.ensureUserKey(row.userId);
-      return;
+      return 'done';
     }
 
     case 'reclaim_member': {
@@ -570,7 +616,7 @@ const runOutboxAction = async (params: {
         remainingMicroUsd: reclaimed?.remainingMicroUsd ?? 0,
       });
       await orgModel.finalizeMemberRevocation(row.orgMemberId);
-      return;
+      return 'done';
     }
 
     default: {

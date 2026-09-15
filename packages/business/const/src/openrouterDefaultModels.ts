@@ -1,8 +1,47 @@
 import { BRANDING_NAME } from './branding';
 import { DEFAULT_MINI_MODEL } from './llm';
+import { MANAGED_PROVIDER_IDS } from './managedProvider';
 
 /** Pinned OpenRouter auto-router id (UI brands as `{BRANDING_NAME}/auto`, e.g. panachat/auto). */
 export const OPENROUTER_AUTO_MODEL_ID = 'openrouter/auto';
+
+/**
+ * The product Auto router's storage id, under a provider-neutral name.
+ *
+ * Identical string to {@link OPENROUTER_AUTO_MODEL_ID} and deliberately so: the
+ * id is written into agent configs and pinned as a catalog row, so it outlives
+ * whichever upstream currently serves it. Prefer this alias in code that is not
+ * specifically about OpenRouter.
+ */
+export const MANAGED_AUTO_MODEL_ID = OPENROUTER_AUTO_MODEL_ID;
+
+const AUTO_MODEL_SUFFIX = 'auto';
+
+/**
+ * True for every spelling of the product Auto router.
+ *
+ * Accepts `openrouter/auto` (what is stored), `aico/auto` (the managed alias
+ * provider), `{BRANDING_NAME}/auto` (what the UI displays, which a user can type
+ * back into an API call), any other managed provider's `/auto`, and a bare
+ * `auto`. Written permissively because the cost of missing one is a request
+ * dispatched upstream as a literal model named "auto", which every provider
+ * rejects.
+ */
+export const isManagedAutoModelId = (modelId: string | null | undefined): boolean => {
+  const id = modelId?.trim().toLowerCase();
+  if (!id) return false;
+  if (id === AUTO_MODEL_SUFFIX) return true;
+
+  const slash = id.lastIndexOf('/');
+  if (slash < 0 || id.slice(slash + 1) !== AUTO_MODEL_SUFFIX) return false;
+
+  const prefix = id.slice(0, slash);
+  return (
+    prefix === 'aico' ||
+    prefix === BRANDING_NAME.trim().toLowerCase() ||
+    (MANAGED_PROVIDER_IDS as readonly string[]).includes(prefix)
+  );
+};
 
 /** Display name for the pinned auto router (product brand, not OpenRouter). */
 export const OPENROUTER_AUTO_DISPLAY_NAME = `${BRANDING_NAME} Auto`;

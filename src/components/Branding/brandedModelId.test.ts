@@ -18,6 +18,31 @@ describe('brandedModelId', () => {
     expect(formatBrandedModelId('deepseek/deepseek-chat')).toBe('deepseek/deepseek-chat');
   });
 
+  it('brands every managed gateway, not only the active one', async () => {
+    // Which gateway is live is a server-side decision and stored ids outlive a
+    // switch, so a model saved before a cutover must still read as ours after.
+    vi.doMock('@/const/version', () => ({ isCustomBranding: true }));
+    const { formatBrandedModelId, getBrandingModelSlug, isBrandedOpenRouterModelId } =
+      await import('./brandedModelId');
+
+    expect(isBrandedOpenRouterModelId('cheapvibecode/auto')).toBe(true);
+    expect(formatBrandedModelId('cheapvibecode/auto')).toBe(`${getBrandingModelSlug()}/auto`);
+    // CVC's own model ids carry no gateway prefix and keep their own identity.
+    expect(isBrandedOpenRouterModelId('gpt-5.6-luna')).toBe(false);
+    expect(formatBrandedModelId('gpt-5.6-luna')).toBe('gpt-5.6-luna');
+  });
+
+  it('brands the cheapvibecode provider label too', async () => {
+    vi.doMock('@/const/version', () => ({ isCustomBranding: true }));
+    const { formatBrandedProviderId, isBrandedOpenRouterProvider } =
+      await import('./brandedModelId');
+
+    expect(isBrandedOpenRouterProvider('cheapvibecode')).toBe(true);
+    expect(formatBrandedProviderId('cheapvibecode')).toBe(BRANDING_NAME);
+    // A provider whose id merely starts with a managed id is not managed.
+    expect(isBrandedOpenRouterProvider('openrouter-proxy')).toBe(false);
+  });
+
   it('leaves ids unchanged when not custom branding', async () => {
     vi.doMock('@/const/version', () => ({ isCustomBranding: false }));
     const { formatBrandedModelId, isBrandedOpenRouterModelId } = await import('./brandedModelId');

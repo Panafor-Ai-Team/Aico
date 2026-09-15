@@ -224,13 +224,38 @@ export const hasValidManagedKeyId = (keyId: string | null | undefined): boolean 
 
 // ─── Usage multiplier (AICO-180) ───────────────────────────────────────
 //
-// Aico resells OpenRouter capacity at a platform-wide markup. Everything the
+// Aico resells upstream capacity at a per-provider markup. Everything the
 // user sees — prices, per-message cost, wallet balance and remaining — is the
-// *billed* figure; OpenRouter's own numbers are *raw* and never leave the
-// server. `bp` is the multiplier in basis points (12000 = 1.20x).
+// *billed* figure; the upstream gateway's own numbers are *raw* and never leave
+// the server. `bp` is the multiplier in basis points (12000 = 1.20x).
+//
+// The markup is keyed by managed provider because the unit economics differ:
+// OpenRouter is resold at 1.20x, CheapVibeCode at 1.25x (CVC sells 25M tokens
+// per USD; a $1 top-up should credit 20M, i.e. buy $0.80 of raw capacity).
+
+/**
+ * Fallback row id in `platform_usage_multiplier_config`. Predates the
+ * per-provider split and is retained so a deployment whose managed provider has
+ * no row of its own still resolves to a configured rate rather than a constant.
+ */
+export const FALLBACK_MULTIPLIER_CONFIG_ID = 'default';
 
 /** Default markup applied when no platform config row exists yet. */
 export const DEFAULT_USAGE_MULTIPLIER_BP = 12_000;
+
+/**
+ * Seed markup per managed provider, used by migration 0151 and as the
+ * get-or-create value when a provider row is missing. Keyed by the provider ids
+ * in `MANAGED_PROVIDER_IDS` (`@lobechat/business-const`).
+ */
+export const DEFAULT_PROVIDER_MULTIPLIER_BP: Record<string, number> = {
+  cheapvibecode: 12_500,
+  openrouter: 12_000,
+};
+
+/** Seed markup for `providerId`, falling back to the platform default. */
+export const defaultMultiplierBpForProvider = (providerId: string | null | undefined): number =>
+  DEFAULT_PROVIDER_MULTIPLIER_BP[providerId ?? ''] ?? DEFAULT_USAGE_MULTIPLIER_BP;
 
 const MULTIPLIER_BP_SCALE = 10_000;
 
@@ -246,6 +271,29 @@ export const assertValidMultiplierBp = (bp: number): number => {
     value > MAX_USAGE_MULTIPLIER_BP
   ) {
     throw new Error('INVALID_USAGE_MULTIPLIER');
+  }
+  return value;
+};
+
+/**
+ * Accepted band for a *per-model* coefficient override: 0.10x - 10.00x.
+ *
+ * Deliberately wider, and open below 1.00x, than the platform band above. The
+ * platform multiplier is a margin and must never sell below cost; a per-model
+ * override is a correction to a published coefficient we have measured to be
+ * wrong, so it has to be able to move in either direction.
+ */
+export const MIN_MODEL_MULTIPLIER_BP = 1_000;
+export const MAX_MODEL_MULTIPLIER_BP = 100_000;
+
+export const assertValidModelMultiplierBp = (bp: number): number => {
+  const value = Math.trunc(Number(bp));
+  if (
+    !Number.isFinite(value) ||
+    value < MIN_MODEL_MULTIPLIER_BP ||
+    value > MAX_MODEL_MULTIPLIER_BP
+  ) {
+    throw new Error('INVALID_MODEL_MULTIPLIER');
   }
   return value;
 };
@@ -349,6 +397,64 @@ export const rebaseCheckpoint = (params: {
     }),
     usageBaselineMicroUsd: raw,
   };
+};
+
+/**
+ * Roll a checkpoint onto a freshly minted key whose counter restarts at zero.
+ *
+ * `rebaseCheckpoint` keeps the baseline on the *same* upstream counter, which is
+ * right for OpenRouter: a key's limit can be raised in place, so the counter is
+ * continuous for the life of the budget. CheapVibeCode has no update endpoint —
+ * `token_limit` is fixed at mint — so growing a member's funding means minting a
+ * new key, and the new key's counter starts at 0.
+ *
+ * Freeze everything billed so far into `billedUsageBeforeBaselineMicroUsd` and
+ * set the baseline to zero, so the next reading is measured against the new key
+ * from its own origin. Usage already billed keeps the rate it was billed at, in
+ * exactly the way a multiplier rebase does.
+ */
+export const rotateCheckpointToNewKey = (params: {
+  checkpoint: UsageMultiplierCheckpoint;
+  /** Final raw counter of the key being retired, in its own units. */
+  finalRawUsage: number;
+}): { billedUsageBeforeBaselineMicroUsd: number; usageBaselineMicroUsd: number } => ({
+  billedUsageBeforeBaselineMicroUsd: billedUsageFromRaw({
+    baselineRaw: Number(params.checkpoint.usageBaselineMicroUsd ?? 0),
+    billedBefore: Number(params.checkpoint.billedUsageBeforeBaselineMicroUsd ?? 0),
+    bp: params.checkpoint.checkpointMultiplierBp,
+    rawUsage: params.finalRawUsage,
+  }),
+  usageBaselineMicroUsd: 0,
+});
+
+/**
+ * Raw spend on a key whose provider reports only what is *left*.
+ *
+ * CheapVibeCode's `GET /v1/balance` returns the calling key's remaining
+ * allowance and nothing else, so spend is what the mint-time limit no longer
+ * covers. The limit is known only to us — it is what we asked for at mint — and
+ * `member_budgets.managed_key_limit_micro_usd` is where we keep it.
+ *
+ * Returns `null` rather than 0 when either side is unknown: a missing limit must
+ * never read as "this key has spent nothing", which would hand a member the
+ * whole cap again.
+ */
+export const rawUsageFromRemaining = (params: {
+  limitMicroUsd: number | null | undefined;
+  remainingMicroUsd: number | null | undefined;
+}): number | null => {
+  // `Number(null)` is 0, not NaN, so nullish values must be rejected before the
+  // finite check — otherwise a missing limit reads as "the whole key is spent"
+  // and a missing remaining reads as "nothing is left".
+  if (params.limitMicroUsd == null || params.remainingMicroUsd == null) return null;
+  const limit = Number(params.limitMicroUsd);
+  const remaining = Number(params.remainingMicroUsd);
+  if (!Number.isFinite(limit) || limit < 0) return null;
+  if (!Number.isFinite(remaining) || remaining < 0) return null;
+  // A remaining figure above the limit means the limit we hold is stale (the key
+  // was re-minted larger). Clamping to 0 is the honest floor; the caller's
+  // checkpoint carries anything already billed.
+  return Math.max(0, Math.trunc(limit) - Math.trunc(remaining));
 };
 
 /**

@@ -1,4 +1,8 @@
-import { DEFAULT_AUTO_IMAGE_MODEL_ID, OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
+import {
+  DEFAULT_AUTO_IMAGE_MODEL_ID,
+  MANAGED_PROVIDER_ID,
+  OPENROUTER_AUTO_MODEL_ID,
+} from '@lobechat/business-const';
 import type { LobeChatDatabase } from '@lobechat/database';
 import { getTestDB } from '@lobechat/database/test-utils';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -33,10 +37,27 @@ describe('explicit billing context + managed policy', () => {
     });
   });
 
-  it('treats aico and openrouter as managed', () => {
+  it('treats aico and every managed gateway id as managed', () => {
     expect(AicoManagedPolicy.isManagedProvider('aico')).toBe(true);
     expect(AicoManagedPolicy.isManagedProvider('openrouter')).toBe(true);
+    expect(AicoManagedPolicy.isManagedProvider('cheapvibecode')).toBe(true);
     expect(AicoManagedPolicy.isManagedProvider('openai')).toBe(false);
+  });
+
+  it('maps every managed provider id onto the active gateway', () => {
+    // Agent configs written before a cutover carry a literal gateway id, and a
+    // browser bundle always resolves DEFAULT_PROVIDER to the default because
+    // AICO_MANAGED_PROVIDER has no NEXT_PUBLIC_ twin. Without this mapping a
+    // cutover would send those requests to the old gateway holding a key minted
+    // on the new one.
+    for (const stored of ['aico', 'openrouter', 'cheapvibecode']) {
+      expect(AicoManagedPolicy.resolveRuntimeProvider(stored)).toBe(MANAGED_PROVIDER_ID);
+    }
+  });
+
+  it('leaves BYOK provider ids untouched', () => {
+    expect(AicoManagedPolicy.resolveRuntimeProvider('openai')).toBe('openai');
+    expect(AicoManagedPolicy.resolveRuntimeProvider('anthropic')).toBe('anthropic');
   });
 
   it('AicoManagedPolicyError is fail-closed typed', () => {
