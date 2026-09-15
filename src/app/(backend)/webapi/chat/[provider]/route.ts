@@ -62,8 +62,11 @@ const recordManagedUsage = async (params: {
       await keyService.syncMemberCycleUsage(me.id).catch(() => null);
     }
   } else {
-    // Warm personal remaining from OpenRouter so the next sources fetch is current.
-    await keyService.getUserRemaining(userId).catch(() => null);
+    // Settle personal spend against the gateway's own balance, right after the
+    // response that caused it. `persist` is what writes `settledUsageMicroUsd`
+    // back, so the wallet the user sees falls as they spend instead of only
+    // when they happen to open the billing page.
+    await keyService.getUserRemaining(userId, { persist: true }).catch(() => null);
   }
 
   await new AicoBillingModel(db).recordUsage({
