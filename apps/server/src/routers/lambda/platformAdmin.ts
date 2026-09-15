@@ -1,3 +1,8 @@
+import {
+  MANAGED_PROVIDER_ID,
+  MANAGED_PROVIDER_IDS,
+  type ManagedProviderId,
+} from '@lobechat/business-const';
 import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -8,8 +13,10 @@ import { PlatformAdminUserModel } from '@/database/models/platformAdminUser';
 import { aicoKeyOutbox, session, users, userWallets } from '@/database/schemas';
 import {
   DEFAULT_USAGE_MULTIPLIER_BP,
+  MAX_MODEL_MULTIPLIER_BP,
   MAX_USAGE_MULTIPLIER_BP,
   microUsdToDecimalString,
+  MIN_MODEL_MULTIPLIER_BP,
   MIN_USAGE_MULTIPLIER_BP,
   tomanString,
   usdDecimalStringToMicro,
@@ -41,6 +48,14 @@ import { OpenRouterModelCatalogSyncService } from '@/server/services/openrouter/
  * Platform-admin procedures live on the Aico control plane only.
  * Do not mount this router on the customer product lambda.
  */
+
+/**
+ * Which managed provider a rate edit targets. Defaults to the live provider so
+ * an admin editing "the" multiplier cannot silently change the dormant one.
+ */
+const managedProviderSchema = z.enum(
+  MANAGED_PROVIDER_IDS as unknown as [ManagedProviderId, ...ManagedProviderId[]],
+);
 
 const platformProcedure = platformAdminProcedure.use(serverDatabase).use(async ({ ctx, next }) => {
   const organizationModel = new OrganizationModel(ctx.serverDB);
@@ -111,14 +126,33 @@ export const platformAdminRouter = router({
     }),
 
   /**
-   * Platform usage multiplier (AICO-180). One global value — per-user relief is
-   * expressed as a coupon on top, never as a second multiplier.
+   * Platform usage multiplier (AICO-180), one row per managed provider
+   * (AICO-186). Per-user relief is expressed as a coupon on top, never as a
+   * second multiplier.
    */
-  getUsageMultiplier: platformProcedure.query(async ({ ctx }) => {
-    const config = await ctx.billingModel.getUsageMultiplierConfig();
+  getUsageMultiplier: platformProcedure
+    .input(z.object({ providerId: managedProviderSchema.optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const providerId = input?.providerId ?? MANAGED_PROVIDER_ID;
+      const config = await ctx.billingModel.getUsageMultiplierConfig(providerId);
+      return {
+        multiplierBp: Number(config.multiplierBp ?? DEFAULT_USAGE_MULTIPLIER_BP),
+        providerId,
+        updatedAt: config.updatedAt ?? null,
+      };
+    }),
+
+  /** Every managed provider's rate, for the platform admin table. */
+  listUsageMultipliers: platformProcedure.query(async ({ ctx }) => {
+    const rows = await ctx.billingModel.listUsageMultipliers([...MANAGED_PROVIDER_IDS]);
     return {
-      multiplierBp: Number(config.multiplierBp ?? DEFAULT_USAGE_MULTIPLIER_BP),
-      updatedAt: config.updatedAt ?? null,
+      activeProviderId: MANAGED_PROVIDER_ID,
+      providers: rows.map((row) => ({
+        isActive: row.id === MANAGED_PROVIDER_ID,
+        multiplierBp: Number(row.multiplierBp ?? DEFAULT_USAGE_MULTIPLIER_BP),
+        providerId: row.id,
+        updatedAt: row.updatedAt ?? null,
+      })),
     };
   }),
 
@@ -126,22 +160,115 @@ export const platformAdminRouter = router({
     .input(
       z.object({
         multiplierBp: z.number().int().min(MIN_USAGE_MULTIPLIER_BP).max(MAX_USAGE_MULTIPLIER_BP),
+        providerId: managedProviderSchema.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const providerId = input.providerId ?? MANAGED_PROVIDER_ID;
       const row = await ctx.billingModel.updateUsageMultiplier({
         multiplierBp: input.multiplierBp,
+        providerId,
       });
       await recordAicoSecurityEvent(ctx.serverDB, {
         action: 'platform.usageMultiplier.update',
         actorAdminId: ctx.adminId,
         ipAddress: ctx.clientIp,
-        metadata: { multiplierBp: Number(row.multiplierBp) },
-        targetId: 'default',
+        metadata: { multiplierBp: Number(row.multiplierBp), providerId },
+        targetId: providerId,
         targetType: 'platform_usage_multiplier_config',
         userAgent: ctx.userAgent,
       });
-      return { multiplierBp: Number(row.multiplierBp) };
+      return { multiplierBp: Number(row.multiplierBp), providerId };
+    }),
+
+  /**
+   * Per-model coefficient overrides (AICO-187).
+   *
+   * Upstream-published coefficients are not always what upstream charges, and
+   * nothing in the models endpoint says which ones differ. An override corrects
+   * the price shown in the picker and the per-message cost estimate; the wallet
+   * debit stays balance-delta derived and is unaffected.
+   */
+  listModelMultipliers: platformProcedure
+    .input(z.object({ providerId: managedProviderSchema.optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const providerId = input?.providerId ?? MANAGED_PROVIDER_ID;
+      const [catalog, overrides] = await Promise.all([
+        ctx.modelCatalogSync.listCatalogCoefficients(),
+        ctx.billingModel.listModelMultiplierOverrides(providerId),
+      ]);
+      const overrideByModel = new Map(overrides.map((row) => [row.modelId, row]));
+
+      return {
+        models: catalog.map((model) => {
+          const override = overrideByModel.get(model.id);
+          const overrideBp = override ? Number(override.multiplierBp) : null;
+          return {
+            displayName: model.displayName,
+            modelId: model.id,
+            note: override?.note ?? null,
+            overrideBp,
+            publishedBp: model.publishedBp,
+            updatedAt: override?.updatedAt ?? null,
+          };
+        }),
+        providerId,
+      };
+    }),
+
+  setModelMultiplier: platformProcedure
+    .input(
+      z.object({
+        modelId: z.string().min(1).max(256),
+        multiplierBp: z.number().int().min(MIN_MODEL_MULTIPLIER_BP).max(MAX_MODEL_MULTIPLIER_BP),
+        note: z.string().max(500).optional(),
+        providerId: managedProviderSchema.optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const providerId = input.providerId ?? MANAGED_PROVIDER_ID;
+      const row = await ctx.billingModel.setModelMultiplierOverride({
+        modelId: input.modelId,
+        multiplierBp: input.multiplierBp,
+        note: input.note ?? null,
+        providerId,
+      });
+      await recordAicoSecurityEvent(ctx.serverDB, {
+        action: 'platform.modelMultiplier.update',
+        actorAdminId: ctx.adminId,
+        ipAddress: ctx.clientIp,
+        metadata: {
+          modelId: input.modelId,
+          multiplierBp: Number(row.multiplierBp),
+          providerId,
+        },
+        targetId: `${providerId}:${input.modelId}`,
+        targetType: 'platform_model_multiplier_overrides',
+        userAgent: ctx.userAgent,
+      });
+      return { modelId: row.modelId, multiplierBp: Number(row.multiplierBp), providerId };
+    }),
+
+  clearModelMultiplier: platformProcedure
+    .input(
+      z.object({
+        modelId: z.string().min(1).max(256),
+        providerId: managedProviderSchema.optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const providerId = input.providerId ?? MANAGED_PROVIDER_ID;
+      await ctx.billingModel.clearModelMultiplierOverride({ modelId: input.modelId, providerId });
+      await recordAicoSecurityEvent(ctx.serverDB, {
+        action: 'platform.modelMultiplier.clear',
+        actorAdminId: ctx.adminId,
+        ipAddress: ctx.clientIp,
+        metadata: { modelId: input.modelId, providerId },
+        targetId: `${providerId}:${input.modelId}`,
+        targetType: 'platform_model_multiplier_overrides',
+        userAgent: ctx.userAgent,
+      });
+      return { modelId: input.modelId, providerId };
     }),
 
   listOrganizations: platformProcedure

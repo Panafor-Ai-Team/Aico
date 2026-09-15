@@ -1,5 +1,5 @@
 import type { LobeDefaultAiModelListItem, Pricing } from 'model-bank';
-import { applyPricingMultiplier } from 'model-bank';
+import { applyPricingMultiplier, composeMultiplierBp } from 'model-bank';
 
 import type { ModelPricingContext } from '../types';
 
@@ -28,10 +28,18 @@ export async function getModelPricing(
   // Managed Aico traffic resells upstream capacity: the caller passes the
   // platform multiplier so every cost derived from this pricing is the billed
   // amount. Raw rates stay server-side.
-  const withMultiplier = (pricing: Pricing): Pricing =>
-    pricingContext?.costMultiplierBp
-      ? applyPricingMultiplier(pricing, pricingContext.costMultiplierBp)
-      : pricing;
+  //
+  // A per-model correction (AICO-187) is composed on top, because some upstream
+  // models bill above their published coefficient and the picker applies the
+  // same pair — reporting a cost without it would contradict the listed price.
+  const modelBp = pricingContext?.modelCostMultiplierBp?.[model];
+  const withMultiplier = (pricing: Pricing): Pricing => {
+    if (!pricingContext?.costMultiplierBp && !modelBp) return pricing;
+    return applyPricingMultiplier(
+      pricing,
+      composeMultiplierBp(pricingContext?.costMultiplierBp, modelBp),
+    );
+  };
 
   // 1. First try to get pricing from the specified provider
   if (provider) {

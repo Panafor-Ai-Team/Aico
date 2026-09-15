@@ -172,6 +172,26 @@ const scaleUnit = (unit: PricingUnit, bp: number): PricingUnit => {
 };
 
 /**
+ * Combine the platform (per-provider) multiplier with a per-model coefficient
+ * correction (AICO-187) into the single bp that `applyPricingMultiplier` takes.
+ *
+ * Composing here rather than scaling twice keeps the model picker and the
+ * per-message cost estimate on exactly one rounding path, so the two can never
+ * drift apart by a float ulp.
+ */
+export const composeMultiplierBp = (
+  platformBp: number | null | undefined,
+  modelBp: number | null | undefined,
+): number => {
+  const platform = Math.trunc(Number(platformBp ?? MULTIPLIER_BP_SCALE));
+  const model = Math.trunc(Number(modelBp ?? MULTIPLIER_BP_SCALE));
+  const safePlatform = Number.isFinite(platform) && platform > 0 ? platform : MULTIPLIER_BP_SCALE;
+  const safeModel = Number.isFinite(model) && model > 0 ? model : MULTIPLIER_BP_SCALE;
+  if (safeModel === MULTIPLIER_BP_SCALE) return safePlatform;
+  return Math.round((safePlatform * safeModel) / MULTIPLIER_BP_SCALE);
+};
+
+/**
  * Scale every price-bearing field of a `Pricing` by a basis-point multiplier.
  *
  * The unit type (millionTokens / image / video / second / megapixel) is

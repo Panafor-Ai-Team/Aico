@@ -23,9 +23,10 @@ let repo: AiInfraRepos;
  * Stub the multiplier rather than writing the platform config row: that row is
  * global, and other suites sharing this database read it concurrently.
  */
-const setMultiplier = (bp: number) => {
+const setMultiplier = (bp: number, overrides: Record<string, number> = {}) => {
   __resetUsageMultiplierCache();
   vi.spyOn(repo as any, 'resolveUsageMultiplierBp').mockResolvedValue(bp);
+  vi.spyOn(repo as any, 'resolveModelMultiplierOverrides').mockResolvedValue(overrides);
 };
 
 const rate = (models: { id: string; pricing?: { units?: any[] } }[], id: string) =>
@@ -109,5 +110,65 @@ describe('AICO-180 usage multiplier on the model serve path', () => {
     expect(
       rate(await (repo as any).fetchBuiltinModels('openrouter'), 'openai/gpt-test'),
     ).toBeCloseTo(6, 10);
+  });
+});
+
+describe('AICO-187 per-model coefficient overrides on the serve path', () => {
+  const seedCatalog = async () =>
+    new OpenRouterModelCatalogModel(db).replaceCatalog({
+      models: [
+        {
+          id: 'openai/gpt-test',
+          pricing: {
+            units: [{ name: 'textInput', rate: 3, strategy: 'fixed', unit: 'millionTokens' }],
+          },
+          type: 'chat',
+        } as any,
+        {
+          id: 'zai/glm-test',
+          pricing: {
+            units: [{ name: 'textInput', rate: 1, strategy: 'fixed', unit: 'millionTokens' }],
+          },
+          type: 'chat',
+        } as any,
+      ],
+      triggeredBy: 'test',
+    });
+
+  it('composes the override on top of the platform rate, per model', async () => {
+    // The published coefficient under-states what CVC actually bills for some
+    // models; an override corrects that one model without moving the others.
+    setMultiplier(12_500, { 'openai/gpt-test': 14_400 });
+    await seedCatalog();
+
+    const models = (await (repo as any).fetchBuiltinModels('openrouter')) as any[];
+
+    // 3 x (1.25 x 1.44) = 5.4
+    expect(rate(models, 'openai/gpt-test')).toBeCloseTo(5.4, 10);
+    expect(rate(models, 'zai/glm-test')).toBeCloseTo(1.25, 10);
+  });
+
+  it('lets an override be a discount', async () => {
+    setMultiplier(12_500, { 'zai/glm-test': 5_000 });
+    await seedCatalog();
+
+    const models = (await (repo as any).fetchBuiltinModels('openrouter')) as any[];
+
+    expect(rate(models, 'zai/glm-test')).toBeCloseTo(0.625, 10);
+  });
+
+  it('picks up an override change on the next request without a re-sync', async () => {
+    setMultiplier(12_000);
+    await seedCatalog();
+
+    expect(
+      rate(await (repo as any).fetchBuiltinModels('openrouter'), 'openai/gpt-test'),
+    ).toBeCloseTo(3.6, 10);
+
+    setMultiplier(12_000, { 'openai/gpt-test': 20_000 });
+
+    expect(
+      rate(await (repo as any).fetchBuiltinModels('openrouter'), 'openai/gpt-test'),
+    ).toBeCloseTo(7.2, 10);
   });
 });

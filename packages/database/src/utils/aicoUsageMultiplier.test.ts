@@ -2,14 +2,18 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyMultiplierMicroUsd,
+  assertValidModelMultiplierBp,
   assertValidMultiplierBp,
   billedUsageFromCapacity,
   billedUsageFromRaw,
   blendedMultiplierBp,
+  defaultMultiplierBpForProvider,
   keyLimitFromBilled,
   rawCapacityFromDeposit,
+  rawUsageFromRemaining,
   rebaseCheckpoint,
   removeMultiplierMicroUsd,
+  rotateCheckpointToNewKey,
   type UsageMultiplierCheckpoint,
 } from './aicoMoney';
 
@@ -37,6 +41,15 @@ describe('applyMultiplierMicroUsd / removeMultiplierMicroUsd', () => {
     expect(assertValidMultiplierBp(15_000)).toBe(15_000);
     expect(() => assertValidMultiplierBp(9_999)).toThrow('INVALID_USAGE_MULTIPLIER');
     expect(() => assertValidMultiplierBp(30_001)).toThrow('INVALID_USAGE_MULTIPLIER');
+  });
+
+  // CheapVibeCode sells 25M tokens per USD. Crediting a $1 top-up with 20M of
+  // them means buying $0.80 of raw capacity, i.e. a 1.25x markup. If this pair
+  // ever inverts, every CVC wallet is mispriced.
+  it('prices the CheapVibeCode rate at 1.25x in both directions', () => {
+    expect(applyMultiplierMicroUsd(80 * USD, 12_500)).toBe(100 * USD);
+    expect(removeMultiplierMicroUsd(100 * USD, 12_500)).toBe(80 * USD);
+    expect(rawCapacityFromDeposit(1 * USD, 12_500)).toBe(800_000);
   });
 });
 
@@ -177,5 +190,171 @@ describe('a multiplier change does not revalue money already paid (AICO-184 regr
         rawUsageMicroUsd: 1_000_000,
       }),
     ).toBe(1_200_000);
+  });
+});
+
+describe('switching managed provider does not revalue a wallet (AICO-186 regression)', () => {
+  it('leaves raw capacity bought at 1.2x alone and bills only later usage at 1.25x', () => {
+    // $12 topped up while OpenRouter was live bought $10 of raw capacity.
+    const capacity = rawCapacityFromDeposit(12 * USD, 12_000);
+    expect(capacity).toBe(10 * USD);
+
+    let checkpoint: UsageMultiplierCheckpoint = {
+      billedUsageBeforeBaselineMicroUsd: 0,
+      checkpointMultiplierBp: 12_000,
+      usageBaselineMicroUsd: 0,
+    };
+    const rawAtSwitch = 5 * USD;
+
+    // AICO_MANAGED_PROVIDER flips to cheapvibecode: an ordinary rate change.
+    checkpoint = {
+      ...rebaseCheckpoint({ checkpoint, nextBp: 12_500, rawUsage: rawAtSwitch }),
+      checkpointMultiplierBp: 12_500,
+    };
+
+    // The capacity the user already paid for is not recomputed at the new rate;
+    // only spend after the switch is billed at 1.25x.
+    expect(rawCapacityFromDeposit(12 * USD, 12_000)).toBe(capacity);
+    expect(checkpoint.billedUsageBeforeBaselineMicroUsd).toBe(6 * USD);
+    expect(
+      billedUsageFromRaw({
+        baselineRaw: Number(checkpoint.usageBaselineMicroUsd),
+        billedBefore: Number(checkpoint.billedUsageBeforeBaselineMicroUsd),
+        bp: checkpoint.checkpointMultiplierBp,
+        rawUsage: rawAtSwitch + 4 * USD,
+      }),
+    ).toBe(11 * USD); // $6 at the old rate + $5 of raw spend at 1.25x
+  });
+});
+
+describe('defaultMultiplierBpForProvider', () => {
+  it('seeds each managed provider at its own rate', () => {
+    expect(defaultMultiplierBpForProvider('openrouter')).toBe(12_000);
+    expect(defaultMultiplierBpForProvider('cheapvibecode')).toBe(12_500);
+  });
+
+  it('falls back to the platform default for an unknown provider', () => {
+    expect(defaultMultiplierBpForProvider('something-else')).toBe(12_000);
+    expect(defaultMultiplierBpForProvider(undefined)).toBe(12_000);
+  });
+});
+
+describe('assertValidModelMultiplierBp', () => {
+  // Wider, and open below 1.00x, than the platform band: a per-model override
+  // corrects a published coefficient that can be wrong in either direction.
+  it('accepts discounts and large markups inside 0.10x - 10.00x', () => {
+    expect(assertValidModelMultiplierBp(3_000)).toBe(3_000);
+    expect(assertValidModelMultiplierBp(1_000)).toBe(1_000);
+    expect(assertValidModelMultiplierBp(100_000)).toBe(100_000);
+  });
+
+  it('rejects out-of-band overrides', () => {
+    expect(() => assertValidModelMultiplierBp(999)).toThrow('INVALID_MODEL_MULTIPLIER');
+    expect(() => assertValidModelMultiplierBp(100_001)).toThrow('INVALID_MODEL_MULTIPLIER');
+    expect(() => assertValidModelMultiplierBp(Number.NaN)).toThrow('INVALID_MODEL_MULTIPLIER');
+  });
+});
+
+describe('rotateCheckpointToNewKey (CheapVibeCode has no update endpoint)', () => {
+  it('carries billed usage forward and restarts the baseline at the new key origin', () => {
+    // $8 raw spent at 1.25x = $10 billed, on a key that is about to be retired.
+    const checkpoint: UsageMultiplierCheckpoint = {
+      billedUsageBeforeBaselineMicroUsd: 0,
+      checkpointMultiplierBp: 12_500,
+      usageBaselineMicroUsd: 0,
+    };
+
+    const rotated = rotateCheckpointToNewKey({ checkpoint, finalRawUsage: 8 * USD });
+
+    expect(rotated.billedUsageBeforeBaselineMicroUsd).toBe(10 * USD);
+    // The new key's counter starts at zero, so the baseline must too.
+    expect(rotated.usageBaselineMicroUsd).toBe(0);
+  });
+
+  it('is exact across a rotation: usage is unchanged the instant the key swaps', () => {
+    const checkpoint: UsageMultiplierCheckpoint = {
+      billedUsageBeforeBaselineMicroUsd: 0,
+      checkpointMultiplierBp: 12_500,
+      usageBaselineMicroUsd: 0,
+    };
+    const before = billedUsageFromRaw({
+      baselineRaw: 0,
+      billedBefore: 0,
+      bp: 12_500,
+      rawUsage: 8 * USD,
+    });
+
+    const rotated = rotateCheckpointToNewKey({ checkpoint, finalRawUsage: 8 * USD });
+    const after = billedUsageFromRaw({
+      baselineRaw: rotated.usageBaselineMicroUsd,
+      billedBefore: rotated.billedUsageBeforeBaselineMicroUsd,
+      bp: 12_500,
+      rawUsage: 0,
+    });
+
+    expect(after).toBe(before);
+  });
+
+  it('accumulates across repeated rotations rather than forgetting earlier keys', () => {
+    let checkpoint: UsageMultiplierCheckpoint = {
+      billedUsageBeforeBaselineMicroUsd: 0,
+      checkpointMultiplierBp: 12_500,
+      usageBaselineMicroUsd: 0,
+    };
+
+    for (let i = 0; i < 3; i += 1) {
+      const rotated = rotateCheckpointToNewKey({ checkpoint, finalRawUsage: 4 * USD });
+      checkpoint = { ...checkpoint, ...rotated };
+    }
+
+    // 3 x $4 raw at 1.25x = $15 billed, carried in full.
+    expect(checkpoint.billedUsageBeforeBaselineMicroUsd).toBe(15 * USD);
+  });
+
+  it('keeps the old rate on old usage when a rotation follows a rate change', () => {
+    // $8 raw already billed at 1.20x, then the key rotates under a 1.25x regime.
+    const checkpoint: UsageMultiplierCheckpoint = {
+      billedUsageBeforeBaselineMicroUsd: 0,
+      checkpointMultiplierBp: 12_000,
+      usageBaselineMicroUsd: 0,
+    };
+
+    const rotated = rotateCheckpointToNewKey({ checkpoint, finalRawUsage: 8 * USD });
+
+    // Billed at the checkpoint's own rate, not at whatever is current.
+    expect(rotated.billedUsageBeforeBaselineMicroUsd).toBe(9_600_000);
+  });
+});
+
+describe('rawUsageFromRemaining (CheapVibeCode reports only what is left)', () => {
+  it('derives spend as the part of the mint-time limit no longer covered', () => {
+    expect(rawUsageFromRemaining({ limitMicroUsd: 800_000, remainingMicroUsd: 600_000 })).toBe(
+      200_000,
+    );
+    expect(rawUsageFromRemaining({ limitMicroUsd: 800_000, remainingMicroUsd: 0 })).toBe(800_000);
+    expect(rawUsageFromRemaining({ limitMicroUsd: 800_000, remainingMicroUsd: 800_000 })).toBe(0);
+  });
+
+  it('returns null — never 0 — when the limit is unknown', () => {
+    // 0 would read as "spent nothing" and re-grant the whole cap.
+    expect(rawUsageFromRemaining({ limitMicroUsd: null, remainingMicroUsd: 600_000 })).toBeNull();
+    expect(
+      rawUsageFromRemaining({ limitMicroUsd: undefined, remainingMicroUsd: 600_000 }),
+    ).toBeNull();
+    expect(
+      rawUsageFromRemaining({ limitMicroUsd: Number.NaN, remainingMicroUsd: 600_000 }),
+    ).toBeNull();
+  });
+
+  it('returns null when the remaining reading is unusable', () => {
+    expect(rawUsageFromRemaining({ limitMicroUsd: 800_000, remainingMicroUsd: null })).toBeNull();
+    expect(
+      rawUsageFromRemaining({ limitMicroUsd: 800_000, remainingMicroUsd: Number.NaN }),
+    ).toBeNull();
+    expect(rawUsageFromRemaining({ limitMicroUsd: 800_000, remainingMicroUsd: -1 })).toBeNull();
+  });
+
+  it('floors at zero when a stale limit is below the reported remaining', () => {
+    expect(rawUsageFromRemaining({ limitMicroUsd: 500_000, remainingMicroUsd: 800_000 })).toBe(0);
   });
 });

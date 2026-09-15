@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
 
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { MANAGED_PROVIDER_ID } from '@lobechat/business-const';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import {
   organizations,
   platformAdminUsers,
   platformFxConfig,
+  platformModelMultiplierOverrides,
   platformTrialConfig,
   platformUsageMultiplierConfig,
   trialAbuseBlocklist,
@@ -18,8 +20,10 @@ import {
 import { users } from '../schemas/user';
 import type { LobeChatDatabase } from '../type';
 import {
+  assertValidModelMultiplierBp,
   assertValidMultiplierBp,
-  DEFAULT_USAGE_MULTIPLIER_BP,
+  defaultMultiplierBpForProvider,
+  FALLBACK_MULTIPLIER_CONFIG_ID,
   rawCapacityFromDeposit,
 } from '../utils/aicoMoney';
 
@@ -189,7 +193,7 @@ export class AicoBillingModel {
         // AICO-184: the deposit buys raw upstream spend once, at the rate in
         // force right now. Read inside the transaction so a concurrent
         // multiplier change either applies to this top-up or does not.
-        const multiplierBp = await this.getUsageMultiplierBp(tx);
+        const multiplierBp = await this.getUsageMultiplierBp(MANAGED_PROVIDER_ID, tx);
         const rawCapacityAdded = rawCapacityFromDeposit(params.amountMicroUsd, multiplierBp);
 
         const [wallet] = await tx
@@ -384,6 +388,22 @@ export class AicoBillingModel {
   updateUserOpenRouterKey = async (params: {
     ciphertext: string;
     keyId: string;
+    /**
+     * Mint-time raw limit of the key, for providers that report only what is
+     * left (CheapVibeCode). Omit on OpenRouter, which reports usage directly.
+     * `null` explicitly clears a limit carried over from a retired key.
+     */
+    managedKeyLimitMicroUsd?: number | null;
+    /**
+     * Which gateway minted this key. Written on every mint so a later provider
+     * switch can tell a usable key from one belonging to the previous gateway.
+     */
+    managedKeyProviderId?: string;
+    /**
+     * Raw spend carried over from keys this wallet has already retired. Written
+     * only on a rotation; omitting it leaves the running total alone.
+     */
+    rawUsageBeforeKeyMicroUsd?: number;
     userId: string;
   }) => {
     await this.getOrCreateUserWallet(params.userId);
@@ -392,6 +412,17 @@ export class AicoBillingModel {
       .set({
         openrouterKeyCiphertext: params.ciphertext,
         openrouterKeyId: params.keyId,
+        ...('managedKeyLimitMicroUsd' in params
+          ? { managedKeyLimitMicroUsd: params.managedKeyLimitMicroUsd ?? null }
+          : {}),
+        ...(params.managedKeyProviderId
+          ? { managedKeyProviderId: params.managedKeyProviderId }
+          : {}),
+        ...(params.rawUsageBeforeKeyMicroUsd == null
+          ? {}
+          : {
+              rawUsageBeforeKeyMicroUsd: Math.max(0, Math.trunc(params.rawUsageBeforeKeyMicroUsd)),
+            }),
       })
       .where(eq(userWallets.userId, params.userId))
       .returning();
@@ -521,53 +552,199 @@ export class AicoBillingModel {
     return row;
   };
 
-  // ─── Usage multiplier config (AICO-180) ────────────────────────────
+  // ─── Usage multiplier config (AICO-180, per-provider AICO-186) ─────
+  //
+  // Rows are keyed by managed provider id. The legacy `'default'` row is kept
+  // as the fallback so a deployment whose provider has no row of its own still
+  // resolves to a configured rate rather than a compiled-in constant.
 
-  getUsageMultiplierConfig = async (db: LobeChatDatabase = this.db) => {
+  /**
+   * Read-or-create the multiplier row for `providerId`.
+   *
+   * Resolution order: the provider's own row, then the legacy `'default'` row,
+   * then create the provider row seeded from that fallback (or from the
+   * provider's seed rate when there is no fallback either).
+   */
+  getUsageMultiplierConfig = async (
+    providerId: string = MANAGED_PROVIDER_ID,
+    db: LobeChatDatabase = this.db,
+  ) => {
     const existing = await db.query.platformUsageMultiplierConfig.findFirst({
-      where: eq(platformUsageMultiplierConfig.id, 'default'),
+      where: eq(platformUsageMultiplierConfig.id, providerId),
     });
     if (existing) return existing;
 
+    const fallback =
+      providerId === FALLBACK_MULTIPLIER_CONFIG_ID
+        ? undefined
+        : await db.query.platformUsageMultiplierConfig.findFirst({
+            where: eq(platformUsageMultiplierConfig.id, FALLBACK_MULTIPLIER_CONFIG_ID),
+          });
+
+    const seedBp = Number(fallback?.multiplierBp ?? defaultMultiplierBpForProvider(providerId));
+
     const [created] = await db
       .insert(platformUsageMultiplierConfig)
-      .values({ id: 'default', multiplierBp: DEFAULT_USAGE_MULTIPLIER_BP })
+      .values({ id: providerId, multiplierBp: seedBp })
       .onConflictDoNothing()
       .returning();
     return (
       created ??
       (await db.query.platformUsageMultiplierConfig.findFirst({
-        where: eq(platformUsageMultiplierConfig.id, 'default'),
+        where: eq(platformUsageMultiplierConfig.id, providerId),
       }))!
     );
   };
 
-  /** Basis-point multiplier in force right now. Never throws — billing must not wedge. */
-  getUsageMultiplierBp = async (db: LobeChatDatabase = this.db): Promise<number> => {
+  /**
+   * Basis-point multiplier in force right now.
+   *
+   * Read-only on purpose. `getUsageMultiplierBp` runs on the money path, and
+   * `creditWallet` calls it with an open transaction handle — seeding a missing
+   * row there would put a write inside a wallet transaction, and a failed write
+   * aborts that transaction even though the error is swallowed below. Rows are
+   * seeded by migration `0151` and, for anything it missed, by the admin paths
+   * (`getUsageMultiplierConfig` / `listUsageMultipliers`).
+   *
+   * Lookup order: the provider's own row, then the legacy `'default'` row (so a
+   * deployment whose rate was tuned before `0151` keeps it even if the
+   * per-provider row is somehow absent), then the compiled-in constant.
+   *
+   * Never throws — billing must not wedge on a config read.
+   */
+  getUsageMultiplierBp = async (
+    providerId: string = MANAGED_PROVIDER_ID,
+    db: LobeChatDatabase = this.db,
+  ): Promise<number> => {
+    const fallbackBp = defaultMultiplierBpForProvider(providerId);
     try {
-      const config = await this.getUsageMultiplierConfig(db);
-      const bp = Number(config?.multiplierBp ?? DEFAULT_USAGE_MULTIPLIER_BP);
-      return Number.isFinite(bp) && bp > 0 ? bp : DEFAULT_USAGE_MULTIPLIER_BP;
+      const row =
+        (await db.query.platformUsageMultiplierConfig.findFirst({
+          where: eq(platformUsageMultiplierConfig.id, providerId),
+        })) ??
+        (providerId === FALLBACK_MULTIPLIER_CONFIG_ID
+          ? undefined
+          : await db.query.platformUsageMultiplierConfig.findFirst({
+              where: eq(platformUsageMultiplierConfig.id, FALLBACK_MULTIPLIER_CONFIG_ID),
+            }));
+
+      const bp = Number(row?.multiplierBp ?? fallbackBp);
+      return Number.isFinite(bp) && bp > 0 ? bp : fallbackBp;
     } catch {
-      return DEFAULT_USAGE_MULTIPLIER_BP;
+      return fallbackBp;
     }
+  };
+
+  /**
+   * Every configured provider rate, for the platform admin table. Ensures a row
+   * exists for each known managed provider so the panel can always edit them.
+   */
+  listUsageMultipliers = async (providerIds: string[]) => {
+    for (const providerId of providerIds) await this.getUsageMultiplierConfig(providerId);
+
+    return this.db.query.platformUsageMultiplierConfig.findMany({
+      orderBy: [asc(platformUsageMultiplierConfig.id)],
+      where: inArray(platformUsageMultiplierConfig.id, providerIds),
+    });
   };
 
   updateUsageMultiplier = async (params: {
     multiplierBp: number;
+    providerId?: string;
     updatedByUserId?: string | null;
   }) => {
+    const providerId = params.providerId ?? MANAGED_PROVIDER_ID;
     const bp = assertValidMultiplierBp(params.multiplierBp);
-    await this.getUsageMultiplierConfig();
+    await this.getUsageMultiplierConfig(providerId);
     const [row] = await this.db
       .update(platformUsageMultiplierConfig)
       .set({
         multiplierBp: bp,
         updatedByUserId: params.updatedByUserId,
+        updatedAt: new Date(),
       })
-      .where(eq(platformUsageMultiplierConfig.id, 'default'))
+      .where(eq(platformUsageMultiplierConfig.id, providerId))
       .returning();
     return row;
+  };
+
+  // ─── Per-model coefficient overrides (AICO-187) ────────────────────
+  //
+  // These correct a published coefficient we have measured to be wrong. They
+  // move the model picker price and the per-message cost estimate only — the
+  // wallet debit stays balance-delta derived. See the table's doc comment.
+
+  listModelMultiplierOverrides = async (providerId: string = MANAGED_PROVIDER_ID) =>
+    this.db.query.platformModelMultiplierOverrides.findMany({
+      orderBy: [asc(platformModelMultiplierOverrides.modelId)],
+      where: eq(platformModelMultiplierOverrides.providerId, providerId),
+    });
+
+  /**
+   * `modelId` → bp map for the serve path. Never throws: a failure here must
+   * degrade to published coefficients, not blank the model list.
+   */
+  getModelMultiplierOverrideMap = async (
+    providerId: string = MANAGED_PROVIDER_ID,
+  ): Promise<Record<string, number>> => {
+    try {
+      const rows = await this.listModelMultiplierOverrides(providerId);
+      const map: Record<string, number> = {};
+      for (const row of rows) {
+        const bp = Number(row.multiplierBp);
+        if (Number.isFinite(bp) && bp > 0) map[row.modelId] = bp;
+      }
+      return map;
+    } catch {
+      return {};
+    }
+  };
+
+  setModelMultiplierOverride = async (params: {
+    modelId: string;
+    multiplierBp: number;
+    note?: string | null;
+    providerId?: string;
+    updatedByUserId?: string | null;
+  }) => {
+    const providerId = params.providerId ?? MANAGED_PROVIDER_ID;
+    const bp = assertValidModelMultiplierBp(params.multiplierBp);
+    const [row] = await this.db
+      .insert(platformModelMultiplierOverrides)
+      .values({
+        modelId: params.modelId,
+        multiplierBp: bp,
+        note: params.note ?? null,
+        providerId,
+        updatedByUserId: params.updatedByUserId ?? null,
+      })
+      .onConflictDoUpdate({
+        set: {
+          multiplierBp: bp,
+          note: params.note ?? null,
+          updatedAt: new Date(),
+          updatedByUserId: params.updatedByUserId ?? null,
+        },
+        target: [
+          platformModelMultiplierOverrides.providerId,
+          platformModelMultiplierOverrides.modelId,
+        ],
+      })
+      .returning();
+    return row;
+  };
+
+  /** Drop an override so the model falls back to its published coefficient. */
+  clearModelMultiplierOverride = async (params: { modelId: string; providerId?: string }) => {
+    const providerId = params.providerId ?? MANAGED_PROVIDER_ID;
+    await this.db
+      .delete(platformModelMultiplierOverrides)
+      .where(
+        and(
+          eq(platformModelMultiplierOverrides.providerId, providerId),
+          eq(platformModelMultiplierOverrides.modelId, params.modelId),
+        ),
+      );
   };
 
   // ─── Trial config ──────────────────────────────────────────────────

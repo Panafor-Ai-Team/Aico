@@ -45,6 +45,18 @@ export { LobeBedrockAI } from './providers/bedrock';
 export { LobeBflAI } from './providers/bfl';
 export { LobeCerebrasAI } from './providers/cerebras';
 export { LobeChatGPTAI } from './providers/chatGPT';
+export type { CheapVibeCodeAutoRoute } from './providers/cheapvibecode';
+export {
+  cvcMultiplierToPricing,
+  DEFAULT_CVC_AUTO_ROUTE,
+  DEFAULT_CVC_TOKENS_PER_USD,
+  fetchCheapVibeCodeModels,
+  isAutoModelId,
+  LobeCheapVibeCodeAI,
+  mapCheapVibeCodeModelCard,
+  resolveAutoModel,
+  resolveAutoRoute,
+} from './providers/cheapvibecode';
 export { LobeCometAPIAI } from './providers/cometapi';
 export { LobeComfyUI } from './providers/comfyui';
 export { LobeDeepSeekAI } from './providers/deepseek';

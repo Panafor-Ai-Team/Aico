@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { Hono } from 'hono';
 
+import { createCheapVibeCodeInternalApp } from './cheapvibecodeInternal';
 import { createOpenRouterInternalApp } from './openrouterInternal';
 import { createOperatorAuthApp } from './operatorAuth';
 import { createControlPlaneTrpcApp } from './platformTrpc';
@@ -76,6 +77,7 @@ app.get('/health', (c) =>
   }),
 );
 
+app.route('/internal/cheapvibecode', createCheapVibeCodeInternalApp());
 app.route('/internal/openrouter/v1/keys', createOpenRouterInternalApp());
 app.route('/trpc/lambda', createControlPlaneTrpcApp());
 app.route('/api/admin', createOperatorAuthApp());

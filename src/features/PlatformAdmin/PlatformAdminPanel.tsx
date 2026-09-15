@@ -24,6 +24,8 @@ import {
 import { groupedNumberInputProps } from '@/features/AicoBilling/groupedNumberInput';
 import { AICO_TABLE_SCROLL, aicoPanelStyles } from '@/features/AicoPanels';
 import { createBudgetSweepModal } from '@/features/OrgAdmin/BudgetSweepModal';
+import { ModelMultiplierTable } from '@/features/PlatformAdmin/ModelMultiplierTable';
+import { UsageMultiplierSection } from '@/features/PlatformAdmin/UsageMultiplierSection';
 import { useClientDataSWR } from '@/libs/swr';
 import { controlPlaneClient } from '@/libs/trpc/client/controlPlane';
 
@@ -76,7 +78,6 @@ export const PlatformAdminPanel = () => {
   }>();
   const [deactivateForm] = Form.useForm<{ reason: string; userId: string }>();
   const [fxForm] = Form.useForm<{ tomanPerUsd: number }>();
-  const [multiplierForm] = Form.useForm<{ multiplier: number }>();
   const [busy, setBusy] = useState(false);
 
   const { data, error, isLoading, mutate } = useClientDataSWR('aico-platform-orgs', () =>
@@ -90,9 +91,10 @@ export const PlatformAdminPanel = () => {
   const { data: fx, mutate: mutateFx } = useClientDataSWR('aico-fx', () =>
     controlPlaneClient.platformAdmin.getFxRate.query(),
   );
-  const { data: usageMultiplier, mutate: mutateUsageMultiplier } = useClientDataSWR(
-    'aico-usage-multiplier',
-    () => controlPlaneClient.platformAdmin.getUsageMultiplier.query(),
+  // Summary card only — the editor below owns its own key. No `providerId`, so
+  // this is the rate for whichever provider is actually live.
+  const { data: usageMultiplier } = useClientDataSWR('aico-usage-multiplier', () =>
+    controlPlaneClient.platformAdmin.getUsageMultiplier.query(),
   );
   const { data: master } = useClientDataSWR('aico-platform-master', () =>
     controlPlaneClient.platformAdmin.getMasterAccountStatus.query(),
@@ -133,12 +135,6 @@ export const PlatformAdminPanel = () => {
       fxForm.setFieldsValue({ tomanPerUsd: fx.tomanPerUsd });
     }
   }, [fx?.tomanPerUsd, fxForm]);
-
-  useEffect(() => {
-    if (usageMultiplier?.multiplierBp != null) {
-      multiplierForm.setFieldsValue({ multiplier: usageMultiplier.multiplierBp / 10_000 });
-    }
-  }, [usageMultiplier?.multiplierBp, multiplierForm]);
 
   if (error) {
     const code = (error as { data?: { code?: string } })?.data?.code;
@@ -274,50 +270,7 @@ export const PlatformAdminPanel = () => {
         </Block>
       )}
 
-      {tab === 'overview' && (
-        <Block className={aicoPanelStyles.section} variant="outlined">
-          <Flexbox gap={12}>
-            <Text strong>{t('platform.multiplierTitle')}</Text>
-            <Text type="secondary">{t('platform.multiplierHint')}</Text>
-            <Form
-              form={multiplierForm}
-              layout="inline"
-              onFinish={async (values) => {
-                setBusy(true);
-                try {
-                  await controlPlaneClient.platformAdmin.updateUsageMultiplier.mutate({
-                    multiplierBp: Math.round(values.multiplier * 10_000),
-                  });
-                  toast.success(t('platform.multiplierSaved'));
-                  await mutateUsageMultiplier();
-                } catch (err) {
-                  toastAicoError(err, t, 'platform.multiplierFailed');
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              <Form.Item
-                label={t('platform.multiplierLabel')}
-                name="multiplier"
-                rules={[{ required: true, type: 'number', min: 1, max: 3 }]}
-              >
-                <InputNumber max={3} min={1} step={0.05} style={{ minWidth: 180 }} />
-              </Form.Item>
-              <Form.Item>
-                <Button htmlType="submit" loading={busy} type="primary">
-                  {t('platform.multiplierSave')}
-                </Button>
-              </Form.Item>
-            </Form>
-            <Text type="secondary">
-              {t('platform.multiplierPreview', {
-                value: ((usageMultiplier?.multiplierBp ?? 12_000) / 10_000).toFixed(2),
-              })}
-            </Text>
-          </Flexbox>
-        </Block>
-      )}
+      {tab === 'overview' && <UsageMultiplierSection />}
 
       {tab === 'overview' && (
         <Block className={aicoPanelStyles.section} variant="outlined">
@@ -585,6 +538,8 @@ export const PlatformAdminPanel = () => {
           </Block>
         </Flexbox>
       )}
+
+      {tab === 'models' && <ModelMultiplierTable />}
 
       {tab === 'models' && (
         <Block className={aicoPanelStyles.section} variant="outlined">

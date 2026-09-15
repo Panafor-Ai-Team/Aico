@@ -1599,9 +1599,33 @@ export class OrganizationModel {
   };
 
   updateMemberOpenRouterKey = async (params: {
+    /**
+     * Checkpoint fields, written in the same statement as the key.
+     *
+     * A provider whose key limits are immutable serves a budget change by
+     * minting a replacement key whose counter restarts at zero, which means the
+     * baseline has to move to zero at exactly the moment the new key id lands.
+     * Two statements could not both fail: a checkpoint without its key
+     * double-bills usage already carried into `billedUsageBefore…`, and a key
+     * without its checkpoint gives the member free spend up to the old baseline.
+     * Both rows live in `member_budgets`, so one UPDATE removes the choice.
+     */
+    billedUsageBeforeBaselineMicroUsd?: number;
     ciphertext: string;
     keyId: string;
+    /**
+     * Mint-time raw limit of the key, for providers that report only what is
+     * left (CheapVibeCode). Omit on OpenRouter, which reports usage directly.
+     * `null` explicitly clears a limit carried over from a retired key.
+     */
+    managedKeyLimitMicroUsd?: number | null;
+    /**
+     * Which gateway minted this key. Written on every mint so a later provider
+     * switch can tell a usable key from one belonging to the previous gateway.
+     */
+    managedKeyProviderId?: string;
     orgMemberId: string;
+    usageBaselineMicroUsd?: number;
   }) => {
     const existing = await this.getMemberBudget(params.orgMemberId);
     if (!existing) throw new Error('BUDGET_NOT_FOUND');
@@ -1611,6 +1635,23 @@ export class OrganizationModel {
       .set({
         openrouterKeyCiphertext: params.ciphertext,
         openrouterKeyId: params.keyId,
+        ...('managedKeyLimitMicroUsd' in params
+          ? { managedKeyLimitMicroUsd: params.managedKeyLimitMicroUsd ?? null }
+          : {}),
+        ...(params.managedKeyProviderId
+          ? { managedKeyProviderId: params.managedKeyProviderId }
+          : {}),
+        ...(params.billedUsageBeforeBaselineMicroUsd == null
+          ? {}
+          : {
+              billedUsageBeforeBaselineMicroUsd: Math.max(
+                0,
+                Math.trunc(params.billedUsageBeforeBaselineMicroUsd),
+              ),
+            }),
+        ...(params.usageBaselineMicroUsd == null
+          ? {}
+          : { usageBaselineMicroUsd: Math.max(0, Math.trunc(params.usageBaselineMicroUsd)) }),
       })
       .where(eq(memberBudgets.id, existing.id))
       .returning();

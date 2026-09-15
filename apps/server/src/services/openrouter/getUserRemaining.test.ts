@@ -5,13 +5,21 @@
 import type { LobeChatDatabase } from '@lobechat/database';
 import { getTestDB } from '@lobechat/database/test-utils';
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { users } from '@/database/schemas';
 import { userWallets, walletTransactions } from '@/database/schemas/aicoOrganization';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 import type { OpenRouterManagementClient } from '@/server/services/openrouter/management';
+
+// `KeyVaultsGateKeeper` reads this at call time, but the imports below are
+// hoisted above ordinary statements — so the stub has to be hoisted with them.
+// Without it every mint fails at the encrypt step and the assertions below
+// never reach the code they are about.
+vi.hoisted(() => {
+  process.env.KEY_VAULTS_SECRET ||= 'LA7n9k3JdEcbSgml2sxfw+4TV1AzaaFU5+R176aQz4s=';
+});
 
 class ControllableOpenRouterClient implements OpenRouterManagementClient {
   keys = new Map<string, any>();

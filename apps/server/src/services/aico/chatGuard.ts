@@ -5,6 +5,8 @@ import { OrganizationModel } from '@/database/models/organization';
 import type { LobeChatDatabase } from '@/database/type';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 
+import { AicoManagedPolicy } from './managedPolicy';
+
 export class AicoChatGuardError extends Error {
   errorType: ErrorType;
 
@@ -16,7 +18,17 @@ export class AicoChatGuardError extends Error {
 }
 
 /**
- * Pre-chat checks + resolve managed OpenRouter key for Aico-branded traffic.
+ * @deprecated Quarantined duplicate — do not build on this.
+ *
+ * `AicoManagedPolicy` is the single mandatory policy boundary; it is what
+ * `initModelRuntimeFromDB` calls, and it is the only one of the two that can
+ * actually resolve a key (`resolveUserApiKey` here is stubbed to return `null`).
+ * This class has no production call sites and survives only because the Phase 2
+ * and Phase 3 bypass-probe suites assert against it.
+ *
+ * Its provider predicates delegate to `AicoManagedPolicy` rather than repeating
+ * the literals, so a managed-provider change cannot leave a stale second answer
+ * behind for someone to find and trust.
  */
 export class AicoChatGuard {
   private readonly orgModel: OrganizationModel;
@@ -29,18 +41,14 @@ export class AicoChatGuard {
     this.keyService = new AicoOpenRouterKeyService(db);
   }
 
-  /**
-   * Providers that should use Aico-managed OpenRouter keys.
-   */
+  /** @deprecated Use `AicoManagedPolicy.isManagedProvider`. */
   static isManagedProvider(provider: string): boolean {
-    return provider === 'aico' || provider === 'openrouter';
+    return AicoManagedPolicy.isManagedProvider(provider);
   }
 
-  /**
-   * Runtime provider id for ModelRuntime (aico → openrouter).
-   */
+  /** @deprecated Use `AicoManagedPolicy.resolveRuntimeProvider`. */
   static resolveRuntimeProvider(provider: string): string {
-    return provider === 'aico' ? 'openrouter' : provider;
+    return AicoManagedPolicy.resolveRuntimeProvider(provider);
   }
 
   /**

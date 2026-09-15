@@ -5,7 +5,7 @@ import {
   OPENROUTER_AUTO_DISPLAY_NAME,
   OPENROUTER_AUTO_MODEL_ID,
 } from '@lobechat/business-const';
-import { desc, eq, inArray, sql } from 'drizzle-orm';
+import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { AiProviderModelListItem, ModelAbilities, Pricing } from 'model-bank';
 import { AiModelSourceEnum, normalizeAiModelType } from 'model-bank';
 
@@ -149,6 +149,39 @@ export class OpenRouterModelCatalogModel {
       .select({ count: sql<number>`count(*)::int` })
       .from(openrouterModelCatalog);
     return row?.count ?? 0;
+  };
+
+  /**
+   * Model ids and their upstream-published cost coefficient, for the platform
+   * admin's per-model override table (AICO-187).
+   *
+   * `publishedBp` is `null` for providers that do not publish a coefficient at
+   * all (OpenRouter prices in USD per token), in which case an override is a
+   * plain markup measured against 1.00x rather than a correction to a number
+   * upstream told us.
+   */
+  listCoefficients = async (): Promise<
+    Array<{ displayName: string | null; id: string; publishedBp: number | null }>
+  > => {
+    const rows = await this.db
+      .select({
+        displayName: openrouterModelCatalog.displayName,
+        id: openrouterModelCatalog.id,
+        payload: openrouterModelCatalog.payload,
+      })
+      .from(openrouterModelCatalog)
+      .orderBy(asc(openrouterModelCatalog.id));
+
+    return rows.map((row) => {
+      const raw = (row.payload as { multiplier?: unknown } | null)?.multiplier;
+      const coefficient = typeof raw === 'number' ? raw : Number.NaN;
+      return {
+        displayName: row.displayName ?? null,
+        id: row.id,
+        publishedBp:
+          Number.isFinite(coefficient) && coefficient > 0 ? Math.round(coefficient * 10_000) : null,
+      };
+    });
   };
 
   listAsProviderModels = async (): Promise<AiProviderModelListItem[]> => {

@@ -1,4 +1,10 @@
-import { isDefaultAutoImageModelId, OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
+import {
+  isDefaultAutoImageModelId,
+  MANAGED_PROVIDER_ID,
+  MANAGED_PROVIDER_IDS,
+  type ManagedProviderId,
+  OPENROUTER_AUTO_MODEL_ID,
+} from '@lobechat/business-const';
 import { ChatErrorType, type ErrorType } from '@lobechat/types';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
@@ -13,9 +19,15 @@ import { aicoEnv } from '@/envs/aico';
 
 import { type AicoBillingContext, parseAicoBillingContext } from './billingContext';
 
-/** Optional repair hook — chat path may lazy-provision a missing member key. */
+/** Optional repair hook — chat path may lazy-provision a missing managed key. */
 export type AicoManagedKeyRepair = {
   ensureMemberKey: (orgMemberId: string) => Promise<unknown>;
+  /**
+   * Personal-wallet counterpart. Present so the first request after a provider
+   * cutover mints a key on the new gateway instead of failing: the replacement
+   * is sized from the wallet's existing billed balance, so nothing is revalued.
+   */
+  ensureUserKey?: (userId: string) => Promise<unknown>;
 };
 
 export class AicoManagedPolicyError extends Error {
@@ -58,12 +70,42 @@ export class AicoManagedPolicy {
     this.billingModel = new AicoBillingModel(db);
   }
 
+  /**
+   * Every gateway we mint keys against is managed, not just the live one. A
+   * deployment mid-switch still holds keys minted under the previous provider,
+   * and a request naming it must stay behind this policy rather than fall
+   * through to the BYOK path where the user's own key would be used.
+   */
   static isManagedProvider(provider: string): boolean {
-    return provider === 'aico' || provider === 'openrouter';
+    return provider === 'aico' || MANAGED_PROVIDER_IDS.includes(provider as ManagedProviderId);
+  }
+
+  /**
+   * `aico` is the stable, user-facing provider id; which gateway actually serves
+   * it is a deployment decision. Resolving it here is what keeps existing agent
+   * configs and the pinned auto model working across a provider switch.
+   *
+   * Every managed provider id maps onto the active one, not just `aico`. Agent
+   * configs written before the switch carry a literal `openrouter`, and a
+   * browser bundle still resolves `DEFAULT_PROVIDER` to the default because
+   * `AICO_MANAGED_PROVIDER` has no `NEXT_PUBLIC_` twin — so without this, a
+   * cutover would route those requests to the old gateway holding a key minted
+   * on the new one. Unmanaged (BYOK) provider ids pass through untouched.
+   */
+  /**
+   * Whether a stored key was minted by the gateway that is currently active.
+   *
+   * Handing a key from the previous gateway to a runtime is the one failure a
+   * cutover can produce silently: the credential authenticates against nothing,
+   * and every request fails as if the provider were down. A null stamp predates
+   * migration 0154 and can only be OpenRouter.
+   */
+  private static isCurrentProviderKey(stamp: string | null | undefined): boolean {
+    return (stamp ?? 'openrouter') === MANAGED_PROVIDER_ID;
   }
 
   static resolveRuntimeProvider(provider: string): string {
-    return provider === 'aico' ? 'openrouter' : provider;
+    return AicoManagedPolicy.isManagedProvider(provider) ? MANAGED_PROVIDER_ID : provider;
   }
 
   /**
@@ -112,11 +154,32 @@ export class AicoManagedPolicy {
         await this.assertTrialAllowed();
       }
 
-      const wallet = await this.billingModel.getUserWallet(params.userId);
+      let wallet = await this.billingModel.getUserWallet(params.userId);
       if (!wallet?.isActive) {
         throw new AicoManagedPolicyError('PERSONAL_WALLET_INACTIVE', ChatErrorType.InvalidUserKey);
       }
-      if (!wallet.openrouterKeyCiphertext || !wallet.openrouterKeyId) {
+
+      const walletKeyUsable = (row: typeof wallet) =>
+        Boolean(
+          row?.openrouterKeyCiphertext &&
+          hasValidManagedKeyId(row.openrouterKeyId) &&
+          AicoManagedPolicy.isCurrentProviderKey(row.managedKeyProviderId),
+        );
+
+      // A key from the previous gateway is not a key. Repairing here is what
+      // makes a cutover invisible to a funded user: the first request mints a
+      // replacement on the active gateway. An unfunded wallet mints nothing and
+      // falls through to the checks below.
+      if (!walletKeyUsable(wallet) && this.keyRepair?.ensureUserKey) {
+        try {
+          await this.keyRepair.ensureUserKey(params.userId);
+          wallet = (await this.billingModel.getUserWallet(params.userId)) ?? wallet;
+        } catch (error) {
+          console.warn('[aico] managed policy failed to repair personal managed key', error);
+        }
+      }
+
+      if (!walletKeyUsable(wallet)) {
         throw new AicoManagedPolicyError('MANAGED_KEY_UNAVAILABLE', ChatErrorType.InvalidUserKey);
       }
       if (
@@ -129,7 +192,8 @@ export class AicoManagedPolicy {
         );
       }
 
-      const apiKey = await this.decryptKey(wallet.openrouterKeyCiphertext);
+      // Narrowing only; `walletKeyUsable` above already proved it is present.
+      const apiKey = await this.decryptKey(wallet.openrouterKeyCiphertext ?? '');
       if (!apiKey) {
         throw new AicoManagedPolicyError(
           'MANAGED_KEY_DECRYPT_FAILED',
@@ -175,10 +239,14 @@ export class AicoManagedPolicy {
       throw new AicoManagedPolicyError('MEMBER_BUDGET_UNFUNDED', ChatErrorType.InvalidUserKey);
     }
 
-    if (
-      (!hasValidManagedKeyId(budget.openrouterKeyId) || !budget.openrouterKeyCiphertext) &&
-      this.keyRepair
-    ) {
+    const budgetKeyUsable = (row: typeof budget) =>
+      Boolean(
+        row?.openrouterKeyCiphertext &&
+        hasValidManagedKeyId(row.openrouterKeyId) &&
+        AicoManagedPolicy.isCurrentProviderKey(row.managedKeyProviderId),
+      );
+
+    if (!budgetKeyUsable(budget) && this.keyRepair) {
       try {
         await this.keyRepair.ensureMemberKey(me.id);
         budget = (await this.orgModel.getMemberBudget(me.id)) ?? budget;
@@ -187,11 +255,12 @@ export class AicoManagedPolicy {
       }
     }
 
-    if (!hasValidManagedKeyId(budget.openrouterKeyId) || !budget.openrouterKeyCiphertext) {
+    if (!budgetKeyUsable(budget)) {
       throw new AicoManagedPolicyError('MANAGED_KEY_UNAVAILABLE', ChatErrorType.InvalidUserKey);
     }
 
-    const apiKey = await this.decryptKey(budget.openrouterKeyCiphertext);
+    // Narrowing only; `budgetKeyUsable` above already proved it is present.
+    const apiKey = await this.decryptKey(budget.openrouterKeyCiphertext ?? '');
     if (!apiKey) {
       throw new AicoManagedPolicyError('MANAGED_KEY_DECRYPT_FAILED', ChatErrorType.InvalidUserKey);
     }

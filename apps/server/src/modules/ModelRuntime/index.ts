@@ -511,6 +511,7 @@ export const initModelRuntimeFromDB = async (
       {
         ensureMemberKey: (orgMemberId) =>
           new AicoOpenRouterKeyService(db).ensureMemberKey(orgMemberId),
+        ensureUserKey: (userId_) => new AicoOpenRouterKeyService(db).ensureUserKey(userId_),
       },
     );
     const authorized = await policy.authorize({
