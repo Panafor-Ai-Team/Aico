@@ -26,6 +26,22 @@ vi.mock('@/auth', () => ({
   },
 }));
 
+// `vi.mock` factories run at import time, before top-level consts initialise,
+// so the spies have to be hoisted alongside them.
+const { getUserRemaining, syncMemberCycleUsage } = vi.hoisted(() => ({
+  getUserRemaining: vi.fn(),
+  syncMemberCycleUsage: vi.fn(),
+}));
+
+vi.mock('@/server/services/openrouter/keyService', () => ({
+  AicoOpenRouterKeyService: vi.fn(() => ({ getUserRemaining, syncMemberCycleUsage })),
+}));
+
+// Hits the database for the platform multiplier; irrelevant to this route's logic.
+vi.mock('@/server/services/aico/usageMultiplier', () => ({
+  resolveManagedPricingContext: vi.fn().mockResolvedValue({}),
+}));
+
 const billing = { source: 'personal' as const };
 
 const makeRequest = (body: Record<string, unknown>) =>
@@ -38,6 +54,13 @@ const makeRequest = (body: Record<string, unknown>) =>
 let request: Request;
 beforeEach(() => {
   request = makeRequest({ model: 'test-model' });
+
+  getUserRemaining.mockResolvedValue({
+    remainingMicroUsd: 0,
+    usageKnown: true,
+    usageMicroUsd: 0,
+  });
+  syncMemberCycleUsage.mockResolvedValue(undefined);
 
   // Default: valid session
   vi.mocked(auth.api.getSession).mockResolvedValue({
@@ -160,6 +183,25 @@ describe('POST handler', () => {
         },
         errorType: 500,
       });
+    });
+  });
+
+  describe('personal usage settlement', () => {
+    it('persists the settled figure after the response, not only on a billing-page visit', async () => {
+      const mockParams = Promise.resolve({ provider: 'openrouter' });
+      const mockRuntime: LobeRuntimeAI = {
+        baseURL: 'abc',
+        chat: vi.fn().mockResolvedValue(new Response('ok')),
+      };
+      vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+      await POST(makeRequest({ model: 'test-model' }), { params: mockParams });
+      // recordManagedUsage is fired with `void`; let its microtasks drain.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      // Without `persist` the wallet only falls when the user opens billing,
+      // so spend would look free until then.
+      expect(getUserRemaining).toHaveBeenCalledWith('test-user-id', { persist: true });
     });
   });
 });
