@@ -29,6 +29,7 @@ import { dbMessageSelectors } from '@/store/chat/slices/message/selectors';
 import type { ChatStore } from '@/store/chat/store';
 import { notifyDesktopHumanApprovalRequired } from '@/store/chat/utils/desktopNotification';
 import { messageMapKey } from '@/store/chat/utils/messageMapKey';
+import { resolveGroupTopicScope } from '@/store/chat/utils/topicMapKey';
 
 // `agent_runtime_end` reasons that are NOT a clean completion: a mid-stream
 // cancel and a deferred-tool park. These must NOT mark the topic unread, and
@@ -1247,6 +1248,7 @@ export const createGatewayEventHandler = (
               get().markTopicUnread({
                 agentId: completedOp.context.agentId,
                 groupId: completedOp.context.groupId,
+                scope: resolveGroupTopicScope(completedOp.context.scope),
                 topicId: completedOp.context.topicId,
               });
             }

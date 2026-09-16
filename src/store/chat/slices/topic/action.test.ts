@@ -561,6 +561,51 @@ describe('topic action', () => {
       // Agent-run status writes must stay a pure status update — no completedAt.
       expect(updateSpy).toHaveBeenCalledWith(topicId, { status: 'running' });
     });
+
+    // Regression: a run writes 'running' at start and 'active' / 'unread' at end,
+    // both fire-and-forget. Issued as independent requests they carry no ordering
+    // guarantee — whenever the start write is the slower of the two it lands LAST
+    // and strands a finished topic at 'running', which is what keeps the sidebar
+    // spinner turning on a chat that is already done.
+    it('persists status writes in issue order when an earlier write resolves slower', async () => {
+      const { result } = renderHook(() => useChatStore());
+      const topicId = 'update-status-ordering-topic';
+
+      const applied: string[] = [];
+      let releaseRunningWrite: (() => void) | undefined;
+
+      const updateSpy = vi
+        .spyOn(topicService, 'updateTopic')
+        .mockImplementation(async (_id, patch: any) => {
+          if (patch.status === 'running') {
+            // The run-start write hangs (cold connection / token refresh) while
+            // the run itself finishes and issues its terminal write.
+            await new Promise<void>((resolve) => {
+              releaseRunningWrite = resolve;
+            });
+          }
+          applied.push(patch.status);
+          return undefined as any;
+        });
+
+      let runningWrite: Promise<void> | undefined;
+      let terminalWrite: Promise<void> | undefined;
+
+      await act(async () => {
+        runningWrite = result.current.updateTopicStatus({ status: 'running', topicId });
+        // Let the 'running' write reach its suspension point before the run ends.
+        await waitFor(() => expect(releaseRunningWrite).toBeDefined());
+
+        terminalWrite = result.current.updateTopicStatus({ status: 'active', topicId });
+
+        releaseRunningWrite!();
+        await Promise.all([runningWrite, terminalWrite]);
+      });
+
+      expect(updateSpy).toHaveBeenCalledTimes(2);
+      // The DB must settle on the terminal status, not on the overtaking start write.
+      expect(applied).toEqual(['running', 'active']);
+    });
   });
   describe('useFetchTopics', () => {
     it('should fetch topics for a given session id', async () => {

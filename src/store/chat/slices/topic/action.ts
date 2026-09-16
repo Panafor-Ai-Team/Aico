@@ -429,6 +429,21 @@ export class ChatTopicActionImpl {
   #pendingTopicStatusWrites = new Map<string, { expiresAt: number; status: ChatTopicStatus }>();
 
   /**
+   * In-flight `topicService.updateTopic` status write per topic, so the next
+   * status write for the same topic queues behind it instead of racing it.
+   *
+   * A run writes `status: 'running'` at start and `'active'` / `'unread'` at
+   * end, both fire-and-forget (see `streamingExecutor` / `buildRunLifecycle`).
+   * Issued as independent requests they carry no ordering guarantee: whenever
+   * the start write is the slower of the two — a cold connection, a token
+   * refresh, a retried blip — it lands LAST and leaves the DB at 'running' for
+   * a run that already finished. The sidebar then spins forever on that topic
+   * (the in-memory row is correct, so it only surfaces once
+   * `#pendingTopicStatusWrites` expires and a refetch reveals the stale row).
+   */
+  #topicStatusWriteChains = new Map<string, Promise<void>>();
+
+  /**
    * Same guard as `#pendingTopicStatusWrites`, for `updateTopicModel`. It
    * matters most for a model switch made while the topic still carried its
    * first-send optimistic `tmp_topic_*` id: `resolveOptimisticTopic` replays
@@ -546,11 +561,30 @@ export class ChatTopicActionImpl {
       scope,
     });
 
-    await topicService.updateTopic(topicId, patch).catch((err) => {
-      console.error('[updateTopicStatus] persist failed:', err);
-      // The DB never got the write — stop pinning it over fetched rows.
-      this.#pendingTopicStatusWrites.delete(topicId);
+    // Queue behind this topic's in-flight status write so the DB applies them in
+    // issue order. Without it a slow run-start 'running' can overtake the
+    // run-end 'active' and strand a finished topic as running (see
+    // `#topicStatusWriteChains`).
+    const previousWrite = this.#topicStatusWriteChains.get(topicId) ?? Promise.resolve();
+    const write: Promise<void> = previousWrite.then(async () => {
+      await topicService.updateTopic(topicId, patch).catch((err) => {
+        console.error('[updateTopicStatus] persist failed:', err);
+        // The DB never got the write — stop pinning it over fetched rows. Only
+        // when the pin is still OURS: with writes queued per topic, a later
+        // write may already own the pin, and dropping that one would let a
+        // refetch revert the status this topic is actually heading to.
+        const current = this.#pendingTopicStatusWrites.get(topicId);
+        if (current?.status === status) this.#pendingTopicStatusWrites.delete(topicId);
+      });
     });
+
+    this.#topicStatusWriteChains.set(topicId, write);
+
+    await write;
+
+    // Last writer out clears the chain so the map can't grow unbounded.
+    if (this.#topicStatusWriteChains.get(topicId) === write)
+      this.#topicStatusWriteChains.delete(topicId);
   };
 
   #getTopicUpdatedAt = (topic: RunningTopicForWatchdog): number | undefined => {

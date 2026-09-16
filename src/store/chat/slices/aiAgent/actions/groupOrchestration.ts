@@ -10,6 +10,7 @@ import { getChatGroupStoreState } from '@/store/agentGroup';
 import { agentGroupByIdSelectors } from '@/store/agentGroup/selectors';
 import { createGroupOrchestrationExecutors } from '@/store/chat/agents/GroupOrchestration';
 import { type ChatStore } from '@/store/chat/store';
+import { resolveGroupTopicScope } from '@/store/chat/utils/topicMapKey';
 import { type GroupOrchestrationCallbacks } from '@/store/tool/slices/builtin/types';
 import { type StoreSetter } from '@/store/types';
 
@@ -371,6 +372,7 @@ export class GroupOrchestrationActionImpl {
         this.#get().markTopicUnread({
           agentId: completedOp.context.agentId,
           groupId: completedOp.context.groupId,
+          scope: resolveGroupTopicScope(completedOp.context.scope),
           topicId: completedOp.context.topicId,
         });
       }
