@@ -572,22 +572,42 @@ export class AiInfraRepos {
     // active — so it is only authoritative for that provider. Serving it under a
     // managed provider that is no longer live would price and offer the other
     // gateway's models, so a stale catalog is ignored rather than trusted.
-    const servesSyncedCatalog = providerId === MANAGED_PROVIDER_ID;
+    //
+    // `BRANDING_PROVIDER` counts too, and must: it is the *slot* the managed
+    // experience lives in (the provider page, every stored model id), while
+    // `MANAGED_PROVIDER_ID` is the gateway currently behind it. The two are
+    // deliberately different under CheapVibeCode — the slot stays `openrouter`
+    // so saved agent configs keep working — so keying only on the gateway left
+    // the branded page serving the static model-bank snapshot of whatever the
+    // slot is named after, i.e. OpenRouter's catalogue at OpenRouter's prices.
+    const servesSyncedCatalog =
+      providerId === MANAGED_PROVIDER_ID || providerId === BRANDING_PROVIDER;
+    // Whose markup and whose models: always the live gateway, never the slot.
+    const syncedCatalogProviderId = MANAGED_PROVIDER_ID;
     try {
       // Aico platform catalog: when managed models have been synced, prefer
       // them over the static model-bank snapshot so pricing/abilities stay fresh.
       if (servesSyncedCatalog) {
         const catalog = new OpenRouterModelCatalogModel(this.db);
         if ((await catalog.count()) > 0) {
-          return this.withUsageMultiplier(await catalog.listAsProviderModels(), providerId);
+          return this.withUsageMultiplier(
+            await catalog.listAsProviderModels(),
+            syncedCatalogProviderId,
+          );
         }
 
         // First setup: one-shot live sync before falling back to static
         // model-bank. Only OpenRouter can bootstrap from here — its `/models` is
         // public. Other managed providers need a credential this process does
         // not hold, so their first catalog arrives via the sync cron instead.
-        if (providerId !== 'openrouter') {
-          return this.withUsageMultiplier(await this.staticModelList(providerId), providerId);
+        // Gated on the live gateway, not the slot: with CheapVibeCode active and
+        // the slot still named `openrouter`, bootstrapping from OpenRouter's
+        // public `/models` would write the wrong gateway's catalogue.
+        if (syncedCatalogProviderId !== 'openrouter') {
+          return this.withUsageMultiplier(
+            await this.staticModelList(providerId),
+            syncedCatalogProviderId,
+          );
         }
         try {
           const { fetchOpenRouterModels } = await import('@lobechat/model-runtime');
@@ -616,7 +636,10 @@ export class AiInfraRepos {
             triggeredBy: 'bootstrap',
           });
           if ((await catalog.count()) > 0) {
-            return this.withUsageMultiplier(await catalog.listAsProviderModels(), providerId);
+            return this.withUsageMultiplier(
+              await catalog.listAsProviderModels(),
+              syncedCatalogProviderId,
+            );
           }
         } catch (error) {
           console.warn('[ai-infra] OpenRouter catalog bootstrap sync failed', error);
@@ -628,7 +651,9 @@ export class AiInfraRepos {
       // Reached on first setup or when the managed gateway is unreachable.
       // Without the markup here the fallback would silently serve raw resale
       // prices.
-      return isManagedProvider ? this.withUsageMultiplier(builtin, providerId) : builtin;
+      return isManagedProvider
+        ? this.withUsageMultiplier(builtin, syncedCatalogProviderId)
+        : builtin;
     } catch (error) {
       console.error(error);
       // maybe provider id not exist
