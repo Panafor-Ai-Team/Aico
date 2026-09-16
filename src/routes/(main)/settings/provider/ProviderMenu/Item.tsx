@@ -5,6 +5,7 @@ import { memo, useMemo } from 'react';
 import { useLocation } from 'react-router';
 
 import { BrandedProviderIcon } from '@/components/Branding/BrandedProviderIcon';
+import { isBrandedProviderRouteSegment } from '@/components/Branding/brandedProviderRoute';
 import { ProductLogo } from '@/components/Branding/ProductLogo';
 import { isCustomBranding } from '@/const/version';
 import NavItem from '@/features/NavPanel/components/NavItem';
@@ -57,7 +58,9 @@ const ProviderItem = memo<ProviderItemProps>(
 
     return (
       <NavItem
-        active={activeKey === id || (useBrandLogo && (activeKey === 'aico' || activeKey === id))}
+        // The branded slot's URL carries the product slug, not its stored id, so
+        // a plain `activeKey === id` would leave the menu item unhighlighted.
+        active={activeKey === id || (useBrandLogo && isBrandedProviderRouteSegment(activeKey))}
         icon={() => providerIcon}
         title={useBrandLogo ? BRANDING_NAME : name}
         extra={

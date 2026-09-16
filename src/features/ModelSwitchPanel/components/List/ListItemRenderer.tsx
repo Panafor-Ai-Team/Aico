@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import urlJoin from 'url-join';
 
 import { useActiveWorkspaceSlug } from '@/business/client/hooks/useActiveWorkspaceSlug';
+import { toProviderRouteSegment } from '@/components/Branding/brandedProviderRoute';
 import { ModelItemRender, ProviderItemRender } from '@/components/ModelSelect';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { buildWorkspaceAwarePath } from '@/features/Workspace/workspaceAwarePath';
@@ -142,7 +143,7 @@ export const ListItemRenderer = memo<ListItemRendererProps>(
             style={{ color: cssVar.colorTextTertiary }}
             onClick={() => {
               onClose();
-              navigate(`/settings/provider/${item.provider.id}`);
+              navigate(`/settings/provider/${toProviderRouteSegment(item.provider.id)}`);
             }}
           >
             {t('ModelSwitchPanel.emptyModel')}
