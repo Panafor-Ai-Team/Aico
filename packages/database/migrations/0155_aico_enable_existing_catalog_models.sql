@@ -1,0 +1,18 @@
+-- One-time back-fill: turn on every model already in the catalog.
+--
+-- `enabled` used to be derived, not stored: the serve path recomputed it from a
+-- curation heuristic (newest 4 chat models per openai/anthropic/google, plus the
+-- Auto router) and every sync rewrote the column to match. The column is now the
+-- authoritative record of what the platform admin wants the site to offer, so
+-- the rows left behind by that heuristic — 407 of 420 chat models sat `false` —
+-- would otherwise read as deliberate "off" choices nobody made.
+--
+-- Flipping them on restores parity with the control panel, which has always
+-- listed the whole catalog. Anything genuinely unwanted is switched off from the
+-- admin panel afterwards, and that choice now survives the next sync.
+--
+-- Runs once, like any migration — the `WHERE` only avoids rewriting rows that
+-- are already on. It is deliberately NOT a reconciliation step: re-running it
+-- against a deployment where an admin has since switched models off would undo
+-- those choices.
+UPDATE "openrouter_model_catalog" SET "enabled" = true WHERE "enabled" = false;

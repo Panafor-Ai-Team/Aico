@@ -12,6 +12,7 @@ import { Form, Input, InputNumber, Table } from 'antd';
 import { Building2Icon, RefreshCwIcon, ShieldIcon, WalletIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { mutate as globalMutate } from 'swr';
 
 import { toastAicoError } from '@/business/client/resolveAicoErrorMessage';
 import StatisticCard from '@/components/StatisticCard';
@@ -24,7 +25,10 @@ import {
 import { groupedNumberInputProps } from '@/features/AicoBilling/groupedNumberInput';
 import { AICO_TABLE_SCROLL, aicoPanelStyles } from '@/features/AicoPanels';
 import { createBudgetSweepModal } from '@/features/OrgAdmin/BudgetSweepModal';
-import { ModelMultiplierTable } from '@/features/PlatformAdmin/ModelMultiplierTable';
+import {
+  MODEL_MULTIPLIERS_SWR_KEY,
+  ModelMultiplierTable,
+} from '@/features/PlatformAdmin/ModelMultiplierTable';
 import { UsageMultiplierSection } from '@/features/PlatformAdmin/UsageMultiplierSection';
 import { useClientDataSWR } from '@/libs/swr';
 import { controlPlaneClient } from '@/libs/trpc/client/controlPlane';
@@ -582,7 +586,12 @@ export const PlatformAdminPanel = () => {
                 try {
                   await controlPlaneClient.platformAdmin.syncOpenRouterModels.mutate();
                   toast.success(t('platform.modelsSynced'));
-                  await Promise.all([mutateModelSync(), mutateModelSyncHistory()]);
+                  await Promise.all([
+                    mutateModelSync(),
+                    mutateModelSyncHistory(),
+                    // A sync can add models; the table below must show them.
+                    globalMutate(MODEL_MULTIPLIERS_SWR_KEY),
+                  ]);
                 } catch (err) {
                   toastAicoError(err, t, 'platform.modelsSyncFailed');
                 } finally {

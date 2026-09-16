@@ -1,7 +1,13 @@
 'use client';
 
 /**
- * Per-model coefficient overrides (AICO-187).
+ * The catalog table: which models the site offers, and what each one costs.
+ *
+ * Availability is the `enabled` flag on the catalog row — the single thing
+ * deciding whether a model appears in the site's picker. It survives catalog
+ * syncs, so a choice made here is not undone by the next refresh.
+ *
+ * Per-model coefficient overrides (AICO-187) below.
  *
  * Upstream publishes a cost coefficient for every model, but does not always
  * charge it: measured against CheapVibeCode, `deepseek-v4.1-flash` billed x0.433
@@ -15,7 +21,7 @@
  */
 
 import { Block, Flexbox, Tag, Text } from '@lobehub/ui';
-import { Button, toast } from '@lobehub/ui/base-ui';
+import { Button, Switch, toast } from '@lobehub/ui/base-ui';
 import { InputNumber, Table } from 'antd';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -27,8 +33,12 @@ import { controlPlaneClient } from '@/libs/trpc/client/controlPlane';
 
 const BP_SCALE = 10_000;
 
+/** Exported so a sync elsewhere in the panel can refresh this table. */
+export const MODEL_MULTIPLIERS_SWR_KEY = 'aico-model-multipliers';
+
 interface ModelRow {
   displayName: string | null;
+  enabled: boolean;
   modelId: string;
   note: string | null;
   overrideBp: number | null;
@@ -44,8 +54,10 @@ export const ModelMultiplierTable = () => {
   const { t } = useTranslation('aico');
   const [drafts, setDrafts] = useState<Record<string, number | null>>({});
   const [busyModelId, setBusyModelId] = useState<string | null>(null);
+  const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
-  const { data, mutate } = useClientDataSWR('aico-model-multipliers', () =>
+  const { data, mutate } = useClientDataSWR(MODEL_MULTIPLIERS_SWR_KEY, () =>
     controlPlaneClient.platformAdmin.listModelMultipliers.query(),
   );
 
@@ -103,7 +115,56 @@ export const ModelMultiplierTable = () => {
     }
   };
 
+  /** Turn a single model on or off; the site's picker follows this flag. */
+  const setEnabled = async (row: ModelRow, enabled: boolean) => {
+    setBusyModelId(row.modelId);
+    try {
+      await controlPlaneClient.platformAdmin.setModelsEnabled.mutate({
+        enabled,
+        modelIds: [row.modelId],
+      });
+      toast.success(t('platform.modelEnabledSaved'));
+      await mutate();
+    } catch (err) {
+      toastAicoError(err, t, 'platform.modelEnabledFailed');
+    } finally {
+      setBusyModelId(null);
+    }
+  };
+
+  const setManyEnabled = async (enabled: boolean) => {
+    if (selectedModelIds.length === 0) return;
+    setBulkBusy(true);
+    try {
+      await controlPlaneClient.platformAdmin.setModelsEnabled.mutate({
+        enabled,
+        modelIds: selectedModelIds,
+      });
+      toast.success(t('platform.modelEnabledSaved'));
+      setSelectedModelIds([]);
+      await mutate();
+    } catch (err) {
+      toastAicoError(err, t, 'platform.modelEnabledFailed');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const columns = [
+    {
+      key: 'enabled',
+      render: (_: unknown, row: ModelRow) => (
+        <Switch
+          checked={row.enabled}
+          disabled={bulkBusy}
+          loading={busyModelId === row.modelId}
+          title={t('platform.modelEnabledColumn')}
+          onChange={(checked) => setEnabled(row, checked)}
+        />
+      ),
+      title: t('platform.modelEnabledColumn'),
+      width: 110,
+    },
     {
       key: 'model',
       render: (_: unknown, row: ModelRow) => (
@@ -174,13 +235,37 @@ export const ModelMultiplierTable = () => {
       <Flexbox gap={12}>
         <Text strong>{t('platform.modelMultiplierTitle')}</Text>
         <Text type="secondary">{t('platform.modelMultiplierHint')}</Text>
+        <Text type="secondary">{t('platform.modelEnabledHint')}</Text>
+        {selectedModelIds.length > 0 && (
+          <Flexbox horizontal align="center" gap={8}>
+            <Text type="secondary">
+              {t('platform.modelEnabledSelected', { count: selectedModelIds.length })}
+            </Text>
+            <Button
+              loading={bulkBusy}
+              size="small"
+              type="primary"
+              onClick={() => setManyEnabled(true)}
+            >
+              {t('platform.modelEnabledBulkOn')}
+            </Button>
+            <Button loading={bulkBusy} size="small" onClick={() => setManyEnabled(false)}>
+              {t('platform.modelEnabledBulkOff')}
+            </Button>
+          </Flexbox>
+        )}
         <Table
           columns={columns}
           dataSource={rows}
+          loading={!data}
           pagination={{ pageSize: 20, showSizeChanger: false }}
           rowKey="modelId"
           scroll={AICO_TABLE_SCROLL}
           size="small"
+          rowSelection={{
+            onChange: (keys) => setSelectedModelIds(keys as string[]),
+            selectedRowKeys: selectedModelIds,
+          }}
         />
       </Flexbox>
     </Block>
