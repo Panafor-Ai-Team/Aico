@@ -205,6 +205,7 @@ export const platformAdminRouter = router({
           const overrideBp = override ? Number(override.multiplierBp) : null;
           return {
             displayName: model.displayName,
+            enabled: model.enabled,
             modelId: model.id,
             note: override?.note ?? null,
             overrideBp,
@@ -269,6 +270,31 @@ export const platformAdminRouter = router({
         userAgent: ctx.userAgent,
       });
       return { modelId: input.modelId, providerId };
+    }),
+
+  /**
+   * Choose which catalog models the site offers. The flag survives catalog
+   * syncs, so a choice made here is not undone by the next refresh.
+   */
+  setModelsEnabled: platformProcedure
+    .input(
+      z.object({
+        enabled: z.boolean(),
+        modelIds: z.array(z.string().min(1).max(256)).min(1).max(1000),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const count = await ctx.modelCatalogSync.setModelsEnabled(input.modelIds, input.enabled);
+      await recordAicoSecurityEvent(ctx.serverDB, {
+        action: 'platform.modelEnabled.update',
+        actorAdminId: ctx.adminId,
+        ipAddress: ctx.clientIp,
+        metadata: { count, enabled: input.enabled, modelIds: input.modelIds.slice(0, 50) },
+        targetId: input.modelIds.length === 1 ? input.modelIds[0] : `bulk:${count}`,
+        targetType: 'openrouter_model_catalog',
+        userAgent: ctx.userAgent,
+      });
+      return { count, enabled: input.enabled };
     }),
 
   listOrganizations: platformProcedure

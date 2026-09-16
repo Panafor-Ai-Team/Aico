@@ -67,8 +67,7 @@ const AUTO_CATALOG_CARD: OpenRouterCatalogModelInput = {
  * through the general `/models` chat-completions listing this catalog syncs from
  * — so embedding models never appear in a live sync snapshot on their own. Inject
  * the ones the product relies on (system-agent memory embedding default) so they
- * exist in the catalog and pick up `computeDefaultEnabledOpenRouterModelIds`'s
- * "every catalog embedding model is enabled" rule instead of showing disabled.
+ * exist in the catalog as ordinary rows, enabled like any other new id.
  */
 const EMBEDDING_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
   {
@@ -161,11 +160,17 @@ export class OpenRouterModelCatalogModel {
    * upstream told us.
    */
   listCoefficients = async (): Promise<
-    Array<{ displayName: string | null; id: string; publishedBp: number | null }>
+    Array<{
+      displayName: string | null;
+      enabled: boolean;
+      id: string;
+      publishedBp: number | null;
+    }>
   > => {
     const rows = await this.db
       .select({
         displayName: openrouterModelCatalog.displayName,
+        enabled: openrouterModelCatalog.enabled,
         id: openrouterModelCatalog.id,
         payload: openrouterModelCatalog.payload,
       })
@@ -177,6 +182,7 @@ export class OpenRouterModelCatalogModel {
       const coefficient = typeof raw === 'number' ? raw : Number.NaN;
       return {
         displayName: row.displayName ?? null,
+        enabled: row.enabled,
         id: row.id,
         publishedBp:
           Number.isFinite(coefficient) && coefficient > 0 ? Math.round(coefficient * 10_000) : null,
@@ -184,15 +190,28 @@ export class OpenRouterModelCatalogModel {
     });
   };
 
+  /**
+   * Turn catalog models on or off for the whole deployment — the platform
+   * admin's control over what the site offers.
+   */
+  setModelsEnabled = async (ids: string[], enabled: boolean): Promise<number> => {
+    if (ids.length === 0) return 0;
+
+    const now = new Date();
+    const CHUNK = 200;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      await this.db
+        .update(openrouterModelCatalog)
+        .set({ enabled, updatedAt: now })
+        .where(inArray(openrouterModelCatalog.id, chunk));
+    }
+
+    return ids.length;
+  };
+
   listAsProviderModels = async (): Promise<AiProviderModelListItem[]> => {
     const rows = await this.db.select().from(openrouterModelCatalog);
-    const defaultEnabled = computeDefaultEnabledOpenRouterModelIds(
-      rows.map((row) => ({
-        id: row.id,
-        releasedAt: row.releasedAt,
-        type: row.type,
-      })),
-    );
 
     const mapped = rows.map((row) => {
       // AICO-180: `payload` is the raw OpenRouter model JSON. Drop every
@@ -206,9 +225,10 @@ export class OpenRouterModelCatalogModel {
         contextWindowTokens: row.contextWindowTokens ?? undefined,
         description: row.description ?? undefined,
         displayName: isAuto ? OPENROUTER_AUTO_DISPLAY_NAME : (row.displayName ?? undefined),
-        // Platform default: Auto + latest 4 chat / openai|anthropic|google
-        // + pinned chat ids + every image/video/embedding generator. Per-user overrides live in `ai_models`.
-        enabled: defaultEnabled.has(row.id),
+        // The stored flag is authoritative: it is what the platform admin edits,
+        // and the only thing deciding whether the site offers this model.
+        // Per-user overrides still layer on top, from `ai_models`.
+        enabled: row.enabled,
         id: row.id,
         pricing: (row.pricing ?? undefined) as Pricing | undefined,
         releasedAt: row.releasedAt ?? undefined,
@@ -245,6 +265,10 @@ export class OpenRouterModelCatalogModel {
    * Recompute and persist `enabled` flags from the current catalog rows
    * (latest 4 chat models per openai / anthropic / google, pinned chat ids,
    * plus all image/video/embedding models).
+   *
+   * Destructive: `enabled` is the platform admin's setting, so this discards
+   * every choice they have made and returns the catalog to the curated
+   * defaults. It is a deliberate "reset", never part of a sync.
    */
   reseedDefaultEnabledFlags = async (): Promise<number> => {
     const rows = await this.db
@@ -287,7 +311,11 @@ export class OpenRouterModelCatalogModel {
 
   /**
    * Replace the catalog with a fresh OpenRouter snapshot.
-   * Always keeps product Auto and recomputes default `enabled` on every sync.
+   *
+   * Always keeps product Auto. `enabled` is deliberately *not* refreshed for
+   * rows that already exist — it is the platform admin's setting, and a sync
+   * that recomputed it would silently revert their choices. New ids arrive
+   * enabled, so a model added upstream reaches the site without an extra step.
    */
   replaceCatalog = async (params: {
     models: OpenRouterCatalogModelInput[];
@@ -304,14 +332,6 @@ export class OpenRouterModelCatalogModel {
       .select({ id: openrouterModelCatalog.id })
       .from(openrouterModelCatalog);
     const existingIds = new Set(existing.map((r) => r.id));
-
-    const defaultEnabled = computeDefaultEnabledOpenRouterModelIds(
-      models.map((model) => ({
-        id: model.id,
-        releasedAt: model.releasedAt,
-        type: model.type,
-      })),
-    );
 
     const addedModelIds = incomingIds.filter(
       (id) => !existingIds.has(id) && id !== OPENROUTER_AUTO_MODEL_ID,
@@ -343,7 +363,9 @@ export class OpenRouterModelCatalogModel {
         contextWindowTokens: contextWindowTokens ?? null,
         description: description ?? null,
         displayName: resolvedDisplayName,
-        enabled: defaultEnabled.has(id),
+        // Only reaches the table on insert; the upsert below leaves `enabled`
+        // alone so an existing row keeps whatever the admin set.
+        enabled: true,
         id,
         payload: {
           ...rest,
@@ -386,7 +408,6 @@ export class OpenRouterModelCatalogModel {
                 contextWindowTokens: sql`excluded.context_window_tokens`,
                 description: sql`excluded.description`,
                 displayName: sql`excluded.display_name`,
-                enabled: sql`excluded.enabled`,
                 payload: sql`excluded.payload`,
                 pricing: sql`excluded.pricing`,
                 releasedAt: sql`excluded.released_at`,

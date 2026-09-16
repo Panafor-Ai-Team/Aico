@@ -29,7 +29,7 @@ describe('OpenRouterModelCatalogModel', () => {
     await expect(catalog.count()).resolves.toBe(0);
   });
 
-  it('enables newest 4 chat models per family and every image/video generator', async () => {
+  it('enables every model in a fresh snapshot, whatever its family or age', async () => {
     await catalog.replaceCatalog({
       models: [
         { displayName: 'GPT old', id: 'openai/gpt-old', releasedAt: '2024-01-01', type: 'chat' },
@@ -78,12 +78,14 @@ describe('OpenRouterModelCatalogModel', () => {
     expect(byId['openai/gpt-3'].enabled).toBe(true);
     expect(byId['openai/gpt-2'].enabled).toBe(true);
     expect(byId['openai/gpt-1'].enabled).toBe(true);
-    expect(byId['openai/gpt-old'].enabled).toBe(false);
     expect(byId['anthropic/claude-1'].enabled).toBe(true);
     expect(byId['google/gemini-1'].enabled).toBe(true);
-    expect(byId['deepseek/deepseek-chat'].enabled).toBe(false);
     expect(byId['openai/dall-e'].enabled).toBe(true);
     expect(byId['google/veo-3'].enabled).toBe(true);
+    // Neither the oldest model of a curated family nor a vendor outside
+    // openai/anthropic/google is held back any more — the admin decides.
+    expect(byId['openai/gpt-old'].enabled).toBe(true);
+    expect(byId['deepseek/deepseek-chat'].enabled).toBe(true);
 
     const status = await catalog.getSyncStatus();
     expect(status).toMatchObject({
@@ -94,7 +96,7 @@ describe('OpenRouterModelCatalogModel', () => {
     });
   });
 
-  it('recomputes enabled flags on re-sync instead of preserving sticky true', async () => {
+  it('preserves an admin-set enabled flag across a re-sync, and enables new ids', async () => {
     await catalog.replaceCatalog({
       models: [
         { displayName: 'GPT-A', id: 'openai/gpt-a', releasedAt: '2025-01-01', type: 'chat' },
@@ -102,6 +104,9 @@ describe('OpenRouterModelCatalogModel', () => {
       ],
       triggeredBy: 'manual:admin',
     });
+
+    // The admin turns one model off. A sync must not undo that.
+    await catalog.setModelsEnabled(['openai/gpt-a'], false);
 
     await catalog.replaceCatalog({
       models: [
@@ -120,8 +125,10 @@ describe('OpenRouterModelCatalogModel', () => {
     const rows = await catalog.listAsProviderModels();
     const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
 
-    expect(byId['openai/gpt-a'].enabled).toBe(true);
+    // Still off, while every other column refreshes from the snapshot.
+    expect(byId['openai/gpt-a'].enabled).toBe(false);
     expect(byId['openai/gpt-a'].displayName).toBe('GPT-A refreshed');
+    // Ids the catalog has not seen before arrive enabled.
     expect(byId['openai/gpt-b'].enabled).toBe(true);
     expect(byId['google/gemini-b'].enabled).toBe(true);
     expect(byId['anthropic/claude-a']).toBeUndefined();
@@ -134,6 +141,23 @@ describe('OpenRouterModelCatalogModel', () => {
       modelCount: 5,
     });
     expect(status.lastSyncedAt).toBeTruthy();
+  });
+
+  it('turns models back on in bulk', async () => {
+    await catalog.replaceCatalog({
+      models: [
+        { displayName: 'GPT-A', id: 'openai/gpt-a', releasedAt: '2025-01-01', type: 'chat' },
+        { displayName: 'GPT-B', id: 'openai/gpt-b', releasedAt: '2025-01-01', type: 'chat' },
+      ],
+      triggeredBy: 'manual:admin',
+    });
+
+    await catalog.setModelsEnabled(['openai/gpt-a', 'openai/gpt-b'], false);
+    await expect(catalog.setModelsEnabled(['openai/gpt-a', 'openai/gpt-b'], true)).resolves.toBe(2);
+
+    const byId = Object.fromEntries((await catalog.listAsProviderModels()).map((r) => [r.id, r]));
+    expect(byId['openai/gpt-a'].enabled).toBe(true);
+    expect(byId['openai/gpt-b'].enabled).toBe(true);
   });
 
   it('records sync errors without clearing prior success metadata', async () => {

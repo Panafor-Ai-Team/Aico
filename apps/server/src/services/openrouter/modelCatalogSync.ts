@@ -65,6 +65,11 @@ export class OpenRouterModelCatalogSyncService {
     return this.catalog.listCoefficients();
   };
 
+  /** Choose which catalog models the site offers. */
+  setModelsEnabled = async (ids: string[], enabled: boolean) => {
+    return this.catalog.setModelsEnabled(ids, enabled);
+  };
+
   /**
    * If the catalog is empty (first setup), pull OpenRouter once.
    * Returns whether a sync was attempted.

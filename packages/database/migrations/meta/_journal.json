@@ -1085,6 +1085,13 @@
       "when": 1788600000000,
       "tag": "0154_aico_managed_key_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1788700000000,
+      "tag": "0155_aico_enable_existing_catalog_models",
+      "breakpoints": true
     }
   ],
   "version": "6"

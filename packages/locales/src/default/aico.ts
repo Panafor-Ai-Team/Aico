@@ -352,6 +352,14 @@ export default {
   'platform.modelMultiplierSaved': 'Model coefficient updated',
   'platform.modelMultiplierReset': 'Model coefficient reset to published',
   'platform.modelMultiplierFailed': 'Failed to update model coefficient',
+  'platform.modelEnabledColumn': 'On the site',
+  'platform.modelEnabledHint':
+    'Models switched on here are the ones people can pick on the site. A choice made here survives the next catalog sync.',
+  'platform.modelEnabledSelected': '{{count}} selected',
+  'platform.modelEnabledBulkOn': 'Turn on',
+  'platform.modelEnabledBulkOff': 'Turn off',
+  'platform.modelEnabledSaved': 'Model availability updated',
+  'platform.modelEnabledFailed': 'Failed to update model availability',
   'platform.modelsCount': 'Models in catalog',
   'platform.modelsFetchNow': 'Fetch models now',
   'platform.modelsHint':
