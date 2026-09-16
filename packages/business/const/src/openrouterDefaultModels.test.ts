@@ -203,3 +203,36 @@ describe('isManagedAutoModelId', () => {
     expect(MANAGED_AUTO_MODEL_ID).toBe('openrouter/auto');
   });
 });
+
+describe('a gateway catalog with no vendor prefixes', () => {
+  // Shape of CheapVibeCode's live /v1/models: bare ids, no releasedAt.
+  const cvcCatalog = [
+    { id: 'claude-opus-5' },
+    { id: 'gpt-6-astra' },
+    { id: 'gemini-3.8-flash' },
+    { id: 'glm-5.3-flash' },
+    { id: 'deepseek-v4.1-flash' },
+    { id: 'grok-4.6' },
+  ];
+
+  it('enables every chat model, because the per-family trim has nothing to rank on', () => {
+    const enabled = computeDefaultEnabledOpenRouterModelIds(cvcCatalog);
+
+    // Before this branch existed the trim bucketed nothing and the picker showed
+    // only the pins — an effectively empty model list for every user.
+    for (const model of cvcCatalog) {
+      expect(enabled.has(model.id)).toBe(true);
+    }
+    expect(enabled.has(OPENROUTER_AUTO_MODEL_ID)).toBe(true);
+  });
+
+  it('still leaves a vendor-prefixed catalog curated', () => {
+    const enabled = computeDefaultEnabledOpenRouterModelIds([
+      { id: 'openai/gpt-4o' },
+      { id: 'anthropic/claude-opus-5' },
+      { id: 'some-vendor/tiny-experiment' },
+    ]);
+
+    expect(enabled.has('some-vendor/tiny-experiment')).toBe(false);
+  });
+});

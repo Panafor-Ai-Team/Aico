@@ -133,6 +133,9 @@ const isEmbeddingType = (type?: string | null): boolean =>
  * {@link DEFAULT_ENABLED_MODELS_PER_FAMILY} newest chat models from each of
  * openai / anthropic / google (by `releasedAt` desc; missing dates sort last),
  * pinned chat models ({@link DEFAULT_ENABLED_OPENROUTER_PINNED_CHAT_MODEL_IDS}),
+ * every chat model when the catalog has no `vendor/`-prefixed families at all
+ * (a pre-curated gateway list such as CheapVibeCode's, where the per-family trim
+ * has nothing to rank on),
  * every catalog `image` / `video` generator (Create pickers only list enabled
  * models) and every catalog `embedding` model (knowledge / memory pickers only
  * list enabled models), plus Nano Banana Image-tab pins and `:image` clones of
@@ -158,6 +161,19 @@ export const computeDefaultEnabledOpenRouterModelIds = (
 
   // Always pin product Auto — even if the upstream snapshot omitted it.
   const enabled = new Set<string>([OPENROUTER_AUTO_MODEL_ID]);
+
+  // A catalog with no `vendor/` prefixes at all is a pre-curated flagship list
+  // rather than a long tail — CheapVibeCode ships ~36 bare ids (`claude-opus-5`,
+  // `gpt-6-astra`) and publishes no release dates. Both inputs the
+  // newest-N-per-family trim ranks on are therefore absent, and running it
+  // anyway enables nothing but the pins, which is what a user sees as an empty
+  // model picker. Upstream already did the curating here, so take all of it.
+  // OpenRouter keeps the trim untouched, so a rollback restores today's list.
+  if ([...buckets.values()].every((bucket) => bucket.length === 0)) {
+    for (const model of models) {
+      if (isChatType(model.type)) enabled.add(model.id);
+    }
+  }
 
   for (const family of OPENROUTER_DEFAULT_ENABLED_FAMILIES) {
     const ranked = buckets.get(family)!.toSorted((a, b) => {
