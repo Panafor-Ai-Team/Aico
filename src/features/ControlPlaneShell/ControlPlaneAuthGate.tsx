@@ -41,10 +41,11 @@ const ControlPlaneAuthGate = memo<PropsWithChildren>(({ children }) => {
   }
 
   return (
-    <Flexbox gap={12} style={{ background: 'transparent', minHeight: '100dvh', width: '100%' }}>
+    <Flexbox gap={12} height={'100%'} style={{ background: 'transparent', width: '100%' }}>
       <Flexbox
         horizontal
         align="center"
+        flex={'none'}
         gap={12}
         justify="flex-end"
         paddingBlock={12}
