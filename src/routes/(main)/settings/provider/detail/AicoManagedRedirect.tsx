@@ -4,6 +4,10 @@ import type { ReactNode } from 'react';
 import { Navigate } from 'react-router';
 
 import { getActiveWorkspaceSlug } from '@/business/client/hooks/useActiveWorkspaceSlug';
+import {
+  isBrandedProviderRouteSegment,
+  toProviderRouteSegment,
+} from '@/components/Branding/brandedProviderRoute';
 import { buildWorkspaceAwarePath } from '@/features/Workspace/workspaceAwarePath';
 import { useClientDataSWR } from '@/libs/swr';
 import { lambdaClient } from '@/libs/trpc/client';
@@ -12,11 +16,14 @@ type Props = {
   children?: ReactNode;
   /** Rendered when not in managed mode. */
   fallback: ReactNode;
-  /** Current provider route id (`all`, `openai`, `openrouter`, …). */
+  /** Current provider route segment (`all`, `openai`, `panachat`, …). */
   id?: string | null;
 };
 
 const ALLOWED = new Set(['openrouter', 'aico']);
+
+/** The branded slot, under any of its URL spellings. */
+const isBrandedSlot = (id: string) => ALLOWED.has(id) || isBrandedProviderRouteSegment(id);
 
 /**
  * When Aico managed billing is on, bounce every other provider surface
@@ -32,8 +39,12 @@ const AicoManagedRedirect = ({ children, fallback, id }: Props) => {
   if (!aicoManaged) return <>{children ?? fallback}</>;
 
   const runtimeId = managedStatus?.runtimeProviderId ?? 'openrouter';
-  if (!id || id === 'all' || !ALLOWED.has(id)) {
-    const to = buildWorkspaceAwarePath(`/settings/provider/${runtimeId}`, getActiveWorkspaceSlug());
+  if (!id || id === 'all' || !isBrandedSlot(id)) {
+    // The address bar shows the product slug; `runtimeId` is the storage id.
+    const to = buildWorkspaceAwarePath(
+      `/settings/provider/${toProviderRouteSegment(runtimeId)}`,
+      getActiveWorkspaceSlug(),
+    );
     return <Navigate replace to={to} />;
   }
 

@@ -4,6 +4,7 @@ import { DEFAULT_MODEL_PROVIDER_LIST } from 'model-bank/modelProviders';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { toProviderRouteSegment } from '@/components/Branding/brandedProviderRoute';
 import { useCategory } from '@/routes/(main)/settings/hooks/useCategory';
 import { SettingsTabs } from '@/store/global/initialState';
 import {
@@ -210,7 +211,7 @@ export const useSettingsSearch = (
           label: provider.name,
           pinyinBase: [],
           tab: SettingsTabs.Provider,
-          url: `/settings/provider/${provider.id}`,
+          url: `/settings/provider/${toProviderRouteSegment(provider.id)}`,
         });
       }
 

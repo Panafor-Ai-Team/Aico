@@ -7,6 +7,7 @@ import { SquareArrowOutUpRight } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { toProviderRouteSegment } from '@/components/Branding/brandedProviderRoute';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import WorkspaceLink from '@/features/Workspace/WorkspaceLink';
 
@@ -20,11 +21,11 @@ const ProviderConfig = memo(() => {
     if (isDesktop) {
       const { ensureElectronIpc } = await import('@/utils/electron/ipc');
       await ensureElectronIpc().windows.openSettingsWindow({
-        path: `/settings/provider/${identifier}`,
+        path: `/settings/provider/${toProviderRouteSegment(identifier)}`,
       });
       return;
     }
-    navigate(`/settings/provider/${identifier}`);
+    navigate(`/settings/provider/${toProviderRouteSegment(identifier)}`);
   };
 
   const icon = <Icon icon={SquareArrowOutUpRight} size={16} />;

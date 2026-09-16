@@ -2,6 +2,7 @@
 
 import { Outlet, useParams } from 'react-router';
 
+import { toProviderRouteSegment } from '@/components/Branding/brandedProviderRoute';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { useClientDataSWR } from '@/libs/swr';
 import { lambdaClient } from '@/libs/trpc/client';
@@ -17,7 +18,7 @@ const Layout = () => {
   const aicoManaged = managedStatus?.managed ?? true;
 
   const handleProviderSelect = (providerKey: string) => {
-    navigate(`/settings/provider/${providerKey}`);
+    navigate(`/settings/provider/${toProviderRouteSegment(providerKey)}`);
   };
 
   // Managed mode: skip the list panel and always show provider detail.

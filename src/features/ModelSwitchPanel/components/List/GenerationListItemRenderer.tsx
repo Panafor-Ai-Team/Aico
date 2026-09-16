@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next';
 import urlJoin from 'url-join';
 
 import { useActiveWorkspaceSlug } from '@/business/client/hooks/useActiveWorkspaceSlug';
+import { toProviderRouteSegment } from '@/components/Branding/brandedProviderRoute';
 import { ProviderItemRender } from '@/components/ModelSelect';
 import type { PricingMode } from '@/features/ModelSwitchPanel/components/ModelDetailPanel';
 import ModelDetailPanel from '@/features/ModelSwitchPanel/components/ModelDetailPanel';
@@ -111,7 +112,7 @@ const GenerationListItemRenderer = memo<GenerationListItemRendererProps>(
             gap={8}
             style={{ color: cssVar.colorTextTertiary }}
             onClick={() => {
-              navigate(`/settings/provider/${item.provider.id}`);
+              navigate(`/settings/provider/${toProviderRouteSegment(item.provider.id)}`);
               onClose();
             }}
           >

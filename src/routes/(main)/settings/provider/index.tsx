@@ -4,6 +4,10 @@ import { Flexbox } from '@lobehub/ui';
 import { memo } from 'react';
 import { Outlet, useParams } from 'react-router';
 
+import {
+  fromProviderRouteSegment,
+  toProviderRouteSegment,
+} from '@/components/Branding/brandedProviderRoute';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 
 import DesktopLayoutContainer from './_layout/Desktop/Container';
@@ -15,7 +19,7 @@ export const ProviderLayout = memo(() => {
   const navigate = useWorkspaceAwareNavigate();
 
   const handleProviderSelect = (providerKey: string) => {
-    navigate(`/settings/provider/${providerKey}`);
+    navigate(`/settings/provider/${toProviderRouteSegment(providerKey)}`);
   };
 
   return (
@@ -42,12 +46,12 @@ export const ProviderDetailPage = memo(() => {
   const navigate = useWorkspaceAwareNavigate();
 
   const handleProviderSelect = (providerKey: string) => {
-    navigate(`/settings/provider/${providerKey}`);
+    navigate(`/settings/provider/${toProviderRouteSegment(providerKey)}`);
   };
 
   return (
     <ProviderDetailPageComponent
-      id={params.providerId ?? ''}
+      id={fromProviderRouteSegment(params.providerId ?? '')}
       onProviderSelect={handleProviderSelect}
     />
   );
