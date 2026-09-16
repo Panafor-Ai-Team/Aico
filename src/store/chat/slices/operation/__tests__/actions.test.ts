@@ -1574,3 +1574,54 @@ describe('Operation Actions', () => {
     });
   });
 });
+
+describe('markTopicUnread', () => {
+  beforeEach(() => {
+    useChatStore.setState(useChatStore.getInitialState());
+  });
+
+  // Regression: a group run writes its topic status with an explicit `scope`,
+  // but the run-end `markTopicUnread` dropped it. `updateTopicStatus` then
+  // auto-derives `group_agent` from agentId+groupId and patches a bucket the
+  // sidebar never renders, so the VISIBLE group topic keeps the run-start
+  // 'running' — spinner still turning on a chat that already finished.
+  it('carries the group scope through to the status write', () => {
+    const updateTopicStatus = vi.fn().mockResolvedValue(undefined);
+    useChatStore.setState({ activeTopicId: 'other-topic', updateTopicStatus } as any);
+
+    act(() => {
+      useChatStore.getState().markTopicUnread({
+        agentId: 'agent-1',
+        groupId: 'group-1',
+        scope: 'group',
+        topicId: 'topic-1',
+      });
+    });
+
+    expect(updateTopicStatus).toHaveBeenCalledWith({
+      agentId: 'agent-1',
+      groupId: 'group-1',
+      scope: 'group',
+      status: 'unread',
+      topicId: 'topic-1',
+    });
+  });
+
+  it('omits scope entirely for a non-group run so auto-detection still applies', () => {
+    const updateTopicStatus = vi.fn().mockResolvedValue(undefined);
+    useChatStore.setState({ activeTopicId: 'other-topic', updateTopicStatus } as any);
+
+    act(() => {
+      useChatStore
+        .getState()
+        .markTopicUnread({ agentId: 'agent-1', scope: undefined, topicId: 'topic-1' });
+    });
+
+    expect(updateTopicStatus).toHaveBeenCalledWith({
+      agentId: 'agent-1',
+      groupId: undefined,
+      status: 'unread',
+      topicId: 'topic-1',
+    });
+  });
+});

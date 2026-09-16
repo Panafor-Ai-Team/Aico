@@ -5,7 +5,7 @@ import { produce } from 'immer';
 import { type ChatStore } from '@/store/chat/store';
 import { type MessageMapKeyInput } from '@/store/chat/utils/messageMapKey';
 import { messageMapKey } from '@/store/chat/utils/messageMapKey';
-import { topicMapKey } from '@/store/chat/utils/topicMapKey';
+import { topicMapKey, type TopicMapScope } from '@/store/chat/utils/topicMapKey';
 import { getHomeStoreState } from '@/store/home';
 import { type StoreSetter } from '@/store/types';
 import { setNamespace } from '@/utils/storeDebug';
@@ -723,14 +723,22 @@ export class OperationActionsImpl {
    * agent) and persists fire-and-forget. After it persists we refresh the home
    * sidebar list so the cross-agent unread badge updates even for agents whose
    * topics aren't loaded on this client.
+   *
+   * `scope` must be carried through for group runs, exactly like the run's own
+   * status writes do. Without it `updateTopicStatus` auto-derives `group_agent`
+   * from agentId+groupId, so the optimistic patch lands in a bucket the sidebar
+   * never reads — leaving the VISIBLE group topic stuck on the run-start
+   * 'running' (spinner still turning on a finished chat) until the next refetch.
    */
   markTopicUnread = ({
     agentId,
     groupId,
+    scope,
     topicId,
   }: {
     agentId?: string;
     groupId?: string | null;
+    scope?: TopicMapScope;
     topicId?: string | null;
   }): void => {
     if (!topicId) return;
@@ -740,6 +748,7 @@ export class OperationActionsImpl {
       .updateTopicStatus?.({
         agentId,
         groupId: groupId ?? undefined,
+        ...(scope ? { scope } : {}),
         status: 'unread',
         topicId,
       })

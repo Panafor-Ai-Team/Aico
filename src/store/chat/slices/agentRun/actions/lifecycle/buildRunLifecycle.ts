@@ -8,6 +8,7 @@ import { emitClientAgentSignalSourceEvent } from '@/store/chat/slices/agentRun/a
 import { snapshotTopicWorkingDirGit } from '@/store/chat/slices/agentRun/actions/lifecycle/snapshotWorkingDirGit';
 import type { ChatStore } from '@/store/chat/store';
 import { notifyDesktopAgentCompleted } from '@/store/chat/utils/desktopNotification';
+import { resolveGroupTopicScope } from '@/store/chat/utils/topicMapKey';
 import { markdownToTxt } from '@/utils/markdownToTxt';
 
 import { messageMapKey } from '../../../../utils/messageMapKey';
@@ -318,6 +319,11 @@ export const buildRunLifecycle = (
           get().markTopicUnread({
             agentId: completedOp.context.agentId,
             groupId: completedOp.context.groupId,
+            // Same rule as `resetActiveTopicRunningStatus` below: carry the group
+            // scope so the optimistic 'unread' patch lands in the bucket the
+            // sidebar actually renders, instead of leaving the visible group
+            // topic on the run-start 'running'.
+            scope: resolveGroupTopicScope(completedOp.context.scope),
             topicId: completedOp.context.topicId,
           });
         }
