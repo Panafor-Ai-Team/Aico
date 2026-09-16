@@ -82,15 +82,17 @@ describe('Generation Actions', () => {
         store.getState().stopGenerating();
       });
 
+      // Targets the conversation bucket, not raw context fields — see
+      // `OperationFilter.context`. A field-by-field filter drifts from the
+      // bucket-based loading selector that decides whether Stop is shown.
       expect(mockCancelOperations).toHaveBeenCalledWith(
         {
-          agentId: 'session-1',
-          groupId: undefined,
-          isNew: undefined,
-          scope: undefined,
+          context: {
+            agentId: 'session-1',
+            threadId: null,
+            topicId: 'topic-1',
+          },
           status: 'running',
-          threadId: null,
-          topicId: 'topic-1',
           type: INPUT_LOADING_OPERATION_TYPES,
         },
         expect.any(String),
@@ -114,13 +116,18 @@ describe('Generation Actions', () => {
         store.getState().stopGenerating();
       });
 
+      // The creating-thread context keys to its own bucket
+      // (`thread_session-1_topic-1_new`), so the main conversation's operations
+      // in the same topic are left running.
       expect(mockCancelOperations).toHaveBeenCalledWith(
         expect.objectContaining({
-          agentId: 'session-1',
-          isNew: true,
-          scope: 'thread',
-          threadId: null,
-          topicId: 'topic-1',
+          context: expect.objectContaining({
+            agentId: 'session-1',
+            isNew: true,
+            scope: 'thread',
+            threadId: null,
+            topicId: 'topic-1',
+          }),
         }),
         expect.any(String),
       );

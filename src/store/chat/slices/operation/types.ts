@@ -5,6 +5,8 @@ import type {
   UploadFileItem,
 } from '@lobechat/types';
 
+import type { MessageMapKeyInput } from '@/store/chat/utils/messageMapKey';
+
 /**
  * Operation Type Definitions
  * Unified operation state management for all async operations
@@ -410,6 +412,21 @@ export const mergeQueuedMessages = (messages: QueuedMessage[]): MergedQueuedMess
  */
 export interface OperationFilter {
   agentId?: string;
+  /**
+   * Match by conversation bucket instead of comparing context fields one by one.
+   *
+   * The per-field comparisons below are strict (`===`), while `messageMapKey`
+   * normalises — `sub_agent` collapses into `main`, and a topicless `isNew: true`
+   * shares a bucket with a topicless `isNew: undefined`. Loading indicators are
+   * bucket-based (`isInputLoadingByContext`), so a filter built from raw context
+   * fields can miss the very operation the input is showing a Stop button for.
+   *
+   * Prefer this whenever the filter is meant to target "the operations this
+   * conversation is currently showing as running". When set, the context fields
+   * (`agentId` / `topicId` / `threadId` / `groupId` / `scope` / `isNew`) are
+   * ignored in favour of the bucket; `type`, `status` and `messageId` still apply.
+   */
+  context?: MessageMapKeyInput;
   groupId?: string;
   isNew?: boolean;
   messageId?: string;

@@ -515,8 +515,31 @@ export class OperationActionsImpl {
     );
   };
 
+  /**
+   * Operations attributed to a conversation bucket.
+   *
+   * Mirrors `operationSelectors.getOperationsByContext` — same `messageMapKey`
+   * bucket, same threadId refinement — so what the input counts as "running" and
+   * what Stop cancels are resolved the same way. Kept here rather than imported
+   * to avoid an actions → selectors cycle.
+   */
+  #getOperationsInContext = (context: MessageMapKeyInput): Operation[] => {
+    const state = this.#get();
+    const operationIds = state.operationsByContext[messageMapKey(context)] || [];
+    const contextThreadId = context.threadId ?? null;
+
+    return operationIds
+      .map((id) => state.operations[id])
+      .filter((op): op is Operation => !!op && (op.context.threadId ?? null) === contextThreadId);
+  };
+
   cancelOperations = (filter: OperationFilter, reason: string = 'Batch cancelled'): string[] => {
-    const operations = Object.values(this.#get().operations);
+    // Bucket mode: match exactly the operations the loading selectors attribute
+    // to this conversation, so a visible Stop button can never target an empty
+    // set. See `OperationFilter.context` for why field-by-field matching drifts.
+    const byContext = filter.context ? this.#getOperationsInContext(filter.context) : undefined;
+
+    const operations = byContext ?? Object.values(this.#get().operations);
     const matchedIds: string[] = [];
 
     operations.forEach((op) => {
@@ -536,27 +559,31 @@ export class OperationActionsImpl {
         matches = matches && statuses.includes(op.status);
       }
 
-      // Context filters
-      if (filter.agentId !== undefined) {
-        matches = matches && op.context.agentId === filter.agentId;
-      }
-      if (filter.topicId !== undefined) {
-        matches = matches && isSameNullableContextValue(op.context.topicId, filter.topicId);
-      }
+      // messageId is orthogonal to the conversation bucket, so it applies in both modes.
       if (filter.messageId !== undefined) {
         matches = matches && op.context.messageId === filter.messageId;
       }
-      if (filter.threadId !== undefined) {
-        matches = matches && isSameNullableContextValue(op.context.threadId, filter.threadId);
-      }
-      if (filter.groupId !== undefined) {
-        matches = matches && op.context.groupId === filter.groupId;
-      }
-      if (filter.scope !== undefined) {
-        matches = matches && op.context.scope === filter.scope;
-      }
-      if (filter.isNew !== undefined) {
-        matches = matches && op.context.isNew === filter.isNew;
+
+      // The remaining context filters are already satisfied by the bucket lookup.
+      if (!byContext) {
+        if (filter.agentId !== undefined) {
+          matches = matches && op.context.agentId === filter.agentId;
+        }
+        if (filter.topicId !== undefined) {
+          matches = matches && isSameNullableContextValue(op.context.topicId, filter.topicId);
+        }
+        if (filter.threadId !== undefined) {
+          matches = matches && isSameNullableContextValue(op.context.threadId, filter.threadId);
+        }
+        if (filter.groupId !== undefined) {
+          matches = matches && op.context.groupId === filter.groupId;
+        }
+        if (filter.scope !== undefined) {
+          matches = matches && op.context.scope === filter.scope;
+        }
+        if (filter.isNew !== undefined) {
+          matches = matches && op.context.isNew === filter.isNew;
+        }
       }
 
       if (matches) {

@@ -1083,21 +1083,20 @@ export const generationSlice: StateCreator<
   stopGenerating: () => {
     const state = get();
     const { context, editor, hooks } = state;
-    const { agentId, groupId, isNew, scope, threadId, topicId } = context;
 
     const chatStore = useChatStore.getState();
 
     // Cancel all running operations in this conversation context
     // Includes sendMessage, AI runtime (client-side and server-side), and agent mode stream
+    //
+    // Match on the conversation bucket rather than on raw context fields: the
+    // Stop button is shown by `isInputLoadingByContext`, which is bucket-based,
+    // so a field-by-field filter could miss the exact operation the user is
+    // looking at — the button would render and cancel nothing.
     chatStore.cancelOperations(
       {
-        agentId,
-        groupId,
-        isNew,
-        scope,
+        context,
         status: 'running',
-        threadId,
-        topicId,
         type: INPUT_LOADING_OPERATION_TYPES,
       },
       MESSAGE_CANCEL_FLAT,
