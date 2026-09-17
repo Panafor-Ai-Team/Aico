@@ -94,11 +94,14 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
     }
 
     const workspaceId = await resolveValidWorkspaceIdFromRequest({ req, serverDB, userId });
-    const data = (await req.json()) as ChatStreamPayload & { aicoBilling?: unknown };
+    const body = (await req.json()) as ChatStreamPayload & { aicoBilling?: unknown };
+    // `aicoBilling` only tells this route who pays; it must never reach the
+    // upstream API — strict endpoints (Responses) reject unknown parameters.
+    const { aicoBilling: _aicoBilling, ...data } = body;
 
     let billingContext: AicoBillingContext;
     try {
-      billingContext = resolveBillingContext(req, data);
+      billingContext = resolveBillingContext(req, body);
     } catch (error) {
       const code =
         error instanceof Error && error.message.startsWith('BILLING_CONTEXT_')
