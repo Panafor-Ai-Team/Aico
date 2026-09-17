@@ -110,6 +110,23 @@ export class OpenRouterModelCatalogModel {
     this.db = db;
   }
 
+  /**
+   * Pricing inputs for every catalog row, enabled or not: a disabled model may
+   * still be reached through Auto, and it must be priced when it is.
+   */
+  listPricingRows = async () =>
+    this.db
+      .select({
+        contextWindowTokens: openrouterModelCatalog.contextWindowTokens,
+        id: openrouterModelCatalog.id,
+        maxOutput: sql<
+          number | null
+        >`NULLIF(${openrouterModelCatalog.payload}->>'maxOutput', '')::int`,
+        pricing: openrouterModelCatalog.pricing,
+        type: openrouterModelCatalog.type,
+      })
+      .from(openrouterModelCatalog);
+
   getSyncStatus = async (): Promise<OpenRouterCatalogSyncStatus> => {
     const row = await this.db.query.openrouterModelSyncState.findFirst({
       where: eq(openrouterModelSyncState.id, SYNC_STATE_ID),

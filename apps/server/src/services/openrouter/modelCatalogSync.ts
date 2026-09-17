@@ -101,6 +101,8 @@ export class OpenRouterModelCatalogSyncService {
           description: model.description,
           displayName: model.displayName,
           id: model.id,
+          // Kept in the payload: the usage ledger bounds a hold by the model's own output cap.
+          maxOutput: model.maxOutput,
           parameters: model.parameters,
           pricing: model.pricing,
           releasedAt: model.releasedAt,

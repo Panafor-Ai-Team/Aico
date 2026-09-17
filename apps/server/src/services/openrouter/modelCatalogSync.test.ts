@@ -27,6 +27,7 @@ describe('OpenRouterModelCatalogSyncService', () => {
         displayName: 'GPT-4o',
         functionCall: true,
         id: 'openai/gpt-4o',
+        maxOutput: 16_384,
         releasedAt: '2025-01-01',
         type: 'chat',
         vision: true,
@@ -89,6 +90,11 @@ describe('OpenRouterModelCatalogSyncService', () => {
         }),
       ]),
     );
+
+    // The usage ledger bounds a hold by the model's own output cap.
+    const pricingRows = await catalog.listPricingRows();
+    expect(pricingRows.find((row) => row.id === 'openai/gpt-4o')?.maxOutput).toBe(16_384);
+    expect(pricingRows.find((row) => row.id === 'openrouter/auto')?.maxOutput).toBeNull();
   });
 
   it('records failure status when OpenRouter fetch throws', async () => {

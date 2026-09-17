@@ -21,6 +21,32 @@ beforeEach(async () => {
 }, 30_000);
 
 describe('OpenRouterModelCatalogModel', () => {
+  it('lists pricing rows with the output cap kept in the payload', async () => {
+    await catalog.replaceCatalog({
+      models: [
+        {
+          contextWindowTokens: 200_000,
+          id: 'glm-5.3-flash',
+          maxOutput: 32_000,
+          pricing: {
+            units: [{ name: 'textInput', rate: 0.012, strategy: 'fixed', unit: 'millionTokens' }],
+          },
+          type: 'chat',
+        },
+        { id: 'no-cap', type: 'chat' },
+      ],
+      triggeredBy: 'test',
+    });
+
+    const rows = await catalog.listPricingRows();
+    expect(rows.find((row) => row.id === 'glm-5.3-flash')).toMatchObject({
+      contextWindowTokens: 200_000,
+      maxOutput: 32_000,
+      type: 'chat',
+    });
+    expect(rows.find((row) => row.id === 'no-cap')?.maxOutput).toBeNull();
+  });
+
   it('starts with never-synced status', async () => {
     await expect(catalog.getSyncStatus()).resolves.toMatchObject({
       lastStatus: 'never',
