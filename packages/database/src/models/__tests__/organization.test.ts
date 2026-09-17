@@ -226,6 +226,53 @@ describe('OrganizationModel', () => {
     ]);
   });
 
+  it('switches a single team model on and off without touching the others', async () => {
+    const org = await orgModel.createOrganization({ name: 'Switch Org', ownerUserId: ownerId });
+    const teams = await orgModel.listTeams(org.id);
+    const teamId = teams[0].id;
+    await orgModel.setTeamModelAccess({ modelIds: ['glm-5.3'], orgId: org.id, teamId });
+
+    // Switching on twice must not grant it twice.
+    await orgModel.setTeamModelEnabled({
+      enabled: true,
+      modelId: 'gpt-image-2',
+      orgId: org.id,
+      teamId,
+    });
+    await orgModel.setTeamModelEnabled({
+      enabled: true,
+      modelId: 'gpt-image-2',
+      orgId: org.id,
+      teamId,
+    });
+    let ids = (await orgModel.getTeamModelAccess(teamId)).map((r) => r.modelId).sort();
+    expect(ids).toEqual(['glm-5.3', 'gpt-image-2']);
+
+    await orgModel.setTeamModelEnabled({
+      enabled: false,
+      modelId: 'glm-5.3',
+      orgId: org.id,
+      teamId,
+    });
+    ids = (await orgModel.getTeamModelAccess(teamId)).map((r) => r.modelId);
+    expect(ids).toEqual(['gpt-image-2']);
+  });
+
+  it('refuses to switch models for a team outside the organization', async () => {
+    const org = await orgModel.createOrganization({ name: 'Home Org', ownerUserId: ownerId });
+    const other = await orgModel.createOrganization({ name: 'Other Org', ownerUserId: adminId });
+    const otherTeam = (await orgModel.listTeams(other.id))[0];
+
+    await expect(
+      orgModel.setTeamModelEnabled({
+        enabled: true,
+        modelId: 'gpt-image-2',
+        orgId: org.id,
+        teamId: otherTeam.id,
+      }),
+    ).rejects.toThrow('TEAM_NOT_FOUND');
+  });
+
   it('cannot demote last owner', async () => {
     const org = await orgModel.createOrganization({ name: 'Owner Org', ownerUserId: ownerId });
     const members = await orgModel.listMembers(org.id);
