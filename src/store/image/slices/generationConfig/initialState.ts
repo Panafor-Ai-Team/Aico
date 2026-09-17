@@ -1,13 +1,13 @@
 import type { ModelParamsSchema, RuntimeImageGenParams } from 'model-bank';
 import { extractDefaultValues, ModelProvider } from 'model-bank';
-import { nanoBanana2Parameters } from 'model-bank/imageParameters';
+import { gptImage2Schema } from 'model-bank/imageParameters';
 
 import { DEFAULT_IMAGE_CONFIG } from '@/const/settings';
 
-/** Aico: Nano Banana runs on managed OpenRouter (not Google BYOK). */
+/** Aico: the managed catalog is served under the `openrouter` slot. */
 export const DEFAULT_AI_IMAGE_PROVIDER = ModelProvider.OpenRouter;
-/** OpenRouter id + Image-tab `:image` sibling (see postProcessModelList). */
-export const DEFAULT_AI_IMAGE_MODEL = 'google/gemini-3.1-flash-image-preview:image';
+/** GPT Image 2 at medium quality (the `quality` default in its schema). */
+export const DEFAULT_AI_IMAGE_MODEL = 'gpt-image-2';
 
 export interface GenerationConfigState {
   parameters: RuntimeImageGenParams;
@@ -34,14 +34,14 @@ export interface GenerationConfigState {
 }
 
 export const DEFAULT_IMAGE_GENERATION_PARAMETERS: RuntimeImageGenParams =
-  extractDefaultValues(nanoBanana2Parameters);
+  extractDefaultValues(gptImage2Schema);
 
 export const initialGenerationConfigState: GenerationConfigState = {
   model: DEFAULT_AI_IMAGE_MODEL,
   provider: DEFAULT_AI_IMAGE_PROVIDER,
   imageNum: DEFAULT_IMAGE_CONFIG.defaultImageNum,
   parameters: DEFAULT_IMAGE_GENERATION_PARAMETERS,
-  parametersSchema: nanoBanana2Parameters,
+  parametersSchema: gptImage2Schema,
   isAspectRatioLocked: false,
   activeAspectRatio: null,
   uploadingImagePreviews: [],

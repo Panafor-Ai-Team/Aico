@@ -1,6 +1,6 @@
 import {
   DEFAULT_AUTO_IMAGE_MODEL_PROVIDER,
-  isDefaultAutoImageModelId,
+  pickDefaultAutoImageModel,
 } from '@lobechat/business-const';
 
 export interface ImageModelOption {
@@ -19,8 +19,8 @@ export const imageModelOptionKey = (option: { model: string; provider: string })
 /**
  * Pick what the confirmation card should propose:
  * 1. the model the assistant explicitly asked for, when the account has it;
- * 2. the pinned product default (OpenRouter `meta/muse-image`) — this is the
- *    branch the Auto router lands on, since Auto never names an image model;
+ * 2. the pinned product default (GPT Image 2, else Muse on OpenRouter) — this
+ *    is the branch the Auto router lands on, since Auto never names an image model;
  * 3. otherwise the first model the account has.
  */
 export const resolveDefaultImageModelOption = (
@@ -39,11 +39,10 @@ export const resolveDefaultImageModelOption = (
   }
 
   const pinned =
-    options.find(
-      (option) =>
-        option.provider === DEFAULT_AUTO_IMAGE_MODEL_PROVIDER &&
-        isDefaultAutoImageModelId(option.model),
-    ) ?? options.find((option) => isDefaultAutoImageModelId(option.model));
+    pickDefaultAutoImageModel(
+      options.filter((option) => option.provider === DEFAULT_AUTO_IMAGE_MODEL_PROVIDER),
+      (option) => option.model,
+    ) ?? pickDefaultAutoImageModel(options, (option) => option.model);
 
   return pinned ?? options[0];
 };

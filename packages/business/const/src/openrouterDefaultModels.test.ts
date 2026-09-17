@@ -9,6 +9,7 @@ import {
   isManagedAutoModelId,
   MANAGED_AUTO_MODEL_ID,
   OPENROUTER_AUTO_MODEL_ID,
+  pickDefaultAutoImageModel,
   pickPreferredDefaultOpenRouterModelId,
 } from './openrouterDefaultModels';
 
@@ -171,6 +172,22 @@ describe('isDefaultAutoImageModelId', () => {
     ]);
 
     expect(enabled.has(DEFAULT_AUTO_IMAGE_MODEL_ID)).toBe(true);
+  });
+});
+
+describe('default auto image model', () => {
+  it('is GPT Image 2, with Muse still treated as a default for OpenRouter', () => {
+    expect(DEFAULT_AUTO_IMAGE_MODEL_ID).toBe('gpt-image-2');
+    expect(isDefaultAutoImageModelId('meta/muse-image')).toBe(true);
+  });
+
+  it('picks by preference order, not by list order', () => {
+    const ids = ['meta/muse-image', 'gpt-image-2'];
+    expect(pickDefaultAutoImageModel(ids, (id) => id)).toBe('gpt-image-2');
+    expect(pickDefaultAutoImageModel(['meta/muse-image:image'], (id) => id)).toBe(
+      'meta/muse-image:image',
+    );
+    expect(pickDefaultAutoImageModel(['some/other'], (id) => id)).toBeUndefined();
   });
 });
 

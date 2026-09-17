@@ -2,12 +2,18 @@ import {
   computeDefaultEnabledOpenRouterModelIds,
   ensureOpenRouterAutoModel,
   ensureOpenRouterModels,
+  MANAGED_PROVIDER_ID,
   OPENROUTER_AUTO_DISPLAY_NAME,
   OPENROUTER_AUTO_MODEL_ID,
 } from '@lobechat/business-const';
 import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { AiProviderModelListItem, ModelAbilities, Pricing } from 'model-bank';
 import { AiModelSourceEnum, normalizeAiModelType } from 'model-bank';
+import {
+  cheapVibeCodePromptOnlyImageParameters,
+  gptImage2Schema,
+} from 'model-bank/imageParameters';
+import { cheapVibeCodeGrokImagineVideoParameters } from 'model-bank/videoParameters';
 
 import {
   type NewOpenrouterModelCatalog,
@@ -83,6 +89,49 @@ const EMBEDDING_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
     type: 'embedding',
   },
 ];
+
+/**
+ * CheapVibeCode's generators. Its `/v1/models` lists only text-output models, so
+ * image and video generation never arrive through a sync; these are the models
+ * its `/v1/images/generations` and `/v1/videos/generations` actually accept.
+ * Injected only while CheapVibeCode is the live gateway, so an OpenRouter
+ * catalog never offers ids its upstream would reject.
+ */
+const CHEAPVIBECODE_GENERATION_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
+  { displayName: 'GPT Image 2', id: 'gpt-image-2', parameters: gptImage2Schema, type: 'image' },
+  {
+    displayName: 'Nano Banana 2',
+    id: 'nano-banana-2',
+    parameters: cheapVibeCodePromptOnlyImageParameters,
+    type: 'image',
+  },
+  {
+    displayName: 'Grok Imagine Image',
+    id: 'grok-imagine-image',
+    parameters: cheapVibeCodePromptOnlyImageParameters,
+    type: 'image',
+  },
+  {
+    displayName: 'Grok Imagine Video',
+    id: 'grok-imagine-video',
+    parameters: cheapVibeCodeGrokImagineVideoParameters,
+    type: 'video',
+  },
+];
+
+const managedGenerationCatalogCards = (): OpenRouterCatalogModelInput[] =>
+  MANAGED_PROVIDER_ID === 'cheapvibecode' ? CHEAPVIBECODE_GENERATION_CATALOG_CARDS : [];
+
+const toProviderCard = (card: OpenRouterCatalogModelInput): AiProviderModelListItem =>
+  ({
+    abilities: {},
+    displayName: card.displayName,
+    enabled: true,
+    id: card.id,
+    parameters: card.parameters,
+    source: AiModelSourceEnum.Remote,
+    type: normalizeAiModelType(card.type),
+  }) as AiProviderModelListItem;
 
 /**
  * Serve-path twin of {@link EMBEDDING_CATALOG_CARDS}: the exact card
@@ -260,7 +309,10 @@ export class OpenRouterModelCatalogModel {
       // injection (or never re-synced) has no embedding rows, which leaves the
       // memory-embedding default disabled. Backfill the same cards
       // `replaceCatalog` injects at sync time.
-      return ensureOpenRouterModels(mapped, EMBEDDING_PROVIDER_CARDS);
+      return ensureOpenRouterModels(mapped, [
+        ...EMBEDDING_PROVIDER_CARDS,
+        ...managedGenerationCatalogCards().map(toProviderCard),
+      ]);
     }
 
     return [
@@ -274,7 +326,10 @@ export class OpenRouterModelCatalogModel {
         source: AiModelSourceEnum.Remote,
         type: 'chat',
       } as AiProviderModelListItem,
-      ...ensureOpenRouterModels(mapped, EMBEDDING_PROVIDER_CARDS),
+      ...ensureOpenRouterModels(mapped, [
+        ...EMBEDDING_PROVIDER_CARDS,
+        ...managedGenerationCatalogCards().map(toProviderCard),
+      ]),
     ];
   };
 
@@ -341,7 +396,7 @@ export class OpenRouterModelCatalogModel {
     const now = new Date();
     const models = ensureOpenRouterModels(
       ensureOpenRouterAutoModel(params.models, AUTO_CATALOG_CARD),
-      EMBEDDING_CATALOG_CARDS,
+      [...EMBEDDING_CATALOG_CARDS, ...managedGenerationCatalogCards()],
     );
     const incomingIds = models.map((m) => m.id);
 

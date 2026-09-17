@@ -72,6 +72,7 @@ export const DEFAULT_ENABLED_OPENROUTER_PINNED_CHAT_MODEL_IDS = [
  * default selection never enables them unless we pin them here.
  */
 export const DEFAULT_ENABLED_OPENROUTER_IMAGE_MODEL_IDS = [
+  'gpt-image-2',
   'meta/muse-image',
   'google/gemini-3.1-flash-image-preview:image',
   'google/gemini-2.5-flash-image:image',
@@ -88,16 +89,36 @@ const IMAGE_MODEL_SUFFIX = ':image';
  */
 export const DEFAULT_AUTO_IMAGE_MODEL_PROVIDER = 'openrouter';
 
-/** Default image generator used when the chat model is the Auto router. */
-export const DEFAULT_AUTO_IMAGE_MODEL_ID = 'meta/muse-image';
+/**
+ * Default image generators used when the chat model is the Auto router, in
+ * preference order. GPT Image 2 is served by CheapVibeCode; OpenRouter does not
+ * offer that id, so a deployment on OpenRouter falls through to Muse.
+ */
+export const DEFAULT_AUTO_IMAGE_MODEL_IDS = ['gpt-image-2', 'meta/muse-image'] as const;
+
+export const DEFAULT_AUTO_IMAGE_MODEL_ID = DEFAULT_AUTO_IMAGE_MODEL_IDS[0];
+
+const matchesImageModelId = (id: string, defaultId: string) =>
+  id === defaultId || id === `${defaultId}${IMAGE_MODEL_SUFFIX}`;
 
 /**
  * Catalog sync stores chat models with image output under an `:image` suffix, so
- * the pinned default can legitimately show up under either id.
+ * a pinned default can legitimately show up under either id.
  */
 export const isDefaultAutoImageModelId = (id: string): boolean =>
-  id === DEFAULT_AUTO_IMAGE_MODEL_ID ||
-  id === `${DEFAULT_AUTO_IMAGE_MODEL_ID}${IMAGE_MODEL_SUFFIX}`;
+  DEFAULT_AUTO_IMAGE_MODEL_IDS.some((defaultId) => matchesImageModelId(id, defaultId));
+
+/** The most preferred default image model present in `candidates`. */
+export const pickDefaultAutoImageModel = <T>(
+  candidates: T[],
+  getId: (candidate: T) => string,
+): T | undefined => {
+  for (const defaultId of DEFAULT_AUTO_IMAGE_MODEL_IDS) {
+    const match = candidates.find((candidate) => matchesImageModelId(getId(candidate), defaultId));
+    if (match) return match;
+  }
+  return undefined;
+};
 
 export type OpenRouterDefaultModelCandidate = {
   id: string;
