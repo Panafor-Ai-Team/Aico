@@ -53,8 +53,13 @@ services:
       - 'AICO_CONTROL_PLANE_URL=${AICO_CONTROL_PLANE_URL:-http://panachat-control-plane:3020}'
       - 'OPENROUTER_MANAGEMENT_API_KEY='
       # Same containment as OpenRouter: the CVC primary key is a management AND
-      # inference credential, so it must never reach the product container.
+      # inference credential. It reaches the product container only as
+      # AICO_SHARED_INFERENCE_API_KEY when AICO_MANAGED_INFERENCE_KEY=shared
+      # (accepted risk, 2026-09-16), where the usage ledger meters every call.
+      # CHEAPVIBECODE_API_KEY stays blank so the unmetered env provider can
+      # never use it.
       - 'CHEAPVIBECODE_MANAGEMENT_API_KEY='
+      - 'CHEAPVIBECODE_API_KEY='
     env_file:
       - ${PANACHAT_APP_ENV_FILE:-../../.env}
       - ${PANACHAT_INFRA_ENV_FILE:-.env}
@@ -103,8 +108,13 @@ services:
       - 'AICO_CONTROL_PLANE_URL=${AICO_CONTROL_PLANE_URL:-http://panachat-control-plane:3020}'
       - 'OPENROUTER_MANAGEMENT_API_KEY='
       # Same containment as OpenRouter: the CVC primary key is a management AND
-      # inference credential, so it must never reach the product container.
+      # inference credential. It reaches the product container only as
+      # AICO_SHARED_INFERENCE_API_KEY when AICO_MANAGED_INFERENCE_KEY=shared
+      # (accepted risk, 2026-09-16), where the usage ledger meters every call.
+      # CHEAPVIBECODE_API_KEY stays blank so the unmetered env provider can
+      # never use it.
       - 'CHEAPVIBECODE_MANAGEMENT_API_KEY='
+      - 'CHEAPVIBECODE_API_KEY='
     env_file:
       - ${PANACHAT_APP_ENV_FILE:-../../.env}
       - ${PANACHAT_INFRA_ENV_FILE:-.env}

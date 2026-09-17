@@ -29,3 +29,27 @@ services:
         done
     depends_on:
       - lobe
+
+  aico-ledger-maintenance:
+    image: curlimages/curl:8.12.1
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+      - .env
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -eu
+        echo "aico-ledger-maintenance: waiting for lobe…"
+        sleep 60
+        while true; do
+          TARGET="$${INTERNAL_APP_URL:-$${APP_URL:-http://lobe:3210}}"
+          echo "$$(date -u +%Y-%m-%dT%H:%M:%SZ) running usage ledger maintenance via $$TARGET"
+          curl -fsS -X GET \
+            -H "Authorization: Bearer $${CRON_SECRET}" \
+            "$$TARGET/api/aico/cron/ledger-maintenance" \
+            || echo "ledger maintenance failed (retry in 5m)"
+          sleep 300
+        done
+    depends_on:
+      - lobe
