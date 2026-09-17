@@ -1,10 +1,10 @@
-import { isDefaultAutoImageModelId } from '@lobechat/business-const';
+import { pickDefaultAutoImageModel } from '@lobechat/business-const';
 import {
   type AsyncTaskError,
   AsyncTaskStatus,
   type BuiltinServerRuntimeOutput,
 } from '@lobechat/types';
-import type { RuntimeImageGenParams } from 'model-bank';
+import type { ModelParamsSchema, RuntimeImageGenParams } from 'model-bank';
 import { extractDefaultValues } from 'model-bank';
 
 import type {
@@ -22,6 +22,18 @@ import type {
 } from '../types';
 
 const DEFAULT_LIST_LIMIT = 20;
+
+/** Schema defaults the request should carry; prompt and reference images come from the call. */
+const schemaDefaultParams = (schema?: ModelParamsSchema): Record<string, unknown> => {
+  if (!schema) return {};
+  const {
+    imageUrl: _imageUrl,
+    imageUrls: _imageUrls,
+    prompt: _prompt,
+    ...defaults
+  } = extractDefaultValues(schema) as Record<string, unknown>;
+  return defaults;
+};
 const MAX_LIST_LIMIT = 50;
 const MAX_PARAMETER_LOOKUP_LIMIT = 200;
 const DEFAULT_IMAGE_NUM = 1;
@@ -368,34 +380,47 @@ export class ImageGenerationExecutionRuntime {
   private async resolveImageModel(
     provider?: string,
     model?: string,
-  ): Promise<{ model: string; provider: string }> {
+  ): Promise<{ model: string; parameters?: ModelParamsSchema; provider: string }> {
     const state = await this.service.listImageModels({
       limit: MAX_PARAMETER_LOOKUP_LIMIT,
       provider,
     });
 
     if (model) {
-      const matchedProvider = state.providers.find(
-        (item) =>
-          (!provider || item.id === provider) &&
-          item.models.some((candidate) => candidate.id === model),
-      );
-
-      if (matchedProvider) return { model, provider: matchedProvider.id };
+      for (const providerItem of state.providers) {
+        if (provider && providerItem.id !== provider) continue;
+        const matched = providerItem.models.find((candidate) => candidate.id === model);
+        if (matched) {
+          return { model, parameters: matched.parameters, provider: providerItem.id };
+        }
+      }
     } else {
       // Pin the product default first. Falling straight through to "whichever
       // generator sorts first" is what made Auto walk the catalog, failing and
       // burning credits one paid model at a time.
-      for (const providerItem of state.providers) {
-        const pinned = providerItem.models.find((candidate) =>
-          isDefaultAutoImageModelId(candidate.id),
-        );
-        if (pinned) return { model: pinned.id, provider: providerItem.id };
+      const pinned = pickDefaultAutoImageModel(
+        state.providers.flatMap((providerItem) =>
+          providerItem.models.map((candidate) => ({ candidate, providerId: providerItem.id })),
+        ),
+        (entry) => entry.candidate.id,
+      );
+      if (pinned) {
+        return {
+          model: pinned.candidate.id,
+          parameters: pinned.candidate.parameters,
+          provider: pinned.providerId,
+        };
       }
 
       for (const providerItem of state.providers) {
         const firstModel = providerItem.models[0];
-        if (firstModel) return { model: firstModel.id, provider: providerItem.id };
+        if (firstModel) {
+          return {
+            model: firstModel.id,
+            parameters: firstModel.parameters,
+            provider: providerItem.id,
+          };
+        }
       }
     }
 
@@ -466,7 +491,7 @@ export class ImageGenerationExecutionRuntime {
       );
     }
 
-    let selection: { model: string; provider: string };
+    let selection: { model: string; parameters?: ModelParamsSchema; provider: string };
     try {
       selection = await this.resolveImageModel(args.provider?.trim(), args.model?.trim());
     } catch (error) {
@@ -474,10 +499,13 @@ export class ImageGenerationExecutionRuntime {
       return errorOutput('ImageModelNotFound', message);
     }
 
-    const { model, provider } = selection;
+    const { model, parameters: parametersSchema, provider } = selection;
     const waitUntilComplete = args.waitUntilComplete !== false;
     const referenceUrls = normalizeReferenceUrls(args);
     const params = {
+      // Schema defaults first (e.g. GPT Image 2's `quality: 'medium'`), so the
+      // tool sends what the Create page would; explicit arguments still win.
+      ...schemaDefaultParams(parametersSchema),
       ...args.parameters,
       ...referenceUrls,
       prompt,

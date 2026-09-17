@@ -75,6 +75,12 @@ declare global {
        */
       CHEAPVIBECODE_MANAGEMENT_API_KEY?: string;
       /**
+       * CheapVibeCode video API base, `/v1` included. Video generation is served
+       * only by the `ru.` host, so it is separate from CHEAPVIBECODE_BASE_URL.
+       * Defaults to https://ru.cheapvibecode.ru/v1.
+       */
+      CHEAPVIBECODE_VIDEO_BASE_URL?: string;
+      /**
        * OpenRouter Management API key (sk-or-…). Creates per-user keys.
        * Never expose to the client. Product servers must NOT set this — only the control plane.
        */
@@ -95,6 +101,7 @@ export const getAicoConfig = () => {
       AICO_OPENROUTER_MOCK: z.boolean().optional().default(false),
       CHEAPVIBECODE_BASE_URL: z.string().default('https://cheapvibecode.ru'),
       CHEAPVIBECODE_MANAGEMENT_API_KEY: z.string().optional(),
+      CHEAPVIBECODE_VIDEO_BASE_URL: z.string().url().optional(),
       AICO_SECURITY_ALERT_WEBHOOK_URL: z.string().url().optional(),
       AICO_TOMAN_PER_USD: z.coerce.number().positive().int().default(187_400),
       OPENROUTER_MANAGEMENT_API_KEY: z.string().optional(),
@@ -109,6 +116,7 @@ export const getAicoConfig = () => {
       AICO_OPENROUTER_MOCK: process.env.AICO_OPENROUTER_MOCK === '1',
       CHEAPVIBECODE_BASE_URL: process.env.CHEAPVIBECODE_BASE_URL || 'https://cheapvibecode.ru',
       CHEAPVIBECODE_MANAGEMENT_API_KEY: process.env.CHEAPVIBECODE_MANAGEMENT_API_KEY,
+      CHEAPVIBECODE_VIDEO_BASE_URL: process.env.CHEAPVIBECODE_VIDEO_BASE_URL || undefined,
       AICO_SECURITY_ALERT_WEBHOOK_URL: process.env.AICO_SECURITY_ALERT_WEBHOOK_URL || undefined,
       AICO_TOMAN_PER_USD: process.env.AICO_TOMAN_PER_USD,
       OPENROUTER_MANAGEMENT_API_KEY: process.env.OPENROUTER_MANAGEMENT_API_KEY,

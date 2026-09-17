@@ -100,6 +100,61 @@ describe('ImageGenerationExecutionRuntime', () => {
     );
   });
 
+  it('prefers GPT Image 2 over Muse when both are available', async () => {
+    const service = createService({
+      listImageModels: vi.fn().mockResolvedValue({
+        providers: [
+          {
+            id: 'openrouter',
+            models: [{ id: 'meta/muse-image' }, { id: 'gpt-image-2' }],
+            name: 'Panachat',
+          },
+        ],
+        totalModels: 2,
+      }),
+    });
+
+    await new ImageGenerationExecutionRuntime(service).generateImage({ prompt: 'a cat' });
+
+    expect(service.createImage).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'gpt-image-2', provider: 'openrouter' }),
+    );
+  });
+
+  it('sends the model schema defaults, with explicit parameters winning', async () => {
+    const service = createService({
+      listImageModels: vi.fn().mockResolvedValue({
+        providers: [
+          {
+            id: 'openrouter',
+            models: [
+              {
+                id: 'gpt-image-2',
+                parameters: {
+                  imageUrls: { default: [] },
+                  prompt: { default: '' },
+                  quality: { default: 'medium', enum: ['low', 'medium', 'high', 'auto'] },
+                  size: { default: 'auto', enum: ['auto', '1024x1024'] },
+                },
+              },
+            ],
+            name: 'Panachat',
+          },
+        ],
+        totalModels: 1,
+      }),
+    });
+    const runtime = new ImageGenerationExecutionRuntime(service);
+
+    await runtime.generateImage({ parameters: { size: '1024x1024' }, prompt: 'a cat' });
+
+    expect(service.createImage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: { prompt: 'a cat', quality: 'medium', size: '1024x1024' },
+      }),
+    );
+  });
+
   it('still honours an explicitly requested image model', async () => {
     const service = pinnedCatalogService();
     const runtime = new ImageGenerationExecutionRuntime(service);
@@ -177,6 +232,8 @@ describe('ImageGenerationExecutionRuntime', () => {
       model: DEFAULT_IMAGE_GENERATION_MODEL,
       params: {
         prompt: 'A compact workbench UI',
+        // The model's schema default, sent as the Create page would.
+        size: '1024x1024',
       },
       provider: DEFAULT_IMAGE_GENERATION_PROVIDER,
     });

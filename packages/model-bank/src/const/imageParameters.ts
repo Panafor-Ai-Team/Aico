@@ -28,6 +28,7 @@ export const gptImage1Schema: ModelParamsSchema = {
 export const gptImage2Schema: ModelParamsSchema = {
   imageUrls: { default: [], maxCount: 1, maxFileSize: 5 * 1024 * 1024 },
   prompt: { default: '' },
+  quality: { default: 'medium', enum: ['low', 'medium', 'high', 'auto'] },
   size: {
     default: 'auto',
     enum: [
@@ -96,4 +97,42 @@ export const nanoBanana2Parameters: ModelParamsSchema = {
     // See https://ai.google.dev/gemini-api/docs/image-generation
     enum: ['512', '1K', '2K', '4K'],
   },
+};
+
+export const grokImagineImageParameters: ModelParamsSchema = {
+  aspectRatio: {
+    default: 'auto',
+    enum: [
+      'auto',
+      '1:1',
+      '3:4',
+      '4:3',
+      '9:16',
+      '16:9',
+      '2:3',
+      '3:2',
+      '9:19.5',
+      '19.5:9',
+      '9:20',
+      '20:9',
+      '1:2',
+      '2:1',
+    ],
+  },
+  imageUrls: { default: [] },
+  prompt: { default: '' },
+  resolution: {
+    default: '1k',
+    enum: ['1k', '2k'],
+  },
+};
+
+/**
+ * Prompt-only schema for image models behind CheapVibeCode's OpenAI-shaped
+ * `/v1/images/generations`. Its accepted fields beyond `model` and `prompt` are
+ * undocumented for these models, so size and aspect-ratio options are withheld
+ * rather than guessed — an unknown field would fail the request.
+ */
+export const cheapVibeCodePromptOnlyImageParameters: ModelParamsSchema = {
+  prompt: { default: '' },
 };

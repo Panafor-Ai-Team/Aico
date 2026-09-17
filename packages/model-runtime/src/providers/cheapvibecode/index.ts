@@ -3,6 +3,7 @@ import { ModelProvider } from 'model-bank';
 import type { OpenAICompatibleFactoryOptions } from '../../core/openaiCompatibleFactory';
 import { createOpenAICompatibleRuntime } from '../../core/openaiCompatibleFactory';
 import { resolveAutoModel } from './autoRouting';
+import { createCheapVibeCodeVideo, pollCheapVibeCodeVideoStatus } from './createVideo';
 import { fetchCheapVibeCodeModels } from './modelFetch';
 
 export type { CheapVibeCodeAutoRoute } from './autoRouting';
@@ -12,6 +13,11 @@ export {
   resolveAutoModel,
   resolveAutoRoute,
 } from './autoRouting';
+export {
+  createCheapVibeCodeVideo,
+  DEFAULT_CVC_VIDEO_BASE_URL,
+  pollCheapVibeCodeVideoStatus,
+} from './createVideo';
 export {
   cvcMultiplierToPricing,
   DEFAULT_CVC_TOKENS_PER_USD,
@@ -59,9 +65,12 @@ export const params = {
       } as any;
     },
   },
+  createVideo: createCheapVibeCodeVideo,
   debug: {
     chatCompletion: () => process.env.DEBUG_CHEAPVIBECODE_CHAT_COMPLETION === '1',
   },
+  handlePollVideoStatus: async (requestId, options) =>
+    pollCheapVibeCodeVideoStatus(requestId, { apiKey: options.apiKey }),
   models: fetchCheapVibeCodeModels,
   provider: ModelProvider.CheapVibeCode,
 } satisfies OpenAICompatibleFactoryOptions;

@@ -127,7 +127,7 @@ describe('imageGenerationConfigSelectors', () => {
       // merge does deep merge, so result contains both default and test values
       expect(result.prompt).toEqual(testModelSchema.prompt);
       expect(result.size).toEqual(testModelSchema.size);
-      expect(result.imageUrls).toEqual(testModelSchema.imageUrls);
+      expect(result.imageUrls).toMatchObject(testModelSchema.imageUrls!);
     });
 
     it('should return default parametersSchema when not explicitly overridden', () => {

@@ -23,16 +23,17 @@ const checkModelEnabled = (
   );
 };
 
-/** Prefer Nano Banana family when the hard-coded default is missing from the list. */
+/** Fall back to the Nano Banana family when the default is missing from the list. */
 export const PREFERRED_AI_IMAGE_MODEL_IDS = [
   DEFAULT_AI_IMAGE_MODEL,
+  'google/gemini-3.1-flash-image-preview:image',
   'google/gemini-2.5-flash-image:image',
   'google/gemini-3-pro-image-preview:image',
 ] as const;
 
 /**
  * Pick the best available Image Create model from the enabled list.
- * Prefers OpenRouter Nano Banana defaults, then any "Nano Banana*" display name,
+ * Prefers the default and then Nano Banana ids, then any "Nano Banana*" display name,
  * then the first enabled model.
  */
 export const resolvePreferredImageModel = (

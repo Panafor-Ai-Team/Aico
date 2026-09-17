@@ -1,3 +1,4 @@
+import { grokImagineImageParameters } from '../const/imageParameters';
 import type { AIChatModelCard, AIImageModelCard, AIVideoModelCard } from '../types/aiModel';
 
 // https://docs.x.ai/docs/models
@@ -291,35 +292,7 @@ const xaiImageModels: AIImageModelCard[] = [
     displayName: 'Grok Imagine Image',
     enabled: true,
     id: 'grok-imagine-image',
-    parameters: {
-      aspectRatio: {
-        default: 'auto',
-        enum: [
-          'auto',
-          '1:1',
-          '3:4',
-          '4:3',
-          '9:16',
-          '16:9',
-          '2:3',
-          '3:2',
-          '9:19.5',
-          '19.5:9',
-          '9:20',
-          '20:9',
-          '1:2',
-          '2:1',
-        ],
-      },
-      imageUrls: { default: [] },
-      prompt: {
-        default: '',
-      },
-      resolution: {
-        default: '1k',
-        enum: ['1k', '2k'],
-      },
-    },
+    parameters: grokImagineImageParameters,
     pricing: {
       units: [{ name: 'imageGeneration', rate: 0.02, strategy: 'fixed', unit: 'image' }],
     },
