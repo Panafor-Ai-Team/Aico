@@ -49,6 +49,7 @@ const prefixes = {
   topicComments: 'tcm',
   topics: 'tpc',
   trialAbuseBlocklist: 'tab',
+  usageHolds: 'uhld',
   usageLogs: 'ulog',
   user: 'user',
   userPublicIds: 'upid',

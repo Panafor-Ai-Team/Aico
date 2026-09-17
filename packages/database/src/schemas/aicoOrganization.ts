@@ -347,6 +347,20 @@ export const memberBudgets = pgTable(
      * OpenRouter; migration 0154 backfills them.
      */
     managedKeyProviderId: text('managed_key_provider_id'),
+    /**
+     * Usage ledger (migration 0156). Billed micro-USD reserved by open holds in
+     * this cycle; always 0 while `AICO_BILLING_LEDGER_MODE` is not `enforce`.
+     */
+    heldMicroUsd: bigint('held_micro_usd', { mode: 'number' }).notNull().default(0),
+    /** Number of open usage holds; capped by `AICO_LEDGER_MAX_OPEN_HOLDS`. */
+    openHolds: integer('open_holds').notNull().default(0),
+    /**
+     * Bumped only where renewal resets `settledUsageMicroUsd`. A hold records the
+     * epoch it was placed in, and its charge is added to `settledUsageMicroUsd`
+     * only if the epoch still matches — so a hold straddling a renewal never
+     * charges the new cycle for the old one.
+     */
+    ledgerEpoch: integer('ledger_epoch').notNull().default(0),
     isActive: boolean('is_active').notNull().default(true),
     lastSyncedAt: timestamptz('last_synced_at'),
     lastSyncStatus: text('last_sync_status').notNull().default('never'),
@@ -455,6 +469,16 @@ export const userWallets = pgTable(
     settledUsageMicroUsd: bigint('settled_usage_micro_usd', { mode: 'number' })
       .notNull()
       .default(0),
+    /**
+     * Usage ledger (migration 0156). Raw spend settled against this wallet. When
+     * the ledger is authoritative, spendable raw capacity is
+     * `rawCapacityMicroUsd - rawUsedMicroUsd - rawHeldMicroUsd`.
+     */
+    rawUsedMicroUsd: bigint('raw_used_micro_usd', { mode: 'number' }).notNull().default(0),
+    /** Raw micro-USD reserved by open usage holds. */
+    rawHeldMicroUsd: bigint('raw_held_micro_usd', { mode: 'number' }).notNull().default(0),
+    /** Number of open usage holds; capped by `AICO_LEDGER_MAX_OPEN_HOLDS`. */
+    openHolds: integer('open_holds').notNull().default(0),
     lastSyncedAt: timestamptz('last_synced_at'),
     /** never | synced | degraded — mirrors `member_budgets.last_sync_status`. */
     lastSyncStatus: text('last_sync_status').notNull().default('never'),
@@ -677,8 +701,15 @@ export const usageLogs = pgTable(
     costMicroUsd: bigint('cost_micro_usd', { mode: 'number' }).notNull().default(0),
     /** Usage multiplier (basis points) in force when this row was recorded. */
     multiplierBp: bigint('multiplier_bp', { mode: 'number' }).notNull().default(12_000),
-    /** pending | synchronized | stale | failed */
+    /**
+     * pending | synchronized | estimated | released | stale | failed
+     *
+     * `estimated`: a ledger hold settled without measured usage and was charged
+     * the hold. `released`: the upstream rejected the request and it cost 0.
+     */
     settlementStatus: text('settlement_status').notNull().default('pending'),
+    /** The usage hold this row settles; unique so a retried settle logs once. */
+    holdId: text('hold_id'),
     createdAt: createdAt(),
   },
   (t) => [
@@ -686,11 +717,114 @@ export const usageLogs = pgTable(
     index('usage_logs_org_member_id_idx').on(t.orgMemberId),
     index('usage_logs_user_id_idx').on(t.userId),
     index('usage_logs_created_at_idx').on(t.createdAt),
+    uniqueIndex('usage_logs_hold_id_unique').on(t.holdId),
   ],
 );
 
 export type UsageLogItem = typeof usageLogs.$inferSelect;
 export type NewUsageLog = typeof usageLogs.$inferInsert;
+
+/**
+ * One reservation of spend for one managed upstream call (migration 0156).
+ *
+ * `enforce` holds move money: placing one increments the subject's held
+ * counters under a conditional UPDATE, settling it moves the actual charge into
+ * used. `shadow` holds only record what enforce would have done.
+ */
+export const usageHolds = pgTable(
+  'usage_holds',
+  {
+    id: text('id')
+      .$defaultFn(() => idGenerator('usageHolds'))
+      .notNull()
+      .primaryKey(),
+    /** shadow | enforce */
+    mode: text('mode').notNull(),
+    /** wallet | budget */
+    subjectType: text('subject_type').notNull(),
+    userId: text('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    orgId: text('org_id'),
+    orgMemberId: text('org_member_id').references(() => organizationMembers.id, {
+      onDelete: 'cascade',
+    }),
+    budgetId: text('budget_id'),
+    /** `member_budgets.ledger_epoch` when the hold was placed. */
+    budgetEpoch: integer('budget_epoch'),
+    /** personal | organization */
+    billingSource: text('billing_source').notNull(),
+    /** chat | object | embeddings | image | video | tts | transcribe */
+    operation: text('operation').notNull(),
+    modelId: text('model_id').notNull(),
+    pricedModelId: text('priced_model_id'),
+    resolvedModelId: text('resolved_model_id'),
+    /** raw (wallet) | billed (budget) — the unit the subject is gated in. */
+    unit: text('unit').notNull(),
+    /** Platform multiplier in force when the hold was placed. */
+    multiplierBp: integer('multiplier_bp').notNull(),
+    modelMultiplierBp: integer('model_multiplier_bp').notNull().default(10_000),
+    estInputTokens: integer('est_input_tokens').notNull().default(0),
+    maxOutputTokens: integer('max_output_tokens').notNull().default(0),
+    holdRawMicroUsd: bigint('hold_raw_micro_usd', { mode: 'number' }).notNull().default(0),
+    /** `holdRawMicroUsd` with the platform multiplier applied. */
+    holdMicroUsd: bigint('hold_micro_usd', { mode: 'number' }).notNull().default(0),
+    /** open | settled | expired */
+    status: text('status').notNull().default('open'),
+    /** usage | released_rejected | estimate_no_usage | estimate_error | estimate_aborted | expired | not_metered */
+    settleReason: text('settle_reason'),
+    wouldRefuse: boolean('would_refuse').notNull().default(false),
+    /** funds | concurrency | inactive | renewal_blocked | not_found | pricing | not_metered */
+    refuseReason: text('refuse_reason'),
+    promptTokens: integer('prompt_tokens'),
+    completionTokens: integer('completion_tokens'),
+    reasoningTokens: integer('reasoning_tokens'),
+    totalTokens: integer('total_tokens'),
+    rawCostMicroUsd: bigint('raw_cost_micro_usd', { mode: 'number' }),
+    chargedRawMicroUsd: bigint('charged_raw_micro_usd', { mode: 'number' }),
+    chargedMicroUsd: bigint('charged_micro_usd', { mode: 'number' }),
+    createdAt: createdAt(),
+    expiresAt: timestamptz('expires_at').notNull(),
+    settledAt: timestamptz('settled_at'),
+  },
+  (t) => [
+    index('usage_holds_status_expires_at_idx').on(t.status, t.expiresAt),
+    index('usage_holds_user_id_status_idx').on(t.userId, t.status),
+    index('usage_holds_org_member_id_status_idx').on(t.orgMemberId, t.status),
+    index('usage_holds_budget_id_status_idx').on(t.budgetId, t.status),
+    index('usage_holds_settled_at_idx').on(t.settledAt),
+    index('usage_holds_created_at_idx').on(t.createdAt),
+  ],
+);
+
+export type UsageHoldItem = typeof usageHolds.$inferSelect;
+export type NewUsageHold = typeof usageHolds.$inferInsert;
+
+/**
+ * Single-row (`id = 'default'`) control state for the usage ledger: the
+ * emergency pause, the cutover snapshot progress, and the shared-key float.
+ */
+export const aicoLedgerState = pgTable('aico_ledger_state', {
+  id: text('id').notNull().primaryKey(),
+  /** Refuses all managed traffic, renewals and key outbox work within ~5s. */
+  paused: boolean('paused').notNull().default(false),
+  /** First time enforce became authoritative; never cleared by the app. */
+  enforceStartedAt: timestamptz('enforce_started_at'),
+  snapshotCompletedAt: timestamptz('snapshot_completed_at'),
+  snapshotWalletsCursor: text('snapshot_wallets_cursor'),
+  snapshotWalletsDoneAt: timestamptz('snapshot_wallets_done_at'),
+  snapshotBudgetsCursor: text('snapshot_budgets_cursor'),
+  snapshotBudgetsDoneAt: timestamptz('snapshot_budgets_done_at'),
+  floatRawMicroUsd: bigint('float_raw_micro_usd', { mode: 'number' }),
+  floatReadAt: timestamptz('float_read_at'),
+  floatRefreshClaimedAt: timestamptz('float_refresh_claimed_at'),
+  reconcileFloatRawMicroUsd: bigint('reconcile_float_raw_micro_usd', { mode: 'number' }),
+  reconcileReadAt: timestamptz('reconcile_read_at'),
+  updatedAt: updatedAt(),
+});
+
+export type AicoLedgerStateItem = typeof aicoLedgerState.$inferSelect;
+export type NewAicoLedgerState = typeof aicoLedgerState.$inferInsert;
 
 export const platformTrialConfig = pgTable('platform_trial_config', {
   id: text('id').notNull().primaryKey().default('default'),
