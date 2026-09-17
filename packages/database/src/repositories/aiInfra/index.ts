@@ -1,5 +1,6 @@
 import {
   BRANDING_PROVIDER,
+  DEFAULT_MANAGED_PROVIDER_ID,
   MANAGED_PROVIDER_ID,
   MANAGED_PROVIDER_IDS,
   type ManagedProviderId,
@@ -59,6 +60,19 @@ const resolveMultiplierConfigId = (providerId: string): ManagedProviderId =>
   MANAGED_PROVIDER_IDS.includes(providerId as ManagedProviderId)
     ? (providerId as ManagedProviderId)
     : MANAGED_PROVIDER_ID;
+
+/**
+ * Provider ids that present the live managed catalog to users.
+ *
+ * `BRANDING_PROVIDER` is the configured slot, but a deployment that never sets
+ * it still keeps every managed agent config under the historical `openrouter`
+ * id — and so does the browser, whose `DEFAULT_PROVIDER` always resolves to it
+ * because `AICO_MANAGED_PROVIDER` has no `NEXT_PUBLIC_` twin. Keying on the env
+ * alone left that slot serving the static OpenRouter snapshot, so models an
+ * admin switched on never reached the site.
+ */
+const isManagedCatalogSlot = (providerId: string) =>
+  providerId === BRANDING_PROVIDER || providerId === DEFAULT_MANAGED_PROVIDER_ID;
 
 type DecryptUserKeyVaults = (encryptKeyVaultsStr: string | null) => Promise<any>;
 
@@ -263,7 +277,7 @@ export class AiInfraRepos {
     // Exclude models already handled in builtinModelList to avoid duplicates
     const appendedUserModels = allModels
       .filter((item) => {
-        if (item.providerId === BRANDING_PROVIDER) return false;
+        if (isManagedCatalogSlot(item.providerId)) return false;
         if (builtinModelKeys.has(`${item.providerId}:${item.id}`)) return false;
         return filterEnabled ? enabledProviderIds.has(item.providerId) && item.enabled : true;
       })
@@ -440,8 +454,8 @@ export class AiInfraRepos {
       m.type = normalizeAiModelType(m.type);
     }
 
-    // Filter out DB residual models that are no longer in the builtin list for branding provider
-    if (providerId === BRANDING_PROVIDER) {
+    // Filter out DB residual models that are no longer in the managed catalog
+    if (isManagedCatalogSlot(providerId)) {
       const builtinIds = new Set(defaultModels.map((m) => m.id));
       mergedModel = mergedModel.filter((m) => builtinIds.has(m.id));
     }
@@ -581,7 +595,7 @@ export class AiInfraRepos {
     // the branded page serving the static model-bank snapshot of whatever the
     // slot is named after, i.e. OpenRouter's catalogue at OpenRouter's prices.
     const servesSyncedCatalog =
-      providerId === MANAGED_PROVIDER_ID || providerId === BRANDING_PROVIDER;
+      providerId === MANAGED_PROVIDER_ID || isManagedCatalogSlot(providerId);
     // Whose markup and whose models: always the live gateway, never the slot.
     const syncedCatalogProviderId = MANAGED_PROVIDER_ID;
     try {
