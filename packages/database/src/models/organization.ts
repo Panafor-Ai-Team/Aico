@@ -25,6 +25,7 @@ import { users } from '../schemas/user';
 import type { LobeChatDatabase } from '../type';
 import {
   type BudgetPeriod,
+  currentCycleLimitMicroUsd,
   cycleRemainingMicroUsd,
   isBudgetPeriod,
   isProductBudgetPeriod,
@@ -1280,12 +1281,19 @@ export class OrganizationModel {
 
       const window = computePeriodWindow(params.period);
       const openrouterLimitReset = periodToOpenRouterLimitReset(params.period);
-      const existing = await tx.query.memberBudgets.findFirst({
-        where: and(
-          eq(memberBudgets.orgMemberId, params.orgMemberId),
-          eq(memberBudgets.orgId, params.orgId),
-        ),
-      });
+      // Row lock: the usage ledger places holds on this row, so the consumed
+      // figure below must not move while the cap is being recomputed.
+      const [existing] = await tx
+        .select()
+        .from(memberBudgets)
+        .where(
+          and(
+            eq(memberBudgets.orgMemberId, params.orgMemberId),
+            eq(memberBudgets.orgId, params.orgId),
+          ),
+        )
+        .for('update')
+        .limit(1);
 
       let budget: MemberBudgetItem;
       /** Net wallet debit (>0) or credit via negative tracked separately for ledger. */
@@ -1346,7 +1354,10 @@ export class OrganizationModel {
         }
 
         const oldCap = Number(existing.periodAmountMicroUsd ?? 0);
-        const consumed = Math.max(0, Number(existing.settledUsageMicroUsd ?? 0));
+        // Open ledger holds count as consumed: they may still be spent.
+        const consumed =
+          Math.max(0, Number(existing.settledUsageMicroUsd ?? 0)) +
+          Math.max(0, Number(existing.heldMicroUsd ?? 0));
         // Decrease cannot go below already-consumed spend this cycle.
         const effectiveCap = Math.max(params.periodAmountMicroUsd, consumed);
         const delta = effectiveCap - oldCap;
@@ -1382,7 +1393,9 @@ export class OrganizationModel {
         }
 
         const oldCap = Number(existing.periodAmountMicroUsd ?? 0);
-        const consumed = Math.max(0, Number(existing.settledUsageMicroUsd ?? 0));
+        const consumed =
+          Math.max(0, Number(existing.settledUsageMicroUsd ?? 0)) +
+          Math.max(0, Number(existing.heldMicroUsd ?? 0));
         const effectiveCap = Math.max(params.periodAmountMicroUsd, consumed);
         const delta = effectiveCap - oldCap;
 
@@ -1504,8 +1517,14 @@ export class OrganizationModel {
     orgId: string;
     orgMemberId: string;
     remainingMicroUsd: number;
+    /**
+     * Recompute the refund from ledger columns under the budget row lock
+     * (cycle − settled − held + pending), ignoring `remainingMicroUsd`. Nothing
+     * can place a hold between the read and the refund.
+     */
+    useLedgerRemaining?: boolean;
   }) => {
-    const remaining =
+    let remaining =
       Number.isInteger(params.remainingMicroUsd) && params.remainingMicroUsd > 0
         ? params.remainingMicroUsd
         : 0;
@@ -1519,12 +1538,27 @@ export class OrganizationModel {
       });
       if (!member) throw new Error('MEMBER_NOT_FOUND');
 
-      const existingBudget = await tx.query.memberBudgets.findFirst({
-        where: and(
-          eq(memberBudgets.orgMemberId, params.orgMemberId),
-          eq(memberBudgets.orgId, params.orgId),
-        ),
-      });
+      const [existingBudget] = await tx
+        .select()
+        .from(memberBudgets)
+        .where(
+          and(
+            eq(memberBudgets.orgMemberId, params.orgMemberId),
+            eq(memberBudgets.orgId, params.orgId),
+          ),
+        )
+        .for('update')
+        .limit(1);
+
+      if (params.useLedgerRemaining && existingBudget) {
+        remaining =
+          Math.max(
+            0,
+            currentCycleLimitMicroUsd(existingBudget) -
+              Math.max(0, Number(existingBudget.settledUsageMicroUsd ?? 0)) -
+              Math.max(0, Number(existingBudget.heldMicroUsd ?? 0)),
+          ) + Math.max(0, Number(existingBudget.pendingPeriodAmountMicroUsd ?? 0));
+      }
 
       let budget: MemberBudgetItem | null = existingBudget ?? null;
       if (existingBudget) {

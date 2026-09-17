@@ -518,6 +518,7 @@ export const initModelRuntimeFromDB = async (
           new AicoOpenRouterKeyService(db).ensureMemberKey(orgMemberId),
         ensureUserKey: (userId_) => new AicoOpenRouterKeyService(db).ensureUserKey(userId_),
       },
+      ledgerGate,
     );
     const authorized = await policy.authorize({
       billing: options.billingContext,

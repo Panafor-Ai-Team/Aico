@@ -16,6 +16,7 @@ import { aicoEnv } from '@/envs/aico';
 import { authedProcedure, router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { getTomanPerUsd } from '@/server/services/aico/fxService';
+import { isSharedInferenceKey } from '@/server/services/aico/ledger/config';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 
 const billingProcedure = authedProcedure.use(serverDatabase).use(async ({ ctx, next }) => {
@@ -75,7 +76,8 @@ export const aicoBillingRouter = router({
       balanceMicroUsd: String(balanceMicroUsd),
       balanceToman: String(wallet.balanceToman ?? 0),
       balanceUsd: microUsdToDecimalString(balanceMicroUsd),
-      hasManagedKey: Boolean(wallet.openrouterKeyId),
+      // Under the shared inference key no subject needs its own key.
+      hasManagedKey: isSharedInferenceKey() || Boolean(wallet.openrouterKeyId),
       isActive: wallet.isActive,
       preferredBillingSource: wallet.preferredBillingSource as 'personal' | 'organization',
       preferredOrganizationId: wallet.preferredOrganizationId,
@@ -125,7 +127,7 @@ export const aicoBillingRouter = router({
     const personalRemaining = personalReading.remainingMicroUsd;
 
     const personal = {
-      hasManagedKey: hasValidManagedKeyId(wallet.openrouterKeyId),
+      hasManagedKey: isSharedInferenceKey() || hasValidManagedKeyId(wallet.openrouterKeyId),
       isActive: Boolean(wallet.isActive),
       remainingMicroUsd: String(personalRemaining),
       // FIN-016: the toman card had no `remaining` counterpart at any layer, so
@@ -151,8 +153,15 @@ export const aicoBillingRouter = router({
           if (!me) return null;
 
           let budget = await ctx.organizationModel.getMemberBudget(me.id);
+          const sharedKey = isSharedInferenceKey();
+          // Open ledger holds are committed to in-flight calls; always 0 with the ledger off.
+          const orgRemaining = () =>
+            Math.max(
+              0,
+              cycleRemainingMicroUsd(budget ?? {}) - Math.max(0, Number(budget?.heldMicroUsd ?? 0)),
+            );
 
-          if (budget && hasValidManagedKeyId(budget.openrouterKeyId)) {
+          if (!sharedKey && budget && hasValidManagedKeyId(budget.openrouterKeyId)) {
             await keyService.syncMemberCycleUsage(me.id).catch(() => null);
             budget = await ctx.organizationModel.getMemberBudget(me.id);
           }
@@ -161,9 +170,10 @@ export const aicoBillingRouter = router({
           const renewalBlocked =
             renewalStatus === 'renewal_pending' || renewalStatus === 'renewal_failed';
 
-          let remainingMicroUsd = cycleRemainingMicroUsd(budget ?? {});
+          let remainingMicroUsd = orgRemaining();
 
           if (
+            !sharedKey &&
             budget?.isActive &&
             !renewalBlocked &&
             remainingMicroUsd > 0 &&
@@ -178,11 +188,11 @@ export const aicoBillingRouter = router({
               return null;
             });
             budget = await ctx.organizationModel.getMemberBudget(me.id);
-            remainingMicroUsd = cycleRemainingMicroUsd(budget ?? {});
+            remainingMicroUsd = orgRemaining();
           }
 
           return {
-            hasManagedKey: hasValidManagedKeyId(budget?.openrouterKeyId),
+            hasManagedKey: sharedKey || hasValidManagedKeyId(budget?.openrouterKeyId),
             isActive: Boolean(budget?.isActive),
             organizationId: org.id,
             organizationName: org.name,
@@ -384,14 +394,22 @@ export const aicoBillingRouter = router({
           const me = members.find((m) => m.userId === ctx.userId && m.status === 'active');
           if (!me) return false;
           const budget = await ctx.organizationModel.getMemberBudget(me.id);
-          return Boolean(budget?.isActive && cycleRemainingMicroUsd(budget) > 0);
+          const held = Math.max(0, Number(budget?.heldMicroUsd ?? 0));
+          return Boolean(budget?.isActive && cycleRemainingMicroUsd(budget) - held > 0);
         }),
       )
     ).some(Boolean);
 
+    // Keyless wallets are normal under the shared key, so read the ledger instead.
+    const hasPersonalCredit = isSharedInferenceKey()
+      ? Boolean(wallet) &&
+        (await ctx.keyService.getUserRemaining(ctx.userId).catch(() => ({ remainingMicroUsd: 0 })))
+          .remainingMicroUsd > 0
+      : Boolean(wallet?.openrouterKeyId);
+
     return {
       brandName: BRANDING_NAME,
-      hasCredit: Boolean(wallet?.openrouterKeyId) || trialActive || hasOrgCredit,
+      hasCredit: hasPersonalCredit || trialActive || hasOrgCredit,
       managed: true,
       providerId: 'aico',
       runtimeProviderId: 'openrouter',

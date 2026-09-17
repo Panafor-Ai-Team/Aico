@@ -18,6 +18,7 @@ import {
 } from '@/database/utils/aicoMoney';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 
+import { isLedgerAuthoritative, isLedgerPaused } from './ledger/state';
 import { computePeriodWindow } from './periodBoundaries';
 import { sendSecurityAlert } from './securityAlert';
 
@@ -85,6 +86,8 @@ export const processDueRenewals = async (
   db: LobeChatDatabase,
   options: RenewalOptions = {},
 ): Promise<OrgRenewalResult[]> => {
+  // The ledger pause is the cutover's maintenance window: no money moves.
+  if (await isLedgerPaused(db)) return [];
   const now = options.now ?? new Date();
   const keyService = options.keyService ?? new AicoOpenRouterKeyService(db);
 
@@ -382,6 +385,10 @@ const renewOrg = async (params: {
             billedUsageBeforeBaselineMicroUsd: 0,
             checkpointMultiplierBp: currentMultiplierBp,
             usageBaselineMicroUsd: nextBaselines.get(b.memberId) ?? 0,
+            // The one place settled usage resets. Holds opened in the closing
+            // cycle were refunded at full value, so their settle must not land
+            // in the new cycle; held and open_holds stay as they are.
+            ledgerEpoch: sql`${memberBudgets.ledgerEpoch} + 1`,
           })
           .where(eq(memberBudgets.id, b.budgetId));
 
@@ -473,6 +480,7 @@ export const processKeyOutbox = async (
   db: LobeChatDatabase,
   options: { keyService?: AicoOpenRouterKeyService; limit?: number; now?: Date } = {},
 ): Promise<OutboxRunResult> => {
+  if (await isLedgerPaused(db)) return { deferred: 0, failed: 0, processed: 0, succeeded: 0 };
   const now = options.now ?? new Date();
   const keyService = options.keyService ?? new AicoOpenRouterKeyService(db);
   const orgModel = new OrganizationModel(db);
@@ -500,7 +508,7 @@ export const processKeyOutbox = async (
 
     processed += 1;
     try {
-      const outcome = await runOutboxAction({ keyService, orgModel, row });
+      const outcome = await runOutboxAction({ db, keyService, orgModel, row });
 
       if (outcome === 'deferred') {
         // Hand the attempt back: the row is a standing record of work the
@@ -560,11 +568,12 @@ export const processKeyOutbox = async (
  * no route for it — see `OUTBOX_DEFER_MS`.
  */
 const runOutboxAction = async (params: {
+  db: LobeChatDatabase;
   keyService: AicoOpenRouterKeyService;
   orgModel: OrganizationModel;
   row: typeof aicoKeyOutbox.$inferSelect;
 }): Promise<'done' | 'deferred'> => {
-  const { keyService, orgModel, row } = params;
+  const { db, keyService, orgModel, row } = params;
 
   switch (row.action) {
     case 'disable_member_key': {
@@ -614,6 +623,7 @@ const runOutboxAction = async (params: {
         orgId: row.orgId,
         orgMemberId: row.orgMemberId,
         remainingMicroUsd: reclaimed?.remainingMicroUsd ?? 0,
+        useLedgerRemaining: await isLedgerAuthoritative(db),
       });
       await orgModel.finalizeMemberRevocation(row.orgMemberId);
       return 'done';

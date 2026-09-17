@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getTestDB } from '../../core/getTestDB';
 import { memberBudgets, organizations, walletTransactions } from '../../schemas/aicoOrganization';
 import type { LobeChatDatabase } from '../../type';
+import { AicoUsageLedgerModel } from '../aicoUsageLedger';
 import { OrganizationModel } from '../organization';
 import { cleanupAicoTables, isServerDb, seedUsers } from './aico.phase2.helpers';
 
@@ -634,4 +635,104 @@ describe('AICO-105 FIN-005 wallet tx balance audit trail', () => {
     expect(reclaimed.transaction!.balanceBeforeMicroUsd).toBe(usd(30));
     expect(reclaimed.transaction!.balanceAfterMicroUsd).toBe(usd(42));
   });
+});
+
+describe('usage ledger holds on member budgets', () => {
+  const allocateDaily = async (amount: number) => {
+    const { memberA, org } = await setupOrgWithUsd(10);
+    await orgModel.allocateMemberCredit({
+      createdByUserId: ownerId,
+      orgId: org.id,
+      orgMemberId: memberA.id,
+      period: 'daily',
+      periodAmountMicroUsd: amount,
+    });
+    return { memberA, org };
+  };
+
+  it('reclaims cycle minus settled minus held under the row lock, ignoring the passed amount', async () => {
+    const { memberA, org } = await allocateDaily(1_000_000);
+    await serverDB
+      .update(memberBudgets)
+      .set({ heldMicroUsd: 300_000, settledUsageMicroUsd: 200_000 })
+      .where(eq(memberBudgets.orgMemberId, memberA.id));
+    const before = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd ?? 0);
+
+    const result = await orgModel.reclaimMemberRemainingCredit({
+      createdByUserId: ownerId,
+      orgId: org.id,
+      orgMemberId: memberA.id,
+      remainingMicroUsd: 900_000,
+      useLedgerRemaining: true,
+    });
+
+    expect(Number(result.organization.walletBalanceMicroUsd)).toBe(before + 500_000);
+  });
+
+  it('never lowers a cap below settled plus held spend', async () => {
+    const { memberA, org } = await allocateDaily(1_000_000);
+    await serverDB
+      .update(memberBudgets)
+      .set({ heldMicroUsd: 300_000, settledUsageMicroUsd: 200_000 })
+      .where(eq(memberBudgets.orgMemberId, memberA.id));
+
+    await orgModel.allocateMemberCredit({
+      createdByUserId: ownerId,
+      orgId: org.id,
+      orgMemberId: memberA.id,
+      period: 'daily',
+      periodAmountMicroUsd: 100_000,
+    });
+
+    const budget = await orgModel.getMemberBudget(memberA.id);
+    expect(Number(budget?.periodAmountMicroUsd)).toBe(500_000);
+  });
+
+  it.skipIf(!isServerDb())(
+    'a reclaim racing holds never refunds money a successful hold reserved',
+    async () => {
+      const { memberA, org } = await allocateDaily(1_000_000);
+      const budget = (await orgModel.getMemberBudget(memberA.id))!;
+      const ledger = new AicoUsageLedgerModel(serverDB);
+      const before = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd ?? 0);
+
+      const [holds, reclaim] = await Promise.all([
+        Promise.all(
+          Array.from({ length: 10 }, () =>
+            ledger.placeHold({
+              billingSource: 'organization',
+              estInputTokens: 0,
+              holdRawMicroUsd: 100_000,
+              maxOpenHolds: 64,
+              maxOutputTokens: 0,
+              modelId: 'glm-5.3-flash',
+              modelMultiplierBp: 10_000,
+              multiplierBp: 10_000,
+              operation: 'chat',
+              pricedModelId: 'glm-5.3-flash',
+              subject: {
+                budgetId: budget.id,
+                orgId: org.id,
+                orgMemberId: memberA.id,
+                type: 'budget',
+                userId: memberAId,
+              },
+              ttlSeconds: 900,
+            }),
+          ),
+        ),
+        orgModel.reclaimMemberRemainingCredit({
+          createdByUserId: ownerId,
+          orgId: org.id,
+          orgMemberId: memberA.id,
+          remainingMicroUsd: 1_000_000,
+          useLedgerRemaining: true,
+        }),
+      ]);
+
+      const placed = holds.filter((h) => h.ok).length;
+      const refunded = Number(reclaim.organization.walletBalanceMicroUsd) - before;
+      expect(refunded).toBeLessThanOrEqual(1_000_000 - placed * 100_000);
+    },
+  );
 });

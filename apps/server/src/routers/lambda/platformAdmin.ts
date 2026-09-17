@@ -29,6 +29,7 @@ import { revokeOIDCArtifactsByUserId } from '@/libs/oidc-provider/access-control
 import { platformAdminProcedure, publicProcedure, router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { getTomanPerUsd } from '@/server/services/aico/fxService';
+import { isSharedInferenceKey } from '@/server/services/aico/ledger/config';
 import { refreshAicoMasterMonitorState } from '@/server/services/aico/masterMonitor';
 import {
   executeOrgBudgetSweep,
@@ -880,7 +881,7 @@ export const platformAdminRouter = router({
         banReason: identity?.banReason ?? null,
         banned: Boolean(identity?.banned),
         email: identity?.email ?? null,
-        hasManagedKey: Boolean(w.openrouterKeyId),
+        hasManagedKey: isSharedInferenceKey() || Boolean(w.openrouterKeyId),
         isActive: w.isActive,
         publicCode: publicCodes.get(w.userId) ?? null,
         userId: w.userId,

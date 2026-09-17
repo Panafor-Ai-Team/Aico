@@ -24,6 +24,8 @@ import {
   type UsageMultiplierCheckpoint,
 } from '@/database/utils/aicoMoney';
 import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
+import { isSharedInferenceKey } from '@/server/services/aico/ledger/config';
+import { isLedgerAuthoritative } from '@/server/services/aico/ledger/state';
 import {
   createManagedProviderClient,
   type ManagedKeyCredential,
@@ -61,6 +63,13 @@ const runExclusive = <T>(key: string, fn: () => Promise<T>): Promise<T> => {
 };
 
 const microToOpenRouterLimitUsd = (micro: number): number => Number(microUsdToDecimalString(micro));
+
+/** HTTP status carried in a management client error message, when there is one. */
+const managedErrorStatus = (error: unknown): number | null => {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = /\b(?:API|proxy) (\d{3})\b/.exec(message);
+  return match ? Number(match[1]) : null;
+};
 
 /**
  * Provisions / updates OpenRouter keys for B2C wallets and B2B member budgets.
@@ -567,6 +576,7 @@ export class AicoOpenRouterKeyService {
     // pre-flight gate refuses the request anyway.
     if (nextLimitMicro <= 0) return { created: false, keyId: null };
 
+    this.assertMintAllowed();
     const created = await this.managed.createKey({
       // The gateway we are moving to may have no native periodic reset, and the
       // checkpoint this rotation just wrote is what accounts the period either
@@ -632,6 +642,7 @@ export class AicoOpenRouterKeyService {
 
     await this.retireManagedKey(params.budget.openrouterKeyId);
 
+    this.assertMintAllowed();
     const created = await this.managed.createKey({
       // A provider reaching this branch has no native periodic reset; asking for
       // one would be a lie the checkpoint then has to work around.
@@ -678,7 +689,16 @@ export class AicoOpenRouterKeyService {
   private isCurrentProviderKey = (stamp: string | null | undefined): boolean =>
     (stamp ?? 'openrouter') === this.managed.providerId;
 
+  /**
+   * Backstop for shared-key mode: every managed call runs on one inference key
+   * and the usage ledger is the brake, so no path may mint a per-subject key.
+   */
+  private assertMintAllowed() {
+    if (isSharedInferenceKey()) throw new Error('SHARED_INFERENCE_KEY_MODE');
+  }
+
   ensureUserKey = async (userId: string) => {
+    if (isSharedInferenceKey()) return { created: false, keyId: null };
     return runExclusive(`user-key:${userId}`, async () => {
       const wallet = await this.billingModel.getOrCreateUserWallet(userId);
       const balanceMicro = Number(wallet.balanceMicroUsd ?? 0);
@@ -759,6 +779,7 @@ export class AicoOpenRouterKeyService {
   };
 
   ensureTrialKey = async (userId: string, budgetMicroUsd: number) => {
+    if (isSharedInferenceKey()) return { created: false, keyId: null };
     const budgetMicro =
       Number.isFinite(budgetMicroUsd) && budgetMicroUsd > 0 ? Math.trunc(budgetMicroUsd) : 0;
     if (budgetMicro <= 0) {
@@ -805,6 +826,7 @@ export class AicoOpenRouterKeyService {
    * Never creates a key when reserved/period amount ≤ 0.
    */
   ensureMemberKey = async (orgMemberId: string) => {
+    if (isSharedInferenceKey()) return { created: false, keyId: null };
     return runExclusive(`member-key:${orgMemberId}`, async () => {
       const budget = await this.orgModel.getMemberBudget(orgMemberId);
       if (!budget) throw new Error('BUDGET_NOT_FOUND');
@@ -896,6 +918,7 @@ export class AicoOpenRouterKeyService {
         return { created: false, keyId: null };
       }
 
+      this.assertMintAllowed();
       const created = await this.managed.createKey({
         limitReset,
         limitUsd,
@@ -1016,6 +1039,7 @@ export class AicoOpenRouterKeyService {
     rawUsageBeforeKeyMicroUsd?: number;
     userId: string;
   }): Promise<{ created: true; keyId: string }> {
+    this.assertMintAllowed();
     const created = await this.managed.createKey({
       limitReset: null,
       limitUsd: params.limitUsd,
@@ -1072,14 +1096,30 @@ export class AicoOpenRouterKeyService {
     orgId: string;
     orgMemberId: string;
   }): Promise<{
-    keyId: string;
+    /** `null` for a keyless budget under the authoritative ledger. */
+    keyId: string | null;
     /** Gateway that minted the key, so a caller does not disable a foreign one. */
     keyProviderId: string | null;
     remainingMicroUsd: number;
     usageMicroUsd: number;
   } | null> => {
     const budget = await this.orgModel.getMemberBudgetForOrg(params);
-    if (!budget?.openrouterKeyId) return null;
+    if (!budget) return null;
+
+    // Under the ledger, spend is settled per call and open holds are committed,
+    // so the key (if any) is not the source of truth.
+    if (await isLedgerAuthoritative(this.db)) {
+      const { remainingMicroUsd, usageMicroUsd } = this.ledgerCycleFigures(budget);
+      return {
+        keyId: budget.openrouterKeyId ?? null,
+        keyProviderId: budget.managedKeyProviderId ?? null,
+        remainingMicroUsd:
+          remainingMicroUsd + Math.max(0, Number(budget.pendingPeriodAmountMicroUsd ?? 0)),
+        usageMicroUsd,
+      };
+    }
+
+    if (!budget.openrouterKeyId) return null;
 
     const info = await this.readMemberKeyInfo({
       managedKeyLimitMicroUsd: budget.managedKeyLimitMicroUsd,
@@ -1136,7 +1176,20 @@ export class AicoOpenRouterKeyService {
     const peeked = await this.peekMemberRemaining(params);
     if (!peeked) return null;
 
-    await this.disableManagedKey(peeked.keyId, peeked.keyProviderId);
+    if (peeked.keyId) {
+      if (await isLedgerAuthoritative(this.db)) {
+        // The legacy key no longer carries traffic; failing to disable it must
+        // not block the refund the ledger has already computed.
+        await this.disableManagedKey(peeked.keyId, peeked.keyProviderId).catch((error) =>
+          console.warn('[aico] legacy member key disable failed during reclaim', {
+            message: error instanceof Error ? error.message : String(error),
+            orgMemberId: params.orgMemberId,
+          }),
+        );
+      } else {
+        await this.disableManagedKey(peeked.keyId, peeked.keyProviderId);
+      }
+    }
 
     return { remainingMicroUsd: peeked.remainingMicroUsd, usageMicroUsd: peeked.usageMicroUsd };
   };
@@ -1299,6 +1352,26 @@ export class AicoOpenRouterKeyService {
     return Math.max(0, Number(budget.usageBaselineMicroUsd ?? 0));
   };
 
+  /**
+   * Cycle figures from ledger columns: settled spend plus open holds count as
+   * used, so a refund never hands back money an in-flight call may still spend.
+   */
+  private ledgerCycleFigures = (budget: {
+    heldMicroUsd?: number | null;
+    periodAmountMicroUsd?: number | null;
+    reservedMicroUsd?: number | null;
+    settledUsageMicroUsd?: number | null;
+  }): { remainingMicroUsd: number; usageMicroUsd: number } => {
+    const cycle = currentCycleLimitMicroUsd(budget);
+    const committed =
+      Math.max(0, Number(budget.settledUsageMicroUsd ?? 0)) +
+      Math.max(0, Number(budget.heldMicroUsd ?? 0));
+    return {
+      remainingMicroUsd: Math.max(0, cycle - committed),
+      usageMicroUsd: Math.min(cycle, committed),
+    };
+  };
+
   settleMemberPeriod = async (
     orgMemberId: string,
   ): Promise<{
@@ -1308,7 +1381,13 @@ export class AicoOpenRouterKeyService {
     usageMicroUsd: number;
   } | null> => {
     const budget = await this.orgModel.getMemberBudget(orgMemberId);
-    if (!budget?.openrouterKeyId) return null;
+    if (!budget) return null;
+
+    if (await isLedgerAuthoritative(this.db)) {
+      return { nextCycleBaselineMicroUsd: 0, ...this.ledgerCycleFigures(budget) };
+    }
+
+    if (!budget.openrouterKeyId) return null;
 
     const info = await this.readMemberKeyInfo({
       managedKeyLimitMicroUsd: budget.managedKeyLimitMicroUsd,
@@ -1379,6 +1458,33 @@ export class AicoOpenRouterKeyService {
     const wallet = await this.billingModel.getOrCreateUserWallet(userId);
     const balanceMicroUsd = Number(wallet.balanceMicroUsd ?? 0);
     const lastSettledMicroUsd = Math.max(0, Number(wallet.settledUsageMicroUsd ?? 0));
+
+    // Under the ledger the wallet's own columns are exact: settled raw spend
+    // plus open holds, billed at the blend its top-ups bought. Never persisted
+    // here; every settle keeps `settled_usage_micro_usd` current.
+    if (await isLedgerAuthoritative(this.db)) {
+      const fallbackBp = await this.billingModel.getUsageMultiplierBp();
+      const rawCapacityMicroUsd = Number(wallet.rawCapacityMicroUsd ?? 0);
+      const used = Math.max(0, Number(wallet.rawUsedMicroUsd ?? 0));
+      const held = Math.max(0, Number(wallet.rawHeldMicroUsd ?? 0));
+      const usageMicroUsd = billedUsageFromCapacity({
+        balanceMicroUsd,
+        fallbackBp,
+        rawCapacityMicroUsd,
+        rawUsageMicroUsd: used,
+      });
+      const committed = billedUsageFromCapacity({
+        balanceMicroUsd,
+        fallbackBp,
+        rawCapacityMicroUsd,
+        rawUsageMicroUsd: used + held,
+      });
+      return {
+        remainingMicroUsd: Math.max(0, balanceMicroUsd - committed),
+        usageKnown: true,
+        usageMicroUsd,
+      };
+    }
 
     // No key was ever provisioned, so no spend was ever possible through us.
     // That is a known zero, not an unknown — the wallet is fully spendable.
@@ -1486,10 +1592,64 @@ export class AicoOpenRouterKeyService {
   };
 
   /**
+   * Cumulative raw spend of a wallet read from its legacy managed key, for the
+   * ledger cutover snapshot.
+   *
+   * `degraded` marks a figure that could not be read live and was derived from
+   * the last settled usage instead. A permanent key failure (401/403/404)
+   * degrades; anything transient (429, 5xx, network) throws so the snapshot
+   * stops and resumes rather than committing a guess.
+   */
+  readWalletRawUsage = async (
+    userId: string,
+  ): Promise<{ degraded: boolean; rawUsedMicroUsd: number }> => {
+    const wallet = await this.billingModel.getOrCreateUserWallet(userId);
+    const before = Math.max(0, Number(wallet.rawUsageBeforeKeyMicroUsd ?? 0));
+    if (!wallet.openrouterKeyId) return { degraded: false, rawUsedMicroUsd: before };
+
+    const balance = Number(wallet.balanceMicroUsd ?? 0);
+    const rawCapacity = Number(wallet.rawCapacityMicroUsd ?? 0);
+    const settled = Math.max(0, Number(wallet.settledUsageMicroUsd ?? 0));
+    const fallback = {
+      degraded: true,
+      rawUsedMicroUsd:
+        balance > 0 ? Math.max(before, Math.ceil((settled * rawCapacity) / balance)) : before,
+    };
+
+    if (
+      isStaleManagedKeyId(wallet.openrouterKeyId) ||
+      !this.isCurrentProviderKey(wallet.managedKeyProviderId)
+    ) {
+      return fallback;
+    }
+
+    let info: ManagedKeyInfo;
+    try {
+      info = await this.managed.getKey(
+        await this.managedCredential({
+          managedKeyLimitMicroUsd: wallet.managedKeyLimitMicroUsd,
+          openrouterKeyCiphertext: wallet.openrouterKeyCiphertext,
+          openrouterKeyId: wallet.openrouterKeyId,
+        }),
+      );
+    } catch (error) {
+      const status = managedErrorStatus(error);
+      if (status === 401 || status === 403 || status === 404) return fallback;
+      throw error;
+    }
+
+    const onKey = this.rawUsageOnKeyMicro(wallet, info);
+    if (onKey === null) return fallback;
+    return { degraded: false, rawUsedMicroUsd: before + onKey };
+  };
+
+  /**
    * Period-aware sync for billing dashboards — prefers cycle counters over
    * lifetime OpenRouter usage so remaining balance stays accurate.
    */
   syncMemberCycleUsage = async (orgMemberId: string) => {
+    // Settles write ledger usage directly; a key read would overwrite it.
+    if (await isLedgerAuthoritative(this.db)) return null;
     const budget = await this.orgModel.getMemberBudget(orgMemberId);
     if (
       !budget?.openrouterKeyId ||

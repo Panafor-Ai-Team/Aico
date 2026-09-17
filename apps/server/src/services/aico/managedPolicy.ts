@@ -18,6 +18,7 @@ import {
 import { aicoEnv } from '@/envs/aico';
 
 import { type AicoBillingContext, parseAicoBillingContext } from './billingContext';
+import type { LedgerGate } from './ledger/gate';
 
 /** Optional repair hook — chat path may lazy-provision a missing managed key. */
 export type AicoManagedKeyRepair = {
@@ -65,6 +66,12 @@ export class AicoManagedPolicy {
     private readonly db: LobeChatDatabase,
     private readonly decryptKey: (ciphertext: string) => Promise<string | null>,
     private readonly keyRepair?: AicoManagedKeyRepair,
+    /**
+     * Result of the usage-ledger traffic gate. When authoritative, funds are read
+     * from ledger columns (usage + open holds), not deposits. With a shared
+     * inference key, subjects need no upstream key of their own.
+     */
+    private readonly ledgerGate?: LedgerGate,
   ) {
     this.orgModel = new OrganizationModel(db);
     this.billingModel = new AicoBillingModel(db);
@@ -148,6 +155,9 @@ export class AicoManagedPolicy {
     }
     await this.assertModelAllowed(params.userId, billing, params.modelId);
 
+    const authoritative = Boolean(this.ledgerGate?.authoritative);
+    const sharedKey = this.ledgerGate?.sharedKey ?? null;
+
     if (billing.source === 'personal') {
       // Trial uses personal wallet key path but product Trial is disabled in prod.
       if (await this.billingModel.isTrialActive(params.userId)) {
@@ -170,7 +180,7 @@ export class AicoManagedPolicy {
       // makes a cutover invisible to a funded user: the first request mints a
       // replacement on the active gateway. An unfunded wallet mints nothing and
       // falls through to the checks below.
-      if (!walletKeyUsable(wallet) && this.keyRepair?.ensureUserKey) {
+      if (!sharedKey && !walletKeyUsable(wallet) && this.keyRepair?.ensureUserKey) {
         try {
           await this.keyRepair.ensureUserKey(params.userId);
           wallet = (await this.billingModel.getUserWallet(params.userId)) ?? wallet;
@@ -179,13 +189,18 @@ export class AicoManagedPolicy {
         }
       }
 
-      if (!walletKeyUsable(wallet)) {
+      if (!sharedKey && !walletKeyUsable(wallet)) {
         throw new AicoManagedPolicyError('MANAGED_KEY_UNAVAILABLE', ChatErrorType.InvalidUserKey);
       }
-      if (
-        (wallet.balanceMicroUsd ?? 0) <= 0 &&
-        !(await this.billingModel.isTrialActive(params.userId))
-      ) {
+      // `balance_micro_usd` counts deposits only; under the ledger the spendable
+      // amount is raw capacity minus settled usage and open holds.
+      const exhausted = authoritative
+        ? Number(wallet.rawCapacityMicroUsd ?? 0) -
+            Number(wallet.rawUsedMicroUsd ?? 0) -
+            Number(wallet.rawHeldMicroUsd ?? 0) <=
+          0
+        : (wallet.balanceMicroUsd ?? 0) <= 0;
+      if (exhausted && !(await this.billingModel.isTrialActive(params.userId))) {
         throw new AicoManagedPolicyError(
           'PERSONAL_FUNDS_UNAVAILABLE',
           ChatErrorType.InvalidUserKey,
@@ -193,7 +208,7 @@ export class AicoManagedPolicy {
       }
 
       // Narrowing only; `walletKeyUsable` above already proved it is present.
-      const apiKey = await this.decryptKey(wallet.openrouterKeyCiphertext ?? '');
+      const apiKey = sharedKey ?? (await this.decryptKey(wallet.openrouterKeyCiphertext ?? ''));
       if (!apiKey) {
         throw new AicoManagedPolicyError(
           'MANAGED_KEY_DECRYPT_FAILED',
@@ -235,7 +250,8 @@ export class AicoManagedPolicy {
         ChatErrorType.InvalidUserKey,
       );
     }
-    if (cycleRemainingMicroUsd(budget) <= 0) {
+    const held = authoritative ? Math.max(0, Number(budget.heldMicroUsd ?? 0)) : 0;
+    if (cycleRemainingMicroUsd(budget) - held <= 0) {
       throw new AicoManagedPolicyError('MEMBER_BUDGET_UNFUNDED', ChatErrorType.InvalidUserKey);
     }
 
@@ -246,7 +262,7 @@ export class AicoManagedPolicy {
         AicoManagedPolicy.isCurrentProviderKey(row.managedKeyProviderId),
       );
 
-    if (!budgetKeyUsable(budget) && this.keyRepair) {
+    if (!sharedKey && !budgetKeyUsable(budget) && this.keyRepair) {
       try {
         await this.keyRepair.ensureMemberKey(me.id);
         budget = (await this.orgModel.getMemberBudget(me.id)) ?? budget;
@@ -255,12 +271,12 @@ export class AicoManagedPolicy {
       }
     }
 
-    if (!budgetKeyUsable(budget)) {
+    if (!sharedKey && !budgetKeyUsable(budget)) {
       throw new AicoManagedPolicyError('MANAGED_KEY_UNAVAILABLE', ChatErrorType.InvalidUserKey);
     }
 
     // Narrowing only; `budgetKeyUsable` above already proved it is present.
-    const apiKey = await this.decryptKey(budget.openrouterKeyCiphertext ?? '');
+    const apiKey = sharedKey ?? (await this.decryptKey(budget.openrouterKeyCiphertext ?? ''));
     if (!apiKey) {
       throw new AicoManagedPolicyError('MANAGED_KEY_DECRYPT_FAILED', ChatErrorType.InvalidUserKey);
     }
