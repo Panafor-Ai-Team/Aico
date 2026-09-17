@@ -11,6 +11,7 @@ export type SecurityAlertSeverity = 'info' | 'warning' | 'critical';
 
 export type SecurityAlertType =
   | 'auth.rate_limit_burst'
+  | 'billing_ledger'
   | 'auth.otp_abuse'
   | 'outbox.exhausted'
   | 'master.balance_unknown_error'

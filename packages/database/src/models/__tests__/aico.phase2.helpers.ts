@@ -3,6 +3,7 @@
  * Finding coverage: AICO-P1-* suite scaffolding.
  */
 import {
+  aicoLedgerState,
   aicoUserPublicIds,
   memberBudgets,
   modelAccessRules,
@@ -16,6 +17,7 @@ import {
   platformAdminUsers,
   platformTrialConfig,
   trialAbuseBlocklist,
+  usageHolds,
   usageLogs,
   userTrials,
   userWallets,
@@ -25,6 +27,7 @@ import { users } from '../../schemas/user';
 import type { LobeChatDatabase } from '../../type';
 
 export const cleanupAicoTables = async (db: LobeChatDatabase) => {
+  await db.delete(usageHolds);
   await db.delete(usageLogs);
   await db.delete(trialAbuseBlocklist);
   await db.delete(userTrials);
@@ -43,6 +46,9 @@ export const cleanupAicoTables = async (db: LobeChatDatabase) => {
   await db.delete(platformAdmins);
   await db.delete(aicoUserPublicIds);
   await db.delete(users);
+  // Single-row control table: restore the migration's default row.
+  await db.delete(aicoLedgerState);
+  await db.insert(aicoLedgerState).values({ id: 'default' });
 };
 
 export const seedUsers = async (

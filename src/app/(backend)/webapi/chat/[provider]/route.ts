@@ -13,6 +13,7 @@ import {
   decodeBillingContextHeader,
   parseAicoBillingContext,
 } from '@/server/services/aico/billingContext';
+import { getLedgerConfig } from '@/server/services/aico/ledger/config';
 import { AicoManagedPolicy, AicoManagedPolicyError } from '@/server/services/aico/managedPolicy';
 import { resolveManagedPricingContext } from '@/server/services/aico/usageMultiplier';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
@@ -134,7 +135,8 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
       signal: req.signal,
     });
 
-    if (billingContext) {
+    // Under ledger enforce, `usage_logs` is written when the hold settles.
+    if (billingContext && getLedgerConfig().mode !== 'enforce') {
       // Best-effort and non-blocking: cost stays 0/`pending` until OpenRouter
       // settlement, which is the source of truth for spend.
       void recordManagedUsage({

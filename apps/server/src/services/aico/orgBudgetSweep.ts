@@ -9,6 +9,8 @@ import {
 } from '@/database/utils/aicoMoney';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 
+import { isLedgerAuthoritative } from './ledger/state';
+
 /**
  * Bulk "reclaim every member's org-funded allowance back into the org wallet".
  *
@@ -114,12 +116,15 @@ const loadSweepCandidates = async (params: { model: OrganizationModel; orgId: st
  * unspent cap for the active cycle plus any prepaid next-period hold.
  */
 const walletSideRemainingMicroUsd = (budget: {
+  /** Open usage-ledger holds: committed to in-flight calls, never reclaimable. */
+  heldMicroUsd?: number | null;
   pendingPeriodAmountMicroUsd?: number | null;
   periodAmountMicroUsd?: number | null;
   reservedMicroUsd?: number | null;
   settledUsageMicroUsd?: number | null;
 }): number =>
-  cycleRemainingMicroUsd(budget) + Math.max(0, Number(budget.pendingPeriodAmountMicroUsd ?? 0));
+  Math.max(0, cycleRemainingMicroUsd(budget) - Math.max(0, Number(budget.heldMicroUsd ?? 0))) +
+  Math.max(0, Number(budget.pendingPeriodAmountMicroUsd ?? 0));
 
 /**
  * What the sweep would reclaim, without disabling a single key.
@@ -254,6 +259,8 @@ export const executeOrgBudgetSweep = async ({
 
   const candidates = await loadSweepCandidates({ model, orgId });
   const rows: OrgBudgetSweepResultRow[] = [];
+  // Under the ledger the refund is recomputed under the budget row lock.
+  const useLedgerRemaining = await isLedgerAuthoritative(db);
 
   for (const { budget, member } of candidates) {
     const base = {
@@ -308,6 +315,7 @@ export const executeOrgBudgetSweep = async ({
         orgId,
         orgMemberId: member.id,
         remainingMicroUsd,
+        useLedgerRemaining,
       });
       // A null transaction means the CAS lost — another sweep already settled it.
       // Report the ledger's own figure rather than what we asked for: the model

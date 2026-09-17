@@ -89,6 +89,21 @@ the foreign ones and are re-minted by the same machinery, with spend on them
 carried through the same last-settled arithmetic. Nothing is restored from a
 backup, and no balance is revalued.
 
+## Shared-key ledger mode
+
+CVC caps how many keys an account may create, so per-subject keys do not scale
+on CVC. With `AICO_MANAGED_INFERENCE_KEY=shared` and
+`AICO_BILLING_LEDGER_MODE=enforce`, all managed traffic runs on the CVC primary
+key. Every call is metered by the hold-and-settle usage ledger (migration 0156)
+instead of per-key upstream limits. After that cutover:
+
+- Top-ups and renewals no longer create keys.
+- Balances come from ledger columns, not key reads.
+- Rolling back to per-key limits requires a reverse snapshot that is not built.
+
+The shadow measurement, cutover snapshot, emergency pause and limitations are
+in [SHARED\_KEY\_LEDGER\_RUNBOOK.md](./SHARED_KEY_LEDGER_RUNBOOK.md).
+
 ## Invariants this must never break
 
 - **`user_wallets.raw_capacity_micro_usd` is a single blended pool denominated in

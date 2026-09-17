@@ -6,6 +6,12 @@ import {
 } from '@lobechat/business-const';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import enUS from '../../../locales/en-US/aico.json';
+import faIR from '../../../locales/fa-IR/aico.json';
+import frFR from '../../../locales/fr-FR/aico.json';
+import zhCN from '../../../locales/zh-CN/aico.json';
+import aicoSource from '../../../packages/locales/src/default/aico';
+
 const mockToastError = vi.hoisted(() => vi.fn());
 
 vi.mock('@lobehub/ui/base-ui', () => ({
@@ -151,5 +157,31 @@ describe('toastAicoError', () => {
     toastAicoError(new Error('network'), t, 'wallet.trialFailed');
 
     expect(mockToastError).toHaveBeenCalledWith('wallet.trialFailed');
+  });
+});
+
+describe('Aico usage ledger error codes', () => {
+  const LEDGER_CODES = [
+    'MANAGED_OPERATION_NOT_METERED',
+    'MODEL_PRICING_UNAVAILABLE',
+    'PLATFORM_CAPACITY_EXHAUSTED',
+    'USAGE_CONCURRENCY_LIMIT',
+  ] as const;
+
+  it('resolves suffixed gate refusals to the base code', () => {
+    expect(resolveAicoErrorCode('PLATFORM_CAPACITY_EXHAUSTED:paused')).toBe(
+      'PLATFORM_CAPACITY_EXHAUSTED',
+    );
+  });
+
+  it.each(LEDGER_CODES)('%s has a Persian default and copy in every shipped locale', (code) => {
+    expect(isAicoErrorCode(code)).toBe(true);
+    expect(AICO_ERROR_MESSAGES_FA[code]).toBeTruthy();
+
+    const key = `errors.${code}`;
+    expect((aicoSource as Record<string, string>)[key]).toBeTruthy();
+    for (const [locale, messages] of Object.entries({ enUS, faIR, frFR, zhCN })) {
+      expect((messages as Record<string, string>)[key], locale).toBeTruthy();
+    }
   });
 });

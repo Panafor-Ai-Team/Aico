@@ -14,6 +14,8 @@ import { appEnv } from '@/envs/app';
 import { normalizeIranianPhoneNumber } from '@/libs/better-auth/phone';
 import { authedProcedure, router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
+import { isSharedInferenceKey } from '@/server/services/aico/ledger/config';
+import { isLedgerAuthoritative } from '@/server/services/aico/ledger/state';
 import {
   executeOrgBudgetSweep,
   previewOrgBudgetSweep,
@@ -474,6 +476,7 @@ export const organizationRouter = router({
         orgId: input.orgId,
         orgMemberId: input.orgMemberId,
         remainingMicroUsd: reclaimed.remainingMicroUsd,
+        useLedgerRemaining: await isLedgerAuthoritative(ctx.serverDB),
       });
 
       await recordAicoSecurityEvent(ctx.serverDB, {
@@ -908,7 +911,7 @@ export const organizationRouter = router({
       return {
         currentPeriodEnd: budget.currentPeriodEnd?.toISOString() ?? null,
         currentPeriodStart: budget.currentPeriodStart?.toISOString() ?? null,
-        hasManagedKey: Boolean(budget.openrouterKeyId),
+        hasManagedKey: isSharedInferenceKey() || Boolean(budget.openrouterKeyId),
         isActive: budget.isActive,
         nextRenewalAt: budget.nextRenewalAt?.toISOString() ?? null,
         openrouterLimitReset: budget.openrouterLimitReset,

@@ -25,6 +25,8 @@ import { getBusinessModelRuntimeHooks } from '@/business/server/model-runtime';
 import { AiProviderModel } from '@/database/models/aiProvider';
 import { type LobeChatDatabase } from '@/database/type';
 import { getLLMConfig } from '@/envs/llm';
+import { assertManagedTrafficAllowed } from '@/server/services/aico/ledger/gate';
+import { createManagedBillingHooks } from '@/server/services/aico/ledger/managedBillingHooks';
 import { AicoManagedPolicy, AicoManagedPolicyError } from '@/server/services/aico/managedPolicy';
 import { createLLMGenerationTracingHook } from '@/server/services/llmGenerationTracing/hook';
 import { ensureFreshOAuthToken } from '@/server/services/oauthDeviceFlow/refresh';
@@ -498,10 +500,13 @@ export const initModelRuntimeFromDB = async (
 
   // Aico: every managed path must pass the centralized policy boundary.
   // Explicit billing context is mandatory — no first-match / env / BYOK fallback.
+  let billingHooks: ModelRuntimeHooks | undefined;
   if (managed) {
     if (options?.billingContext === undefined) {
       throw new AicoManagedPolicyError('BILLING_CONTEXT_REQUIRED');
     }
+    // Usage ledger gate: refuses all managed traffic while paused or misconfigured.
+    const ledgerGate = await assertManagedTrafficAllowed(db);
     // Decrypt-only by default. Management client is created only if authorize
     // needs to repair a funded member budget that is missing a managed key.
     const decryptKeyService = new AicoOpenRouterKeyService(db, null);
@@ -513,6 +518,7 @@ export const initModelRuntimeFromDB = async (
           new AicoOpenRouterKeyService(db).ensureMemberKey(orgMemberId),
         ensureUserKey: (userId_) => new AicoOpenRouterKeyService(db).ensureUserKey(userId_),
       },
+      ledgerGate,
     );
     const authorized = await policy.authorize({
       billing: options.billingContext,
@@ -520,6 +526,7 @@ export const initModelRuntimeFromDB = async (
       userId,
     });
     keyVaults = { ...keyVaults, apiKey: authorized.apiKey };
+    billingHooks = createManagedBillingHooks({ authorized, db, gate: ledgerGate });
   }
 
   const payload = buildPayloadFromKeyVaults(keyVaults, runtimeProvider);
@@ -530,7 +537,11 @@ export const initModelRuntimeFromDB = async (
   // 5. Compose with the per-call llm_generation_tracing hook (no-op when the
   //    service is unconfigured, so OSS / self-hosted setups pay nothing for it).
   const tracingHooks = createLLMGenerationTracingHook(userId, runtimeLookupProvider, workspaceId);
-  const hooks = mergeModelRuntimeHooks(businessHooks, tracingHooks);
+  // Ledger billing goes first: a merged hook only runs the next one if it resolves.
+  const hooks = mergeModelRuntimeHooks(
+    billingHooks,
+    mergeModelRuntimeHooks(businessHooks, tracingHooks),
+  );
 
   // 6. Initialize ModelRuntime with the payload and hooks
   return initModelRuntimeWithUserPayload(runtimeLookupProvider, payload, { userId }, hooks);

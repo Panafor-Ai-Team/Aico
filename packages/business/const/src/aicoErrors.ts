@@ -47,6 +47,11 @@ export const AICO_ERROR_CODES = [
   'MEMBER_BUDGET_UNFUNDED',
   'MEMBER_BUDGET_INACTIVE',
   'MEMBER_BUDGET_RENEWAL_BLOCKED',
+  // Usage ledger
+  'USAGE_CONCURRENCY_LIMIT',
+  'PLATFORM_CAPACITY_EXHAUSTED',
+  'MODEL_PRICING_UNAVAILABLE',
+  'MANAGED_OPERATION_NOT_METERED',
   // Control-plane operator auth
   'INVALID_CREDENTIALS',
   'EMAIL_PASSWORD_REQUIRED',
@@ -88,12 +93,15 @@ export const AICO_ERROR_MESSAGES_FA: Record<AicoErrorCode, string> = {
   INVITE_NOT_FOUND: 'دعوت‌نامه یافت نشد.',
   INVITE_NOT_PENDING: 'این دعوت‌نامه دیگر قابل پذیرش نیست.',
   MANAGED_KEY_UNAVAILABLE: 'کلید مدیریت‌شده در دسترس نیست. لطفاً بعداً تلاش کنید.',
+  MANAGED_OPERATION_NOT_METERED: 'این قابلیت موقتاً در دسترس نیست.',
   MEMBER_BUDGET_INACTIVE: 'سهمیه عضویت شما غیرفعال است.',
   MEMBER_BUDGET_RENEWAL_BLOCKED:
     'تمدید سهمیه عضویت در حال انجام یا ناموفق است؛ فعلاً نمی‌توانید چت کنید.',
   MEMBER_BUDGET_UNFUNDED: 'سهمیه سازمانی انتخاب‌شده موجودی ندارد.',
   MEMBER_NOT_FOUND: 'عضو یافت نشد.',
   MODEL_NOT_ALLOWED: 'دسترسی به این مدل برای شما فعال نیست.',
+  MODEL_PRICING_UNAVAILABLE:
+    'قیمت این مدل در حال حاضر در دسترس نیست و نمی‌توان از آن استفاده کرد. مدل دیگری انتخاب کنید.',
   ORG_ALREADY_DELETED: 'این سازمان قبلاً حذف شده است.',
   ORG_HAS_PENDING_RENEWAL: 'تا وقتی تمدید سهمیه در جریان است نمی‌توان سازمان را حذف کرد.',
   ORG_NAME_MISMATCH: 'نام سازمان با تأیید شما مطابقت ندارد.',
@@ -107,6 +115,7 @@ export const AICO_ERROR_MESSAGES_FA: Record<AicoErrorCode, string> = {
     'موجودی کیف پول شخصی کافی نیست. لطفاً شارژ کنید یا دوره آزمایشی را فعال کنید.',
   PERSONAL_WALLET_INACTIVE: 'کیف پول شخصی شما غیرفعال است.',
   PHONE_VERIFICATION_REQUIRED: 'برای ادامه، ابتدا شماره موبایل خود را تأیید کنید.',
+  PLATFORM_CAPACITY_EXHAUSTED: 'سرویس موقتاً در دسترس نیست. لطفاً چند دقیقه بعد دوباره تلاش کنید.',
   TEAM_NOT_FOUND: 'تیم یافت نشد.',
   TRIAL_ALREADY_USED: 'دوره آزمایشی این حساب قبلاً استفاده شده است.',
   TRIAL_DISABLED: 'دوره آزمایشی در حال حاضر غیرفعال است.',
@@ -116,6 +125,8 @@ export const AICO_ERROR_MESSAGES_FA: Record<AicoErrorCode, string> = {
   TRIAL_PHONE_ALREADY_USED: 'دوره آزمایشی با این شماره قبلاً استفاده شده است.',
   TRIAL_PHONE_BLOCKED: 'این شماره برای دوره آزمایشی مجاز نیست.',
   TRIAL_REQUEST_LIMIT: 'سقف درخواست‌های دوره آزمایشی تمام شده است.',
+  USAGE_CONCURRENCY_LIMIT:
+    'درخواست‌های هم‌زمان زیادی با این موجودی در حال اجراست. صبر کنید یکی تمام شود و دوباره تلاش کنید.',
 };
 
 /** Strip suffixes like `MODEL_NOT_ALLOWED:gpt-4` → `MODEL_NOT_ALLOWED`. */

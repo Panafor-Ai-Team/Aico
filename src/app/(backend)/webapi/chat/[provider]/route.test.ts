@@ -42,6 +42,12 @@ vi.mock('@/server/services/aico/usageMultiplier', () => ({
   resolveManagedPricingContext: vi.fn().mockResolvedValue({}),
 }));
 
+const ledger = vi.hoisted(() => ({ mode: 'off' as 'enforce' | 'off' | 'shadow' }));
+
+vi.mock('@/server/services/aico/ledger/config', () => ({
+  getLedgerConfig: () => ({ mode: ledger.mode }),
+}));
+
 const billing = { source: 'personal' as const };
 
 const makeRequest = (body: Record<string, unknown>) =>
@@ -202,6 +208,26 @@ describe('POST handler', () => {
       // Without `persist` the wallet only falls when the user opens billing,
       // so spend would look free until then.
       expect(getUserRemaining).toHaveBeenCalledWith('test-user-id', { persist: true });
+    });
+
+    it('leaves usage to the hold settle under ledger enforce', async () => {
+      ledger.mode = 'enforce';
+      try {
+        const mockRuntime: LobeRuntimeAI = {
+          baseURL: 'abc',
+          chat: vi.fn().mockResolvedValue(new Response('ok')),
+        };
+        vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+        await POST(makeRequest({ model: 'test-model' }), {
+          params: Promise.resolve({ provider: 'openrouter' }),
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(getUserRemaining).not.toHaveBeenCalled();
+      } finally {
+        ledger.mode = 'off';
+      }
     });
   });
 });
