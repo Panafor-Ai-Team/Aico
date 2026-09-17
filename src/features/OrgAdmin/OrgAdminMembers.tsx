@@ -26,8 +26,12 @@ import { TeamModelsForm } from '@/features/OrgAdmin/TeamModelsForm';
 import { buildPhoneVerifyRedirectUrl, isValidIranianPhoneNumber } from '@/libs/better-auth/phone';
 import { useClientDataSWR } from '@/libs/swr';
 import { lambdaClient } from '@/libs/trpc/client';
+import { aiModelService } from '@/services/aiModel';
 import { useUserStore } from '@/store/user';
 import { userProfileSelectors } from '@/store/user/selectors';
+
+/** Model types a team can be granted; embeddings are not user-selectable. */
+const TEAM_MODEL_TYPES = new Set(['chat', 'image', 'video']);
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   dangerCard: css`
@@ -157,16 +161,17 @@ export const OrgAdminMembers = () => {
     () => lambdaClient.organization.listTeams.query({ orgId: selectedOrgId }),
   );
 
+  // Same list the site's model switches use: the whole managed catalog, with
+  // hidden and free models already filtered out by the service.
   const { data: catalogModels } = useClientDataSWR('aico-org-model-catalog', () =>
-    lambdaClient.aiModel.getAiProviderModelList.query({ id: 'openrouter', limit: 200 }),
+    aiModelService.getAiProviderModelList('openrouter'),
   );
 
-  const modelOptions = useMemo(
+  const teamCatalogModels = useMemo(
     () =>
-      (catalogModels || []).map((model) => ({
-        label: model.displayName ? `${model.displayName} (${model.id})` : model.id,
-        value: model.id,
-      })),
+      (catalogModels || [])
+        .filter((model) => TEAM_MODEL_TYPES.has(model.type || 'chat'))
+        .map((model) => ({ displayName: model.displayName, id: model.id, type: model.type })),
     [catalogModels],
   );
 
@@ -1009,7 +1014,7 @@ export const OrgAdminMembers = () => {
               </div>
               {selectedOrgId && (
                 <TeamModelsForm
-                  modelOptions={modelOptions}
+                  models={teamCatalogModels}
                   orgId={selectedOrgId}
                   readOnly={readOnly}
                   teams={teams || []}

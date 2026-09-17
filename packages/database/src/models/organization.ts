@@ -1188,6 +1188,48 @@ export class OrganizationModel {
     });
   };
 
+  /**
+   * Switch one model on or off for a team. A rule row means on, no row means
+   * off — the two states the org admin sees.
+   */
+  setTeamModelEnabled = async (params: {
+    enabled: boolean;
+    modelId: string;
+    orgId: string;
+    teamId: string;
+  }) => {
+    const team = await this.db.query.organizationTeams.findFirst({
+      where: and(
+        eq(organizationTeams.id, params.teamId),
+        eq(organizationTeams.orgId, params.orgId),
+      ),
+    });
+    if (!team) throw new Error('TEAM_NOT_FOUND');
+
+    await this.db.transaction(async (tx) => {
+      // No unique index on (team, model): delete first so repeating "on" stays one rule.
+      await tx
+        .delete(modelAccessRules)
+        .where(
+          and(
+            eq(modelAccessRules.teamId, params.teamId),
+            eq(modelAccessRules.scope, 'team'),
+            eq(modelAccessRules.modelId, params.modelId),
+          ),
+        );
+      if (!params.enabled) return;
+
+      await tx.insert(modelAccessRules).values({
+        modelId: params.modelId,
+        orgId: params.orgId,
+        scope: 'team',
+        teamId: params.teamId,
+      });
+    });
+
+    return { enabled: params.enabled, modelId: params.modelId };
+  };
+
   getTeamModelAccess = async (teamId: string) => {
     return this.db.query.modelAccessRules.findMany({
       where: and(eq(modelAccessRules.teamId, teamId), eq(modelAccessRules.scope, 'team')),

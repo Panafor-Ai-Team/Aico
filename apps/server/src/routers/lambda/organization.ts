@@ -1,3 +1,4 @@
+import { OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
 import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -791,6 +792,42 @@ export const organizationRouter = router({
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: error instanceof Error ? error.message : 'Failed to set models',
+        });
+      }
+    }),
+
+  /** One model on or off for a team, saved immediately like the site's model switches. */
+  setTeamModelEnabled: orgProcedure
+    .input(
+      z.object({
+        enabled: z.boolean(),
+        modelId: z.string().min(1).max(256),
+        orgId: z.string().min(1),
+        teamId: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireOrgManager(ctx.organizationModel, ctx.userId, input.orgId);
+      if (input.modelId === OPENROUTER_AUTO_MODEL_ID) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'The Auto model is always on' });
+      }
+      try {
+        const result = await ctx.organizationModel.setTeamModelEnabled(input);
+        await recordAicoSecurityEvent(ctx.serverDB, {
+          action: 'org.teamModel.update',
+          actorUserId: ctx.userId,
+          ipAddress: ctx.clientIp,
+          metadata: { enabled: input.enabled, modelId: input.modelId, teamId: input.teamId },
+          organizationId: input.orgId,
+          targetId: `${input.teamId}:${input.modelId}`,
+          targetType: 'model_access_rules',
+          userAgent: ctx.userAgent,
+        });
+        return result;
+      } catch (error) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: error instanceof Error ? error.message : 'Failed to update team model',
         });
       }
     }),
