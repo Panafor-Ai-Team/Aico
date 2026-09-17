@@ -80,6 +80,10 @@ export interface ModelRuntimeHooks {
     payload: GenerateObjectPayload,
     options?: GenerateObjectOptions,
   ) => Promise<void>;
+  /** Runs before text-to-speech. Throw to abort. */
+  beforeTextToSpeech?: (payload: TextToSpeechPayload, options?: EmbeddingsOptions) => Promise<void>;
+  /** Runs before transcription. Throw to abort. */
+  beforeTranscribe?: (payload: ASRPayload, options?: ASROptions) => Promise<void>;
   /**
    * Called when chat() throws. Handle side effects (sanitize, log, DB record).
    * The error is re-thrown after the hook completes — callers still handle response formatting.
@@ -96,6 +100,21 @@ export interface ModelRuntimeHooks {
   onChatFinal?: (
     data: OnFinishData,
     context: { options?: ChatMethodOptions; payload: ChatStreamPayload },
+  ) => void | Promise<void>;
+
+  /**
+   * Always fires after `embeddings` returns or throws, including when
+   * `beforeEmbeddings` throws. Unlike `onEmbeddingsFinal`, it fires whether or
+   * not the runtime reported usage. Hook failures are swallowed and logged.
+   */
+  onEmbeddingsComplete?: (
+    data: {
+      error?: { code?: string; message?: string; stack?: string };
+      latencyMs: number;
+      success: boolean;
+      usage?: ModelUsage;
+    },
+    context: { options?: EmbeddingsOptions; payload: EmbeddingsPayload },
   ) => void | Promise<void>;
 
   onEmbeddingsError?: (
@@ -433,20 +452,48 @@ export class ModelRuntime {
   }
 
   async embeddings(payload: EmbeddingsPayload, options?: EmbeddingsOptions) {
+    const startedAt = Date.now();
+    let usageCapture: ModelUsage | undefined;
+
+    const fireComplete = async (data: {
+      error?: { code?: string; message?: string; stack?: string };
+      success: boolean;
+    }) => {
+      if (!this._hooks?.onEmbeddingsComplete) return;
+      try {
+        await this._hooks.onEmbeddingsComplete(
+          {
+            error: data.error,
+            latencyMs: Date.now() - startedAt,
+            success: data.success,
+            usage: usageCapture,
+          },
+          { options, payload },
+        );
+      } catch (e) {
+        // Hook failures must not affect the caller — log and move on.
+        console.error('[ModelRuntime] onEmbeddingsComplete hook error:', e);
+      }
+    };
+
     try {
       const hookOptions = this._hooks?.beforeEmbeddings && !options ? {} : options;
       await this._hooks?.beforeEmbeddings?.(payload, hookOptions);
 
       const startTime = Date.now();
 
-      const finalOptions = this._hooks?.onEmbeddingsFinal
+      const needsUsageCapture = this._hooks?.onEmbeddingsFinal || this._hooks?.onEmbeddingsComplete;
+
+      const finalOptions = needsUsageCapture
         ? {
             ...hookOptions,
             onUsage: async (usage: ModelUsage) => {
+              usageCapture = usage;
               await hookOptions?.onUsage?.(usage);
+              if (!this._hooks?.onEmbeddingsFinal) return;
               try {
                 const latencyMs = Date.now() - startTime;
-                await this._hooks!.onEmbeddingsFinal!({ latencyMs, usage }, { options, payload });
+                await this._hooks.onEmbeddingsFinal({ latencyMs, usage }, { options, payload });
               } catch (e) {
                 console.error('[ModelRuntime] onEmbeddingsFinal hook error:', e);
               }
@@ -454,7 +501,9 @@ export class ModelRuntime {
           }
         : hookOptions;
 
-      return await this._runtime.embeddings?.(payload, finalOptions);
+      const result = await this._runtime.embeddings?.(payload, finalOptions);
+      await fireComplete({ success: true });
+      return result;
     } catch (error) {
       if (this._hooks?.onEmbeddingsError) {
         await this._hooks.onEmbeddingsError(error as ChatCompletionErrorPayload, {
@@ -462,15 +511,28 @@ export class ModelRuntime {
           payload,
         });
       }
+      const err = error as Error & { code?: string; errorType?: string };
+      const code = err?.errorType ?? err?.code ?? err?.name ?? err?.constructor?.name;
+      await fireComplete({
+        error: { code, message: err?.message, stack: err?.stack },
+        success: false,
+      });
       throw error;
     }
   }
+
   async textToSpeech(payload: TextToSpeechPayload, options?: EmbeddingsOptions) {
-    return this._runtime.textToSpeech?.(payload, options);
+    const finalOptions = this._hooks?.beforeTextToSpeech && !options ? {} : options;
+    await this._hooks?.beforeTextToSpeech?.(payload, finalOptions);
+
+    return this._runtime.textToSpeech?.(payload, finalOptions);
   }
 
   async transcribe(payload: ASRPayload, options?: ASROptions) {
-    return this._runtime.transcribe?.(payload, options);
+    const finalOptions = this._hooks?.beforeTranscribe && !options ? {} : options;
+    await this._hooks?.beforeTranscribe?.(payload, finalOptions);
+
+    return this._runtime.transcribe?.(payload, finalOptions);
   }
 
   async pullModel(params: PullModelParams, options?: ModelRequestOptions) {

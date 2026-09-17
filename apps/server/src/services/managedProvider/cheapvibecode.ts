@@ -140,7 +140,7 @@ const cvcRequest = async <T>(
  * credential, which is why the product server can call it directly instead of
  * proxying through the control plane.
  */
-const fetchKeyBalanceUsd = async (apiKey: string): Promise<number> =>
+export const fetchKeyBalanceUsd = async (apiKey: string): Promise<number> =>
   cvcTokensToUsd(
     readBalanceTokens(await cvcRequest<unknown>('/v1/balance', { method: 'GET' }, apiKey)),
   );
