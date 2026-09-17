@@ -35,6 +35,13 @@ export default {
   'errors.MEMBER_BUDGET_RENEWAL_BLOCKED':
     'Organization budget renewal is pending or failed — chat is blocked until it completes.',
   'errors.MEMBER_BUDGET_UNFUNDED': 'The selected organization budget has no remaining credit.',
+  'errors.USAGE_CONCURRENCY_LIMIT':
+    'Too many requests are running at once on this balance. Wait for one to finish and try again.',
+  'errors.PLATFORM_CAPACITY_EXHAUSTED':
+    'The service is temporarily unavailable. Please try again in a few minutes.',
+  'errors.MODEL_PRICING_UNAVAILABLE':
+    "This model's price is not available right now, so it can't be used. Choose another model.",
+  'errors.MANAGED_OPERATION_NOT_METERED': 'This feature is temporarily unavailable.',
   'errors.MEMBER_NOT_FOUND': 'Member not found.',
   'errors.MODEL_NOT_ALLOWED': 'You do not have access to this model.',
   'errors.ORG_ALREADY_DELETED': 'This organization has already been deleted.',
