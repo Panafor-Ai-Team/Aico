@@ -20,6 +20,8 @@
 #   POSTGRES_CONTAINER     default lobe-postgres
 #   POSTGRES_VOLUME_NAME   default panachat_postgres_data
 #   RUSTFS_VOLUME_NAME     default panachat_rustfs_data
+#   RUSTFS_CONTAINER       default <POSTGRES_CONTAINER prefix>-rustfs (lobe-rustfs, panachat-rustfs)
+#   PANACHAT_BACKUP_DOCKER_TIMEOUT=900  seconds before a hung docker exec/run is killed
 #   PANACHAT_KEEP_DAILY_DAYS=14
 #   PANACHAT_KEEP_WEEKLY_DAYS=56
 #   PANACHAT_KEEP_MONTHLY_DAYS=365
@@ -61,7 +63,7 @@ load_deploy_env() {
   local envf="${PANACHAT_INFRA_ENV_FILE:-$DEPLOY_DIR/.env}"
   [[ -f "$envf" ]] || return 0
   local key val
-  for key in PANACHAT_DATA_DIR PANACHAT_BACKUP_DIR LOBE_DB_NAME POSTGRES_CONTAINER POSTGRES_VOLUME_NAME RUSTFS_VOLUME_NAME; do
+  for key in PANACHAT_DATA_DIR PANACHAT_BACKUP_DIR LOBE_DB_NAME POSTGRES_CONTAINER POSTGRES_VOLUME_NAME RUSTFS_VOLUME_NAME RUSTFS_CONTAINER; do
     val="$(grep -E "^${key}=" "$envf" 2>/dev/null | cut -d= -f2- || true)"
     if [[ -n "$val" ]]; then
       printf -v "$key" '%s' "$val"
@@ -156,6 +158,8 @@ if [[ "${MOZ_SKIP_BACKUP:-}" == "1" && -z "$RESTORE_FILE" ]]; then
 fi
 
 load_deploy_env
+RUSTFS_CONTAINER="${RUSTFS_CONTAINER:-${POSTGRES_CONTAINER%-postgres}-rustfs}"
+DOCKER_TIMEOUT="${PANACHAT_BACKUP_DOCKER_TIMEOUT:-900}"
 
 stamp="$(date +%Y%m%d-%H%M%S)"
 day="$(date +%Y-%m-%d)"
@@ -193,8 +197,32 @@ list_backups() {
   fi
 }
 
+container_running() {
+  [[ "$(docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null || echo missing)" == "running" ]]
+}
+
 postgres_running() {
-  [[ "$(docker inspect -f '{{.State.Status}}' "$POSTGRES_CONTAINER" 2>/dev/null || echo missing)" == "running" ]]
+  container_running "$POSTGRES_CONTAINER"
+}
+
+# Archive the RustFS volume as rustfs/… into $1. Exit 2 = volume has no files.
+# Prefer exec into the running RustFS container: no new container, no network.
+# A wedged dockerd can drop docker0 and lose exit events of new containers, so
+# `docker run` is only the fallback, and both are bounded by a timeout.
+archive_rustfs_volume() {
+  local out="$1"
+  # shellcheck disable=SC2016
+  local pack='find "$1" -type f ! -path "*/.*" | grep -q . || exit 2
+    d="$(mktemp -d)" && ln -s "$1" "$d/rustfs" && tar -C "$d" -chzf - rustfs; rc=$?; rm -rf "$d"; exit $rc'
+  if container_running "$RUSTFS_CONTAINER"; then
+    echo "    via: docker exec $RUSTFS_CONTAINER"
+    timeout "$DOCKER_TIMEOUT" docker exec "$RUSTFS_CONTAINER" sh -c "$pack" sh /data >"$out"
+    return
+  fi
+  docker volume inspect "$RUSTFS_VOLUME_NAME" >/dev/null 2>&1 || return 2
+  echo "    via: docker run alpine (--network none)"
+  timeout "$DOCKER_TIMEOUT" docker run --rm --network none -v "$RUSTFS_VOLUME_NAME:/rustfs:ro" \
+    alpine sh -c "$pack" sh /rustfs >"$out"
 }
 
 fingerprint_file() {
@@ -365,10 +393,14 @@ compute_keep_stems() {
   KEEP_STEMS=()
 
   shopt -s nullglob
-  for f in "$PANACHAT_BACKUP_DIR"/panachat-*.sql.gz; do
+  # RustFS archives count too: a run without a SQL dump (Postgres down) must
+  # not have its uploads archive pruned the moment it is written.
+  for f in "$PANACHAT_BACKUP_DIR"/panachat-*.sql.gz "$PANACHAT_BACKUP_DIR"/panachat-*.rustfs.tar.gz; do
     base="$(basename "$f")"
     parse_backup_name "$base" || continue
     stem="${base%.sql.gz}"
+    stem="${stem%.rustfs.tar.gz}"
+    stem_is_kept "$stem" && continue
     sql_files+=("$stem")
     if calendar_keep "$_ymd"; then
       KEEP_STEMS+=("$stem")
@@ -380,7 +412,7 @@ compute_keep_stems() {
   done
 
   if ((${#pre_deploy[@]} > 0)); then
-    mapfile -t pre_deploy < <(printf '%s\n' "${pre_deploy[@]}" | sort -r)
+    mapfile -t pre_deploy < <(printf '%s\n' "${pre_deploy[@]}" | sort -ru)
     local i=0
     for stem in "${pre_deploy[@]}"; do
       i=$((i + 1))
@@ -431,7 +463,7 @@ create_backup() {
   local sql_path="$PANACHAT_BACKUP_DIR/${base}.sql.gz"
   local rustfs_path="$PANACHAT_BACKUP_DIR/${base}.rustfs.tar.gz"
   local rustfs_src="$PANACHAT_DATA_DIR/rustfs"
-  local live_users="?" fstype="?" fp_users="" rustfs_archived=0
+  local live_users="?" fstype="?" fp_users="" rustfs_archived=0 rustfs_rc=0
 
   echo "==> Backup reason=$REASON"
   echo "    Data dir:   $PANACHAT_DATA_DIR"
@@ -484,13 +516,13 @@ EOF
     fi
   fi
 
-  if docker volume inspect "$RUSTFS_VOLUME_NAME" >/dev/null 2>&1; then
-    if docker run --rm \
-      -v "$RUSTFS_VOLUME_NAME:/rustfs:ro" \
-      -v "$PANACHAT_BACKUP_DIR:/out" \
-      alpine sh -c 'find /rustfs -type f ! -path "*/.*" | grep -q . || exit 2
-        tar -C / -czf /out/'"$(basename "$rustfs_path")"' rustfs'; then
-      rustfs_archived=1
+  archive_rustfs_volume "$rustfs_path" || rustfs_rc=$?
+  if [[ $rustfs_rc -eq 0 ]]; then
+    rustfs_archived=1
+  else
+    rm -f "$rustfs_path"
+    if [[ $rustfs_rc -ne 2 ]]; then
+      echo "Error: RustFS archive failed (exit $rustfs_rc) — uploads NOT backed up" >&2
     fi
   fi
   if [[ $rustfs_archived -eq 0 ]] \
@@ -502,9 +534,10 @@ EOF
   if [[ $rustfs_archived -eq 1 ]]; then
     echo "==> Archiving RustFS uploads"
     echo "    RustFS: $(basename "$rustfs_path") ($(du -h "$rustfs_path" | awk '{print $1}'))"
-  else
+  elif [[ $rustfs_rc -eq 0 || $rustfs_rc -eq 2 ]]; then
     echo "==> RustFS empty/missing — skipped"
   fi
+  RUSTFS_FAILED=$(( rustfs_archived == 0 && rustfs_rc != 0 && rustfs_rc != 2 ))
 
   {
     echo "created_at=$(date -Iseconds)"
@@ -542,6 +575,11 @@ if [[ -n "$RESTORE_FILE" ]]; then
   exit 0
 fi
 
+RUSTFS_FAILED=0
 create_backup
 prune_backups
 list_backups
+if [[ $RUSTFS_FAILED -eq 1 ]]; then
+  echo "Error: backup incomplete — RustFS uploads were not archived (see above)" >&2
+  exit 1
+fi
