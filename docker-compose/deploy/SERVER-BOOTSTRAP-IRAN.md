@@ -30,7 +30,8 @@ Runbook for the Iran-hosted Panachat server. Base host prep (sections 1–6) is 
   3. Does the foreign server allow outbound port 25 and rDNS? (Needed for Stalwart mail.)
 - [ ] Decision on a **foreign relay** (ParsPack Germany/Hetzner) for LLM egress. See §8.
 - [ ] `OPENROUTER_MANAGEMENT_BASE_URL` change so OpenRouter key allocation works from this host (open code item).
-- [ ] Off-site backup target (ParsPack snapshots live on the same platform, so they are not an independent backup).
+- [x] Off-site copy of prod (kamyar) backups on this host, with a weekly restore drill. See §8.
+- [ ] Off-site target for **this** host's backups once it becomes production (ParsPack snapshots live on the same platform, so they are not an independent backup).
 
 ---
 
@@ -182,9 +183,57 @@ done
 
 ---
 
-## 8. Open items (not done)
+## 8. Backups: off-site copy of kamyar + restore drill
+
+This host already works as the off-site backup for current production (kamyar, `5.135.244.12`).
+
+| What          | Where / when                                                                                         |
+| ------------- | ---------------------------------------------------------------------------------------------------- |
+| Prod backup   | kamyar cron `03:00 UTC` → `scripts/panachat-backup.sh --reason daily` → `/var/lib/panachat/backups`  |
+| Off-site pull | this host, cron `03:30 UTC` → `panachat-offsite-pull` → `/var/lib/panachat-offsite/kamyar` (90 days) |
+| Restore drill | this host, cron `Sun 05:00 UTC` → `panachat-restore-drill` → `/var/lib/panachat-offsite/drill.log`   |
+| Logs          | `/var/lib/panachat-offsite/pull.log`, `drill.log`                                                    |
+
+The scripts live in the repo as `scripts/panachat-offsite-pull.sh` and `scripts/panachat-restore-drill.sh`, and are installed into `/usr/local/bin`. The pull fails loudly if the newest dump is older than 30 hours, which catches a broken prod cron.
+
+**Pull key.** `~/.ssh/offsite_pull` on this host. On kamyar it is locked in `~panachat/.ssh/authorized_keys` to read-only rsync of the backup folder from this IP only:
+
+```text
+command="/usr/bin/rrsync -ro /var/lib/panachat/backups/",restrict,from="94.184.43.17" ssh-ed25519 … panachat-offsite-pull@parspack
+```
+
+It gets no shell, can't write, and can't use `..`. The pull never uses `--delete`, so a wipe on prod does not propagate here.
+
+**Setup from scratch:**
+
+```bash
+# on this host
+ssh-keygen -t ed25519 -N '' -C panachat-offsite-pull@parspack -f ~/.ssh/offsite_pull
+ssh-keyscan -t ed25519 5.135.244.12 >> ~/.ssh/known_hosts
+sudo install -d -o panachat -g panachat -m 750 /var/lib/panachat-offsite/kamyar
+sudo install -m 755 ~/panachat/scripts/panachat-offsite-pull.sh /usr/local/bin/panachat-offsite-pull
+sudo install -m 755 ~/panachat/scripts/panachat-restore-drill.sh /usr/local/bin/panachat-restore-drill
+# add the authorized_keys line above on kamyar, then:
+panachat-offsite-pull && panachat-restore-drill
+crontab -e # 30 3 * * * panachat-offsite-pull …   /   0 5 * * 0 panachat-restore-drill …
+```
+
+**Restoring into a fresh database.** The `paradedb` image pre-installs its extensions into `POSTGRES_DB` and `template1`. A dump restored into them fails with `schema "paradedb" already exists`. That includes `panachat-backup.sh --restore` against a brand-new stack. Create the target from `template0` instead:
+
+```bash
+docker exec panachat-postgres createdb -U postgres -T template0 lobechat_restore
+gunzip -c panachat-….sql.gz | docker exec -i panachat-postgres psql -U postgres -d lobechat_restore -v ON_ERROR_STOP=1
+```
+
+Then point `PANACHAT_DB_NAME` at it, or rename the databases while the app is stopped. RustFS archives contain `rustfs/…` = the contents of the RustFS `/data` volume. Restore with `tar -xzf … --strip-components=1` into the new `panachat_rustfs_data` volume.
+
+Drill on 2026-09-21: restore OK, users=15, messages=506, topics=52, files=71, 230 upload files. These match live prod exactly.
+
+---
+
+## 9. Open items (not done)
 
 - **LLM egress:** `openrouter.ai` answers from this DC, but providers can geo-block **inference** from Iranian IPs. Before go-live, run one real completion with a test key. If it is refused, route LLM traffic through the foreign relay: a ParsPack Germany/Hetzner server with a WireGuard tunnel, or an HTTP proxy via `HTTPS_PROXY` on the app container.
 - **`OPENROUTER_MANAGEMENT_BASE_URL`:** code change needed so key allocation goes through the relay.
-- **Backups:** after the stack is up, run `./scripts/panachat-backup.sh --install-cron`, then sync `~/.local/share/panachat-backups` off-site (for example to the foreign server with `rsync`).
+- **Backups when this host is prod:** run `./scripts/panachat-backup.sh --install-cron`, then ship its backups off this platform (for example, reverse the pull above so kamyar or the foreign server pulls from here).
 - **Mail (Stalwart):** belongs on the foreign server if it provides outbound port 25 and rDNS (ticket question 3).
