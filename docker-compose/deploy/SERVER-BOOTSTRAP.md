@@ -1,5 +1,7 @@
 # Panachat server bootstrap (kamyar VPS)
 
+> Iran (ParsPack Tehran) host: see [SERVER-BOOTSTRAP-IRAN.md](./SERVER-BOOTSTRAP-IRAN.md) for host prep, then continue here from §2.
+
 Numbered operator runbook for Ubuntu 24.04. Assumes GitHub **repository** secrets are already set (`DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_PATH`, `GHCR_READ_TOKEN`) and the repo is cloned.
 
 | Setting    | Value                                        |
