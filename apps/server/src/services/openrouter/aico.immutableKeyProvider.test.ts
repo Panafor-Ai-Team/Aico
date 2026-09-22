@@ -26,14 +26,24 @@ import {
   userWallets,
   walletTransactions,
 } from '@/database/schemas/aicoOrganization';
+import { aicoEnv } from '@/envs/aico';
 import { processKeyOutbox } from '@/server/services/aico/renewalScheduler';
-import type { ManagedProviderClient } from '@/server/services/managedProvider';
+import {
+  CheapVibeCodeAmbiguousEditError,
+  type ManagedProviderClient,
+} from '@/server/services/managedProvider';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 
 // Read at call time by `KeyVaultsGateKeeper`, but the modules below are hoisted
 // above ordinary statements — so the stub has to be hoisted with them.
 vi.hoisted(() => {
   process.env.KEY_VAULTS_SECRET ||= 'LA7n9k3JdEcbSgml2sxfw+4TV1AzaaFU5+R176aQz4s=';
+});
+
+// A mutable copy, so one describe block can turn `AICO_CVC_RESIZE_IN_PLACE` on.
+vi.mock('@/envs/aico', async (importOriginal) => {
+  const actual = await importOriginal<{ aicoEnv: Record<string, unknown> }>();
+  return { ...actual, aicoEnv: { ...actual.aicoEnv } };
 });
 
 const usd = (n: number) => Math.round(n * 1_000_000);
@@ -140,6 +150,47 @@ class RevocableImmutableProvider extends ImmutableProvider {
     return { ...(await this.getKey({ hash })), disabled: Boolean(params.disabled) };
   };
 }
+
+/**
+ * CVC with `POST /v1/keys/edit` resizing: the limit moves on the same key and
+ * its counter carries on. `resizeMode` stands in for CVC timing out mid-raise
+ * (`ambiguous`, which still applies the edit) or refusing it.
+ */
+class ResizableProvider extends RevocableImmutableProvider {
+  resizeMode: 'ambiguous' | 'ok' | 'refuse' = 'ok';
+  resizes: { active: boolean; limitUsd: number }[] = [];
+
+  resizeKey: NonNullable<ManagedProviderClient['resizeKey']> = async (params) => {
+    const hash = params.apiKey.replace('sk-cvc-fake-', '');
+    const row = this.keys.get(hash);
+    if (!row) throw new Error('CheapVibeCode API 404: Not Found');
+    if (this.resizeMode === 'refuse') throw new Error('CheapVibeCode API 400: Bad Request');
+    this.resizes.push({ active: params.active, limitUsd: params.limitUsd });
+    if (params.active) this.frozen.delete(hash);
+    else this.frozen.add(hash);
+    row.limitUsd = Math.max(params.limitUsd, row.usedUsd);
+    if (this.resizeMode === 'ambiguous') throw new CheapVibeCodeAmbiguousEditError(502);
+    return {
+      ...(await this.getKey({ hash, limitUsd: row.limitUsd })),
+      limit: row.limitUsd,
+    };
+  };
+
+  override updateKey: NonNullable<ManagedProviderClient['updateKey']> = async (params) => {
+    const hash = params.apiKey!.replace('sk-cvc-fake-', '');
+    const row = this.keys.get(hash);
+    if (!row) throw new Error('CheapVibeCode API 404: Not Found');
+    if (params.disabled) this.frozen.add(hash);
+    else this.frozen.delete(hash);
+    return {
+      ...(await this.getKey({ hash, limitUsd: row.limitUsd })),
+      disabled: Boolean(params.disabled),
+      limit: row.limitUsd,
+    };
+  };
+}
+
+const resizeFlag = aicoEnv as { AICO_CVC_RESIZE_IN_PLACE: boolean };
 
 let db: LobeChatDatabase;
 const userId = 'imm-user';
@@ -391,6 +442,103 @@ describe('revocable fixed-limit provider (CVC reseller API)', () => {
   });
 });
 
+describe('resize in place (AICO_CVC_RESIZE_IN_PLACE) — personal wallet', () => {
+  beforeEach(() => {
+    resizeFlag.AICO_CVC_RESIZE_IN_PLACE = true;
+  });
+  afterEach(() => {
+    resizeFlag.AICO_CVC_RESIZE_IN_PLACE = false;
+  });
+
+  it('a top-up raises the same key instead of minting a replacement', async () => {
+    const provider = new ResizableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    await creditUser(10);
+    const first = await keys.ensureUserKey(userId);
+    provider.spend(first.keyId!, 4);
+    await creditUser(10);
+
+    const again = await keys.ensureUserKey(userId);
+
+    expect(again).toEqual({ created: false, keyId: first.keyId });
+    expect(provider.keys.size).toBe(1);
+    const wallet = await readWallet();
+    // Same key, same counter: the whole capacity is its limit, nothing carried.
+    expect(wallet?.managedKeyLimitMicroUsd).toBe(Number(wallet?.rawCapacityMicroUsd));
+    expect(wallet?.rawUsageBeforeKeyMicroUsd).toBe(0);
+    expect(provider.keys.get(first.keyId!)!.limitUsd * 1_000_000).toBe(
+      Number(wallet?.rawCapacityMicroUsd),
+    );
+
+    // Spend reads the same as it would across two keys: $4 raw at 1.2x.
+    const remaining = await keys.getUserRemaining(userId);
+    expect(remaining.usageMicroUsd).toBe(usd(4.8));
+  });
+
+  it('does not touch the key when the wallet is not being topped up', async () => {
+    const provider = new ResizableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    await creditUser(10);
+    await keys.ensureUserKey(userId);
+
+    await keys.ensureUserKey(userId);
+
+    expect(provider.resizes).toHaveLength(0);
+  });
+
+  it('an ambiguous raise is not retried, keeps the key, and heals the stored limit from a live read', async () => {
+    const provider = new ResizableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    await creditUser(10);
+    const first = await keys.ensureUserKey(userId);
+    await creditUser(10);
+    provider.resizeMode = 'ambiguous';
+
+    const again = await keys.ensureUserKey(userId);
+
+    expect(again).toEqual({ created: false, keyId: first.keyId });
+    expect(provider.resizes).toHaveLength(1);
+    expect(provider.keys.size).toBe(1);
+    // The raise did land upstream; the stored limit now says so.
+    const wallet = await readWallet();
+    expect(wallet?.managedKeyLimitMicroUsd).toBe(
+      Math.round(provider.keys.get(first.keyId!)!.limitUsd * 1_000_000),
+    );
+  });
+
+  it('a refused resize falls back to mint-then-delete with the stored limit restored', async () => {
+    const provider = new ResizableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    await creditUser(10);
+    const first = await keys.ensureUserKey(userId);
+    provider.spend(first.keyId!, 4);
+    await creditUser(10);
+    provider.resizeMode = 'refuse';
+
+    const second = await keys.ensureUserKey(userId);
+
+    expect(second.created).toBe(true);
+    expect([...provider.keys.keys()]).toEqual([second.keyId]);
+    // The rotation read the old key against its real limit, so the carry is exact.
+    expect((await readWallet())?.rawUsageBeforeKeyMicroUsd).toBe(usd(4));
+  });
+
+  it('stays on rotation while the flag is off', async () => {
+    resizeFlag.AICO_CVC_RESIZE_IN_PLACE = false;
+    const provider = new ResizableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    await creditUser(10);
+    const first = await keys.ensureUserKey(userId);
+    provider.spend(first.keyId!, 4);
+    await creditUser(10);
+
+    const second = await keys.ensureUserKey(userId);
+
+    expect(second.keyId).not.toBe(first.keyId);
+    expect(provider.resizes).toHaveLength(0);
+  });
+});
+
 describe('immutable-limit provider — member budgets', () => {
   const setupMember = async () => {
     const orgModel = new OrganizationModel(db);
@@ -512,5 +660,93 @@ describe('immutable-limit provider — member budgets', () => {
     expect(Number((await orgModel.getMemberBudget(member.id))?.managedKeyLimitMicroUsd)).toBe(
       usd(16),
     );
+  });
+
+  describe('resize in place (AICO_CVC_RESIZE_IN_PLACE)', () => {
+    beforeEach(() => {
+      resizeFlag.AICO_CVC_RESIZE_IN_PLACE = true;
+    });
+    afterEach(() => {
+      resizeFlag.AICO_CVC_RESIZE_IN_PLACE = false;
+    });
+
+    it('a raised cap resizes the same key and keeps the checkpoint on its counter', async () => {
+      const provider = new ResizableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      const { member, org, orgModel } = await setupMember();
+      const first = await keys.ensureMemberKey(member.id);
+      provider.spend(first.keyId!, 4);
+      await orgModel.allocateMemberCredit({
+        createdByUserId: userId,
+        orgId: org.id,
+        orgMemberId: member.id,
+        period: 'daily',
+        periodAmountMicroUsd: usd(24),
+      });
+
+      const again = await keys.ensureMemberKey(member.id);
+
+      expect(again).toEqual({ created: false, keyId: first.keyId });
+      expect(provider.keys.size).toBe(1);
+      const budget = await orgModel.getMemberBudget(member.id);
+      // No rotation: nothing frozen into the checkpoint, the counter carries on.
+      expect(Number(budget?.usageBaselineMicroUsd ?? 0)).toBe(0);
+      expect(Number(budget?.billedUsageBeforeBaselineMicroUsd ?? 0)).toBe(0);
+      // $24 at 1.2x buys $20 raw on the same counter — the $4 already used included.
+      expect(Number(budget?.managedKeyLimitMicroUsd)).toBe(usd(20));
+      expect(provider.keys.get(first.keyId!)!.limitUsd).toBe(20);
+    });
+
+    it('a cut cap reduces the same key, never below what it already used', async () => {
+      const provider = new ResizableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      const { member, org, orgModel } = await setupMember();
+      const first = await keys.ensureMemberKey(member.id);
+      provider.spend(first.keyId!, 4);
+      await orgModel.allocateMemberCredit({
+        createdByUserId: userId,
+        orgId: org.id,
+        orgMemberId: member.id,
+        period: 'daily',
+        periodAmountMicroUsd: usd(6),
+      });
+
+      await keys.ensureMemberKey(member.id);
+
+      expect(provider.keys.size).toBe(1);
+      // $6 at 1.2x is $5 raw; the key keeps the $4 it spent and $1 of headroom.
+      expect(provider.keys.get(first.keyId!)!.limitUsd).toBe(5);
+      expect(Number((await orgModel.getMemberBudget(member.id))?.managedKeyLimitMicroUsd)).toBe(
+        usd(5),
+      );
+    });
+
+    it('a daily renewal resizes the key on the re-based counter without re-metering the closed cycle', async () => {
+      const provider = new ResizableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      const { member } = await setupMember();
+      const first = await keys.ensureMemberKey(member.id);
+      provider.spend(first.keyId!, 3);
+
+      const settled = await keys.settleMemberPeriod(member.id);
+      // What the renewal writes for the new cycle (see renewalScheduler).
+      await db
+        .update(memberBudgets)
+        .set({
+          billedUsageBeforeBaselineMicroUsd: 0,
+          settledUsageMicroUsd: 0,
+          usageBaselineMicroUsd: settled!.nextCycleBaselineMicroUsd,
+        })
+        .where(eq(memberBudgets.orgMemberId, member.id));
+
+      const again = await keys.ensureMemberKey(member.id);
+
+      expect(again.keyId).toBe(first.keyId);
+      // The new cycle's $10 raw sits on top of the $3 the old one used.
+      expect(provider.keys.get(first.keyId!)!.limitUsd).toBe(13);
+      // Nothing spent yet this cycle, even though the key's counter reads $3.
+      const synced = await keys.syncMemberCycleUsage(member.id);
+      expect(Number(synced?.settledUsageMicroUsd)).toBe(0);
+    });
   });
 });

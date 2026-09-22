@@ -44,10 +44,24 @@ is concerned; the dashboard's regenerate control is the only remedy. Plan around
 > Errors use `{"error": {"code", "message", "type"}}`. The fallback origin is
 > `https://ru.cheapvibecode.ru`.
 >
-> Aico uses only freeze, unfreeze and delete (`cheapvibecode.ts`, control-plane
-> `POST /internal/cheapvibecode/v1/keys/edit`). Limits stay fixed at mint, so a top-up still mints a
-> replacement key, but the retired key is now deleted. Keys retired before this change were
-> recorded by id only; their secrets are gone, so only CVC support can remove them.
+> Aico uses freeze, unfreeze, delete and resize (`cheapvibecode.ts`, control-plane
+> `POST /internal/cheapvibecode/v1/keys/edit`). Keys retired before this change were recorded by id
+> only; their secrets are gone, so only CVC support can remove them.
+>
+> **Live probe 2026-09-22** (throwaway key, frozen, `token_limit: 1`):
+>
+> - Every edit except delete answers with the key's `meta`, including `token_limit`,
+>   `tokens_used` and `is_active`. `{key, active: <current>}` is therefore an idempotent read of
+>   the live limit, and it works on a frozen key, which cannot call `/v1/balance` (401).
+> - `additional_tokens: 5` on limit 1 → 6. `token_limit: 2` → 2.
+> - `token_limit: 0` → 400 `invalid_token_limit`. `token_limit` above the current limit → 400
+>   `token_limit_not_reduced`.
+> - Unfreeze → `/v1/balance` as the key answers again.
+>
+> With `AICO_CVC_RESIZE_IN_PLACE=1`, a wallet top-up and a member cap change or renewal resize the
+> existing key: read the live limit, then raise by the difference or reduce to the target (never
+> below `tokens_used`). A raise that times out is never re-sent; the next pass re-reads the limit.
+> With the flag off, a top-up mints a replacement and deletes the retired key.
 
 ## 2. `/v1/balance` is per-key
 
