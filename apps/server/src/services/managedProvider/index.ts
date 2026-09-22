@@ -12,6 +12,7 @@ import { OpenRouterManagedProviderClient } from './openrouterAdapter';
 import type { ManagedProviderClient } from './types';
 
 export {
+  CheapVibeCodeAmbiguousEditError,
   cvcTokensToUsd,
   HttpCheapVibeCodeClient,
   isManagedKeyCapacityError,

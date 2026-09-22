@@ -15,9 +15,10 @@ import type { ChatModelCard } from '@lobechat/types';
  *    holding that member's own key. Callers already store it
  *    (`openrouterKeyCiphertext`), so both implementations can be satisfied.
  *
- * 2. **Not every operation exists everywhere.** CVC can freeze and delete a key
- *    (by its secret), but cannot change a limit safely or reset one on a period
- *    boundary. Rather than have the
+ * 2. **Not every operation exists everywhere.** CVC can freeze, resize and
+ *    delete a key (by its secret), but cannot reset a limit on a period boundary,
+ *    and its resize is a read-then-delta rather than OpenRouter's absolute
+ *    `PATCH` — so it gets its own `resizeKey` instead of `updateKey`. Rather than have the
  *    optional methods throw and make every call site defensive, capabilities are
  *    declared up front and the caller branches on them.
  *
@@ -120,6 +121,15 @@ export interface UpdateManagedKeyParams {
   name?: string;
 }
 
+export interface ResizeManagedKeyParams {
+  /** Desired freeze state, applied first; its answer is also the live read. */
+  active: boolean;
+  apiKey: string;
+  hash: string;
+  /** Absolute target limit on the key's own (continuous) counter, in USD. */
+  limitUsd: number;
+}
+
 export interface ManagedProviderClient {
   capabilities: ManagedProviderCapabilities;
   createKey: (params: CreateManagedKeyParams) => Promise<CreateManagedKeyResult>;
@@ -139,6 +149,12 @@ export interface ManagedProviderClient {
    */
   listModels?: () => Promise<ChatModelCard[]>;
   providerId: ManagedProviderId;
+  /**
+   * Resize a key in place against its *live* limit (CheapVibeCode). Never
+   * computes a delta from a stored figure, so a repeat after an ambiguous
+   * failure converges instead of adding twice. Returns the key as it now is.
+   */
+  resizeKey?: (params: ResizeManagedKeyParams) => Promise<ManagedKeyInfo>;
   /** Present only when `capabilities.updateLimit` (or `revoke`, for `disabled`). */
   updateKey?: (params: UpdateManagedKeyParams) => Promise<ManagedKeyInfo>;
 }

@@ -15,11 +15,14 @@ import type { CreateManagedKeyResult, ManagedKeyInfo, ManagedProviderClient } fr
  * with the primary key but names its target by the target's *plaintext secret*,
  * never by id, so every caller must hold the key it wants to change.
  *
- * `capabilities.revoke` is true (freeze + delete). `updateLimit` stays false on
- * purpose: `additional_tokens` is a non-idempotent delta, and a top-up is still
- * served by minting a replacement key — which is now deleted afterwards rather
- * than abandoned, so the account's key count no longer grows. There is still no
- * list of keys, and `nativePeriodicLimits` is false.
+ * `capabilities.revoke` is true (freeze + delete). `updateLimit` stays false:
+ * CVC has no absolute "set limit" — `token_limit` may only go down and
+ * `additional_tokens` is a non-idempotent delta — so limits change through
+ * {@link ManagedProviderClient.resizeKey}, which reads the live limit first and
+ * sizes the delta from that, never from a stored figure. Every edit answers
+ * with the key's `meta` (`token_limit`, `tokens_used`, `is_active`); a same-state
+ * `active` edit is the idempotent way to read it. There is still no list of
+ * keys, and `nativePeriodicLimits` is false.
  *
  * Never treat `POST /v1/keys` as an upsert: it ignores unknown fields and always
  * creates. A probe that posted `{id, is_active: false}` hoping to disable a key
@@ -255,8 +258,43 @@ const getKeyByCredential: ManagedProviderClient['getKey'] = async (credential) =
   } satisfies ManagedKeyInfo;
 };
 
-/** Body of `POST /v1/keys/edit` for the two operations Aico performs. */
-export type CheapVibeCodeKeyEdit = { active: boolean; key: string } | { delete: true; key: string };
+/** Body of `POST /v1/keys/edit` for the operations Aico performs. */
+export type CheapVibeCodeKeyEdit =
+  | { active: boolean; key: string }
+  | { delete: true; key: string }
+  | { additional_tokens: number; key: string }
+  | { key: string; token_limit: number };
+
+/** The parts of an edit's `meta` Aico reads. `null` when the answer had none (delete). */
+export type CheapVibeCodeKeyMeta = {
+  active: boolean;
+  tokenLimit: number | null;
+  tokensUsed: number;
+};
+
+export const parseKeyEditMeta = (json: unknown): CheapVibeCodeKeyMeta | null => {
+  const meta = (json as { meta?: Record<string, unknown> } | null)?.meta;
+  if (!meta || typeof meta !== 'object') return null;
+  const limit = meta.token_limit == null ? null : Number(meta.token_limit);
+  return {
+    active: meta.is_active !== false,
+    tokenLimit: limit != null && Number.isFinite(limit) ? limit : null,
+    tokensUsed: Math.max(0, Number(meta.tokens_used ?? 0) || 0),
+  };
+};
+
+const keyInfoFromMeta = (hash: string, meta: CheapVibeCodeKeyMeta): ManagedKeyInfo => ({
+  disabled: !meta.active,
+  hash,
+  limit: meta.tokenLimit == null ? null : cvcTokensToUsd(meta.tokenLimit),
+  limitRemaining:
+    meta.tokenLimit == null ? null : cvcTokensToUsd(Math.max(0, meta.tokenLimit - meta.tokensUsed)),
+  name: null,
+  usage: cvcTokensToUsd(meta.tokensUsed),
+  usageDaily: null,
+  usageMonthly: null,
+  usageWeekly: null,
+});
 
 const requireSecret = (credential: { apiKey?: string }, op: string): string => {
   if (!credential.apiKey) {
@@ -266,12 +304,13 @@ const requireSecret = (credential: { apiKey?: string }, op: string): string => {
 };
 
 /**
- * `updateKey` / `deleteKey` for both clients, over whichever transport reaches
- * `POST /v1/keys/edit`. Only freeze/unfreeze is exposed as an update: a limit
- * change would be a non-idempotent `additional_tokens` delta, which the
- * capability flags keep callers from asking for.
+ * `updateKey` / `resizeKey` / `deleteKey` for both clients, over whichever
+ * transport reaches `POST /v1/keys/edit`. `updateKey` is freeze/unfreeze only;
+ * limits move through `resizeKey`.
  */
-const keyEditOps = (edit: (body: CheapVibeCodeKeyEdit) => Promise<unknown>) => ({
+const keyEditOps = (
+  edit: (body: CheapVibeCodeKeyEdit) => Promise<CheapVibeCodeKeyMeta | null>,
+) => ({
   deleteKey: (async (credential) => {
     const key = requireSecret(credential, 'deleteKey');
     try {
@@ -287,7 +326,8 @@ const keyEditOps = (edit: (body: CheapVibeCodeKeyEdit) => Promise<unknown>) => (
     if (params.disabled === undefined || params.limitUsd !== undefined) {
       throw new Error('CheapVibeCode keys support freeze/unfreeze only; limits are fixed at mint');
     }
-    await edit({ active: !params.disabled, key: requireSecret(params, 'updateKey') });
+    const meta = await edit({ active: !params.disabled, key: requireSecret(params, 'updateKey') });
+    if (meta) return keyInfoFromMeta(params.hash, meta);
     return {
       disabled: params.disabled,
       hash: params.hash,
@@ -300,6 +340,33 @@ const keyEditOps = (edit: (body: CheapVibeCodeKeyEdit) => Promise<unknown>) => (
       usageWeekly: null,
     } satisfies ManagedKeyInfo;
   }) satisfies NonNullable<ManagedProviderClient['updateKey']>,
+
+  /**
+   * Freeze state first — idempotent, and its answer is the live limit — then at
+   * most one limit edit sized from that live figure. A raise that times out is
+   * never retried here; the next call reads the limit again and adds only what
+   * is still missing, so a raise that did land is not applied twice.
+   *
+   * A reduction is clamped to what the key has already used (and to CVC's
+   * minimum of 1), because CVC refuses a limit below `tokens_used`.
+   */
+  resizeKey: (async (params) => {
+    const key = requireSecret(params, 'resizeKey');
+    const live = await edit({ active: params.active, key });
+    if (!live || live.tokenLimit == null) {
+      throw new Error('CheapVibeCode key has no readable token_limit; refusing to resize');
+    }
+    const target = usdToCvcTokens(params.limitUsd);
+    let meta: CheapVibeCodeKeyMeta | null = live;
+    if (target > live.tokenLimit) {
+      meta = await edit({ additional_tokens: target - live.tokenLimit, key });
+    } else {
+      const floor = Math.max(target, live.tokensUsed, 1);
+      if (floor < live.tokenLimit) meta = await edit({ key, token_limit: floor });
+    }
+    if (!meta) throw new Error('CheapVibeCode key edit returned no meta');
+    return keyInfoFromMeta(params.hash, meta);
+  }) satisfies NonNullable<ManagedProviderClient['resizeKey']>,
 });
 
 /** Maps a `POST /v1/keys` response onto the neutral shape. */
@@ -407,21 +474,24 @@ export class HttpCheapVibeCodeClient implements ManagedProviderClient {
    * Raw `POST /v1/keys/edit` with the primary key. Refuses the primary itself:
    * freezing or deleting it makes CVC promote another key to primary.
    */
-  editKey = async (body: CheapVibeCodeKeyEdit): Promise<void> => {
+  editKey = async (body: CheapVibeCodeKeyEdit): Promise<CheapVibeCodeKeyMeta | null> => {
     if (body.key === this.primaryApiKey) {
       throw new Error('Refusing to edit the CheapVibeCode primary key');
     }
-    await cvcRequest(
+    const json = await cvcRequest(
       '/v1/keys/edit',
       { body: JSON.stringify(body), method: 'POST' },
       this.primaryApiKey,
       { mutation: true },
     );
+    return parseKeyEditMeta(json);
   };
 
   private readonly ops = keyEditOps(this.editKey);
 
   deleteKey = this.ops.deleteKey;
+
+  resizeKey = this.ops.resizeKey;
 
   updateKey = this.ops.updateKey;
 
@@ -499,11 +569,15 @@ export class RemoteCheapVibeCodeClient implements ManagedProviderClient {
     return parseCreateKeyResponse(json, params.name);
   };
 
-  private readonly ops = keyEditOps((body) =>
-    this.request('/v1/keys/edit', { body: JSON.stringify(body), method: 'POST' }),
+  private readonly ops = keyEditOps(async (body) =>
+    parseKeyEditMeta(
+      await this.request('/v1/keys/edit', { body: JSON.stringify(body), method: 'POST' }),
+    ),
   );
 
   deleteKey = this.ops.deleteKey;
+
+  resizeKey = this.ops.resizeKey;
 
   updateKey = this.ops.updateKey;
 
@@ -527,8 +601,9 @@ export class RemoteCheapVibeCodeClient implements ManagedProviderClient {
 
 /**
  * In-memory mock for local QA. Models CVC faithfully — edit addresses a key by
- * its secret, a frozen or deleted key cannot read its balance, limits never
- * change, balance falls only when `__spend` is called — so a code path that
+ * its secret, a frozen or deleted key cannot read its balance, `token_limit`
+ * only goes down and `additional_tokens` only up, and balance falls only when
+ * `__spend` is called — so a code path that
  * would break against the real API breaks here too.
  */
 export class MockCheapVibeCodeClient implements ManagedProviderClient {
@@ -582,16 +657,36 @@ export class MockCheapVibeCodeClient implements ManagedProviderClient {
   getAccountBalanceUsd: ManagedProviderClient['getAccountBalanceUsd'] = async () =>
     cvcTokensToUsd(this.accountTokens);
 
+  /** Test seam: every edit body received, secrets included (tests only). */
+  __edits: CheapVibeCodeKeyEdit[] = [];
+
   private readonly ops = keyEditOps(async (body) => {
+    this.__edits.push(body);
     const row = this.keys.get(body.key);
     if (!row) throw new CheapVibeCodeApiError(404, 'Not Found', null);
-    if ('delete' in body) this.keys.delete(body.key);
-    else row.active = body.active;
+    if ('delete' in body) {
+      this.keys.delete(body.key);
+      return null;
+    }
+    if ('active' in body) row.active = body.active;
+    else if ('additional_tokens' in body) row.limitTokens += body.additional_tokens;
+    else {
+      if (body.token_limit > row.limitTokens || body.token_limit < Math.max(1, row.usedTokens)) {
+        throw new CheapVibeCodeApiError(400, 'Bad Request', 'token_limit_not_reduced');
+      }
+      row.limitTokens = body.token_limit;
+    }
+    return { active: row.active, tokenLimit: row.limitTokens, tokensUsed: row.usedTokens };
   });
 
   deleteKey = this.ops.deleteKey;
 
+  resizeKey = this.ops.resizeKey;
+
   updateKey = this.ops.updateKey;
+
+  /** Test seam: a key's live token limit, or null once deleted. */
+  __limitTokens = (apiKey: string) => this.keys.get(apiKey)?.limitTokens ?? null;
 
   /** Test seam: whether a key still exists upstream, and whether it is frozen. */
   __state = (apiKey: string) => {

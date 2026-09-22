@@ -160,6 +160,85 @@ describe('HttpCheapVibeCodeClient', () => {
       }
     });
 
+    describe('resizeKey', () => {
+      const meta = (tokenLimit: number, tokensUsed = 0, active = true) =>
+        jsonResponse({
+          meta: { is_active: active, token_limit: tokenLimit, tokens_used: tokensUsed },
+        });
+      const bodies = () => fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body as string));
+
+      it('reads the live limit, then raises by exactly the missing tokens', async () => {
+        fetchMock.mockResolvedValueOnce(meta(100)).mockResolvedValueOnce(meta(TOKENS_PER_USD * 2));
+
+        const info = await client().resizeKey({
+          active: true,
+          apiKey: 'sk-cvc-member',
+          hash: 'k1',
+          limitUsd: 2,
+        });
+
+        expect(bodies()).toEqual([
+          { active: true, key: 'sk-cvc-member' },
+          { additional_tokens: TOKENS_PER_USD * 2 - 100, key: 'sk-cvc-member' },
+        ]);
+        expect(info.limit).toBe(2);
+      });
+
+      it('reduces with an absolute token_limit, clamped to what the key has used', async () => {
+        fetchMock
+          .mockResolvedValueOnce(meta(TOKENS_PER_USD * 5, TOKENS_PER_USD * 3))
+          .mockResolvedValueOnce(meta(TOKENS_PER_USD * 3, TOKENS_PER_USD * 3));
+
+        await client().resizeKey({
+          active: true,
+          apiKey: 'sk-cvc-member',
+          hash: 'k1',
+          limitUsd: 1,
+        });
+
+        expect(bodies()[1]).toEqual({ key: 'sk-cvc-member', token_limit: TOKENS_PER_USD * 3 });
+      });
+
+      it('sends no limit edit when the key is already at the target', async () => {
+        fetchMock.mockResolvedValueOnce(meta(TOKENS_PER_USD));
+        await client().resizeKey({
+          active: false,
+          apiKey: 'sk-cvc-member',
+          hash: 'k1',
+          limitUsd: 1,
+        });
+        expect(bodies()).toEqual([{ active: false, key: 'sk-cvc-member' }]);
+      });
+
+      it('never re-sends a raise whose outcome is unknown', async () => {
+        fetchMock
+          .mockResolvedValueOnce(meta(100))
+          .mockResolvedValueOnce(new Response('bad gateway', { status: 502 }));
+
+        await expect(
+          client().resizeKey({ active: true, apiKey: 'sk-cvc-member', hash: 'k1', limitUsd: 2 }),
+        ).rejects.toBeInstanceOf(CheapVibeCodeAmbiguousEditError);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      });
+
+      it('refuses an uncapped key rather than guessing a delta', async () => {
+        fetchMock.mockResolvedValueOnce(
+          jsonResponse({ meta: { is_active: true, token_limit: null } }),
+        );
+        await expect(
+          client().resizeKey({ active: true, apiKey: 'sk-cvc-member', hash: 'k1', limitUsd: 2 }),
+        ).rejects.toThrow(/token_limit/);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      });
+
+      it('refuses the primary key', async () => {
+        await expect(
+          client().resizeKey({ active: true, apiKey: 'sk-cvc-primary', hash: 'p', limitUsd: 2 }),
+        ).rejects.toThrow(/primary key/);
+        expect(fetchMock).not.toHaveBeenCalled();
+      });
+    });
+
     it("carries CVC's error.code on a rejected edit, not the body", async () => {
       fetchMock.mockResolvedValue(
         jsonResponse({ error: { code: 'key_not_owned', message: 'secret detail' } }, 403),
@@ -379,6 +458,22 @@ describe('MockCheapVibeCodeClient', () => {
   });
 });
 
+describe('MockCheapVibeCodeClient resize', () => {
+  it('raises and lowers the same key the way CVC does', async () => {
+    const mock = new MockCheapVibeCodeClient();
+    const created = await mock.createKey({ limitUsd: 1, name: 'm' });
+    const params = { active: true, apiKey: created.key, hash: created.hash };
+
+    await mock.resizeKey({ ...params, limitUsd: 3 });
+    expect(mock.__limitTokens(created.key)).toBe(TOKENS_PER_USD * 3);
+
+    mock.__spend(created.key, TOKENS_PER_USD * 2);
+    await mock.resizeKey({ ...params, limitUsd: 1 });
+    // Never below what was used.
+    expect(mock.__limitTokens(created.key)).toBe(TOKENS_PER_USD * 2);
+  });
+});
+
 describe('RemoteCheapVibeCodeClient', () => {
   it('rebuilds the typed capacity error from the control-plane 409', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ error: 'managed_key_capacity' }, 409));
@@ -401,6 +496,32 @@ describe('RemoteCheapVibeCodeClient', () => {
     expect(url).toBe('http://control.test/internal/cheapvibecode/v1/keys/edit');
     expect(init.headers.Authorization).toBe('Bearer token');
     expect(JSON.parse(init.body as string)).toEqual({ active: false, key: 'sk-cvc-member' });
+  });
+
+  it('resizes through the proxy from the token meta it passes back', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({ meta: { is_active: true, tokens_used: 0, token_limit: 100 }, ok: true }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          meta: { is_active: true, tokens_used: 0, token_limit: TOKENS_PER_USD },
+          ok: true,
+        }),
+      );
+
+    const info = await remote().resizeKey({
+      active: true,
+      apiKey: 'sk-cvc-member',
+      hash: 'k1',
+      limitUsd: 1,
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({
+      additional_tokens: TOKENS_PER_USD - 100,
+      key: 'sk-cvc-member',
+    });
+    expect(info.limit).toBe(1);
   });
 
   it('treats a proxied 404 delete as done', async () => {

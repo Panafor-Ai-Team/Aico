@@ -199,11 +199,37 @@ describe('/internal/cheapvibecode', () => {
     it.each([
       [{ additional_tokens: 100, key: 'sk-cvc-member' }],
       [{ key: 'sk-cvc-member', token_limit: 1 }],
+    ])('forwards a resize and passes back token meta only: %j', async (body) => {
+      fetchMock.mockResolvedValue(
+        jsonResponse({
+          meta: {
+            is_active: true,
+            key_prefix: 'sk-cvc-mem',
+            name: 'n',
+            token_limit: 101,
+            tokens_used: 7,
+          },
+        }),
+      );
+      const res = await edit(body);
+      expect(res.status).toBe(200);
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual(body);
+      expect(await res.json()).toEqual({
+        meta: { is_active: true, token_limit: 101, tokens_used: 7 },
+        ok: true,
+      });
+    });
+
+    it.each([
+      [{ additional_tokens: 0, key: 'sk-cvc-member' }],
+      [{ additional_tokens: 1.5, key: 'sk-cvc-member' }],
+      [{ key: 'sk-cvc-member', token_limit: -1 }],
+      [{ additional_tokens: 5, key: 'sk-cvc-member', token_limit: 5 }],
       [{ active: true, delete: true, key: 'sk-cvc-member' }],
       [{ active: 'no', key: 'sk-cvc-member' }],
       [{ active: false, key: 'not-a-secret' }],
       [{ active: false }],
-    ])('refuses anything but a freeze or delete: %j', async (body) => {
+    ])('refuses a malformed or combined edit: %j', async (body) => {
       const res = await edit(body);
       expect(res.status).toBe(400);
       expect(fetchMock).not.toHaveBeenCalled();
