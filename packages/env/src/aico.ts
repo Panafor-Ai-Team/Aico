@@ -29,6 +29,12 @@ declare global {
        */
       AICO_CONTROL_PLANE_URL?: string;
       /**
+       * When `1`, CheapVibeCode top-ups and cycle renewals resize the existing key
+       * through `POST /v1/keys/edit` instead of minting a replacement. Off by
+       * default; unset restores mint-then-delete rotation.
+       */
+      AICO_CVC_RESIZE_IN_PLACE?: string;
+      /**
        * CheapVibeCode tokens per 1 USD of raw upstream capacity. CVC prices in its
        * own tokens and publishes no USD rate, so this is the only bridge between
        * their unit and our micro-USD ledger. Default 25,000,000 (the rate we buy
@@ -169,6 +175,7 @@ export const getAicoConfig = () => {
       AICO_MANAGED_INFERENCE_KEY: z.enum(['per_subject', 'shared']).default('per_subject'),
       AICO_MANAGED_PROVIDER: z.enum(['openrouter', 'cheapvibecode']).default('openrouter'),
       AICO_SHARED_INFERENCE_API_KEY: z.string().optional(),
+      AICO_CVC_RESIZE_IN_PLACE: z.boolean().optional().default(false),
       AICO_CVC_TOKENS_PER_USD: z.coerce.number().positive().int().default(25_000_000),
       AICO_OPENROUTER_MOCK: z.boolean().optional().default(false),
       CHEAPVIBECODE_BASE_URL: z.string().default('https://cheapvibecode.ru'),
@@ -195,6 +202,7 @@ export const getAicoConfig = () => {
       AICO_MANAGED_INFERENCE_KEY: process.env.AICO_MANAGED_INFERENCE_KEY || 'per_subject',
       AICO_MANAGED_PROVIDER: process.env.AICO_MANAGED_PROVIDER || 'openrouter',
       AICO_SHARED_INFERENCE_API_KEY: process.env.AICO_SHARED_INFERENCE_API_KEY || undefined,
+      AICO_CVC_RESIZE_IN_PLACE: process.env.AICO_CVC_RESIZE_IN_PLACE === '1',
       AICO_CVC_TOKENS_PER_USD: process.env.AICO_CVC_TOKENS_PER_USD,
       AICO_OPENROUTER_MOCK: process.env.AICO_OPENROUTER_MOCK === '1',
       CHEAPVIBECODE_BASE_URL: process.env.CHEAPVIBECODE_BASE_URL || 'https://cheapvibecode.ru',

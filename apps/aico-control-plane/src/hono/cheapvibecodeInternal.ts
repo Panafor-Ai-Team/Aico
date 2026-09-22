@@ -94,10 +94,10 @@ export const createCheapVibeCodeInternalApp = () => {
   });
 
   /**
-   * Freeze, unfreeze or delete one delegated key. The product server sends the
-   * target's secret because CVC addresses edits by secret; it is never logged.
-   * Only those two shapes pass — no limit change, no transfer — and the primary
-   * key is refused by `editKey` itself.
+   * Freeze, unfreeze, resize or delete one delegated key. The product server
+   * sends the target's secret because CVC addresses edits by secret; it is never
+   * logged. Exactly one operation per call, token counts as positive integers —
+   * no transfer, no model list — and the primary key is refused by `editKey`.
    */
   app.post('/v1/keys/edit', async (c) => {
     const cvc = client();
@@ -109,16 +109,32 @@ export const createCheapVibeCodeInternalApp = () => {
       return c.json({ error: 'key must be a CheapVibeCode secret' }, 400);
     }
 
+    const ops = ['active', 'delete', 'additional_tokens', 'token_limit'].filter(
+      (op) => body && op in body,
+    );
+    const isCount = (value: unknown): value is number =>
+      Number.isSafeInteger(value) && (value as number) > 0;
     let edit: CheapVibeCodeKeyEdit;
-    if (body?.delete === true && !('active' in body)) edit = { delete: true, key };
-    else if (typeof body?.active === 'boolean' && !('delete' in body)) {
-      edit = { active: body.active, key };
-    } else {
-      return c.json({ error: 'send exactly one of active (boolean) or delete: true' }, 400);
+    if (ops.length !== 1) {
+      return c.json(
+        { error: 'send exactly one of active, delete, additional_tokens or token_limit' },
+        400,
+      );
+    } else if (body?.delete === true) edit = { delete: true, key };
+    else if (typeof body?.active === 'boolean') edit = { active: body.active, key };
+    else if (isCount(body?.additional_tokens)) {
+      edit = { additional_tokens: body.additional_tokens, key };
+    } else if (isCount(body?.token_limit)) edit = { key, token_limit: body.token_limit };
+    else {
+      return c.json(
+        { error: 'active must be boolean, delete true, token counts positive integers' },
+        400,
+      );
     }
 
+    let meta: Awaited<ReturnType<typeof cvc.editKey>>;
     try {
-      await cvc.editKey(edit);
+      meta = await cvc.editKey(edit);
     } catch (error) {
       if (error instanceof CheapVibeCodeAmbiguousEditError) {
         return c.json({ error: EDIT_OUTCOME_UNKNOWN }, 502);
@@ -131,7 +147,14 @@ export const createCheapVibeCodeInternalApp = () => {
       }
       throw error;
     }
-    return c.json({ ok: true });
+    // Token counts only: the product server converts, and the key's prefix and
+    // name stay here.
+    return c.json({
+      meta: meta
+        ? { is_active: meta.active, token_limit: meta.tokenLimit, tokens_used: meta.tokensUsed }
+        : null,
+      ok: true,
+    });
   });
 
   /**

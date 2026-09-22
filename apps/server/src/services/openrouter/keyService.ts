@@ -23,10 +23,12 @@ import {
   rotateCheckpointToNewKey,
   type UsageMultiplierCheckpoint,
 } from '@/database/utils/aicoMoney';
+import { aicoEnv } from '@/envs/aico';
 import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
 import { isSharedInferenceKey } from '@/server/services/aico/ledger/config';
 import { isLedgerAuthoritative } from '@/server/services/aico/ledger/state';
 import {
+  CheapVibeCodeAmbiguousEditError,
   createManagedProviderClient,
   type ManagedKeyCredential,
   type ManagedKeyInfo,
@@ -328,6 +330,90 @@ export class AicoOpenRouterKeyService {
    * Unfreezing an active key is a no-op upstream, which is what lets the ensure
    * paths call it without tracking whether the key was frozen.
    */
+  /**
+   * `AICO_CVC_RESIZE_IN_PLACE`: move a live key to `targetMicro` on its own
+   * counter instead of minting a replacement.
+   *
+   * Usage on CVC is `stored limit − remaining`, so the stored limit must never
+   * sit below the live one — that would under-read spend. A raise therefore
+   * persists the target *before* the edit and a reduction only after it; the
+   * live limit from CVC's answer is persisted last either way.
+   *
+   * - `'resized'`: done.
+   * - `'ambiguous'`: the edit may or may not have landed. Nothing is retried;
+   *   the stored limit is healed from a live read when one succeeds, and the
+   *   caller keeps the key — rotating would size the replacement from a limit
+   *   we cannot vouch for. The next ensure call converges.
+   * - `'unavailable'`: flag off, no secret, or CVC refused. Nothing changed
+   *   upstream, so the caller's mint-then-delete rotation is still safe.
+   */
+  private resizeFixedLimitKey = async (
+    row: {
+      managedKeyLimitMicroUsd?: number | null;
+      openrouterKeyCiphertext?: string | null;
+      openrouterKeyId: string;
+    },
+    params: {
+      active: boolean;
+      persistLimit: (micro: number) => Promise<unknown>;
+      targetMicro: number;
+    },
+  ): Promise<'ambiguous' | 'resized' | 'unavailable'> => {
+    if (!aicoEnv.AICO_CVC_RESIZE_IN_PLACE || !this.managed.resizeKey) return 'unavailable';
+    if (row.managedKeyLimitMicroUsd == null) return 'unavailable';
+    const credential = await this.managedCredential(row);
+    if (!credential.apiKey) return 'unavailable';
+
+    const storedMicro = Number(row.managedKeyLimitMicroUsd);
+    const targetMicro = Math.max(0, Math.trunc(params.targetMicro));
+    const raising = targetMicro > storedMicro;
+    const hash = row.openrouterKeyId;
+    if (raising) await params.persistLimit(targetMicro);
+
+    let info: ManagedKeyInfo;
+    try {
+      info = await this.managed.resizeKey({
+        active: params.active,
+        apiKey: credential.apiKey,
+        hash,
+        limitUsd: microToOpenRouterLimitUsd(targetMicro),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!(error instanceof CheapVibeCodeAmbiguousEditError)) {
+        console.warn('[aico] managed key resize refused; falling back to rotation', {
+          hash,
+          message,
+        });
+        if (raising) await params.persistLimit(storedMicro);
+        return 'unavailable';
+      }
+      console.error('[aico] managed key resize outcome unknown; not retried', { hash });
+      try {
+        const live = await this.managed.updateKey?.({
+          apiKey: credential.apiKey,
+          disabled: !params.active,
+          hash,
+        });
+        if (live?.limit != null) {
+          await params.persistLimit(Number(openRouterUsdToMicroFloor(live.limit)));
+        }
+      } catch (readError) {
+        // The stored limit is the target (raise) or the old one (reduction) —
+        // both at or above the live limit, so spend is over-read, never under.
+        console.warn('[aico] managed key live limit not re-read after ambiguous resize', {
+          hash,
+          message: readError instanceof Error ? readError.message : String(readError),
+        });
+      }
+      return 'ambiguous';
+    }
+
+    if (info.limit == null) throw new Error('Managed key resize returned no limit');
+    await params.persistLimit(Number(openRouterUsdToMicroFloor(info.limit)));
+    return 'resized';
+  };
+
   private setFixedLimitKeyActive = async (
     row: { openrouterKeyCiphertext?: string | null; openrouterKeyId: string },
     active: boolean,
@@ -800,6 +886,31 @@ export class AicoOpenRouterKeyService {
       }
 
       if (hasLiveKey && !this.managed.capabilities.updateLimit) {
+        const liveWallet = {
+          managedKeyLimitMicroUsd: wallet.managedKeyLimitMicroUsd,
+          openrouterKeyCiphertext: wallet.openrouterKeyCiphertext,
+          openrouterKeyId: wallet.openrouterKeyId as string,
+        };
+        // A top-up raises the key it already has. Only ever upward on this
+        // path: an unfunded or trial wallet keeps its key exactly as it is.
+        const keyTargetMicro =
+          limitMicro - Math.max(0, Number(wallet.rawUsageBeforeKeyMicroUsd ?? 0));
+        if (balanceMicro > 0 && keyTargetMicro > Number(wallet.managedKeyLimitMicroUsd ?? 0)) {
+          const outcome = await this.resizeFixedLimitKey(liveWallet, {
+            active: true,
+            persistLimit: (micro) =>
+              this.billingModel.updateUserOpenRouterKey({
+                ciphertext: wallet.openrouterKeyCiphertext as string,
+                keyId: wallet.openrouterKeyId as string,
+                managedKeyLimitMicroUsd: micro,
+                userId,
+              }),
+            targetMicro: keyTargetMicro,
+          });
+          if (outcome !== 'unavailable') {
+            return { created: false, keyId: wallet.openrouterKeyId };
+          }
+        }
         // A funded wallet must not be left behind a key frozen while it was empty.
         if (balanceMicro > 0) {
           await this.setFixedLimitKeyActive(
@@ -968,6 +1079,25 @@ export class AicoOpenRouterKeyService {
         };
         await this.setFixedLimitKeyActive(liveKey, !shouldDisable);
         if (shouldDisable) return { created: false, keyId: budget.openrouterKeyId };
+
+        // The key's counter is continuous, and renewal re-bases the checkpoint
+        // on it, so `limitMicro` is already the absolute limit this cycle needs —
+        // up for a renewal or a raised cap, down for a cut one.
+        const outcome = await this.resizeFixedLimitKey(
+          { ...liveKey, managedKeyLimitMicroUsd: budget.managedKeyLimitMicroUsd },
+          {
+            active: true,
+            persistLimit: (micro) =>
+              this.orgModel.updateMemberOpenRouterKey({
+                ciphertext: budget.openrouterKeyCiphertext as string,
+                keyId: budget.openrouterKeyId as string,
+                managedKeyLimitMicroUsd: micro,
+                orgMemberId,
+              }),
+            targetMicro: limitMicro,
+          },
+        );
+        if (outcome !== 'unavailable') return { created: false, keyId: budget.openrouterKeyId };
 
         return this.rotateMemberKeyIfUnderfunded({
           bp,
