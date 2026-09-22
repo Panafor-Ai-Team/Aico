@@ -187,31 +187,36 @@ export class AicoOpenRouterKeyService {
   }
 
   /**
-   * Best-effort retire a managed key before recreating (FIN-004).
+   * Best-effort retire a managed key (FIN-004).
    *
-   * A provider with neither revoke nor update — CheapVibeCode has no `PATCH` or
-   * `DELETE` on `/v1/keys` at all — cannot retire anything upstream. Retiring
-   * then means ceasing to hand the key to a runtime, which is only safe because
-   * managed keys never reach the browser (`disableBrowserRequest: true`) and
-   * every request passes `AicoManagedPolicy.authorize()` first. The key is
-   * recorded rather than silently forgotten so it can be revoked for real if the
-   * provider ever ships the route.
+   * A provider with neither revoke nor update cannot retire anything upstream.
+   * Neither can one that addresses keys by secret (CheapVibeCode) when the
+   * secret is missing. Retiring then means ceasing to hand the key to a
+   * runtime, which is only safe because managed keys never reach the browser
+   * (`disableBrowserRequest: true`) and every request passes
+   * `AicoManagedPolicy.authorize()` first. The key is recorded rather than
+   * silently forgotten, so the inventory of live-but-unused keys stays visible.
    */
-  private async retireManagedKey(hash: string): Promise<void> {
-    const { revoke, updateLimit } = this.managed.capabilities;
+  private async retireManagedKey(credential: { apiKey?: string; hash: string }): Promise<void> {
+    const { hash } = credential;
+    const { readKeyBySecret, revoke, updateLimit } = this.managed.capabilities;
+    const reachable = !readKeyBySecret || Boolean(credential.apiKey);
 
-    if (!revoke && !updateLimit) {
-      console.warn('[aico] managed provider cannot retire keys upstream; key abandoned in place', {
+    if ((!revoke && !updateLimit) || !reachable) {
+      console.warn('[aico] managed key cannot be retired upstream; key abandoned in place', {
         hash,
         providerId: this.managed.providerId,
       });
-      await this.recordAbandonedKey(hash);
+      await this.recordAbandonedKey(
+        hash,
+        reachable ? 'PROVIDER_HAS_NO_REVOKE' : 'KEY_SECRET_UNAVAILABLE',
+      );
       return;
     }
 
     if (updateLimit && this.managed.updateKey) {
       try {
-        await this.managed.updateKey({ disabled: true, hash });
+        await this.managed.updateKey({ apiKey: credential.apiKey, disabled: true, hash });
       } catch (error) {
         console.warn('[aico] failed to disable stale managed key before recreate', error);
       }
@@ -219,12 +224,23 @@ export class AicoOpenRouterKeyService {
 
     if (revoke && this.managed.deleteKey) {
       try {
-        await this.managed.deleteKey({ hash });
+        await this.managed.deleteKey({ apiKey: credential.apiKey, hash });
       } catch (error) {
-        console.warn('[aico] failed to delete stale managed key before recreate', error);
+        console.warn('[aico] failed to delete stale managed key', {
+          hash,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        // Without a delete the key is live and unused: keep it on the inventory.
+        if (readKeyBySecret) await this.recordAbandonedKey(hash, 'DELETE_FAILED');
       }
     }
   }
+
+  /** {@link retireManagedKey} for a stored row, decrypting its secret if needed. */
+  private retireStoredKey = async (row: {
+    openrouterKeyCiphertext?: string | null;
+    openrouterKeyId: string;
+  }): Promise<void> => this.retireManagedKey(await this.managedCredential(row));
 
   /**
    * Record a key we stopped using but could not revoke.
@@ -234,13 +250,13 @@ export class AicoOpenRouterKeyService {
    * delete route. Best-effort by design — failing to file the record must not
    * fail the operation that was retiring the key.
    */
-  private recordAbandonedKey = async (hash: string): Promise<void> => {
+  private recordAbandonedKey = async (hash: string, reason: string): Promise<void> => {
     try {
       await this.db.insert(aicoKeyOutbox).values({
         action: 'revoke_managed_key',
         nextAttemptAt: new Date(),
         openrouterKeyId: hash,
-        payload: { providerId: this.managed.providerId, reason: 'PROVIDER_HAS_NO_REVOKE' },
+        payload: { providerId: this.managed.providerId, reason },
         status: 'pending',
       });
     } catch (error) {
@@ -249,13 +265,19 @@ export class AicoOpenRouterKeyService {
   };
 
   /**
-   * Delete a key upstream by id. Returns `false` when the provider has no route
-   * for it, which the outbox reads as "still owed" rather than "done".
+   * Delete a key upstream by id.
+   *
+   * `'deferred'`: the provider has no delete route yet, so the job is still owed.
+   * `'unsupported'`: the provider deletes by secret (CheapVibeCode) and the
+   * outbox holds only the id, so this job can never succeed. Only the provider's
+   * support can remove such a key.
    */
-  revokeManagedKeyById = async (hash: string): Promise<boolean> => {
-    if (!this.managed.capabilities.revoke || !this.managed.deleteKey) return false;
+  revokeManagedKeyById = async (hash: string): Promise<'done' | 'deferred' | 'unsupported'> => {
+    const { readKeyBySecret, revoke } = this.managed.capabilities;
+    if (!revoke || !this.managed.deleteKey) return 'deferred';
+    if (readKeyBySecret) return 'unsupported';
     await this.managed.deleteKey({ hash });
-    return true;
+    return 'done';
   };
 
   /**
@@ -263,7 +285,11 @@ export class AicoOpenRouterKeyService {
    * Callers treat `null` as "nothing to do upstream" — the pre-flight gate is
    * what actually stops spend in that case.
    */
-  private disableManagedKey = async (hash: string, keyProviderId?: string | null) => {
+  private disableManagedKey = async (
+    hash: string,
+    keyProviderId?: string | null,
+    ciphertext?: string | null,
+  ) => {
     // A key minted by the previous gateway is not ours to disable through this
     // one: the hash means nothing to it. It is also deliberately left alive so a
     // rollback is an env change rather than a restore, and it is unreachable
@@ -276,14 +302,52 @@ export class AicoOpenRouterKeyService {
       });
       return null;
     }
-    if (!this.managed.capabilities.updateLimit || !this.managed.updateKey) {
-      console.warn('[aico] managed provider cannot disable keys upstream; relying on the gate', {
+    const { readKeyBySecret, revoke, updateLimit } = this.managed.capabilities;
+    const credential = await this.managedCredential({
+      openrouterKeyCiphertext: ciphertext,
+      openrouterKeyId: hash,
+    });
+    if (
+      (!updateLimit && !revoke) ||
+      !this.managed.updateKey ||
+      (readKeyBySecret && !credential.apiKey)
+    ) {
+      console.warn('[aico] managed key cannot be disabled upstream; relying on the gate', {
         hash,
         providerId: this.managed.providerId,
       });
       return null;
     }
-    return this.managed.updateKey({ disabled: true, hash });
+    return this.managed.updateKey({ apiKey: credential.apiKey, disabled: true, hash });
+  };
+
+  /**
+   * Freeze or unfreeze a live key on a provider whose limits are fixed at mint
+   * (CheapVibeCode). Best-effort: the pre-flight gate is still what refuses an
+   * unfunded or inactive subject, so a failure here is logged, never thrown.
+   * Unfreezing an active key is a no-op upstream, which is what lets the ensure
+   * paths call it without tracking whether the key was frozen.
+   */
+  private setFixedLimitKeyActive = async (
+    row: { openrouterKeyCiphertext?: string | null; openrouterKeyId: string },
+    active: boolean,
+  ): Promise<void> => {
+    if (!this.managed.capabilities.revoke || !this.managed.updateKey) return;
+    try {
+      const credential = await this.managedCredential(row);
+      if (!credential.apiKey) return;
+      await this.managed.updateKey({
+        apiKey: credential.apiKey,
+        disabled: !active,
+        hash: row.openrouterKeyId,
+      });
+    } catch (error) {
+      console.warn('[aico] managed key freeze state not updated', {
+        active,
+        hash: row.openrouterKeyId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   };
 
   /**
@@ -504,15 +568,18 @@ export class AicoOpenRouterKeyService {
     // also covers an exhausted wallet, where `unspentMicro` is 0.
     if (read.remainingMicro >= unspentMicro) return keep;
 
-    await this.retireManagedKey(params.wallet.openrouterKeyId);
-
-    return this.createAndPersistUserKey({
+    // Mint and persist first, retire second: if the mint fails (the account's
+    // key limit, a CVC outage) the wallet keeps a working key instead of
+    // pointing at a deleted one.
+    const created = await this.createAndPersistUserKey({
       limitUsd: microToOpenRouterLimitUsd(unspentMicro),
       managedKeyLimitMicroUsd: unspentMicro,
       name: `aico-user-${params.userId}`,
       rawUsageBeforeKeyMicroUsd: usedBeforeMicro + read.rawUsedMicro,
       userId: params.userId,
     });
+    await this.retireStoredKey(params.wallet);
+    return created;
   };
 
   /**
@@ -601,7 +668,7 @@ export class AicoOpenRouterKeyService {
       // OR-002: the key exists upstream and can spend; it must not outlive a
       // failed persist.
       console.error('[aico] member managed key persist failed; retiring orphan key', error);
-      await this.retireManagedKey(created.hash);
+      await this.retireManagedKey({ apiKey: created.key, hash: created.hash });
       throw error;
     }
 
@@ -640,8 +707,8 @@ export class AicoOpenRouterKeyService {
     // where the headroom is zero and a new key would buy nothing.
     if (read.remainingMicro >= nextLimitMicro) return keep;
 
-    await this.retireManagedKey(params.budget.openrouterKeyId);
-
+    // As on the wallet path, the old key is retired only once its replacement
+    // is persisted.
     this.assertMintAllowed();
     const created = await this.managed.createKey({
       // A provider reaching this branch has no native periodic reset; asking for
@@ -666,10 +733,11 @@ export class AicoOpenRouterKeyService {
       // OR-002: the key exists upstream and can spend; it must not outlive a
       // failed persist.
       console.error('[aico] member managed key persist failed; retiring orphan key', error);
-      await this.retireManagedKey(created.hash);
+      await this.retireManagedKey({ apiKey: created.key, hash: created.hash });
       throw error;
     }
 
+    await this.retireStoredKey(params.budget);
     return { created: true, keyId: created.hash };
   };
 
@@ -732,6 +800,16 @@ export class AicoOpenRouterKeyService {
       }
 
       if (hasLiveKey && !this.managed.capabilities.updateLimit) {
+        // A funded wallet must not be left behind a key frozen while it was empty.
+        if (balanceMicro > 0) {
+          await this.setFixedLimitKeyActive(
+            {
+              openrouterKeyCiphertext: wallet.openrouterKeyCiphertext,
+              openrouterKeyId: wallet.openrouterKeyId as string,
+            },
+            true,
+          );
+        }
         // The key's limit is fixed at mint, so a top-up is served by minting a
         // replacement rather than raising this one.
         return this.rotateUserKeyIfUnderfunded({
@@ -759,7 +837,10 @@ export class AicoOpenRouterKeyService {
           const message = error instanceof Error ? error.message : String(error);
           if (!/OpenRouter Management API (?:403|404)/.test(message)) throw error;
           console.warn('[aico] user OpenRouter key update failed; recreating', message);
-          await this.retireManagedKey(wallet.openrouterKeyId as string);
+          await this.retireStoredKey({
+            openrouterKeyCiphertext: wallet.openrouterKeyCiphertext,
+            openrouterKeyId: wallet.openrouterKeyId as string,
+          });
         }
       }
 
@@ -876,10 +957,16 @@ export class AicoOpenRouterKeyService {
       }
 
       if (hasLiveKey && !this.managed.capabilities.updateLimit) {
-        // No upstream lever exists: the limit cannot be raised, and the key
-        // cannot be disabled. `shouldDisable` is honoured by the pre-flight gate
-        // in `AicoManagedPolicy.authorize()`, which refuses an inactive or
-        // unfunded budget before the key is ever handed to a runtime.
+        // The limit cannot be raised. `shouldDisable` is honoured by the
+        // pre-flight gate in `AicoManagedPolicy.authorize()`, which refuses an
+        // inactive or unfunded budget before the key is ever handed to a
+        // runtime; freezing the key upstream is defence in depth behind it, and
+        // unfreezing is what a renewed or reactivated budget needs.
+        const liveKey = {
+          openrouterKeyCiphertext: budget.openrouterKeyCiphertext,
+          openrouterKeyId: budget.openrouterKeyId as string,
+        };
+        await this.setFixedLimitKeyActive(liveKey, !shouldDisable);
         if (shouldDisable) return { created: false, keyId: budget.openrouterKeyId };
 
         return this.rotateMemberKeyIfUnderfunded({
@@ -910,7 +997,10 @@ export class AicoOpenRouterKeyService {
           const message = error instanceof Error ? error.message : String(error);
           if (!/OpenRouter Management API (?:403|404)/.test(message)) throw error;
           console.warn('[aico] member OpenRouter key update failed; recreating', message);
-          await this.retireManagedKey(budget.openrouterKeyId as string);
+          await this.retireStoredKey({
+            openrouterKeyCiphertext: budget.openrouterKeyCiphertext,
+            openrouterKeyId: budget.openrouterKeyId as string,
+          });
         }
       }
 
@@ -938,7 +1028,7 @@ export class AicoOpenRouterKeyService {
       } catch (error) {
         // OR-002: OR create succeeded but DB persist failed — retire orphan spendable key.
         console.error('[aico] member OpenRouter key persist failed; retiring orphan key', error);
-        await this.retireManagedKey(created.hash);
+        await this.retireManagedKey({ apiKey: created.key, hash: created.hash });
         throw error;
       }
       return { created: true, keyId: created.hash };
@@ -1063,7 +1153,7 @@ export class AicoOpenRouterKeyService {
       });
     } catch (error) {
       console.error('[aico] user OpenRouter key persist failed; retiring orphan key', error);
-      await this.retireManagedKey(created.hash);
+      await this.retireManagedKey({ apiKey: created.key, hash: created.hash });
       throw error;
     }
     return { created: true, keyId: created.hash };
@@ -1072,13 +1162,21 @@ export class AicoOpenRouterKeyService {
   disableMemberKey = async (orgMemberId: string) => {
     const budget = await this.orgModel.getMemberBudget(orgMemberId);
     if (!budget?.openrouterKeyId) return null;
-    return this.disableManagedKey(budget.openrouterKeyId, budget.managedKeyProviderId);
+    return this.disableManagedKey(
+      budget.openrouterKeyId,
+      budget.managedKeyProviderId,
+      budget.openrouterKeyCiphertext,
+    );
   };
 
   disableUserKey = async (userId: string) => {
     const wallet = await this.billingModel.getUserWallet(userId);
     if (!wallet?.openrouterKeyId) return null;
-    return this.disableManagedKey(wallet.openrouterKeyId, wallet.managedKeyProviderId);
+    return this.disableManagedKey(
+      wallet.openrouterKeyId,
+      wallet.managedKeyProviderId,
+      wallet.openrouterKeyCiphertext,
+    );
   };
 
   disableAllOrgMemberKeys = async (orgId: string) => {
@@ -1177,17 +1275,22 @@ export class AicoOpenRouterKeyService {
     if (!peeked) return null;
 
     if (peeked.keyId) {
+      // CheapVibeCode freezes a key by its secret, which the peek does not return.
+      const ciphertext = this.managed.capabilities.readKeyBySecret
+        ? (await this.orgModel.getMemberBudgetForOrg(params))?.openrouterKeyCiphertext
+        : undefined;
       if (await isLedgerAuthoritative(this.db)) {
         // The legacy key no longer carries traffic; failing to disable it must
         // not block the refund the ledger has already computed.
-        await this.disableManagedKey(peeked.keyId, peeked.keyProviderId).catch((error) =>
-          console.warn('[aico] legacy member key disable failed during reclaim', {
-            message: error instanceof Error ? error.message : String(error),
-            orgMemberId: params.orgMemberId,
-          }),
+        await this.disableManagedKey(peeked.keyId, peeked.keyProviderId, ciphertext).catch(
+          (error) =>
+            console.warn('[aico] legacy member key disable failed during reclaim', {
+              message: error instanceof Error ? error.message : String(error),
+              orgMemberId: params.orgMemberId,
+            }),
         );
       } else {
-        await this.disableManagedKey(peeked.keyId, peeked.keyProviderId);
+        await this.disableManagedKey(peeked.keyId, peeked.keyProviderId, ciphertext);
       }
     }
 

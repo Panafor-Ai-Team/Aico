@@ -163,4 +163,64 @@ describe('/internal/cheapvibecode', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('https://cheapvibecode.ru/v1/balance');
     expect(await res.json()).toEqual({ balanceUsd: 272_202_472 / 25_000_000 });
   });
+
+  describe('POST /v1/keys/edit', () => {
+    const edit = (body: unknown) =>
+      call('/v1/keys/edit', { body: JSON.stringify(body), method: 'POST' });
+
+    it('forwards a freeze to CVC with the primary key', async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ meta: {} }));
+
+      const res = await edit({ active: false, key: 'sk-cvc-member' });
+
+      expect(res.status).toBe(200);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toMatch(/\/v1\/keys\/edit$/);
+      expect(init.headers.Authorization).toBe(`Bearer ${PRIMARY_KEY}`);
+      expect(JSON.parse(init.body as string)).toEqual({ active: false, key: 'sk-cvc-member' });
+    });
+
+    it('forwards a delete as exactly { key, delete: true }', async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ status: 'deleted' }));
+      const res = await edit({ delete: true, key: 'sk-cvc-member' });
+      expect(res.status).toBe(200);
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({
+        delete: true,
+        key: 'sk-cvc-member',
+      });
+    });
+
+    it('refuses the primary key: CVC would promote another key in its place', async () => {
+      const res = await edit({ delete: true, key: PRIMARY_KEY });
+      expect(res.status).toBe(403);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [{ additional_tokens: 100, key: 'sk-cvc-member' }],
+      [{ key: 'sk-cvc-member', token_limit: 1 }],
+      [{ active: true, delete: true, key: 'sk-cvc-member' }],
+      [{ active: 'no', key: 'sk-cvc-member' }],
+      [{ active: false, key: 'not-a-secret' }],
+      [{ active: false }],
+    ])('refuses anything but a freeze or delete: %j', async (body) => {
+      const res = await edit(body);
+      expect(res.status).toBe(400);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('passes a CVC 404 through so the caller can treat the delete as done', async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ error: { code: 'not_found' } }, 404));
+      const res = await edit({ delete: true, key: 'sk-cvc-gone' });
+      expect(res.status).toBe(404);
+    });
+
+    it('marks a 5xx edit as outcome-unknown instead of retrying it', async () => {
+      fetchMock.mockResolvedValue(new Response('oops', { status: 503 }));
+      const res = await edit({ active: false, key: 'sk-cvc-member' });
+      expect(res.status).toBe(502);
+      expect(await res.json()).toEqual({ error: 'edit_outcome_unknown' });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
 });

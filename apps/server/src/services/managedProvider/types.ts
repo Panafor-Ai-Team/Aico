@@ -15,8 +15,9 @@ import type { ChatModelCard } from '@lobechat/types';
  *    holding that member's own key. Callers already store it
  *    (`openrouterKeyCiphertext`), so both implementations can be satisfied.
  *
- * 2. **Not every operation exists everywhere.** CVC cannot revoke, disable,
- *    update a limit, or reset a limit on a period boundary. Rather than have the
+ * 2. **Not every operation exists everywhere.** CVC can freeze and delete a key
+ *    (by its secret), but cannot change a limit safely or reset one on a period
+ *    boundary. Rather than have the
  *    optional methods throw and make every call site defensive, capabilities are
  *    declared up front and the caller branches on them.
  *
@@ -38,7 +39,8 @@ export interface ManagedProviderCapabilities {
    */
   readKeyBySecret: boolean;
   /** A key can be deleted or disabled upstream. When false, retiring a key means
-   *  ceasing to use it — safe only because managed keys never reach the browser. */
+   *  ceasing to use it — safe only because managed keys never reach the browser.
+   *  With `readKeyBySecret`, both operations need the key's `apiKey` too. */
   revoke: boolean;
   /** An existing key's limit can be changed after creation. When false, the
    *  limit written at mint time is final for that key's lifetime. */
@@ -109,6 +111,8 @@ export interface CreateManagedKeyParams {
 }
 
 export interface UpdateManagedKeyParams {
+  /** The key's secret, for providers that address edits by it (CVC). */
+  apiKey?: string;
   disabled?: boolean;
   hash: string;
   limitReset?: ManagedKeyLimitReset;
