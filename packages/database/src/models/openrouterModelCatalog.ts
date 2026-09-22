@@ -218,14 +218,18 @@ export class OpenRouterModelCatalogModel {
 
   /**
    * Model ids and their upstream-published cost coefficient, for the platform
-   * admin's per-model override table (AICO-187).
+   * admin's model table.
    *
-   * `publishedBp` is `null` for providers that do not publish a coefficient at
-   * all (OpenRouter prices in USD per token), in which case an override is a
-   * plain markup measured against 1.00x rather than a correction to a number
-   * upstream told us.
+   * The sync stores the coefficient only as the pricing derived from it, so it
+   * is recovered from the `textInput` rate when `tokensPerUsd` is given — the
+   * same conversion `cvcMultiplierToPricing` applies, reversed. The figure shown
+   * is therefore exactly the one being charged. `publishedBp` is `null` for
+   * providers that do not publish a coefficient (OpenRouter prices in USD per
+   * token), which callers signal by omitting `tokensPerUsd`.
    */
-  listCoefficients = async (): Promise<
+  listCoefficients = async (options?: {
+    tokensPerUsd?: number;
+  }): Promise<
     Array<{
       displayName: string | null;
       enabled: boolean;
@@ -239,13 +243,27 @@ export class OpenRouterModelCatalogModel {
         enabled: openrouterModelCatalog.enabled,
         id: openrouterModelCatalog.id,
         payload: openrouterModelCatalog.payload,
+        pricing: openrouterModelCatalog.pricing,
       })
       .from(openrouterModelCatalog)
       .orderBy(asc(openrouterModelCatalog.id));
 
-    return rows.map((row) => {
+    const tokensPerUsd = options?.tokensPerUsd;
+
+    const coefficientOf = (row: (typeof rows)[number]): number => {
       const raw = (row.payload as { multiplier?: unknown } | null)?.multiplier;
-      const coefficient = typeof raw === 'number' ? raw : Number.NaN;
+      if (typeof raw === 'number') return raw;
+      if (!tokensPerUsd) return Number.NaN;
+      const units = (row.pricing as { units?: Array<{ name?: string; rate?: unknown }> } | null)
+        ?.units;
+      const rate = Array.isArray(units)
+        ? Number(units.find((unit) => unit?.name === 'textInput')?.rate)
+        : Number.NaN;
+      return (rate * tokensPerUsd) / 1_000_000;
+    };
+
+    return rows.map((row) => {
+      const coefficient = coefficientOf(row);
       return {
         displayName: row.displayName ?? null,
         enabled: row.enabled,

@@ -326,4 +326,39 @@ describe('OpenRouterModelCatalogModel', () => {
     expect(byId['openai/new'].enabled).toBe(true);
     expect(byId['deepseek/old'].enabled).toBe(false);
   });
+
+  it('recovers the published CVC coefficient from the synced pricing', async () => {
+    // Regression: the sync stores the coefficient only as pricing, so reading
+    // `payload.multiplier` showed every model as unpublished (x1.00 in the admin
+    // table), inviting an override that stacked on top of the real coefficient.
+    const cvcUnit = (rate: number) => ({
+      units: [
+        {
+          name: 'textInput' as const,
+          rate,
+          strategy: 'fixed' as const,
+          unit: 'millionTokens' as const,
+        },
+      ],
+    });
+    await catalog.replaceCatalog({
+      models: [
+        { id: 'claude-opus-5', pricing: cvcUnit(0.16), type: 'chat' },
+        { id: 'gpt-5.6-luna', pricing: cvcUnit(0.0132), type: 'chat' },
+        { id: 'unpriced', type: 'chat' },
+      ],
+      triggeredBy: 'test',
+    });
+
+    const byId = (list: { id: string; publishedBp: number | null }[]) =>
+      Object.fromEntries(list.map((row) => [row.id, row.publishedBp]));
+
+    const cvc = byId(await catalog.listCoefficients({ tokensPerUsd: 25_000_000 }));
+    expect(cvc['claude-opus-5']).toBe(40_000);
+    expect(cvc['gpt-5.6-luna']).toBe(3300);
+    expect(cvc['unpriced']).toBeNull();
+
+    // Providers without a published coefficient (OpenRouter) omit the rate.
+    expect(byId(await catalog.listCoefficients())['claude-opus-5']).toBeNull();
+  });
 });

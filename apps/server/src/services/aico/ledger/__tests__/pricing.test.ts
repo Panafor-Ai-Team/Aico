@@ -12,16 +12,11 @@ import {
 } from '../pricing';
 
 const catalogRows = vi.hoisted(() => ({ rows: [] as Record<string, unknown>[] }));
-const overrides = vi.hoisted(() => ({ map: {} as Record<string, number> }));
 
 vi.mock('@/database/models/openrouterModelCatalog', () => ({
   OpenRouterModelCatalogModel: class {
     listPricingRows = async () => catalogRows.rows;
   },
-}));
-
-vi.mock('../../usageMultiplier', () => ({
-  getCachedModelMultiplierOverrides: async () => overrides.map,
 }));
 
 const db = {} as LobeChatDatabase;
@@ -55,7 +50,6 @@ const glmRates = (extra: Partial<ManagedModelRates> = {}): ManagedModelRates => 
 
 beforeEach(() => {
   resetManagedPricingCacheForTests();
-  overrides.map = {};
   catalogRows.rows = [
     row('glm-5.3-flash', 0.3),
     row('grok-4.6', 0.5),
@@ -119,11 +113,8 @@ describe('rawCostMicroUsd', () => {
 });
 
 describe('getManagedModelRates', () => {
-  it('reads catalog rates, caps and corrections', async () => {
-    overrides.map = { 'glm-5.3-flash': 14_400 };
-    await expect(getManagedModelRates(db, 'glm-5.3-flash')).resolves.toEqual(
-      glmRates({ modelBp: 14_400 }),
-    );
+  it('reads catalog rates and caps with no per-model correction', async () => {
+    await expect(getManagedModelRates(db, 'glm-5.3-flash')).resolves.toEqual(glmRates());
   });
 
   it('flags double-billing models', async () => {

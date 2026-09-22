@@ -1,4 +1,4 @@
-# Optional daily OpenRouter model catalog sync for self-hosted Aico.
+# Optional model catalog sync (every 6h, keeps CVC multipliers fresh) for self-hosted Aico.
 #
 # Requires CRON_SECRET (same value as the app) and APP_URL / internal URL.
 # Usage:
@@ -24,8 +24,8 @@ services:
           curl -fsS -X GET \
             -H "Authorization: Bearer $${CRON_SECRET}" \
             "$$TARGET/api/aico/cron/sync-openrouter-models" \
-            || echo "sync failed (will retry in 24h)"
-          sleep 86400
+            || echo "sync failed (will retry in 6h)"
+          sleep 21600
         done
     depends_on:
       - lobe

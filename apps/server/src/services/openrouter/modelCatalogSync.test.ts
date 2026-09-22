@@ -1,3 +1,4 @@
+import type { ChatModelCard } from '@lobechat/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getTestDB } from '@/database/core/getTestDB';
@@ -109,5 +110,58 @@ describe('OpenRouterModelCatalogSyncService', () => {
       lastStatus: 'error',
       lastTriggeredBy: 'cron',
     });
+  });
+  it('keeps the previous catalog when upstream returns a truncated list', async () => {
+    const chat = (id: string) => ({ displayName: id, id, type: 'chat' });
+    fetchOpenRouterModels.mockResolvedValue(['a/1', 'a/2', 'a/3', 'a/4', 'a/5', 'a/6'].map(chat));
+
+    const { OpenRouterModelCatalogSyncService } = await import('./modelCatalogSync');
+    const service = new OpenRouterModelCatalogSyncService(db);
+    expect((await service.sync('cron')).lastStatus).toBe('success');
+
+    fetchOpenRouterModels.mockResolvedValue([chat('a/1')]);
+    const status = await service.sync('cron');
+
+    expect(status.lastStatus).toBe('error');
+    expect(status.lastError).toContain('Refused catalog with 1 chat models (had 6)');
+    const ids = (await new OpenRouterModelCatalogModel(db).listPricingRows()).map((r) => r.id);
+    expect(ids).toEqual(expect.arrayContaining(['a/1', 'a/2', 'a/3', 'a/4', 'a/5', 'a/6']));
+
+    // A full-size list still replaces the catalog, including removals.
+    fetchOpenRouterModels.mockResolvedValue(['a/1', 'a/2', 'a/3', 'a/4', 'a/5'].map(chat));
+    expect((await service.sync('cron')).lastStatus).toBe('success');
+    const after = (await new OpenRouterModelCatalogModel(db).listPricingRows()).map((r) => r.id);
+    expect(after).not.toContain('a/6');
+  });
+});
+
+describe('catalogFetchRejection', () => {
+  const priced = { units: [] };
+  const chat = (id: string, pricing?: unknown) =>
+    ({ id, pricing, type: 'chat' }) as unknown as ChatModelCard;
+
+  it('accepts a first sync into an empty catalog', async () => {
+    const { catalogFetchRejection } = await import('./modelCatalogSync');
+    expect(
+      catalogFetchRejection({ existingChatCount: 0, fetched: [chat('a')], requirePricing: false }),
+    ).toBeNull();
+  });
+
+  it('refuses a coefficient catalog where no chat model is priced', async () => {
+    const { catalogFetchRejection } = await import('./modelCatalogSync');
+    const fetched = [chat('a'), chat('b')];
+    expect(
+      catalogFetchRejection({ existingChatCount: 2, fetched, requirePricing: true }),
+    ).toContain('no priced chat models');
+    expect(
+      catalogFetchRejection({ existingChatCount: 2, fetched, requirePricing: false }),
+    ).toBeNull();
+    expect(
+      catalogFetchRejection({
+        existingChatCount: 2,
+        fetched: [chat('a', priced), chat('b')],
+        requirePricing: true,
+      }),
+    ).toBeNull();
   });
 });

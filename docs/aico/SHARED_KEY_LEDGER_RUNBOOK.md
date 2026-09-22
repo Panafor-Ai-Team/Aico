@@ -281,7 +281,8 @@ mode, with no deploy. Unpause with step 7 once the cause is understood.
 ## Flagged ops issues (outside this change)
 
 - The server crontab references a missing `openrouter-sync-cron.sh` and holds
-  `CRON_SECRET` inline. Move it to an env file.
+  `CRON_SECRET` inline. Replace it with the 6-hourly `sync-openrouter-models`
+  entry from `RENEWAL_SETTLEMENT_RUNBOOK.md`, reading `CRON_SECRET` from an env file.
 - Delete the unrevokable unlimited CVC key `ace4a1f7-…` (prefix `sk-cvc-01780`)
   from the CVC dashboard.
 - When the CVC primary key is rotated, update only

@@ -2,13 +2,13 @@
 
 ## Cron / worker entrypoints
 
-| Job | Interval | Entrypoint |
-|---|---|---|
-| Due renewals | every 1–5 min | `GET /api/aico/cron/process-renewals` → `processDueRenewals(db)` |
-| Key outbox | every 1 min | `GET /api/aico/cron/process-key-outbox` → `processKeyOutbox(db)` |
-| Usage sync | every 15 min | sync active member keys |
-| Daily reconcile | daily | full org usage vs OR usage |
-| Master monitor | every 15 min | update `aico_master_monitor_state` |
+| Job             | Interval      | Entrypoint                                                       |
+| --------------- | ------------- | ---------------------------------------------------------------- |
+| Due renewals    | every 1–5 min | `GET /api/aico/cron/process-renewals` → `processDueRenewals(db)` |
+| Key outbox      | every 1 min   | `GET /api/aico/cron/process-key-outbox` → `processKeyOutbox(db)` |
+| Usage sync      | every 15 min  | sync active member keys                                          |
+| Daily reconcile | daily         | full org usage vs OR usage                                       |
+| Master monitor  | every 15 min  | update `aico_master_monitor_state`                               |
 
 Auth for Aico crons: `Authorization: Bearer $CRON_SECRET`.
 
@@ -31,7 +31,12 @@ Example crontab:
 ```cron
 */5 * * * * curl -fsS -H "Authorization: Bearer ${CRON_SECRET}" "https://<host>/api/aico/cron/process-renewals"
 *   * * * * curl -fsS -H "Authorization: Bearer ${CRON_SECRET}" "https://<host>/api/aico/cron/process-key-outbox"
+0 */6 * * * curl -fsS -H "Authorization: Bearer ${CRON_SECRET}" "https://<host>/api/aico/cron/sync-openrouter-models"
 ```
+
+The 6-hourly catalog sync refreshes CheapVibeCode per-model multipliers (`/v1/models`), which the
+usage ledger prices with. A sync that returns under half the current chat models, or no priced chat
+models, is refused and the previous catalog keeps serving (see sync history in Platform Admin).
 
 Ensure `CRON_SECRET` is set in the app environment and in the scheduler environment. A missing secret returns HTTP 503; a wrong bearer returns HTTP 401.
 

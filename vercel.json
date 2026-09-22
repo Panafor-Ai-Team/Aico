@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/aico/cron/sync-openrouter-models",
-      "schedule": "0 3 * * *"
+      "schedule": "0 */6 * * *"
     }
   ],
   "headers": [

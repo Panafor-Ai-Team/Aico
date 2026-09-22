@@ -892,7 +892,10 @@ export type PlatformUsageMultiplierConfigItem = typeof platformUsageMultiplierCo
 export type NewPlatformUsageMultiplierConfig = typeof platformUsageMultiplierConfig.$inferInsert;
 
 /**
- * Per-model coefficient overrides (AICO-187), edited by platform admins.
+ * Per-model coefficient overrides (AICO-187). No longer applied to any price and
+ * no longer editable: coefficients come only from the upstream catalog sync.
+ * The table is kept so the change stays reversible; the notes below describe
+ * its original role.
  *
  * Kept out of `openrouterModelCatalog` on purpose: `replaceCatalog` rewrites
  * `pricing` and `payload` from the upstream snapshot on every sync, drops rows

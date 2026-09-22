@@ -10,8 +10,6 @@ import cvcModels from 'model-bank/cheapvibecode';
 import { OpenRouterModelCatalogModel } from '@/database/models/openrouterModelCatalog';
 import type { LobeChatDatabase } from '@/database/type';
 
-import { getCachedModelMultiplierOverrides } from '../usageMultiplier';
-
 /**
  * Models whose measured charge counts reasoning tokens a second time
  * (`deepseek-v4.1-flash` ~x0.433 against a published x0.3).
@@ -23,7 +21,10 @@ export interface ManagedModelRates {
   /** Pico-USD per token, so fractional µUSD rates stay integers. */
   inputPusdPerToken: bigint;
   maxOutputTokens: number | null;
-  /** Per-model coefficient correction; 10,000 when none. */
+  /**
+   * Per-model coefficient correction, always 10,000: coefficients come from the
+   * synced catalog alone. Kept so ledger rows keep recording the factor applied.
+   */
   modelBp: number;
   /** Null for input-only models (embeddings). */
   outputPusdPerToken: bigint | null;
@@ -121,13 +122,11 @@ export const getManagedModelRates = async (
   const output = findFixedRate(row.pricing, 'textOutput');
   if (input === null || input === 'unsupported' || output === 'unsupported') return null;
 
-  const overrides = await getCachedModelMultiplierOverrides(db);
-
   return {
     contextWindowTokens: toPositiveIntOrNull(row.contextWindowTokens),
     inputPusdPerToken: rateToPusdPerToken(input),
     maxOutputTokens: toPositiveIntOrNull(row.maxOutput),
-    modelBp: toPositiveIntOrNull(overrides[modelId]) ?? 10_000,
+    modelBp: 10_000,
     outputPusdPerToken: output === null ? null : rateToPusdPerToken(output),
     pricedModelId: modelId,
     reasoningBilledTwice: REASONING_BILLED_TWICE.has(modelId),

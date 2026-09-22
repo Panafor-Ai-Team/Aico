@@ -1,4 +1,4 @@
-import { MANAGED_PROVIDER_ID } from '@lobechat/business-const';
+import { MANAGED_PROVIDER_ID, OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
 import { fetchOpenRouterModels } from '@lobechat/model-runtime';
 import type { ChatModelCard } from '@lobechat/types';
 import type { ModelAbilities } from 'model-bank';
@@ -9,6 +9,7 @@ import {
   OpenRouterModelCatalogModel,
 } from '@/database/models/openrouterModelCatalog';
 import type { LobeChatDatabase } from '@/database/type';
+import { aicoEnv } from '@/envs/aico';
 import { getManagedProviderClient } from '@/server/services/managedProvider';
 
 const toAbilities = (model: ChatModelCard): ModelAbilities => {
@@ -45,6 +46,38 @@ const fetchManagedCatalog = async (): Promise<ChatModelCard[]> => {
   return client.listModels();
 };
 
+const isUpstreamChat = (model: { id: string; type?: string | null }) =>
+  (model.type ?? 'chat') === 'chat' && model.id !== OPENROUTER_AUTO_MODEL_ID;
+
+/**
+ * Why a fetched catalog should not replace the stored one, or null when it may.
+ *
+ * `replaceCatalog` deletes every row missing from the response, and the usage
+ * ledger cannot price a model without catalog pricing. A truncated or
+ * price-less response from a flaky upstream would therefore leave models
+ * unpriced until the next sync — so it is refused and the previous catalog,
+ * with its last known coefficients, keeps serving.
+ */
+export const catalogFetchRejection = ({
+  existingChatCount,
+  fetched,
+  requirePricing,
+}: {
+  existingChatCount: number;
+  fetched: ChatModelCard[];
+  requirePricing: boolean;
+}): string | null => {
+  const chat = fetched.filter(isUpstreamChat);
+
+  if (existingChatCount >= 4 && chat.length * 2 < existingChatCount) {
+    return `Refused catalog with ${chat.length} chat models (had ${existingChatCount}); keeping the previous catalog`;
+  }
+  if (requirePricing && chat.length > 0 && !chat.some((model) => model.pricing)) {
+    return 'Refused catalog with no priced chat models; keeping the previous catalog';
+  }
+  return null;
+};
+
 export class OpenRouterModelCatalogSyncService {
   private catalog: OpenRouterModelCatalogModel;
 
@@ -60,9 +93,13 @@ export class OpenRouterModelCatalogSyncService {
     return this.catalog.listSyncRuns(limit);
   };
 
-  /** Per-model published coefficients for the admin override table (AICO-187). */
+  /** Per-model published coefficients for the admin model table. */
   listCatalogCoefficients = async () => {
-    return this.catalog.listCoefficients();
+    return this.catalog.listCoefficients(
+      MANAGED_PROVIDER_ID === 'cheapvibecode'
+        ? { tokensPerUsd: aicoEnv.AICO_CVC_TOKENS_PER_USD }
+        : undefined,
+    );
   };
 
   /** Choose which catalog models the site offers. */
@@ -93,6 +130,16 @@ export class OpenRouterModelCatalogSyncService {
   sync = async (triggeredBy: string): Promise<OpenRouterCatalogSyncStatus> => {
     try {
       const models = await fetchManagedCatalog();
+
+      const existing = await this.catalog.listPricingRows();
+      const rejection = catalogFetchRejection({
+        existingChatCount: existing.filter(isUpstreamChat).length,
+        fetched: models,
+        // OpenRouter rows are priced in USD per token and may legitimately lack
+        // pricing; every other gateway derives pricing from a published coefficient.
+        requirePricing: MANAGED_PROVIDER_ID !== 'openrouter',
+      });
+      if (rejection) return this.catalog.markSyncError({ error: rejection, triggeredBy });
 
       return await this.catalog.replaceCatalog({
         models: models.map((model) => ({

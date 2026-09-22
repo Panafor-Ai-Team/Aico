@@ -7,7 +7,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * Daily OpenRouter model catalog sync (Vercel Cron / manual ops).
+ * Managed model catalog sync, every 6h (host crontab / Vercel Cron / manual ops).
+ * For CheapVibeCode this refreshes the per-model multipliers the ledger prices with.
  * Auth: `Authorization: Bearer $CRON_SECRET`
  */
 export const GET = async (req: Request) => {

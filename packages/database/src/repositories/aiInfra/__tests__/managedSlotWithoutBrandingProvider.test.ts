@@ -38,7 +38,6 @@ const createRepo = async () => {
   __resetUsageMultiplierCache();
   const repo = new AiInfraRepos(db, 'test-user-id', { openrouter: { enabled: true } });
   vi.spyOn(repo as any, 'resolveUsageMultiplierBp').mockResolvedValue(12_500);
-  vi.spyOn(repo as any, 'resolveModelMultiplierOverrides').mockResolvedValue({});
   return repo;
 };
 
