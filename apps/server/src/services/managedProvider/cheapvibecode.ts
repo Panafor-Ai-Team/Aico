@@ -21,6 +21,27 @@ import type { CreateManagedKeyResult, ManagedKeyInfo, ManagedProviderClient } fr
  * minted a brand new one with `token_limit: null` — unlimited, and unrevokable.
  */
 
+/**
+ * CVC refuses `POST /v1/keys` with 409 `api_key_count_limit_exceeded` once the
+ * account holds its maximum number of keys. Keys cannot be deleted through the
+ * API, so this does not clear by retrying: only shared-key mode or CVC support
+ * can. Carried across the control-plane hop as {@link MANAGED_KEY_CAPACITY}.
+ */
+export const MANAGED_KEY_CAPACITY = 'managed_key_capacity';
+const CVC_KEY_LIMIT_CODE = 'api_key_count_limit_exceeded';
+
+export class ManagedKeyCapacityError extends Error {
+  readonly code = MANAGED_KEY_CAPACITY;
+
+  constructor() {
+    super('CheapVibeCode key-count limit reached');
+    this.name = 'ManagedKeyCapacityError';
+  }
+}
+
+export const isManagedKeyCapacityError = (error: unknown): error is ManagedKeyCapacityError =>
+  (error as { code?: unknown } | null)?.code === MANAGED_KEY_CAPACITY;
+
 /** CVC prices in its own tokens; the ledger is micro-USD. One rate bridges them. */
 const tokensPerUsd = () => aicoEnv.AICO_CVC_TOKENS_PER_USD;
 
@@ -120,6 +141,9 @@ const cvcRequest = async <T>(
           path,
           status: res.status,
         });
+        if (res.status === 409 && body.includes(CVC_KEY_LIMIT_CODE)) {
+          throw new ManagedKeyCapacityError();
+        }
         lastError = new Error(`CheapVibeCode API ${res.status}: ${res.statusText}`);
         // 5xx and 429-after-retries are worth the fallback domain; a 4xx is our
         // own request being wrong and will fail identically there.
@@ -322,6 +346,9 @@ export class RemoteCheapVibeCodeClient implements ManagedProviderClient {
         path,
         status: res.status,
       });
+      if (res.status === 409 && body.includes(MANAGED_KEY_CAPACITY)) {
+        throw new ManagedKeyCapacityError();
+      }
       throw new Error(`Control plane CheapVibeCode proxy ${res.status}: ${res.statusText}`);
     }
 

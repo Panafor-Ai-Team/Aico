@@ -7,6 +7,7 @@ import {
   IMAGE_PART_TOKENS,
   MIN_OUTPUT_TOKENS,
   REQUEST_OVERHEAD_TOKENS,
+  resolveHoldOutputTokens,
   resolveMaxOutputTokens,
   shrinkMaxOutputToFit,
 } from '../estimate';
@@ -84,6 +85,21 @@ describe('resolveMaxOutputTokens', () => {
     [{ defaultMax: 32_000, modelMax: 100_000, requested: 0 }, 32_000],
   ])('%o → %d', (params, expected) => {
     expect(resolveMaxOutputTokens(params)).toBe(expected);
+  });
+});
+
+describe('resolveHoldOutputTokens', () => {
+  it.each([
+    // Capped models: the hold covers exactly what was sent.
+    [{ contextWindow: 500_000, modelMax: 393_216, sentMax: 64, uncapped: false }, 64],
+    // Regression: deepseek-v4.1-flash returned 648 tokens for max_tokens 64.
+    [{ contextWindow: 1_048_576, modelMax: 393_216, sentMax: 64, uncapped: true }, 393_216],
+    // grok-4.6 has no published max output: its context window bounds it.
+    [{ contextWindow: 500_000, modelMax: null, sentMax: 64, uncapped: true }, 500_000],
+    [{ contextWindow: null, modelMax: null, sentMax: 32_000, uncapped: true }, 32_000],
+    [{ contextWindow: null, modelMax: 8000, sentMax: 32_000, uncapped: true }, 32_000],
+  ])('%o → %d', (params, expected) => {
+    expect(resolveHoldOutputTokens(params)).toBe(expected);
   });
 });
 

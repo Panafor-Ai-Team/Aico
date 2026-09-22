@@ -42,6 +42,14 @@ declare global {
        */
       AICO_IS_CONTROL_PLANE?: string;
       /**
+       * Comma-separated CVC model ids measured to honour `max_tokens` (see
+       * `scripts/aico/probe_max_tokens.py`). Holds for these cover `max_tokens`;
+       * every other model is held at its own output ceiling, because most CVC
+       * models do not count reasoning against the cap. Default: the 2026-09-22
+       * probe result.
+       */
+      AICO_LEDGER_CAPPED_OUTPUT_MODELS?: string;
+      /**
        * Shared-key mode only. Managed traffic is refused once the upstream account
        * float, net of ledger spend since the last reading and open holds, would
        * drop below this many raw micro-USD. Default 1,000,000 ($1).
@@ -147,6 +155,11 @@ export const getAicoConfig = () => {
       AICO_LEDGER_FLOAT_MAX_AGE_SECONDS: z.coerce.number().int().min(60).default(600),
       AICO_LEDGER_HOLD_TTL_SECONDS: z.coerce.number().int().min(360).max(3600).default(900),
       AICO_LEDGER_MAX_OPEN_HOLDS: z.coerce.number().int().min(1).max(64).default(6),
+      AICO_LEDGER_CAPPED_OUTPUT_MODELS: z
+        .string()
+        .default(
+          'claude-fable-5-1,claude-fable-5,claude-opus-5,claude-opus-4-8,claude-opus-4-7,claude-opus-4-6,claude-sonnet-5,claude-sonnet-4-6,claude-haiku-4-5,glm-5.3,glm-5.3-flash,hy4-preview,kimi-k3,mimo-v2.5',
+        ),
       AICO_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS: z.coerce
         .number()
         .int()
@@ -176,6 +189,7 @@ export const getAicoConfig = () => {
       AICO_LEDGER_FLOAT_MAX_AGE_SECONDS: process.env.AICO_LEDGER_FLOAT_MAX_AGE_SECONDS || undefined,
       AICO_LEDGER_HOLD_TTL_SECONDS: process.env.AICO_LEDGER_HOLD_TTL_SECONDS || undefined,
       AICO_LEDGER_MAX_OPEN_HOLDS: process.env.AICO_LEDGER_MAX_OPEN_HOLDS || undefined,
+      AICO_LEDGER_CAPPED_OUTPUT_MODELS: process.env.AICO_LEDGER_CAPPED_OUTPUT_MODELS || undefined,
       AICO_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS:
         process.env.AICO_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS || undefined,
       AICO_MANAGED_INFERENCE_KEY: process.env.AICO_MANAGED_INFERENCE_KEY || 'per_subject',

@@ -9,6 +9,7 @@ const SHARED_KEY = 'sk-cvc-test-shared-key-do-not-leak';
 
 const cfg = {} as LedgerConfig;
 const baseConfig = (): LedgerConfig => ({
+  cappedOutputModels: new Set(['glm-5.3-flash']),
   defaultMaxOutputTokens: 32_000,
   floatFloorRawMicroUsd: 1_000_000,
   floatMaxAgeMs: 600_000,
