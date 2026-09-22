@@ -27,6 +27,28 @@ are misleading.
 **There is no API revoke, disable, or update for keys.** A minted key is permanent as far as the API
 is concerned; the dashboard's regenerate control is the only remedy. Plan around this.
 
+> **Superseded 2026-09-22.** CVC's reseller API added key management. All of it is authenticated
+> with the primary key, and the target key is named **by its plaintext secret** in the body, never
+> by id:
+>
+> | Route                    | Body                           | Notes                                                              |
+> | ------------------------ | ------------------------------ | ------------------------------------------------------------------ |
+> | `POST /v1/keys/edit`     | `{key, active: false \| true}` | Freeze / unfreeze. Freezing the primary promotes another key.      |
+> | `POST /v1/keys/edit`     | `{key, delete: true}`          | Permanent. Success is `{"status":"deleted"}`.                      |
+> | `POST /v1/keys/edit`     | `{key, additional_tokens}`     | Adds to the lifetime limit. **Not idempotent** — never auto-retry. |
+> | `POST /v1/keys/edit`     | `{key, token_limit}`           | Absolute reduction; ≥ `tokens_used`, ≤ current. Safe to repeat.    |
+> | `POST /v1/keys/edit`     | `{key, allowed_models}`        | Replaces the model list; `[]` means all models.                    |
+> | `POST /v1/keys/transfer` | `{from_key, to_key}`           | Moves unused finite allowance and deletes the donor.               |
+> | `GET /v1/keys/logs`      | — (auth as the key)            | Newest 30 requests of that key, with `cost_tokens`; no pagination. |
+>
+> Errors use `{"error": {"code", "message", "type"}}`. The fallback origin is
+> `https://ru.cheapvibecode.ru`.
+>
+> Aico uses only freeze, unfreeze and delete (`cheapvibecode.ts`, control-plane
+> `POST /internal/cheapvibecode/v1/keys/edit`). Limits stay fixed at mint, so a top-up still mints a
+> replacement key, but the retired key is now deleted. Keys retired before this change were
+> recorded by id only; their secrets are gone, so only CVC support can remove them.
+
 ## 2. `/v1/balance` is per-key
 
 Called with the primary key it returns the account float; called with a scoped key it returns that
@@ -151,8 +173,9 @@ Both OpenAI-shaped and working. Streaming returns usage in the final chunk when
 1. **Keep per-member keys.** Per-key remaining and upstream `allowed_models` enforcement both work.
 2. **Balance deltas are the billing source of truth**, not computed charges (§3).
 3. **Space out balance reads** (§2) — settlement must batch and back off, not poll per request.
-4. **No revoke.** Retiring a member means ceasing to use the key; record it in `aico_key_outbox` for
-   cleanup if CVC ever ships one. Safe only because managed keys never reach the browser
+4. **No revoke** (superseded 2026-09-22, see §1). Retired keys are now deleted by secret, and
+   disabled ones are frozen. Before that, retiring a member meant ceasing to use the key and
+   recording it in `aico_key_outbox`. Safe only because managed keys never reach the browser
    (`disableBrowserRequest: true`).
 5. **Test `daily_budget_rubles` and `expires_at` at create time** before committing to the
    checkpoint-emulation design — either would materially simplify it.

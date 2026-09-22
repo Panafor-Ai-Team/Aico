@@ -1,9 +1,14 @@
 # Shared-key usage ledger runbook
 
-CheapVibeCode (CVC) caps how many API keys an account may ever create, and CVC
-keys are immutable, so every wallet top-up used to burn a key slot. This runbook
+CheapVibeCode (CVC) caps how many API keys an account may hold, and CVC key
+limits are fixed at mint, so every wallet top-up used to burn a key slot. This runbook
 moves managed traffic onto **one key** (the CVC primary key) and enforces every
 cent in our own database with a hold-and-settle ledger.
+
+Since 2026-09-22, retired per-subject keys are deleted through CVC's
+`POST /v1/keys/edit`, so the key count no longer grows in `per_subject` mode.
+The key limit alone no longer forces Phase B; decide on the Phase A (shadow)
+figures.
 
 - **Before each call:** a hold is placed atomically against the wallet or member
   budget: `UPDATE … WHERE available >= hold AND open_holds < max`.

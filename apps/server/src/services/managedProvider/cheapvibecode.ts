@@ -8,13 +8,18 @@ import type { CreateManagedKeyResult, ManagedKeyInfo, ManagedProviderClient } fr
 /**
  * CheapVibeCode managed-provider client.
  *
- * What CVC actually offers, measured (see `docs/aico/CHEAPVIBECODE_PROVIDER_PROBE.md`):
+ * What CVC offers (see `docs/aico/CHEAPVIBECODE_PROVIDER_PROBE.md`):
  * `POST /v1/keys` creates, `GET /v1/balance` reports the calling key's remaining
- * allowance, `GET /v1/models` lists the catalog. There is no list, read, update,
- * disable, or delete for keys — `GET/PATCH/DELETE /v1/keys` return 405 and
- * `/v1/keys/{id}` returns 404. Hence `capabilities` denies revoke, updateLimit
- * and nativePeriodicLimits, and `updateKey` / `deleteKey` are absent rather than
- * present-and-throwing.
+ * allowance, `GET /v1/models` lists the catalog, and `POST /v1/keys/edit` (reseller
+ * API, 2026-09) freezes, unfreezes, resizes or deletes a key. Edit authenticates
+ * with the primary key but names its target by the target's *plaintext secret*,
+ * never by id, so every caller must hold the key it wants to change.
+ *
+ * `capabilities.revoke` is true (freeze + delete). `updateLimit` stays false on
+ * purpose: `additional_tokens` is a non-idempotent delta, and a top-up is still
+ * served by minting a replacement key — which is now deleted afterwards rather
+ * than abandoned, so the account's key count no longer grows. There is still no
+ * list of keys, and `nativePeriodicLimits` is false.
  *
  * Never treat `POST /v1/keys` as an upsert: it ignores unknown fields and always
  * creates. A probe that posted `{id, is_active: false}` hoping to disable a key
@@ -23,11 +28,13 @@ import type { CreateManagedKeyResult, ManagedKeyInfo, ManagedProviderClient } fr
 
 /**
  * CVC refuses `POST /v1/keys` with 409 `api_key_count_limit_exceeded` once the
- * account holds its maximum number of keys. Keys cannot be deleted through the
- * API, so this does not clear by retrying: only shared-key mode or CVC support
- * can. Carried across the control-plane hop as {@link MANAGED_KEY_CAPACITY}.
+ * account holds its maximum number of keys. Retrying does not clear it; deleting
+ * retired keys or CVC support does. Carried across the control-plane hop as
+ * {@link MANAGED_KEY_CAPACITY}.
  */
 export const MANAGED_KEY_CAPACITY = 'managed_key_capacity';
+/** Control-plane error body for {@link CheapVibeCodeAmbiguousEditError}. */
+export const EDIT_OUTCOME_UNKNOWN = 'edit_outcome_unknown';
 const CVC_KEY_LIMIT_CODE = 'api_key_count_limit_exceeded';
 
 export class ManagedKeyCapacityError extends Error {
@@ -41,6 +48,44 @@ export class ManagedKeyCapacityError extends Error {
 
 export const isManagedKeyCapacityError = (error: unknown): error is ManagedKeyCapacityError =>
   (error as { code?: unknown } | null)?.code === MANAGED_KEY_CAPACITY;
+
+/**
+ * A non-2xx CVC answer. The message keeps the `CheapVibeCode API <status>` shape
+ * that `managedErrorStatus` parses; `code` is CVC's machine-readable
+ * `error.code` when the body had one. The body itself is never carried.
+ */
+export class CheapVibeCodeApiError extends Error {
+  constructor(
+    readonly status: number,
+    statusText: string,
+    readonly code: string | null,
+  ) {
+    super(`CheapVibeCode API ${status}: ${statusText}`);
+    this.name = 'CheapVibeCodeApiError';
+  }
+}
+
+/**
+ * A key edit whose outcome is unknown: the request may have reached CVC, but no
+ * answer came back (network failure or 5xx). Never retried automatically — CVC's
+ * guidance is that a repeated mutation may apply twice.
+ */
+export class CheapVibeCodeAmbiguousEditError extends Error {
+  constructor(readonly status: number | null) {
+    super(`CheapVibeCode key edit outcome unknown${status ? ` (${status})` : ''}`);
+    this.name = 'CheapVibeCodeAmbiguousEditError';
+  }
+}
+
+/** Reads CVC's `{"error": {"code": ...}}` envelope; `null` when absent. */
+const readErrorCode = (body: string): string | null => {
+  try {
+    const code = (JSON.parse(body) as { error?: { code?: unknown } })?.error?.code;
+    return typeof code === 'string' ? code : null;
+  } catch {
+    return null;
+  }
+};
 
 /** CVC prices in its own tokens; the ledger is micro-USD. One rate bridges them. */
 const tokensPerUsd = () => aicoEnv.AICO_CVC_TOKENS_PER_USD;
@@ -93,19 +138,24 @@ const readBalanceTokens = (json: unknown): number => {
 const CVC_CAPABILITIES = {
   nativePeriodicLimits: false,
   readKeyBySecret: true,
-  revoke: false,
+  revoke: true,
   updateLimit: false,
 } as const;
 
 /**
  * One request, tried across every configured domain, retrying 429 with backoff.
  * `apiKey` is per call because per-key state is read by authenticating *as* that
- * key — the primary credential is used only for create and the account float.
+ * key — the primary credential is used only for create, edit and the account float.
+ *
+ * A `mutation` is never re-sent once it may have been received: a network error
+ * or 5xx throws {@link CheapVibeCodeAmbiguousEditError} instead of moving on to
+ * the fallback domain. A 429 is still retried, because it was not processed.
  */
 const cvcRequest = async <T>(
   path: string,
   init: RequestInit & { method: string },
   apiKey: string,
+  options: { mutation?: boolean } = {},
 ): Promise<T> => {
   const baseUrls = resolveBaseUrls();
   let lastError: Error | null = null;
@@ -123,6 +173,7 @@ const cvcRequest = async <T>(
           },
         });
       } catch (error) {
+        if (options.mutation) throw new CheapVibeCodeAmbiguousEditError(null);
         // Network-level failure: try the fallback domain rather than retrying.
         lastError = error as Error;
         break;
@@ -141,10 +192,17 @@ const cvcRequest = async <T>(
           path,
           status: res.status,
         });
-        if (res.status === 409 && body.includes(CVC_KEY_LIMIT_CODE)) {
+        const code = readErrorCode(body);
+        if (
+          res.status === 409 &&
+          (code === CVC_KEY_LIMIT_CODE || (!code && body.includes(CVC_KEY_LIMIT_CODE)))
+        ) {
           throw new ManagedKeyCapacityError();
         }
-        lastError = new Error(`CheapVibeCode API ${res.status}: ${res.statusText}`);
+        if (options.mutation && (res.status >= 500 || res.status === 429)) {
+          throw new CheapVibeCodeAmbiguousEditError(res.status);
+        }
+        lastError = new CheapVibeCodeApiError(res.status, res.statusText, code);
         // 5xx and 429-after-retries are worth the fallback domain; a 4xx is our
         // own request being wrong and will fail identically there.
         if (res.status < 500 && res.status !== 429) throw lastError;
@@ -196,6 +254,53 @@ const getKeyByCredential: ManagedProviderClient['getKey'] = async (credential) =
     usageWeekly: null,
   } satisfies ManagedKeyInfo;
 };
+
+/** Body of `POST /v1/keys/edit` for the two operations Aico performs. */
+export type CheapVibeCodeKeyEdit = { active: boolean; key: string } | { delete: true; key: string };
+
+const requireSecret = (credential: { apiKey?: string }, op: string): string => {
+  if (!credential.apiKey) {
+    throw new Error(`CheapVibeCode ${op} names the key by its secret — apiKey is required`);
+  }
+  return credential.apiKey;
+};
+
+/**
+ * `updateKey` / `deleteKey` for both clients, over whichever transport reaches
+ * `POST /v1/keys/edit`. Only freeze/unfreeze is exposed as an update: a limit
+ * change would be a non-idempotent `additional_tokens` delta, which the
+ * capability flags keep callers from asking for.
+ */
+const keyEditOps = (edit: (body: CheapVibeCodeKeyEdit) => Promise<unknown>) => ({
+  deleteKey: (async (credential) => {
+    const key = requireSecret(credential, 'deleteKey');
+    try {
+      await edit({ delete: true, key });
+    } catch (error) {
+      // Already gone (or never ours): the outcome the caller wanted.
+      if ((error as { status?: unknown })?.status === 404) return;
+      throw error;
+    }
+  }) satisfies NonNullable<ManagedProviderClient['deleteKey']>,
+
+  updateKey: (async (params) => {
+    if (params.disabled === undefined || params.limitUsd !== undefined) {
+      throw new Error('CheapVibeCode keys support freeze/unfreeze only; limits are fixed at mint');
+    }
+    await edit({ active: !params.disabled, key: requireSecret(params, 'updateKey') });
+    return {
+      disabled: params.disabled,
+      hash: params.hash,
+      limit: null,
+      limitRemaining: null,
+      name: null,
+      usage: 0,
+      usageDaily: null,
+      usageMonthly: null,
+      usageWeekly: null,
+    } satisfies ManagedKeyInfo;
+  }) satisfies NonNullable<ManagedProviderClient['updateKey']>,
+});
 
 /** Maps a `POST /v1/keys` response onto the neutral shape. */
 const parseCreateKeyResponse = (
@@ -298,6 +403,28 @@ export class HttpCheapVibeCodeClient implements ManagedProviderClient {
     return parseCreateKeyResponse(json, params.name);
   };
 
+  /**
+   * Raw `POST /v1/keys/edit` with the primary key. Refuses the primary itself:
+   * freezing or deleting it makes CVC promote another key to primary.
+   */
+  editKey = async (body: CheapVibeCodeKeyEdit): Promise<void> => {
+    if (body.key === this.primaryApiKey) {
+      throw new Error('Refusing to edit the CheapVibeCode primary key');
+    }
+    await cvcRequest(
+      '/v1/keys/edit',
+      { body: JSON.stringify(body), method: 'POST' },
+      this.primaryApiKey,
+      { mutation: true },
+    );
+  };
+
+  private readonly ops = keyEditOps(this.editKey);
+
+  deleteKey = this.ops.deleteKey;
+
+  updateKey = this.ops.updateKey;
+
   getKey = getKeyByCredential;
 
   listModels: NonNullable<ManagedProviderClient['listModels']> = async () =>
@@ -349,7 +476,11 @@ export class RemoteCheapVibeCodeClient implements ManagedProviderClient {
       if (res.status === 409 && body.includes(MANAGED_KEY_CAPACITY)) {
         throw new ManagedKeyCapacityError();
       }
-      throw new Error(`Control plane CheapVibeCode proxy ${res.status}: ${res.statusText}`);
+      if (body.includes(EDIT_OUTCOME_UNKNOWN)) throw new CheapVibeCodeAmbiguousEditError(null);
+      throw Object.assign(
+        new Error(`Control plane CheapVibeCode proxy ${res.status}: ${res.statusText}`),
+        { status: res.status },
+      );
     }
 
     if (res.status === 204) return undefined as T;
@@ -367,6 +498,14 @@ export class RemoteCheapVibeCodeClient implements ManagedProviderClient {
     });
     return parseCreateKeyResponse(json, params.name);
   };
+
+  private readonly ops = keyEditOps((body) =>
+    this.request('/v1/keys/edit', { body: JSON.stringify(body), method: 'POST' }),
+  );
+
+  deleteKey = this.ops.deleteKey;
+
+  updateKey = this.ops.updateKey;
 
   getKey = getKeyByCredential;
 
@@ -387,8 +526,9 @@ export class RemoteCheapVibeCodeClient implements ManagedProviderClient {
 }
 
 /**
- * In-memory mock for local QA. Models CVC's limitations faithfully — no revoke,
- * no update, balance falls only when `__spend` is called — so a code path that
+ * In-memory mock for local QA. Models CVC faithfully — edit addresses a key by
+ * its secret, a frozen or deleted key cannot read its balance, limits never
+ * change, balance falls only when `__spend` is called — so a code path that
  * would break against the real API breaks here too.
  */
 export class MockCheapVibeCodeClient implements ManagedProviderClient {
@@ -396,7 +536,7 @@ export class MockCheapVibeCodeClient implements ManagedProviderClient {
 
   readonly providerId = 'cheapvibecode' as const;
 
-  private keys = new Map<string, { limitTokens: number; usedTokens: number }>();
+  private keys = new Map<string, { active: boolean; limitTokens: number; usedTokens: number }>();
 
   private accountTokens = 25_000_000;
 
@@ -404,7 +544,7 @@ export class MockCheapVibeCodeClient implements ManagedProviderClient {
     const id = crypto.randomUUID();
     const limitTokens = usdToCvcTokens(params.limitUsd);
     const key = `sk-cvc-mock-${id.replaceAll('-', '').slice(0, 20)}`;
-    this.keys.set(key, { limitTokens, usedTokens: 0 });
+    this.keys.set(key, { active: true, limitTokens, usedTokens: 0 });
     return {
       disabled: false,
       hash: id,
@@ -423,6 +563,7 @@ export class MockCheapVibeCodeClient implements ManagedProviderClient {
     if (!credential.apiKey) throw new Error('CheapVibeCode mock requires apiKey');
     const row = this.keys.get(credential.apiKey);
     if (!row) throw new Error(`CheapVibeCode mock key not found: ${credential.hash}`);
+    if (!row.active) throw new CheapVibeCodeApiError(401, 'Unauthorized', null);
     const remainingUsd = cvcTokensToUsd(Math.max(0, row.limitTokens - row.usedTokens));
     const limitUsd = credential.limitUsd ?? cvcTokensToUsd(row.limitTokens);
     return {
@@ -440,6 +581,23 @@ export class MockCheapVibeCodeClient implements ManagedProviderClient {
 
   getAccountBalanceUsd: ManagedProviderClient['getAccountBalanceUsd'] = async () =>
     cvcTokensToUsd(this.accountTokens);
+
+  private readonly ops = keyEditOps(async (body) => {
+    const row = this.keys.get(body.key);
+    if (!row) throw new CheapVibeCodeApiError(404, 'Not Found', null);
+    if ('delete' in body) this.keys.delete(body.key);
+    else row.active = body.active;
+  });
+
+  deleteKey = this.ops.deleteKey;
+
+  updateKey = this.ops.updateKey;
+
+  /** Test seam: whether a key still exists upstream, and whether it is frozen. */
+  __state = (apiKey: string) => {
+    const row = this.keys.get(apiKey);
+    return row ? (row.active ? 'active' : 'frozen') : 'deleted';
+  };
 
   /** Test seam: simulate upstream spend against a key. */
   __spend = (apiKey: string, tokens: number) => {

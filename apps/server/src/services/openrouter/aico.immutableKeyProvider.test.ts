@@ -57,10 +57,12 @@ class ImmutableProvider implements ManagedProviderClient {
   /** Secrets handed to `getKey`, to prove the ciphertext is actually decrypted. */
   seenApiKeys: (string | undefined)[] = [];
   readFails = false;
+  createFails = false;
 
   private seq = 0;
 
   createKey: ManagedProviderClient['createKey'] = async (params) => {
+    if (this.createFails) throw new Error('CheapVibeCode API 409: Conflict');
     const hash = `cvc_${++this.seq}`;
     this.keys.set(hash, { limitUsd: params.limitUsd, name: params.name, usedUsd: 0 });
     return {
@@ -105,6 +107,38 @@ class ImmutableProvider implements ManagedProviderClient {
     if (!row) throw new Error(`unknown key ${hash}`);
     row.usedUsd += amountUsd;
   }
+}
+
+/**
+ * CheapVibeCode since its 2026-09 reseller API: limits still fixed at mint, but
+ * a key can be frozen and deleted — addressed by its secret, never its id.
+ */
+class RevocableImmutableProvider extends ImmutableProvider {
+  override readonly capabilities = {
+    nativePeriodicLimits: false,
+    readKeyBySecret: true,
+    revoke: true,
+    updateLimit: false,
+  };
+
+  frozen = new Set<string>();
+
+  private hashOf = (apiKey: string | undefined) => {
+    const hash = apiKey?.replace('sk-cvc-fake-', '');
+    if (!hash || !this.keys.has(hash)) throw new Error('CheapVibeCode API 404: Not Found');
+    return hash;
+  };
+
+  deleteKey: NonNullable<ManagedProviderClient['deleteKey']> = async (credential) => {
+    this.keys.delete(this.hashOf(credential.apiKey));
+  };
+
+  updateKey: NonNullable<ManagedProviderClient['updateKey']> = async (params) => {
+    const hash = this.hashOf(params.apiKey);
+    if (params.disabled) this.frozen.add(hash);
+    else this.frozen.delete(hash);
+    return { ...(await this.getKey({ hash })), disabled: Boolean(params.disabled) };
+  };
 }
 
 let db: LobeChatDatabase;
@@ -288,6 +322,75 @@ describe('immutable-limit provider — retired keys', () => {
   });
 });
 
+describe('revocable fixed-limit provider (CVC reseller API)', () => {
+  it('a top-up deletes the retired key by its secret instead of abandoning it', async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    await creditUser(10);
+    const first = await keys.ensureUserKey(userId);
+    provider.spend(first.keyId!, 4);
+    await creditUser(10);
+
+    const second = await keys.ensureUserKey(userId);
+
+    expect(second.created).toBe(true);
+    // The account holds one key per wallet, so the key-count limit stops growing.
+    expect([...provider.keys.keys()]).toEqual([second.keyId]);
+    expect(await db.query.aicoKeyOutbox.findMany()).toHaveLength(0);
+    // Spend carried forward exactly as before; only the retirement changed.
+    const wallet = await readWallet();
+    expect(wallet?.openrouterKeyId).toBe(second.keyId);
+    expect(wallet?.rawUsageBeforeKeyMicroUsd).toBe(usd(4));
+  });
+
+  it('keeps the old key working when its replacement cannot be minted', async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    await creditUser(10);
+    const first = await keys.ensureUserKey(userId);
+    provider.spend(first.keyId!, 4);
+    await creditUser(10);
+    provider.createFails = true;
+
+    await expect(keys.ensureUserKey(userId)).rejects.toThrow(/409/);
+
+    // Deleting first would have left the wallet pointing at a dead key.
+    expect(provider.keys.has(first.keyId!)).toBe(true);
+    expect((await readWallet())?.openrouterKeyId).toBe(first.keyId);
+  });
+
+  it('unfreezes a funded wallet key frozen while it was disabled', async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    await creditUser(10);
+    const first = await keys.ensureUserKey(userId);
+
+    await keys.disableUserKey(userId);
+    expect(provider.frozen.has(first.keyId!)).toBe(true);
+
+    await keys.ensureUserKey(userId);
+    expect(provider.frozen.has(first.keyId!)).toBe(false);
+  });
+
+  it('ends an id-only revoke job as unsupported: CVC deletes by secret', async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    await db.insert(aicoKeyOutbox).values({
+      action: 'revoke_managed_key',
+      nextAttemptAt: new Date(Date.now() - 1000),
+      openrouterKeyId: 'cvc_legacy',
+      payload: { providerId: 'cheapvibecode', reason: 'PROVIDER_HAS_NO_REVOKE' },
+      status: 'pending',
+    });
+
+    const run = await processKeyOutbox(db, { keyService: keys });
+
+    expect(run).toMatchObject({ deferred: 0, failed: 0, succeeded: 0 });
+    const [after] = await db.select().from(aicoKeyOutbox);
+    expect(after.status).toBe('unsupported');
+  });
+});
+
 describe('immutable-limit provider — member budgets', () => {
   const setupMember = async () => {
     const orgModel = new OrganizationModel(db);
@@ -373,5 +476,41 @@ describe('immutable-limit provider — member budgets', () => {
     expect(Number(budget?.usageBaselineMicroUsd)).toBe(0);
     // The replacement covers only what the cycle has left: ($24 − $4.8) / 1.2.
     expect(Number(budget?.managedKeyLimitMicroUsd)).toBe(usd(16));
+  });
+
+  it('freezes a disabled member key by secret and unfreezes it once the budget is active', async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    const { member } = await setupMember();
+    const created = await keys.ensureMemberKey(member.id);
+
+    await keys.disableMemberKey(member.id);
+    expect(provider.frozen.has(created.keyId!)).toBe(true);
+
+    const again = await keys.ensureMemberKey(member.id);
+    expect(again.keyId).toBe(created.keyId);
+    expect(provider.frozen.has(created.keyId!)).toBe(false);
+  });
+
+  it('deletes the retired member key once its replacement is persisted', async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    const { member, org, orgModel } = await setupMember();
+    const first = await keys.ensureMemberKey(member.id);
+    provider.spend(first.keyId!, 4);
+    await orgModel.allocateMemberCredit({
+      createdByUserId: userId,
+      orgId: org.id,
+      orgMemberId: member.id,
+      period: 'daily',
+      periodAmountMicroUsd: usd(24),
+    });
+
+    const second = await keys.ensureMemberKey(member.id);
+
+    expect([...provider.keys.keys()]).toEqual([second.keyId]);
+    expect(Number((await orgModel.getMemberBudget(member.id))?.managedKeyLimitMicroUsd)).toBe(
+      usd(16),
+    );
   });
 });

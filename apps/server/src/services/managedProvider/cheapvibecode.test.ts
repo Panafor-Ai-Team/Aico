@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { CheapVibeCodeAmbiguousEditError, CheapVibeCodeApiError } from './cheapvibecode';
 import {
   cvcTokensToUsd,
   HttpCheapVibeCodeClient,
@@ -56,12 +57,122 @@ describe('HttpCheapVibeCodeClient', () => {
     expect(client().capabilities).toEqual({
       nativePeriodicLimits: false,
       readKeyBySecret: true,
-      revoke: false,
+      revoke: true,
       updateLimit: false,
     });
-    // Absent, not throwing: callers branch on capabilities rather than catching.
-    expect((client() as { deleteKey?: unknown }).deleteKey).toBeUndefined();
-    expect((client() as { updateKey?: unknown }).updateKey).toBeUndefined();
+  });
+
+  describe('key edit (POST /v1/keys/edit)', () => {
+    const editBody = () => JSON.parse(fetchMock.mock.calls[0][1].body as string);
+
+    it('freezes a key by its secret, authenticating as the primary', async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ meta: {} }));
+
+      await client().updateKey({ apiKey: 'sk-cvc-member', disabled: true, hash: 'k1' });
+
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://cheapvibecode.ru/v1/keys/edit');
+      expect(init.method).toBe('POST');
+      expect(init.headers.Authorization).toBe('Bearer sk-cvc-primary');
+      expect(editBody()).toEqual({ active: false, key: 'sk-cvc-member' });
+    });
+
+    it('unfreezes with active: true', async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ meta: {} }));
+      await client().updateKey({ apiKey: 'sk-cvc-member', disabled: false, hash: 'k1' });
+      expect(editBody()).toEqual({ active: true, key: 'sk-cvc-member' });
+    });
+
+    it('deletes with exactly { key, delete: true }', async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ status: 'deleted' }));
+      await client().deleteKey({ apiKey: 'sk-cvc-member', hash: 'k1' });
+      expect(editBody()).toEqual({ delete: true, key: 'sk-cvc-member' });
+    });
+
+    it('treats a delete of a key CVC no longer has as done', async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ error: { code: 'not_found' } }, 404));
+      await expect(client().deleteKey({ apiKey: 'sk-cvc-gone', hash: 'k1' })).resolves.toBe(
+        undefined,
+      );
+    });
+
+    it('never asks CVC to change a limit — additional_tokens is not idempotent', async () => {
+      await expect(
+        client().updateKey({ apiKey: 'sk-cvc-member', hash: 'k1', limitUsd: 5 }),
+      ).rejects.toThrow(/freeze\/unfreeze only/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('refuses to edit or delete without the key secret', async () => {
+      await expect(client().deleteKey({ hash: 'k1' })).rejects.toThrow(/apiKey is required/);
+      await expect(client().updateKey({ disabled: true, hash: 'k1' })).rejects.toThrow(
+        /apiKey is required/,
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('refuses to touch the primary key, which CVC would replace by promotion', async () => {
+      await expect(
+        client().updateKey({ apiKey: 'sk-cvc-primary', disabled: true, hash: 'p' }),
+      ).rejects.toThrow(/primary key/);
+      await expect(client().deleteKey({ apiKey: 'sk-cvc-primary', hash: 'p' })).rejects.toThrow(
+        /primary key/,
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('reports a 5xx edit as outcome-unknown and does not re-send it', async () => {
+      fetchMock.mockResolvedValue(new Response('bad gateway', { status: 502 }));
+
+      await expect(
+        client().updateKey({ apiKey: 'sk-cvc-member', disabled: true, hash: 'k1' }),
+      ).rejects.toBeInstanceOf(CheapVibeCodeAmbiguousEditError);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports a network failure mid-edit as outcome-unknown', async () => {
+      fetchMock.mockRejectedValue(new TypeError('fetch failed'));
+
+      await expect(
+        client().deleteKey({ apiKey: 'sk-cvc-member', hash: 'k1' }),
+      ).rejects.toBeInstanceOf(CheapVibeCodeAmbiguousEditError);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('still retries a 429, which CVC did not process', async () => {
+      vi.useFakeTimers();
+      try {
+        fetchMock
+          .mockResolvedValueOnce(new Response('', { status: 429 }))
+          .mockResolvedValueOnce(jsonResponse({ meta: {} }));
+
+        const pending = client().updateKey({
+          apiKey: 'sk-cvc-member',
+          disabled: false,
+          hash: 'k1',
+        });
+        await vi.runAllTimersAsync();
+        await pending;
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("carries CVC's error.code on a rejected edit, not the body", async () => {
+      fetchMock.mockResolvedValue(
+        jsonResponse({ error: { code: 'key_not_owned', message: 'secret detail' } }, 403),
+      );
+
+      const error = await client()
+        .updateKey({ apiKey: 'sk-cvc-member', disabled: true, hash: 'k1' })
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(CheapVibeCodeApiError);
+      expect((error as CheapVibeCodeApiError).code).toBe('key_not_owned');
+      expect((error as Error).message).not.toContain('secret detail');
+    });
   });
 
   it('mints a key with a token limit converted from USD', async () => {
@@ -250,10 +361,21 @@ describe('MockCheapVibeCodeClient', () => {
     expect(after.usage).toBeCloseTo(0.2, 12);
   });
 
-  it('offers no revoke or update, exactly like the real thing', () => {
+  it('freezes, unfreezes and deletes by secret, like the real thing', async () => {
     const mock = new MockCheapVibeCodeClient();
-    expect((mock as { deleteKey?: unknown }).deleteKey).toBeUndefined();
-    expect((mock as { updateKey?: unknown }).updateKey).toBeUndefined();
+    const created = await mock.createKey({ limitUsd: 1, name: 'm' });
+    const credential = { apiKey: created.key, hash: created.hash, limitUsd: 1 };
+
+    await mock.updateKey({ apiKey: created.key, disabled: true, hash: created.hash });
+    expect(mock.__state(created.key)).toBe('frozen');
+    // A frozen key cannot authenticate, so its balance cannot be read.
+    await expect(mock.getKey(credential)).rejects.toThrow(/401/);
+
+    await mock.updateKey({ apiKey: created.key, disabled: false, hash: created.hash });
+    await expect(mock.getKey(credential)).resolves.toMatchObject({ limitRemaining: 1 });
+
+    await mock.deleteKey(credential);
+    expect(mock.__state(created.key)).toBe('deleted');
   });
 });
 
@@ -266,5 +388,32 @@ describe('RemoteCheapVibeCodeClient', () => {
       .catch((e: unknown) => e);
 
     expect(isManagedKeyCapacityError(error)).toBe(true);
+  });
+
+  const remote = () => new RemoteCheapVibeCodeClient('http://control.test', 'token');
+
+  it('proxies a freeze to the control plane with the target secret', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+
+    await remote().updateKey({ apiKey: 'sk-cvc-member', disabled: true, hash: 'k1' });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://control.test/internal/cheapvibecode/v1/keys/edit');
+    expect(init.headers.Authorization).toBe('Bearer token');
+    expect(JSON.parse(init.body as string)).toEqual({ active: false, key: 'sk-cvc-member' });
+  });
+
+  it('treats a proxied 404 delete as done', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ error: 'not_found' }, 404));
+    await expect(remote().deleteKey({ apiKey: 'sk-cvc-gone', hash: 'k1' })).resolves.toBe(
+      undefined,
+    );
+  });
+
+  it('rebuilds the outcome-unknown error from the control plane', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ error: 'edit_outcome_unknown' }, 502));
+    await expect(
+      remote().deleteKey({ apiKey: 'sk-cvc-member', hash: 'k1' }),
+    ).rejects.toBeInstanceOf(CheapVibeCodeAmbiguousEditError);
   });
 });

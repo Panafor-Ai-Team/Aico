@@ -510,6 +510,16 @@ export const processKeyOutbox = async (
     try {
       const outcome = await runOutboxAction({ db, keyService, orgModel, row });
 
+      if (outcome === 'unsupported') {
+        // Terminal but not a failure: nothing can perform this job, so it must
+        // neither retry nor raise an exhaustion alert.
+        await db
+          .update(aicoKeyOutbox)
+          .set({ lastError: 'UNSUPPORTED_BY_PROVIDER', status: 'unsupported' })
+          .where(eq(aicoKeyOutbox.id, row.id));
+        continue;
+      }
+
       if (outcome === 'deferred') {
         // Hand the attempt back: the row is a standing record of work the
         // provider cannot do yet, not a failing job.
@@ -565,14 +575,14 @@ export const processKeyOutbox = async (
 
 /**
  * `'deferred'` means the action is still owed but the live managed provider has
- * no route for it — see `OUTBOX_DEFER_MS`.
+ * no route for it — see `OUTBOX_DEFER_MS`. `'unsupported'` means it never can be.
  */
 const runOutboxAction = async (params: {
   db: LobeChatDatabase;
   keyService: AicoOpenRouterKeyService;
   orgModel: OrganizationModel;
   row: typeof aicoKeyOutbox.$inferSelect;
-}): Promise<'done' | 'deferred'> => {
+}): Promise<'done' | 'deferred' | 'unsupported'> => {
   const { db, keyService, orgModel, row } = params;
 
   switch (row.action) {
@@ -584,14 +594,13 @@ const runOutboxAction = async (params: {
 
     /**
      * A key we stopped using but could not revoke, recorded by
-     * `retireManagedKey`. CheapVibeCode exposes no delete route, so these rows
-     * sit deferred — a standing inventory of spendable credentials that only our
-     * own gate keeps unused — and drain by themselves if a revoke ever ships.
+     * `retireManagedKey`. CheapVibeCode deletes a key only by its secret, which
+     * this row does not hold, so its rows end `unsupported`: an inventory of
+     * live-but-unused keys for the provider's support to remove.
      */
     case 'revoke_managed_key': {
       if (!row.openrouterKeyId) throw new Error('MANAGED_KEY_ID_REQUIRED');
-      const revoked = await keyService.revokeManagedKeyById(row.openrouterKeyId);
-      return revoked ? 'done' : 'deferred';
+      return keyService.revokeManagedKeyById(row.openrouterKeyId);
     }
 
     // OR-001: soft-delete enqueues disable_user_key; must actually disable the personal OR key.
