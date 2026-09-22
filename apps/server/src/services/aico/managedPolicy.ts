@@ -16,6 +16,7 @@ import {
   microUsdToDecimalString,
 } from '@/database/utils/aicoMoney';
 import { aicoEnv } from '@/envs/aico';
+import { isManagedKeyCapacityError } from '@/server/services/managedProvider/cheapvibecode';
 
 import { type AicoBillingContext, parseAicoBillingContext } from './billingContext';
 import type { LedgerGate } from './ledger/gate';
@@ -42,6 +43,19 @@ export class AicoManagedPolicyError extends Error {
     this.errorType = errorType;
   }
 }
+
+/**
+ * The key a subject needs is missing and could not be minted. When the upstream
+ * account is out of key slots that is a platform outage, not the user's key, so
+ * it shows as "temporarily unavailable" and logs `:key_limit`.
+ */
+const keyUnavailableError = (repairError: unknown) =>
+  isManagedKeyCapacityError(repairError)
+    ? new AicoManagedPolicyError(
+        'PLATFORM_CAPACITY_EXHAUSTED:key_limit',
+        ChatErrorType.InvalidUserKey,
+      )
+    : new AicoManagedPolicyError('MANAGED_KEY_UNAVAILABLE', ChatErrorType.InvalidUserKey);
 
 export interface ManagedExecutionContext {
   /** Decrypted OpenRouter key — never log. */
@@ -180,17 +194,19 @@ export class AicoManagedPolicy {
       // makes a cutover invisible to a funded user: the first request mints a
       // replacement on the active gateway. An unfunded wallet mints nothing and
       // falls through to the checks below.
+      let repairError: unknown;
       if (!sharedKey && !walletKeyUsable(wallet) && this.keyRepair?.ensureUserKey) {
         try {
           await this.keyRepair.ensureUserKey(params.userId);
           wallet = (await this.billingModel.getUserWallet(params.userId)) ?? wallet;
         } catch (error) {
+          repairError = error;
           console.warn('[aico] managed policy failed to repair personal managed key', error);
         }
       }
 
       if (!sharedKey && !walletKeyUsable(wallet)) {
-        throw new AicoManagedPolicyError('MANAGED_KEY_UNAVAILABLE', ChatErrorType.InvalidUserKey);
+        throw keyUnavailableError(repairError);
       }
       // `balance_micro_usd` counts deposits only; under the ledger the spendable
       // amount is raw capacity minus settled usage and open holds.
@@ -262,17 +278,19 @@ export class AicoManagedPolicy {
         AicoManagedPolicy.isCurrentProviderKey(row.managedKeyProviderId),
       );
 
+    let repairError: unknown;
     if (!sharedKey && !budgetKeyUsable(budget) && this.keyRepair) {
       try {
         await this.keyRepair.ensureMemberKey(me.id);
         budget = (await this.orgModel.getMemberBudget(me.id)) ?? budget;
       } catch (error) {
+        repairError = error;
         console.warn('[aico] managed policy failed to repair member OpenRouter key', error);
       }
     }
 
     if (!sharedKey && !budgetKeyUsable(budget)) {
-      throw new AicoManagedPolicyError('MANAGED_KEY_UNAVAILABLE', ChatErrorType.InvalidUserKey);
+      throw keyUnavailableError(repairError);
     }
 
     // Narrowing only; `budgetKeyUsable` above already proved it is present.

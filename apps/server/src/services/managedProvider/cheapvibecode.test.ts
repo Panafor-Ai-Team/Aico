@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cvcTokensToUsd,
   HttpCheapVibeCodeClient,
+  isManagedKeyCapacityError,
   MockCheapVibeCodeClient,
+  RemoteCheapVibeCodeClient,
   usdToCvcTokens,
 } from './index';
 
@@ -80,6 +82,35 @@ describe('HttpCheapVibeCodeClient', () => {
     expect(created.usageDaily).toBeNull();
     expect(created.usageWeekly).toBeNull();
     expect(created.usageMonthly).toBeNull();
+  });
+
+  it('types a full key inventory so callers can tell it from a transient fault', async () => {
+    // Measured on prod 2026-09-22: every mint failed with this once the account was full.
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        { error: { code: 'api_key_count_limit_exceeded', message: 'Too many API keys' } },
+        409,
+      ),
+    );
+
+    const error = await client()
+      .createKey({ limitUsd: 1, name: 'aico' })
+      .catch((e: unknown) => e);
+
+    expect(isManagedKeyCapacityError(error)).toBe(true);
+    // A 4xx is not retried on the fallback domain.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps any other 409 generic', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ error: { code: 'conflict' } }, 409));
+
+    const error = await client()
+      .createKey({ limitUsd: 1, name: 'aico' })
+      .catch((e: unknown) => e);
+
+    expect(isManagedKeyCapacityError(error)).toBe(false);
+    expect((error as Error).message).toBe('CheapVibeCode API 409: ');
   });
 
   it('refuses a create response with no key rather than persisting a dangling row', async () => {
@@ -223,5 +254,17 @@ describe('MockCheapVibeCodeClient', () => {
     const mock = new MockCheapVibeCodeClient();
     expect((mock as { deleteKey?: unknown }).deleteKey).toBeUndefined();
     expect((mock as { updateKey?: unknown }).updateKey).toBeUndefined();
+  });
+});
+
+describe('RemoteCheapVibeCodeClient', () => {
+  it('rebuilds the typed capacity error from the control-plane 409', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ error: 'managed_key_capacity' }, 409));
+
+    const error = await new RemoteCheapVibeCodeClient('http://control.test', 'token')
+      .createKey({ limitUsd: 1, name: 'aico' })
+      .catch((e: unknown) => e);
+
+    expect(isManagedKeyCapacityError(error)).toBe(true);
   });
 });

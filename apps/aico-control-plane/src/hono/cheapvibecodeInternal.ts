@@ -2,7 +2,11 @@ import { Hono } from 'hono';
 
 // The concrete module, not the barrel: the control plane has no business
 // importing the OpenRouter factory the barrel pulls in.
-import { HttpCheapVibeCodeClient } from '@/server/services/managedProvider/cheapvibecode';
+import {
+  HttpCheapVibeCodeClient,
+  isManagedKeyCapacityError,
+  MANAGED_KEY_CAPACITY,
+} from '@/server/services/managedProvider/cheapvibecode';
 
 import { assertBearerServiceToken } from './serviceToken';
 
@@ -59,11 +63,18 @@ export const createCheapVibeCodeInternalApp = () => {
       return c.json({ error: 'token_limit must be a positive number' }, 400);
     }
 
-    const created = await cvc.createKeyWithTokenLimit({
-      allowedModels: body.allowed_models,
-      name: String(body.name ?? 'aico'),
-      tokenLimit,
-    });
+    let created: Awaited<ReturnType<HttpCheapVibeCodeClient['createKeyWithTokenLimit']>>;
+    try {
+      created = await cvc.createKeyWithTokenLimit({
+        allowedModels: body.allowed_models,
+        name: String(body.name ?? 'aico'),
+        tokenLimit,
+      });
+    } catch (error) {
+      // Typed so the product server can tell "account full" from a transient fault.
+      if (isManagedKeyCapacityError(error)) return c.json({ error: MANAGED_KEY_CAPACITY }, 409);
+      throw error;
+    }
 
     // Mirror CVC's own create shape so both clients share one parser.
     return c.json({

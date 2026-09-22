@@ -10,8 +10,9 @@ cent in our own database with a hold-and-settle ledger.
 - **After each call:** the hold settles to the cost recomputed from token counts.
   Unmeasured calls are charged the full hold, never zero.
 - **Overspend is bounded:** `max overspend per subject ≤ MAX_OPEN_HOLDS × max(actual − hold)`.
-  Output is capped by the injected `max_tokens` and input is over-estimated, so
-  `actual ≤ hold` for normal traffic. Phase A measures that before anything is
+  Output is bounded by the injected `max_tokens` for models measured to honour
+  it, and by the model's own output ceiling for all others. Input is
+  over-estimated, so `actual ≤ hold` for normal traffic. Phase A measures that before anything is
   enforced.
 
 Schema: migration `0156_aico_usage_ledger.sql`, which is additive only. It adds
@@ -30,6 +31,7 @@ key or `CRON_SECRET`. Read `CRON_SECRET` from the env file into a shell variable
 | `AICO_SHARED_INFERENCE_API_KEY`          | —             | CVC primary key, used only when `shared`. Never log. Accepted risk (2026-09-16).                          |
 | `AICO_LEDGER_HOLD_TTL_SECONDS`           | `900`         | Open holds past this are charged in full by maintenance (360–3600).                                       |
 | `AICO_LEDGER_MAX_OPEN_HOLDS`             | `6`           | Concurrent in-flight calls per wallet or budget (1–64).                                                   |
+| `AICO_LEDGER_CAPPED_OUTPUT_MODELS`       | probe result  | Models measured to honour `max_tokens`. Any other model is held at its own output ceiling.                |
 | `AICO_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS` | `32000`       | `max_tokens` injected when the client sends none.                                                         |
 | `AICO_LEDGER_FLOAT_FLOOR_MICRO_USD`      | `1000000`     | Shared mode refuses holds that would take the CVC account below this.                                     |
 | `AICO_LEDGER_FLOAT_MAX_AGE_SECONDS`      | `600`         | A float reading older than this alerts, and requests are allowed.                                         |
@@ -76,20 +78,43 @@ Both require `Authorization: Bearer $CRON_SECRET`.
    inside the product and control-plane containers. Example:
    `awk -F= '$2 ~ /^sk-cvc-4b3e/ {print $1}' <file>`. Do not print values.
    Wrap every `docker exec` in `timeout`, and never restart dockerd or containerd.
-2. **CVC honours `max_tokens`.** From a trusted shell, send one request with
-   `max_tokens: 64` to `glm-5.3-flash`, `deepseek-v4.1-flash` and `grok-4.6`.
-   `usage.completion_tokens` must be ≤ 64, reasoning included. If CVC ignores
-   it, **stop**: the output bound rests on it.
+
+2. **Which models honour `max_tokens`.** Only models in
+   `AICO_LEDGER_CAPPED_OUTPUT_MODELS` are held at `max_tokens`. Every other
+   model is held at its own output ceiling (catalog max output, else context
+   window), so the hold stays a true bound. Measure the list on the prod host;
+   it reads the key itself and never prints it:
+
+   ```bash
+   python3 - --env-file /home/panachat/panachat/.env < scripts/aico/probe_max_tokens.py
+   ```
+
+   Set the printed `AICO_LEDGER_CAPPED_OUTPUT_MODELS=` line only if it
+   differs from the default. List only models whose `completion_tokens` was
+   ≤ 64. A model that errored stays off the list, and a model on the list must
+   never exceed the cap. Rerun after CVC adds models.
+
+   Result on 2026-09-22, 33 of 37 models measured:
+
+   - Honour the cap: all `claude-*`, `glm-5.3`, `glm-5.3-flash`, `hy4-preview`, `kimi-k3`, `mimo-v2.5`.
+   - Ignore it (up to 1,899 tokens for a 64 cap): all `gpt-*`, `gemini-*`, `deepseek-*` and `grok-*`, plus `glm-5.2`, `kimi-k2.7-code`, `minimax-m3`, `mimo-v2.5-pro`, `composer-2.5-fast`.
+   - Not measured (503 or timeout): `glm-5-turbo`, `qwen3.8-flash`, `qwen3.8-max`, `gemini-3.6-flash`.
+
 3. **Migration on a copy.** Apply 0156 to a copy of the database. Confirm
    `\d user_wallets` and `\d member_budgets` gained columns and row counts are
    unchanged.
+
 4. **Catalog coverage.** Every enabled model must have a fixed text input price:
+
    ```sql
    SELECT id FROM openrouter_model_catalog WHERE enabled AND NOT (pricing::text LIKE '%textInput%');
    ```
+
    This must return no rows.
+
 5. **Model picker.** With `CHEAPVIBECODE_API_KEY=` blank, confirm on staging that
    the managed model picker still lists models.
+
 6. **Overdue renewals.** Resolve any overdue member renewals first: the Phase B
    pause blocks renewals.
 

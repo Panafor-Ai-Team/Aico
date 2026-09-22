@@ -7,6 +7,7 @@ import { cleanupAicoTables, seedUsers } from '@/database/models/__tests__/aico.p
 import { OrganizationModel } from '@/database/models/organization';
 import { memberBudgets, userWallets } from '@/database/schemas/aicoOrganization';
 
+import { ManagedKeyCapacityError } from '../managedProvider/cheapvibecode';
 import type { LedgerGate } from './ledger/gate';
 import { AicoManagedPolicy } from './managedPolicy';
 
@@ -108,6 +109,28 @@ describe('AicoManagedPolicy under the usage ledger', () => {
     await expect(policy.authorize(personal)).rejects.toMatchObject({
       code: 'MANAGED_KEY_UNAVAILABLE',
     });
+  });
+
+  it('reports a full upstream key inventory as a platform outage, not a user key fault', async () => {
+    await db.insert(userWallets).values({
+      balanceMicroUsd: 1_000_000,
+      rawCapacityMicroUsd: 1_000_000,
+      userId,
+    });
+    const ensureUserKey = vi.fn(async () => {
+      throw new ManagedKeyCapacityError();
+    });
+    const policy = new AicoManagedPolicy(
+      db,
+      async () => 'decrypted',
+      { ensureMemberKey: vi.fn(), ensureUserKey },
+      legacyGate,
+    );
+
+    await expect(policy.authorize(personal)).rejects.toMatchObject({
+      code: 'PLATFORM_CAPACITY_EXHAUSTED:key_limit',
+    });
+    expect(ensureUserKey).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the deposit-based check without a gate', async () => {

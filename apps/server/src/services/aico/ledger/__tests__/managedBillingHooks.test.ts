@@ -25,6 +25,7 @@ vi.mock('../config', () => ({
 vi.mock('../floatGuard', () => ({ assertPlatformCapacity: vi.fn() }));
 
 const baseConfig = (): LedgerConfig => ({
+  cappedOutputModels: new Set(['glm-5.3-flash']),
   defaultMaxOutputTokens: 32_000,
   floatFloorRawMicroUsd: 1_000_000,
   floatMaxAgeMs: 600_000,
@@ -199,6 +200,41 @@ describe('createManagedBillingHooks', () => {
       expect(await codeOf(build(enforceGate, org).beforeChat!(chatPayload()))).toBe(
         'MEMBER_BUDGET_UNFUNDED',
       );
+    });
+
+    describe('a model that ignores max_tokens', () => {
+      beforeEach(() => {
+        deps.rates.chat.mockResolvedValue({
+          modelId: 'deepseek-v4.1-flash',
+          rates: rates({
+            contextWindowTokens: 1_048_576,
+            maxOutputTokens: 393_216,
+            pricedModelId: 'deepseek-v4.1-flash',
+          }),
+        });
+      });
+
+      it('holds its own output ceiling but still sends the requested cap', async () => {
+        const payload = chatPayload({ max_tokens: 64, model: 'deepseek-v4.1-flash' });
+        await build().beforeChat!(payload);
+
+        expect(payload.max_tokens).toBe(64);
+        expect(deps.ledger.placeHold.mock.calls[0][0]).toMatchObject({
+          maxOutputTokens: 393_216,
+        });
+      });
+
+      it('is refused rather than shrunk when funds are short', async () => {
+        deps.ledger.placeHold.mockResolvedValue({
+          ok: false,
+          refusal: { available: 100, reason: 'funds' },
+        } as never);
+        const payload = chatPayload({ model: 'deepseek-v4.1-flash' });
+
+        expect(await codeOf(build().beforeChat!(payload))).toBe('PERSONAL_FUNDS_UNAVAILABLE');
+        expect(deps.ledger.placeHold).toHaveBeenCalledTimes(1);
+        expect(payload.max_tokens).toBe(32_000);
+      });
     });
 
     it('maps concurrency and renewal refusals', async () => {

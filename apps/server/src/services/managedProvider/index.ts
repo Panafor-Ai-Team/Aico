@@ -14,6 +14,9 @@ import type { ManagedProviderClient } from './types';
 export {
   cvcTokensToUsd,
   HttpCheapVibeCodeClient,
+  isManagedKeyCapacityError,
+  MANAGED_KEY_CAPACITY,
+  ManagedKeyCapacityError,
   MockCheapVibeCodeClient,
   RemoteCheapVibeCodeClient,
   usdToCvcTokens,

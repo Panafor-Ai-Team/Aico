@@ -10,6 +10,11 @@ export type InferenceKeyMode = 'per_subject' | 'shared';
  * primary key.
  */
 export interface LedgerConfig {
+  /**
+   * CVC models measured to honour `max_tokens`. Any other model's hold assumes
+   * its own output ceiling.
+   */
+  cappedOutputModels: ReadonlySet<string>;
   defaultMaxOutputTokens: number;
   floatFloorRawMicroUsd: number;
   floatMaxAgeMs: number;
@@ -27,10 +32,19 @@ export interface LedgerConfig {
   sharedApiKey: string | null;
 }
 
+const parseModelList = (value: string | undefined): ReadonlySet<string> =>
+  new Set(
+    (value ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean),
+  );
+
 export const getLedgerConfig = (): LedgerConfig => {
   const configured = aicoEnv.AICO_BILLING_LEDGER_MODE;
 
   return {
+    cappedOutputModels: parseModelList(aicoEnv.AICO_LEDGER_CAPPED_OUTPUT_MODELS),
     defaultMaxOutputTokens: aicoEnv.AICO_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS,
     floatFloorRawMicroUsd: aicoEnv.AICO_LEDGER_FLOAT_FLOOR_MICRO_USD,
     floatMaxAgeMs: aicoEnv.AICO_LEDGER_FLOAT_MAX_AGE_SECONDS * 1000,

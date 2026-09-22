@@ -79,6 +79,23 @@ export const resolveMaxOutputTokens = (params: {
   return Math.trunc(Math.min(defaultMax, modelMax ?? defaultMax));
 };
 
+/**
+ * Output tokens a hold must cover. For a model measured to honour it, the
+ * `max_tokens` sent upstream. Most CVC models ignore it (reasoning is not
+ * capped; 19 of 33 on 2026-09-22), so otherwise only the model's own ceiling
+ * is a real bound: its max output, else its context window.
+ */
+export const resolveHoldOutputTokens = (params: {
+  contextWindow: number | null;
+  modelMax: number | null;
+  sentMax: number;
+  uncapped: boolean;
+}): number => {
+  const { contextWindow, modelMax, sentMax, uncapped } = params;
+  if (!uncapped) return sentMax;
+  return Math.trunc(Math.max(sentMax, modelMax ?? contextWindow ?? sentMax));
+};
+
 /** Worst-case raw cost of a chat call: every output token spent, reasoning included. */
 export const holdRawForChat = (
   rates: ManagedModelRates,

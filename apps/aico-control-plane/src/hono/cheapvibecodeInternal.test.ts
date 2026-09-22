@@ -109,6 +109,20 @@ describe('/internal/cheapvibecode', () => {
     });
   });
 
+  it('answers a full CVC key inventory with a typed 409', async () => {
+    fetchMock.mockImplementation(async () =>
+      jsonResponse({ error: { code: 'api_key_count_limit_exceeded' } }, 409),
+    );
+
+    const res = await call('/v1/keys', {
+      body: JSON.stringify({ name: 'aico-member', token_limit: 1000 }),
+      method: 'POST',
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'managed_key_capacity' });
+  });
+
   it('forwards allowed_models so the upstream scope is applied at mint time', async () => {
     fetchMock.mockImplementation(async () =>
       jsonResponse({ key: 'sk-cvc-x', meta: { id: 'i', token_limit: 10 } }),

@@ -19,6 +19,7 @@ import {
   estimateChatInputTokens,
   estimateEmbeddingInputTokens,
   holdRawForChat,
+  resolveHoldOutputTokens,
   resolveMaxOutputTokens,
   shrinkMaxOutputToFit,
 } from './estimate';
@@ -128,6 +129,16 @@ export const createManagedBillingHooks = (params: {
   const isOrg = authorized.billing.source === 'organization';
   const billingSource = isOrg ? 'organization' : 'personal';
   const handles = new WeakMap<object, Handle>();
+
+  const isUncapped = (rates: ManagedModelRates | null) =>
+    Boolean(rates && !cfg.cappedOutputModels.has(rates.pricedModelId));
+  const holdOutputFor = (rates: ManagedModelRates, sentMax: number) =>
+    resolveHoldOutputTokens({
+      contextWindow: rates.contextWindowTokens,
+      modelMax: rates.maxOutputTokens,
+      sentMax,
+      uncapped: isUncapped(rates),
+    });
 
   const subject = (): HoldSubject => {
     if (!isOrg) return { type: 'wallet', userId: authorized.userId };
@@ -427,13 +438,15 @@ export const createManagedBillingHooks = (params: {
       const rates = priced?.rates ?? null;
 
       let maxOutput = 0;
+      const uncapped = isUncapped(rates);
       if (rates) {
-        maxOutput = resolveMaxOutputTokens({
+        const sentMax = resolveMaxOutputTokens({
           defaultMax: cfg.defaultMaxOutputTokens,
           modelMax: rates.maxOutputTokens,
           requested: payload.max_tokens,
         });
-        payload.max_tokens = maxOutput;
+        payload.max_tokens = sentMax;
+        maxOutput = holdOutputFor(rates, sentMax);
       }
 
       const handle = await begin({
@@ -443,7 +456,8 @@ export const createManagedBillingHooks = (params: {
         operation: 'chat',
         payload,
         rates,
-        shrinkable: payload,
+        // Shrinking a cap the model ignores would make the hold a false bound.
+        shrinkable: uncapped ? undefined : payload,
       });
       if (handle) registerAbort(handle, options?.signal);
     },
@@ -484,11 +498,14 @@ export const createManagedBillingHooks = (params: {
         estInput: estimateChatInputTokens(payload, rates?.contextWindowTokens ?? null),
         // Output cannot be capped upstream here, so assume the full default cap.
         maxOutput: rates
-          ? resolveMaxOutputTokens({
-              defaultMax: cfg.defaultMaxOutputTokens,
-              modelMax: rates.maxOutputTokens,
-              requested: null,
-            })
+          ? holdOutputFor(
+              rates,
+              resolveMaxOutputTokens({
+                defaultMax: cfg.defaultMaxOutputTokens,
+                modelMax: rates.maxOutputTokens,
+                requested: null,
+              }),
+            )
           : 0,
         modelId: payload.model,
         operation: 'object',
