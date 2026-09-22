@@ -13,10 +13,8 @@ import { PlatformAdminUserModel } from '@/database/models/platformAdminUser';
 import { aicoKeyOutbox, session, users, userWallets } from '@/database/schemas';
 import {
   DEFAULT_USAGE_MULTIPLIER_BP,
-  MAX_MODEL_MULTIPLIER_BP,
   MAX_USAGE_MULTIPLIER_BP,
   microUsdToDecimalString,
-  MIN_MODEL_MULTIPLIER_BP,
   MIN_USAGE_MULTIPLIER_BP,
   tomanString,
   usdDecimalStringToMicro,
@@ -183,94 +181,24 @@ export const platformAdminRouter = router({
     }),
 
   /**
-   * Per-model coefficient overrides (AICO-187).
-   *
-   * Upstream-published coefficients are not always what upstream charges, and
-   * nothing in the models endpoint says which ones differ. An override corrects
-   * the price shown in the picker and the per-message cost estimate; the wallet
-   * debit stays balance-delta derived and is unaffected.
+   * Catalog models with the coefficient upstream publishes for each. Read-only:
+   * coefficients come from the catalog sync (every 6h), not from admin edits.
    */
   listModelMultipliers: platformProcedure
     .input(z.object({ providerId: managedProviderSchema.optional() }).optional())
     .query(async ({ ctx, input }) => {
       const providerId = input?.providerId ?? MANAGED_PROVIDER_ID;
-      const [catalog, overrides] = await Promise.all([
-        ctx.modelCatalogSync.listCatalogCoefficients(),
-        ctx.billingModel.listModelMultiplierOverrides(providerId),
-      ]);
-      const overrideByModel = new Map(overrides.map((row) => [row.modelId, row]));
+      const catalog = await ctx.modelCatalogSync.listCatalogCoefficients();
 
       return {
-        models: catalog.map((model) => {
-          const override = overrideByModel.get(model.id);
-          const overrideBp = override ? Number(override.multiplierBp) : null;
-          return {
-            displayName: model.displayName,
-            enabled: model.enabled,
-            modelId: model.id,
-            note: override?.note ?? null,
-            overrideBp,
-            publishedBp: model.publishedBp,
-            updatedAt: override?.updatedAt ?? null,
-          };
-        }),
+        models: catalog.map((model) => ({
+          displayName: model.displayName,
+          enabled: model.enabled,
+          modelId: model.id,
+          publishedBp: model.publishedBp,
+        })),
         providerId,
       };
-    }),
-
-  setModelMultiplier: platformProcedure
-    .input(
-      z.object({
-        modelId: z.string().min(1).max(256),
-        multiplierBp: z.number().int().min(MIN_MODEL_MULTIPLIER_BP).max(MAX_MODEL_MULTIPLIER_BP),
-        note: z.string().max(500).optional(),
-        providerId: managedProviderSchema.optional(),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      const providerId = input.providerId ?? MANAGED_PROVIDER_ID;
-      const row = await ctx.billingModel.setModelMultiplierOverride({
-        modelId: input.modelId,
-        multiplierBp: input.multiplierBp,
-        note: input.note ?? null,
-        providerId,
-      });
-      await recordAicoSecurityEvent(ctx.serverDB, {
-        action: 'platform.modelMultiplier.update',
-        actorAdminId: ctx.adminId,
-        ipAddress: ctx.clientIp,
-        metadata: {
-          modelId: input.modelId,
-          multiplierBp: Number(row.multiplierBp),
-          providerId,
-        },
-        targetId: `${providerId}:${input.modelId}`,
-        targetType: 'platform_model_multiplier_overrides',
-        userAgent: ctx.userAgent,
-      });
-      return { modelId: row.modelId, multiplierBp: Number(row.multiplierBp), providerId };
-    }),
-
-  clearModelMultiplier: platformProcedure
-    .input(
-      z.object({
-        modelId: z.string().min(1).max(256),
-        providerId: managedProviderSchema.optional(),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      const providerId = input.providerId ?? MANAGED_PROVIDER_ID;
-      await ctx.billingModel.clearModelMultiplierOverride({ modelId: input.modelId, providerId });
-      await recordAicoSecurityEvent(ctx.serverDB, {
-        action: 'platform.modelMultiplier.clear',
-        actorAdminId: ctx.adminId,
-        ipAddress: ctx.clientIp,
-        metadata: { modelId: input.modelId, providerId },
-        targetId: `${providerId}:${input.modelId}`,
-        targetType: 'platform_model_multiplier_overrides',
-        userAgent: ctx.userAgent,
-      });
-      return { modelId: input.modelId, providerId };
     }),
 
   /**
