@@ -23,7 +23,11 @@
 #   PANACHAT_PUBLIC_URL           for post-flip verify
 #   PANACHAT_HEALTH_TIMEOUT_SEC   default 180
 #   PANACHAT_IMAGE_KEEP           keep last N SHA images (default 5)
-#   PANACHAT_CONTROL_PLANE_IMAGE  ghcr.io/<owner>/panachat-control-plane:<sha>
+#   PANACHAT_CONTROL_PLANE_IMAGE  ghcr.io/<owner>/panachat-control-plane:<sha> (wins over the infra .env)
+#   PANACHAT_CONTROL_PLANE_IMAGE_KEEP  keep last N control-plane images (default 2)
+#   PANACHAT_PULL_TIMEOUT_SEC     per-attempt `docker pull` limit (default 600)
+#   PANACHAT_PULL_ATTEMPTS        pull attempts before the deploy fails (default 3)
+#   PANACHAT_PULL_BACKOFF_SEC     wait before retry n is n × this (default 15)
 #   PANACHAT_SKIP_BACKUP=1
 #   PANACHAT_SKIP_NGINX=1
 #   PANACHAT_ALLOW_DB_DRIFT=1     allow deploy when live user count dropped vs fingerprint
@@ -39,6 +43,10 @@ DEPLOY_DIR="$ROOT/docker-compose/deploy"
 COMPOSE_FILE="$DEPLOY_DIR/docker-compose.panachat.yml"
 HEALTH_TIMEOUT="${PANACHAT_HEALTH_TIMEOUT_SEC:-180}"
 IMAGE_KEEP="${PANACHAT_IMAGE_KEEP:-5}"
+CONTROL_PLANE_IMAGE_KEEP="${PANACHAT_CONTROL_PLANE_IMAGE_KEEP:-2}"
+PULL_TIMEOUT="${PANACHAT_PULL_TIMEOUT_SEC:-600}"
+PULL_ATTEMPTS="${PANACHAT_PULL_ATTEMPTS:-3}"
+PULL_BACKOFF="${PANACHAT_PULL_BACKOFF_SEC:-15}"
 APP_ALIAS="panachat-app"
 
 # --- Environment mode (canary vs preview) ---------------------------------
@@ -84,7 +92,7 @@ STATE_FILE="$STATE_DIR/deploy.env"
 NETWORK_NAME="${PANACHAT_STACK}-network"
 
 usage() {
-  sed -n '2,28p' "$0" | sed 's/^# \?//'
+  sed -n '2,34p' "$0" | sed 's/^# \?//'
   exit "${1:-0}"
 }
 
@@ -96,12 +104,19 @@ ensure_state_dir() {
 }
 
 load_infra_defaults() {
+  # The workflow exports the control-plane image built from this commit; the
+  # infra .env holds the one the last deploy persisted (on older hosts, the
+  # moving :canary tag). Sourcing the file must not override the export.
+  local cp_image="${PANACHAT_CONTROL_PLANE_IMAGE:-}"
   if [[ -f "$INFRA_ENV_FILE" ]]; then
     # shellcheck disable=SC1090
     set -a
     # shellcheck disable=SC1090
     source "$INFRA_ENV_FILE"
     set +a
+  fi
+  if [[ -n "$cp_image" ]]; then
+    export PANACHAT_CONTROL_PLANE_IMAGE="$cp_image"
   fi
   PORT_BLUE="${PANACHAT_PORT_BLUE:-$PORT_BLUE}"
   PORT_GREEN="${PANACHAT_PORT_GREEN:-$PORT_GREEN}"
@@ -300,6 +315,24 @@ wait_control_plane() {
   return 1
 }
 
+# A stalled registry transfer must fail the deploy cleanly, not hang it until the
+# SSH step's timeout cuts the script off. Only the client is killed; the daemon
+# is never restarted.
+pull_with_retry() {
+  local ref="$1" attempt
+  for ((attempt = 1; attempt <= PULL_ATTEMPTS; attempt++)); do
+    log "Pulling $ref (attempt $attempt/$PULL_ATTEMPTS, limit ${PULL_TIMEOUT}s)"
+    if timeout -k 30 "$PULL_TIMEOUT" docker pull "$ref"; then
+      return 0
+    fi
+    if ((attempt < PULL_ATTEMPTS)); then
+      sleep $((attempt * PULL_BACKOFF))
+    fi
+  done
+  err "docker pull $ref failed after $PULL_ATTEMPTS attempts"
+  return 1
+}
+
 deploy_control_plane() {
   if [[ -z "${PANACHAT_CONTROL_PLANE_IMAGE:-}" ]]; then
     log "Skipping control-plane (PANACHAT_CONTROL_PLANE_IMAGE unset)"
@@ -307,11 +340,13 @@ deploy_control_plane() {
   fi
   persist_infra_kv "PANACHAT_CONTROL_PLANE_IMAGE" "$PANACHAT_CONTROL_PLANE_IMAGE"
   persist_infra_kv "PANACHAT_CONTROL_PLANE_PORT" "$CONTROL_PLANE_PORT"
-  log "Pulling control-plane ${PANACHAT_CONTROL_PLANE_IMAGE}"
-  docker pull "$PANACHAT_CONTROL_PLANE_IMAGE"
+  pull_with_retry "$PANACHAT_CONTROL_PLANE_IMAGE"
   log "Starting ${PANACHAT_STACK}-control-plane"
-  compose_with_profile control-plane up -d --no-deps --force-recreate panachat-control-plane
+  # Just pulled: --pull never skips the service's pull_policy: always, which
+  # would make a second, unbounded registry round trip.
+  compose_with_profile control-plane up -d --no-deps --force-recreate --pull never panachat-control-plane
   wait_control_plane
+  prune_repo_images "$PANACHAT_CONTROL_PLANE_IMAGE" "$CONTROL_PLANE_IMAGE_KEEP"
 }
 
 # Until DNS, APP_URL may be http://IP:3210 or :3211. Rewrite to the slot we are starting
@@ -480,19 +515,28 @@ flip_nginx() {
   fi
 }
 
-prune_old_images() {
-  local keep="$IMAGE_KEEP"
-  local repo
-  repo="$(echo "${PANACHAT_IMAGE:-}" | sed 's/:.*//')"
+# Keep the newest <keep> images of <image-ref>'s repository (docker images lists
+# newest first). Rows are one per tag, so count distinct IDs: an image tagged
+# both :canary and :<sha> is one image. `docker rmi` refuses an image that a
+# container (running or stopped slot) still uses, so those survive.
+prune_repo_images() {
+  local repo="${1%:*}" keep="$2" id ref
   [[ -n "$repo" ]] || return 0
-  mapfile -t ids < <(docker images "$repo" --format '{{.ID}}' 2>/dev/null | awk -v k="$keep" 'NR>k')
-  if ((${#ids[@]} == 0)); then
-    return 0
-  fi
-  log "Pruning old $repo images (keep $keep)"
-  for id in "${ids[@]}"; do
+  local -A rank=()
+  local -a stale=()
+  while read -r id ref; do
     [[ -n "$id" ]] || continue
-    docker rmi "$id" 2>/dev/null || true
+    [[ -v "rank[$id]" ]] || rank[$id]=${#rank[@]}
+    if ((rank[$id] >= keep)); then
+      # An untagged row can only be removed by ID.
+      [[ "$ref" == *:"<none>" ]] && ref="$id"
+      stale+=("$ref")
+    fi
+  done < <(docker images "$repo" --format '{{.ID}} {{.Repository}}:{{.Tag}}' 2>/dev/null)
+  ((${#stale[@]} > 0)) || return 0
+  log "Pruning old $repo images (keep $keep)"
+  for ref in "${stale[@]}"; do
+    docker rmi "$ref" 2>/dev/null || true
   done
 }
 
@@ -609,11 +653,10 @@ cmd_deploy() {
   set_image_env "$image"
   sync_app_url_to_slot "$inactive"
 
-  log "Pulling $image"
-  docker pull "$image"
+  pull_with_retry "$image"
 
   log "Starting inactive slot $inactive_svc"
-  compose_with_profile "$inactive_profile" up -d --no-deps --force-recreate "$inactive_compose"
+  compose_with_profile "$inactive_profile" up -d --no-deps --force-recreate --pull never "$inactive_compose"
 
   if ! wait_healthy "$inactive"; then
     err "New slot unhealthy — leaving traffic on $active; stopping $inactive_svc"
@@ -645,7 +688,7 @@ cmd_deploy() {
 
   write_state "$inactive" "$(image_sha_tag "$image")" "$active" "$prev_sha"
   save_db_fingerprint
-  prune_old_images
+  prune_repo_images "$image" "$IMAGE_KEEP"
   deploy_control_plane
 
   if [[ -n "${PANACHAT_PUBLIC_URL:-}" ]]; then
@@ -692,4 +735,7 @@ main() {
   esac
 }
 
-main "$@"
+# Sourced by scripts/panachat-deploy-remote.test.sh for its functions.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

@@ -21,6 +21,21 @@ describe('control-plane CI/CD wiring', () => {
     }
   });
 
+  it('bounds image pulls so a stalled registry cannot outlive the SSH step', () => {
+    const script = read('scripts/panachat-deploy-remote.sh');
+
+    // Every pull goes through the bounded retry; compose must not pull again.
+    expect(script).not.toMatch(/^\s*docker pull /m);
+    expect(script).toContain('timeout -k 30 "$PULL_TIMEOUT" docker pull "$ref"');
+    expect(script).toContain('pull_with_retry "$image"');
+    expect(script).toContain('pull_with_retry "$PANACHAT_CONTROL_PLANE_IMAGE"');
+    expect(script).toMatch(/up -d --no-deps --force-recreate --pull never "\$inactive_compose"/);
+
+    for (const file of ['deploy-canary.yml', 'deploy-preview.yml']) {
+      expect(read(`.github/workflows/${file}`)).toContain('command_timeout: 75m');
+    }
+  });
+
   it('recreates the control-plane container without compose down -v', () => {
     const script = read('scripts/panachat-deploy-remote.sh');
     const compose = read('docker-compose/deploy/docker-compose.panachat.yml');
@@ -28,7 +43,7 @@ describe('control-plane CI/CD wiring', () => {
 
     expect(script).toContain('deploy_control_plane');
     expect(script).toMatch(
-      /compose_with_profile control-plane up -d --no-deps --force-recreate panachat-control-plane/,
+      /compose_with_profile control-plane up -d --no-deps --force-recreate --pull never panachat-control-plane/,
     );
     expect(script).not.toMatch(/^\s*(docker compose|compose).*down\s+-v/m);
 

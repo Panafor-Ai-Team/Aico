@@ -215,6 +215,10 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script_stop: true
+          # The deploy script bounds each image pull (3 × 600s, see pull_with_retry);
+          # the session must outlive that so a stalled registry fails the script
+          # cleanly instead of being cut off mid-deploy by the 10m default.
+          command_timeout: 75m
           envs: IMAGE,CONTROL_PLANE_IMAGE,DEPLOY_PATH,GHCR_USER,GHCR_TOKEN
           script: |
             set -euo pipefail
