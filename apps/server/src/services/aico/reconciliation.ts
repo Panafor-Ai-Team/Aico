@@ -118,8 +118,42 @@ interface ChainRow {
   amountMicroUsd: number | null;
   balanceAfterMicroUsd: number | null;
   balanceBeforeMicroUsd: number | null;
+  createdAt: Date;
   id: string;
 }
+
+/**
+ * Oldest first, with rows written at the same instant (one database
+ * transaction, e.g. a period refund and the renewal that follows it) put in
+ * the order that continues the chain. Their ids are random, so sorting ties by
+ * id would report a break that never happened.
+ */
+export const orderChain = <T extends ChainRow>(rows: T[]): T[] => {
+  const sorted = [...rows].sort(
+    (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id),
+  );
+  const out: T[] = [];
+  let prevAfter: number | null = null;
+  for (let i = 0; i < sorted.length;) {
+    let j = i;
+    while (j < sorted.length && sorted[j].createdAt.getTime() === sorted[i].createdAt.getTime())
+      j++;
+    const group = sorted.slice(i, j);
+    while (group.length > 0) {
+      const next = group.findIndex(
+        (r) =>
+          prevAfter != null &&
+          r.balanceBeforeMicroUsd != null &&
+          Number(r.balanceBeforeMicroUsd) === prevAfter,
+      );
+      const [row] = group.splice(Math.max(next, 0), 1);
+      out.push(row);
+      if (row.balanceAfterMicroUsd != null) prevAfter = Number(row.balanceAfterMicroUsd);
+    }
+    i = j;
+  }
+  return out;
+};
 
 /** Chain breaks within one subject's rows, oldest first. */
 const chainBreaks = (label: string, rows: ChainRow[]): string[] => {
@@ -152,6 +186,7 @@ const walletLedgerCheck = async (db: LobeChatDatabase): Promise<AicoReconciliati
       amountMicroUsd: walletTransactions.amountMicroUsd,
       balanceAfterMicroUsd: walletTransactions.balanceAfterMicroUsd,
       balanceBeforeMicroUsd: walletTransactions.balanceBeforeMicroUsd,
+      createdAt: walletTransactions.createdAt,
       id: walletTransactions.id,
       userId: walletTransactions.userId,
     })
@@ -169,7 +204,7 @@ const walletLedgerCheck = async (db: LobeChatDatabase): Promise<AicoReconciliati
   const details: string[] = [];
   let unexplainedMicro = 0;
   for (const wallet of wallets) {
-    const list = byUser.get(wallet.userId) ?? [];
+    const list = orderChain(byUser.get(wallet.userId) ?? []);
     const sum = list.reduce((acc, r) => acc + Number(r.amountMicroUsd ?? 0), 0);
     const balance = Number(wallet.balance ?? 0);
     if (sum !== balance) {
@@ -198,6 +233,7 @@ const orgLedgerCheck = async (db: LobeChatDatabase): Promise<AicoReconciliationC
       amountMicroUsd: walletTransactions.amountMicroUsd,
       balanceAfterMicroUsd: walletTransactions.balanceAfterMicroUsd,
       balanceBeforeMicroUsd: walletTransactions.balanceBeforeMicroUsd,
+      createdAt: walletTransactions.createdAt,
       id: walletTransactions.id,
       orgId: walletTransactions.orgId,
     })
@@ -216,7 +252,7 @@ const orgLedgerCheck = async (db: LobeChatDatabase): Promise<AicoReconciliationC
 
   const details: string[] = [];
   for (const org of orgs) {
-    const list = byOrg.get(org.id) ?? [];
+    const list = orderChain(byOrg.get(org.id) ?? []);
     // Org rows record the org wallet's before/after, but the amount's sign is
     // the member's point of view (an allocation is positive and drains the
     // org), so only the chain and its end point are checked here.
