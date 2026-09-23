@@ -926,7 +926,7 @@ export const PlatformAdminPanel = () => {
                 layout="vertical"
                 onFinish={async (values) => {
                   const payload = resolveFxTopupPayload(values, creditChargeField);
-                  if (!payload || !values.orgId) return;
+                  if (!payload || !values.orgId || !values.description) return;
                   creditIdempotencyKeyRef.current ??= uuid();
                   setBusy(true);
                   try {
@@ -971,7 +971,11 @@ export const PlatformAdminPanel = () => {
                   usdLabelKey="platform.amountUsd"
                   onChargeFieldChange={setCreditChargeField}
                 />
-                <Form.Item label={t('platform.description')} name="description">
+                <Form.Item
+                  label={t('platform.description')}
+                  name="description"
+                  rules={[{ required: true, whitespace: true }]}
+                >
                   <Input />
                 </Form.Item>
                 <Button htmlType="submit" loading={busy} type="primary">
@@ -994,7 +998,7 @@ export const PlatformAdminPanel = () => {
                     return;
                   }
                   const payload = resolveFxTopupPayload(values, userCreditChargeField);
-                  if (!payload) return;
+                  if (!payload || !values.description) return;
                   userCreditIdempotencyKeyRef.current ??= uuid();
                   setBusy(true);
                   try {
@@ -1055,7 +1059,11 @@ export const PlatformAdminPanel = () => {
                   usdLabelKey="platform.amountUsd"
                   onChargeFieldChange={setUserCreditChargeField}
                 />
-                <Form.Item label={t('platform.description')} name="description">
+                <Form.Item
+                  label={t('platform.description')}
+                  name="description"
+                  rules={[{ required: true, whitespace: true }]}
+                >
                   <Input />
                 </Form.Item>
                 <Button htmlType="submit" loading={busy} type="primary">
