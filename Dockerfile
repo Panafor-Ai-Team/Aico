@@ -128,12 +128,25 @@ RUN set -eux; \
 # trees never served over HTTP (static ETags derive from size+mtime), so the
 # same deps produce the same layer digest. The standalone copies of public/_spa*
 # are dropped because the builder's public/_spa* are copied over them anyway.
+#
+# The migration deps (/deps: pg, drizzle-orm) are merged here, not by COPY in
+# the final stage: in the traced tree node_modules/pg is a pnpm symlink into
+# .pnpm/, and `COPY --link` does not follow destination symlinks, so it would
+# replace the link with a bare directory whose siblings (pg-types, …) are
+# unreachable. The trailing `/.` makes cp write through the link, as a plain
+# COPY used to.
 RUN set -eux; \
     mkdir -p /out; \
     mv .next/standalone/node_modules /out/node_modules; \
     mv .next/standalone/dist /out/dist; \
     rm -rf .next/standalone/public/_spa .next/standalone/public/_spa-auth .next/standalone/public/_spa-workbench; \
-    find /out/node_modules /deps/node_modules packages/database/migrations -exec touch -h -d @0 {} +
+    mkdir -p /out/node_modules/.pnpm; \
+    cp -a /deps/node_modules/.pnpm/. /out/node_modules/.pnpm/; \
+    for pkg in pg drizzle-orm; do \
+        mkdir -p "/out/node_modules/${pkg}"; \
+        cp -a "/deps/node_modules/${pkg}/." "/out/node_modules/${pkg}/"; \
+    done; \
+    find /out/node_modules packages/database/migrations -exec touch -h -d @0 {} +
 
 ## Production image. Not flattened: one layer per part (--link keeps each layer
 ## independent of the ones before it), ownership set via --chown instead of
@@ -163,11 +176,6 @@ COPY --link --chown=1001:1001 --from=builder /app/packages/database/migrations /
 COPY --link --chown=1001:1001 --from=builder /app/docs/changelog /app/docs/changelog
 COPY --link --chown=1001:1001 --from=builder /app/scripts/migrateServerDB/docker.cjs /app/docker.cjs
 COPY --link --chown=1001:1001 --from=builder /app/scripts/migrateServerDB/errorHint.js /app/errorHint.js
-
-# copy dependencies
-COPY --link --chown=1001:1001 --from=builder /deps/node_modules/.pnpm /app/node_modules/.pnpm
-COPY --link --chown=1001:1001 --from=builder /deps/node_modules/pg /app/node_modules/pg
-COPY --link --chown=1001:1001 --from=builder /deps/node_modules/drizzle-orm /app/node_modules/drizzle-orm
 
 # Copy server launcher and shared scripts
 COPY --link --chown=1001:1001 --from=builder /app/scripts/serverLauncher/startServer.js /app/startServer.js
