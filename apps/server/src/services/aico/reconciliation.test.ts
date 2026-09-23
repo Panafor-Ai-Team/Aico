@@ -4,10 +4,16 @@ import { getTestDB } from '@lobechat/database/test-utils';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { OrganizationModel } from '@/database/models/organization';
 import { users } from '@/database/schemas';
 import {
   type AicoReconciliationCheck,
   aicoReconciliationRuns,
+  memberBudgets,
+  organizationMembers,
+  organizations,
+  organizationTeamMembers,
+  organizationTeams,
   userWallets,
   walletTransactions,
 } from '@/database/schemas/aicoOrganization';
@@ -48,6 +54,11 @@ const deps = (opts: { floatUsd: number; remainingUsd: number }) => ({
 const clean = async (db: LobeChatDatabase) => {
   await db.delete(aicoReconciliationRuns);
   await db.delete(walletTransactions);
+  await db.delete(memberBudgets);
+  await db.delete(organizationTeamMembers);
+  await db.delete(organizationTeams);
+  await db.delete(organizationMembers);
+  await db.delete(organizations);
   await db.delete(userWallets);
   await db.delete(users);
 };
@@ -241,6 +252,36 @@ describe('runReconciliation', () => {
     );
 
     expect(checkOf(run, 'ledger_actor')).toMatchObject({ status: 'warn' });
+  });
+
+  it('reports a failed renewal even after the batch switched the budget off', async () => {
+    const orgModel = new OrganizationModel(db);
+    const org = await orgModel.createOrganization({ name: 'Recon Org', ownerUserId: userId });
+    const [member] = await db
+      .select({ id: organizationMembers.id })
+      .from(organizationMembers)
+      .where(eq(organizationMembers.orgId, org.id));
+    // What `failBatch` leaves behind.
+    await db.insert(memberBudgets).values({
+      isActive: false,
+      orgId: org.id,
+      orgMemberId: member.id,
+      period: 'daily',
+      periodAmountMicroUsd: 1_000_000,
+      renewalStatus: 'renewal_failed',
+    });
+
+    const run = await runReconciliation(
+      db,
+      { trigger: 'cron' },
+      deps({ floatUsd: 20, remainingUsd: 4 }),
+    );
+
+    const hygiene = checkOf(run, 'key_hygiene');
+    expect(hygiene.status).toBe('warn');
+    expect(hygiene.details).toEqual([
+      expect.stringMatching(/renewal failed and the budget is off$/),
+    ]);
   });
 
   it('flags enabled OpenRouter keys that nothing points at', async () => {

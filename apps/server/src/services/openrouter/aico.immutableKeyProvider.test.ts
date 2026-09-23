@@ -18,6 +18,7 @@ import { OrganizationModel } from '@/database/models/organization';
 import { users } from '@/database/schemas';
 import {
   aicoKeyOutbox,
+  aicoRenewalBatches,
   memberBudgets,
   organizationMembers,
   organizations,
@@ -27,11 +28,12 @@ import {
   walletTransactions,
 } from '@/database/schemas/aicoOrganization';
 import { aicoEnv } from '@/envs/aico';
-import { processKeyOutbox } from '@/server/services/aico/renewalScheduler';
+import { processDueRenewals, processKeyOutbox } from '@/server/services/aico/renewalScheduler';
 import {
   CheapVibeCodeAmbiguousEditError,
   type ManagedProviderClient,
 } from '@/server/services/managedProvider';
+import { CheapVibeCodeApiError } from '@/server/services/managedProvider/cheapvibecode';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 
 // Read at call time by `KeyVaultsGateKeeper`, but the modules below are hoisted
@@ -92,14 +94,19 @@ class ImmutableProvider implements ManagedProviderClient {
   getKey: ManagedProviderClient['getKey'] = async (credential) => {
     this.seenApiKeys.push(credential.apiKey);
     if (this.readFails) throw new Error('CheapVibeCode API 429');
-    const row = this.keys.get(credential.hash);
-    if (!row) throw new Error(`unknown key ${credential.hash}`);
+    return this.state(credential.hash, credential.limitUsd);
+  };
+
+  /** A key's state as the gateway holds it, bypassing what `getKey` refuses. */
+  protected state(hash: string, limitUsd?: number) {
+    const row = this.keys.get(hash);
+    if (!row) throw new Error(`unknown key ${hash}`);
     return {
       disabled: false,
-      hash: credential.hash,
+      hash,
       // The real provider reports only what is left; `limit` comes from the
       // caller's own record of the mint, which is the whole point of the column.
-      limit: credential.limitUsd ?? null,
+      limit: limitUsd ?? null,
       limitRemaining: Math.max(0, row.limitUsd - row.usedUsd),
       name: row.name,
       usage: 0,
@@ -107,7 +114,7 @@ class ImmutableProvider implements ManagedProviderClient {
       usageMonthly: null,
       usageWeekly: null,
     };
-  };
+  }
 
   getAccountBalanceUsd: ManagedProviderClient['getAccountBalanceUsd'] = async () => 1000;
 
@@ -133,6 +140,16 @@ class RevocableImmutableProvider extends ImmutableProvider {
 
   frozen = new Set<string>();
 
+  /** As on the live API: a frozen key cannot read its own balance. */
+  override getKey: ManagedProviderClient['getKey'] = async (credential) => {
+    if (this.frozen.has(credential.hash)) {
+      throw new CheapVibeCodeApiError(401, 'Unauthorized', null);
+    }
+    this.seenApiKeys.push(credential.apiKey);
+    if (this.readFails) throw new Error('CheapVibeCode API 429');
+    return this.state(credential.hash, credential.limitUsd);
+  };
+
   private hashOf = (apiKey: string | undefined) => {
     const hash = apiKey?.replace('sk-cvc-fake-', '');
     if (!hash || !this.keys.has(hash)) throw new Error('CheapVibeCode API 404: Not Found');
@@ -147,7 +164,11 @@ class RevocableImmutableProvider extends ImmutableProvider {
     const hash = this.hashOf(params.apiKey);
     if (params.disabled) this.frozen.add(hash);
     else this.frozen.delete(hash);
-    return { ...(await this.getKey({ hash })), disabled: Boolean(params.disabled) };
+    // Every edit but delete answers with the key's meta, frozen or not.
+    return {
+      ...this.state(hash, this.keys.get(hash)!.limitUsd),
+      disabled: Boolean(params.disabled),
+    };
   };
 }
 
@@ -170,10 +191,7 @@ class ResizableProvider extends RevocableImmutableProvider {
     else this.frozen.add(hash);
     row.limitUsd = Math.max(params.limitUsd, row.usedUsd);
     if (this.resizeMode === 'ambiguous') throw new CheapVibeCodeAmbiguousEditError(502);
-    return {
-      ...(await this.getKey({ hash, limitUsd: row.limitUsd })),
-      limit: row.limitUsd,
-    };
+    return { ...this.state(hash, row.limitUsd), limit: row.limitUsd };
   };
 
   override updateKey: NonNullable<ManagedProviderClient['updateKey']> = async (params) => {
@@ -183,7 +201,7 @@ class ResizableProvider extends RevocableImmutableProvider {
     if (params.disabled) this.frozen.add(hash);
     else this.frozen.delete(hash);
     return {
-      ...(await this.getKey({ hash, limitUsd: row.limitUsd })),
+      ...this.state(hash, row.limitUsd),
       disabled: Boolean(params.disabled),
       limit: row.limitUsd,
     };
@@ -198,6 +216,7 @@ const memberUserId = 'imm-member';
 
 const cleanup = async () => {
   await db.delete(aicoKeyOutbox);
+  await db.delete(aicoRenewalBatches);
   await db.delete(walletTransactions);
   await db.delete(memberBudgets);
   await db.delete(organizationTeamMembers);
@@ -638,6 +657,43 @@ describe('immutable-limit provider — member budgets', () => {
     const again = await keys.ensureMemberKey(member.id);
     expect(again.keyId).toBe(created.keyId);
     expect(provider.frozen.has(created.keyId!)).toBe(false);
+  });
+
+  it('settles a member key that renewal froze, although a frozen key cannot read its balance', async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    const { member } = await setupMember();
+    const created = await keys.ensureMemberKey(member.id);
+    provider.spend(created.keyId!, 3);
+    // What renewal does before settling, so the reading is final.
+    await keys.disableMemberKey(member.id);
+
+    const settled = await keys.settleMemberPeriod(member.id);
+
+    expect(settled?.nextCycleBaselineMicroUsd).toBe(usd(3));
+    expect(settled?.usageMicroUsd).toBe(usd(3.6));
+    expect(provider.frozen.has(created.keyId!)).toBe(true);
+  });
+
+  it('renews a CVC member budget end to end instead of failing settlement on the frozen key', async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    const { member, orgModel } = await setupMember();
+    const created = await keys.ensureMemberKey(member.id);
+    provider.spend(created.keyId!, 3);
+    await db
+      .update(memberBudgets)
+      .set({ nextRenewalAt: new Date(Date.now() - 60_000) })
+      .where(eq(memberBudgets.orgMemberId, member.id));
+
+    const [result] = await processDueRenewals(db, { keyService: keys });
+
+    expect(result?.status).toBe('funded');
+    const budget = await orgModel.getMemberBudget(member.id);
+    expect(budget?.renewalStatus).toBe('active');
+    expect(budget?.isActive).toBe(true);
+    // The member leaves the boundary on a spendable key.
+    expect(provider.frozen.has(budget!.openrouterKeyId!)).toBe(false);
   });
 
   it('deletes the retired member key once its replacement is persisted', async () => {

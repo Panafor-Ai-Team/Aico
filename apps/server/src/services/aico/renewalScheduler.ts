@@ -91,6 +91,8 @@ export const processDueRenewals = async (
   const now = options.now ?? new Date();
   const keyService = options.keyService ?? new AicoOpenRouterKeyService(db);
 
+  await retryRenewalKeySync(db, keyService);
+
   const rows = await db
     .select({ budget: memberBudgets, member: organizationMembers })
     .from(memberBudgets)
@@ -136,6 +138,59 @@ export const processDueRenewals = async (
     results.push(await renewOrg({ budgets, db, keyService, now, orgId }));
   }
   return results;
+};
+
+/**
+ * Finish renewals that funded the new cycle but could not sync the key.
+ *
+ * `renewOrg` step 3 marks such a budget `renewal_failed` while leaving it
+ * active: the org has already paid for the cycle, but chat refuses the member
+ * and nothing revisits it before the next boundary. `failBatch` always sets
+ * `isActive = false`, so "active and failed" is this case alone. Each pass
+ * re-opens the budget and runs the key sync again; a sync that still throws
+ * puts the budget back the way it was.
+ */
+export const retryRenewalKeySync = async (
+  db: LobeChatDatabase,
+  keyService: AicoOpenRouterKeyService,
+): Promise<{ failed: number; synced: number }> => {
+  const stuck = await db
+    .select({ id: memberBudgets.id, orgMemberId: memberBudgets.orgMemberId })
+    .from(memberBudgets)
+    .where(
+      and(eq(memberBudgets.isActive, true), eq(memberBudgets.renewalStatus, 'renewal_failed')),
+    );
+
+  let failed = 0;
+  let synced = 0;
+  for (const budget of stuck) {
+    // `ensureMemberKey` leaves a failed renewal's key alone, so re-open first.
+    const [claimed] = await db
+      .update(memberBudgets)
+      .set({ renewalStatus: 'active' })
+      .where(
+        and(
+          eq(memberBudgets.id, budget.id),
+          eq(memberBudgets.isActive, true),
+          eq(memberBudgets.renewalStatus, 'renewal_failed'),
+        ),
+      )
+      .returning({ id: memberBudgets.id });
+    if (!claimed) continue;
+
+    try {
+      await keyService.ensureMemberKey(budget.orgMemberId);
+      synced += 1;
+    } catch (error) {
+      console.error('[aico] renewal key sync retry failed', budget.orgMemberId, error);
+      await db
+        .update(memberBudgets)
+        .set({ renewalStatus: 'renewal_failed' })
+        .where(eq(memberBudgets.id, budget.id));
+      failed += 1;
+    }
+  }
+  return { failed, synced };
 };
 
 const claimRenewalBatch = async (params: {

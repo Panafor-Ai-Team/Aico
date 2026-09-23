@@ -597,6 +597,46 @@ export class AicoOpenRouterKeyService {
   };
 
   /**
+   * {@link readMemberKeyInfo} for a key that renewal has just frozen.
+   *
+   * CheapVibeCode refuses `/v1/balance` to a frozen key (401), so on a gateway
+   * that freezes by secret the key is read through the freeze itself: a
+   * same-state `{key, active: false}` edit answers with its live limit and use.
+   * If the freeze at renewal start did not land, this one applies it — the
+   * state settlement wants anyway.
+   */
+  private readFrozenMemberKeyInfo = async (budget: {
+    managedKeyLimitMicroUsd?: number | null;
+    managedKeyProviderId?: string | null;
+    openrouterKeyCiphertext?: string | null;
+    openrouterKeyId: string;
+  }): Promise<ManagedKeyInfo> => {
+    const { readKeyBySecret, revoke } = this.managed.capabilities;
+    if (
+      !readKeyBySecret ||
+      !revoke ||
+      !this.managed.updateKey ||
+      !this.isCurrentProviderKey(budget.managedKeyProviderId)
+    ) {
+      return this.readMemberKeyInfo(budget);
+    }
+
+    const credential = await this.managedCredential(budget);
+    if (!credential.apiKey) return this.readMemberKeyInfo(budget);
+
+    const info = await this.managed.updateKey({
+      apiKey: credential.apiKey,
+      disabled: true,
+      hash: credential.hash,
+    });
+    // Never settle a period on a guess: an edit without `meta` is a failed read.
+    if (info.limitRemaining == null) {
+      throw new Error('managed key freeze returned no remaining; cannot settle the period');
+    }
+    return info;
+  };
+
+  /**
    * Read a managed key's state, or `null` when the provider would not answer.
    *
    * A failed read is not an empty key. Rotation is the one path that mints a
@@ -1785,7 +1825,7 @@ export class AicoOpenRouterKeyService {
 
     if (!budget.openrouterKeyId) return null;
 
-    const info = await this.readMemberKeyInfo({
+    const info = await this.readFrozenMemberKeyInfo({
       managedKeyLimitMicroUsd: budget.managedKeyLimitMicroUsd,
       managedKeyProviderId: budget.managedKeyProviderId,
       openrouterKeyCiphertext: budget.openrouterKeyCiphertext,
