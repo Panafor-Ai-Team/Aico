@@ -20,7 +20,7 @@
  * - `openrouter_orphans`: enabled OpenRouter keys no row points at.
  */
 import type { LobeChatDatabase } from '@lobechat/database';
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
 import {
@@ -492,17 +492,30 @@ const keyHygieneCheck = async (
     details.push(`wallet ${w.id}: funded but its key is on ${w.provider ?? 'openrouter'}`);
   }
 
+  // A failed batch switches its budgets off (`failBatch`), so a failed renewal
+  // is looked for whatever the budget's active flag says.
   const budgets = await db
     .select({
       id: memberBudgets.id,
+      isActive: memberBudgets.isActive,
       provider: memberBudgets.managedKeyProviderId,
       renewalStatus: memberBudgets.renewalStatus,
     })
     .from(memberBudgets)
-    .where(eq(memberBudgets.isActive, true));
+    .where(or(eq(memberBudgets.isActive, true), eq(memberBudgets.renewalStatus, 'renewal_failed')));
   for (const b of budgets) {
-    if (b.renewalStatus === 'renewal_failed') details.push(`budget ${b.id}: renewal failed`);
-    if (b.renewalStatus === 'active' && (b.provider ?? 'openrouter') !== activeProvider) {
+    if (b.renewalStatus === 'renewal_failed') {
+      details.push(
+        b.isActive
+          ? `budget ${b.id}: renewal failed`
+          : `budget ${b.id}: renewal failed and the budget is off`,
+      );
+    }
+    if (
+      b.isActive &&
+      b.renewalStatus === 'active' &&
+      (b.provider ?? 'openrouter') !== activeProvider
+    ) {
       details.push(`budget ${b.id}: active but its key is on ${b.provider ?? 'openrouter'}`);
     }
   }

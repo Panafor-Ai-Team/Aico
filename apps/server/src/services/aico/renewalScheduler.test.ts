@@ -189,6 +189,37 @@ describe('processDueRenewals (AICO-140)', () => {
     expect(budget?.pendingPeriod).toBeNull();
   });
 
+  it('retries the key sync of a renewal that funded the cycle but could not sync the key', async () => {
+    const { member, org } = await setupDailyBudget({
+      capUsd: 5,
+      orgWalletUsd: 20,
+      settledUsageUsd: 3,
+    });
+    const failing = mockKeyService({ remainingMicroUsd: usd(2), usageMicroUsd: usd(3) });
+    vi.mocked(failing.ensureMemberKey).mockRejectedValue(new Error('CheapVibeCode API 409'));
+
+    const [renewal] = await processDueRenewals(serverDB, { keyService: failing });
+    expect(renewal.status).toBe('funded');
+    let budget = await orgModel.getMemberBudget(member.id);
+    expect(budget).toMatchObject({ isActive: true, renewalStatus: 'renewal_failed' });
+    const paidBalance = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd);
+
+    // A sync that still fails leaves the budget exactly as it was.
+    await processDueRenewals(serverDB, { keyService: failing });
+    budget = await orgModel.getMemberBudget(member.id);
+    expect(budget).toMatchObject({ isActive: true, renewalStatus: 'renewal_failed' });
+
+    const healthy = mockKeyService({ remainingMicroUsd: usd(2), usageMicroUsd: usd(3) });
+    const results = await processDueRenewals(serverDB, { keyService: healthy });
+
+    // The cycle is already paid: no boundary is due and the org is not charged again.
+    expect(results).toEqual([]);
+    expect(healthy.ensureMemberKey).toHaveBeenCalledWith(member.id);
+    budget = await orgModel.getMemberBudget(member.id);
+    expect(budget).toMatchObject({ isActive: true, renewalStatus: 'active' });
+    expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(paidBalance);
+  });
+
   it('insufficient balance fails atomically and retries after top-up', async () => {
     const { member, org } = await setupDailyBudget({
       capUsd: 5,
