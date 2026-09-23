@@ -2,7 +2,7 @@
 
 import { OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
 import { Flexbox, SearchBar, Text } from '@lobehub/ui';
-import { Select, Switch } from '@lobehub/ui/base-ui';
+import { Select, Switch, Tabs } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -10,12 +10,14 @@ import { useTranslation } from 'react-i18next';
 import { toastAicoError } from '@/business/client/resolveAicoErrorMessage';
 import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
 import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
+import { aicoPanelStyles } from '@/features/AicoPanels';
 import { lambdaClient } from '@/libs/trpc/client';
 
-export type TeamCatalogModel = { displayName?: string | null; id: string; type?: string | null };
-type Team = { id: string; modelIds: string[]; name: string };
+import { buildTeamModelTabs, type TeamCatalogModel } from './teamModelTabs';
 
-const TYPE_ORDER = ['chat', 'image', 'video'];
+export type { TeamCatalogModel } from './teamModelTabs';
+
+type Team = { id: string; modelIds: string[]; name: string };
 
 const styles = createStaticStyles(({ css }) => ({
   empty: css`
@@ -23,8 +25,8 @@ const styles = createStaticStyles(({ css }) => ({
     color: ${cssVar.colorTextTertiary};
     text-align: center;
   `,
-  groupTitle: css`
-    margin-block: 12px 4px;
+  count: css`
+    margin-inline-start: 6px;
     font-size: 12px;
     color: ${cssVar.colorTextTertiary};
   `,
@@ -69,6 +71,7 @@ export const TeamModelsForm = ({
   const [enabledIds, setEnabledIds] = useState<Set<string>>(() => new Set());
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const [keyword, setKeyword] = useState('');
+  const [activeType, setActiveType] = useState<string>();
 
   const team = teams.find((item) => item.id === teamId);
 
@@ -81,25 +84,21 @@ export const TeamModelsForm = ({
     setEnabledIds(new Set(team?.modelIds ?? []));
   }, [team?.id, team?.modelIds]);
 
-  const groups = useMemo(() => {
+  const tabs = useMemo(() => buildTeamModelTabs(models), [models]);
+  const currentType = tabs.some((tab) => tab.type === activeType) ? activeType : tabs[0]?.type;
+
+  const visibleModels = useMemo(() => {
+    const items = tabs.find((tab) => tab.type === currentType)?.items ?? [];
     const q = keyword.trim().toLowerCase();
-    const visible = models.filter((model) => {
-      if (!q) return true;
-      return [model.displayName || '', model.id, formatBrandedModelId(model.id)].some((value) =>
+    if (!q) return items;
+    return items.filter((model) =>
+      [model.displayName || '', model.id, formatBrandedModelId(model.id)].some((value) =>
         value.toLowerCase().includes(q),
-      );
-    });
-    const byType = new Map<string, TeamCatalogModel[]>();
-    for (const model of visible) {
-      const type = model.type || 'chat';
-      byType.set(type, [...(byType.get(type) ?? []), model]);
-    }
-    return [...byType.entries()].sort(
-      ([a], [b]) =>
-        (TYPE_ORDER.indexOf(a) + 1 || TYPE_ORDER.length + 1) -
-        (TYPE_ORDER.indexOf(b) + 1 || TYPE_ORDER.length + 1),
+      ),
     );
-  }, [keyword, models]);
+  }, [currentType, keyword, tabs]);
+
+  const isOn = (modelId: string) => modelId === OPENROUTER_AUTO_MODEL_ID || enabledIds.has(modelId);
 
   const toggle = async (modelId: string, enabled: boolean) => {
     if (!teamId) return;
@@ -152,38 +151,52 @@ export const TeamModelsForm = ({
         variant="filled"
         onChange={(e) => setKeyword(e.target.value)}
       />
+      {tabs.length > 1 && (
+        <div className={aicoPanelStyles.tabs}>
+          <Tabs
+            activeKey={currentType}
+            items={tabs.map(({ items, type }) => ({
+              key: type,
+              label: (
+                <>
+                  {t(`org.teamModelsType.${type}`, type)}
+                  <span className={styles.count}>
+                    {items.filter((model) => isOn(model.id)).length}/{items.length}
+                  </span>
+                </>
+              ),
+            }))}
+            onChange={setActiveType}
+          />
+        </div>
+      )}
       <Flexbox className={styles.list}>
-        {groups.length === 0 ? (
+        {visibleModels.length === 0 ? (
           <div className={styles.empty}>{t('org.teamModelsEmpty')}</div>
         ) : (
-          groups.map(([type, items]) => (
-            <Flexbox key={type}>
-              <div className={styles.groupTitle}>{t(`org.teamModelsType.${type}`, type)}</div>
-              {items.map((model) => {
-                const isAuto = model.id === OPENROUTER_AUTO_MODEL_ID;
-                return (
-                  <Flexbox horizontal className={styles.row} justify="space-between" key={model.id}>
-                    <Flexbox horizontal align="center" gap={10} style={{ minWidth: 0 }}>
-                      <BrandedModelIcon model={model.id} size={24} />
-                      <Flexbox style={{ minWidth: 0 }}>
-                        <Text ellipsis>{model.displayName || model.id}</Text>
-                        <Text ellipsis fontSize={12} type="secondary">
-                          {isAuto ? t('org.teamModelAutoAlwaysOn') : formatBrandedModelId(model.id)}
-                        </Text>
-                      </Flexbox>
-                    </Flexbox>
-                    <Switch
-                      checked={isAuto || enabledIds.has(model.id)}
-                      disabled={readOnly || isAuto || !teamId}
-                      loading={pendingIds.has(model.id)}
-                      size="small"
-                      onChange={(checked) => void toggle(model.id, checked)}
-                    />
+          visibleModels.map((model) => {
+            const isAuto = model.id === OPENROUTER_AUTO_MODEL_ID;
+            return (
+              <Flexbox horizontal className={styles.row} justify="space-between" key={model.id}>
+                <Flexbox horizontal align="center" gap={10} style={{ minWidth: 0 }}>
+                  <BrandedModelIcon model={model.id} size={24} />
+                  <Flexbox style={{ minWidth: 0 }}>
+                    <Text ellipsis>{model.displayName || model.id}</Text>
+                    <Text ellipsis fontSize={12} type="secondary">
+                      {isAuto ? t('org.teamModelAutoAlwaysOn') : formatBrandedModelId(model.id)}
+                    </Text>
                   </Flexbox>
-                );
-              })}
-            </Flexbox>
-          ))
+                </Flexbox>
+                <Switch
+                  checked={isOn(model.id)}
+                  disabled={readOnly || isAuto || !teamId}
+                  loading={pendingIds.has(model.id)}
+                  size="small"
+                  onChange={(checked) => void toggle(model.id, checked)}
+                />
+              </Flexbox>
+            );
+          })
         )}
       </Flexbox>
     </Flexbox>
