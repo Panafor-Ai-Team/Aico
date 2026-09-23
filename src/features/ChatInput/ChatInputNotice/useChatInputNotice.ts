@@ -1,7 +1,7 @@
 import { useAgentId } from '@/features/ChatInput/hooks/useAgentId';
 import { useAgentModelSelection } from '@/features/ChatInput/hooks/useAgentModelSelection';
 import { useChatInputResourceAccess } from '@/features/ChatInput/hooks/useChatInputResourceAccess';
-import { useEnabledChatModels } from '@/hooks/useEnabledChatModels';
+import { useEnabledChatModelsState } from '@/hooks/useEnabledChatModels';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
 import { aiProviderSelectors, useAiInfraStore } from '@/store/aiInfra';
@@ -88,7 +88,10 @@ export const useChatInputNotice = (): ChatInputNotice | undefined => {
   // Waiting on it for a `fixed` agent would swallow a genuine warning.
   const isMemberOverridePending = selectionPolicy === 'member' && isPreferenceLoading;
 
-  const enabledChatModelList = useEnabledChatModels();
+  // In org-wallet mode the list hides every managed model until the team
+  // allow-list and catalog load (and before billing context resolves it can be
+  // the personal list), so the model looks missing on a cold load.
+  const { isPending: isModelListPending, list: enabledChatModelList } = useEnabledChatModelsState();
   const isModelConfigReady = useAiInfraStore((s) =>
     aiProviderSelectors.isInitAiProviderRuntimeState(s),
   );
@@ -97,7 +100,7 @@ export const useChatInputNotice = (): ChatInputNotice | undefined => {
 
   return resolveChatInputNotice({
     currentChatModel,
-    isAgentModelPending: isAgentConfigLoading || isMemberOverridePending,
+    isAgentModelPending: isAgentConfigLoading || isMemberOverridePending || isModelListPending,
     isGroupContext,
     isHeterogeneousAgent,
     isModelConfigReady,

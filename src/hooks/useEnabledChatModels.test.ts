@@ -168,4 +168,55 @@ describe('useEnabledChatModels', () => {
       'openai/gpt-4o-mini',
     ]);
   });
+
+  describe('isPending', () => {
+    it('is pending while the org allow-list and catalog load', async () => {
+      useAicoBillingStore.mockImplementation((selector: any) =>
+        selector({ context: { organizationId: 'org-1', source: 'organization' } }),
+      );
+      useClientDataSWR.mockImplementation((key: unknown) => {
+        if (key === 'aico-provider-status') return { data: { managed: true } };
+        return { data: undefined, isLoading: true };
+      });
+
+      const { useEnabledChatModelsState } = await import('./useEnabledChatModels');
+      const { result } = renderHook(() => useEnabledChatModelsState());
+
+      expect(result.current.isPending).toBe(true);
+    });
+
+    it('is pending before the billing context resolves', async () => {
+      useAicoBillingStore.mockImplementation((selector: any) => selector({ context: null }));
+      useClientDataSWR.mockImplementation(() => ({ data: { managed: true } }));
+
+      const { useEnabledChatModelsState } = await import('./useEnabledChatModels');
+      const { result } = renderHook(() => useEnabledChatModelsState());
+
+      expect(result.current.isPending).toBe(true);
+    });
+
+    it('settles once personal context and managed status are known', async () => {
+      useClientDataSWR.mockImplementation(() => ({ data: { managed: true } }));
+
+      const { useEnabledChatModelsState } = await import('./useEnabledChatModels');
+      const { result } = renderHook(() => useEnabledChatModelsState());
+
+      expect(result.current.isPending).toBe(false);
+    });
+
+    it('settles when the org allow-list request fails, so the warning can still show', async () => {
+      useAicoBillingStore.mockImplementation((selector: any) =>
+        selector({ context: { organizationId: 'org-1', source: 'organization' } }),
+      );
+      useClientDataSWR.mockImplementation((key: unknown) => {
+        if (key === 'aico-provider-status') return { data: { managed: true } };
+        return { data: undefined, error: new Error('boom'), isLoading: false };
+      });
+
+      const { useEnabledChatModelsState } = await import('./useEnabledChatModels');
+      const { result } = renderHook(() => useEnabledChatModelsState());
+
+      expect(result.current.isPending).toBe(false);
+    });
+  });
 });

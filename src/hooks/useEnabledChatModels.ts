@@ -32,6 +32,16 @@ const catalogModelToSelect = (model: AiProviderModelListItem): AiModelForSelect 
   releasedAt: model.releasedAt,
 });
 
+interface EnabledChatModelsState {
+  /**
+   * True while the list is still a fail-closed placeholder: billing context not
+   * resolved yet, managed status in flight, or the org allow-list/catalog still
+   * loading. Consumers that judge "model missing" must wait on this.
+   */
+  isPending: boolean;
+  list: EnabledProviderWithModels[];
+}
+
 /**
  * Enabled chat models for the model switcher.
  *
@@ -39,12 +49,13 @@ const catalogModelToSelect = (model: AiProviderModelListItem): AiModelForSelect 
  * - Org wallet: team allow-list only — built from the managed catalog,
  *   ignoring personal enable toggles.
  */
-export const useEnabledChatModels = (): EnabledProviderWithModels[] => {
+export const useEnabledChatModelsState = (): EnabledChatModelsState => {
   const enabledChatModelList = useAiInfraStore((s) => s.enabledChatModelList, isEqual);
   const billingContext = useAicoBillingStore((s) => s.context);
 
-  const { data: managedStatus } = useClientDataSWR('aico-provider-status', () =>
-    lambdaClient.aicoBilling.getManagedProviderStatus.query(),
+  const { data: managedStatus, isLoading: isManagedStatusLoading } = useClientDataSWR(
+    'aico-provider-status',
+    () => lambdaClient.aicoBilling.getManagedProviderStatus.query(),
   );
   // Fail-closed: hide BYOK providers until the API says unmanaged.
   const aicoManaged = managedStatus?.managed ?? true;
@@ -52,16 +63,22 @@ export const useEnabledChatModels = (): EnabledProviderWithModels[] => {
   const orgId =
     billingContext?.source === 'organization' ? billingContext.organizationId : undefined;
 
-  const { data: allowed } = useClientDataSWR(orgId ? ['aico-my-allowed-models', orgId] : null, () =>
-    lambdaClient.organization.getMyAllowedModels.query({ organizationId: orgId! }),
+  const { data: allowed, isLoading: isAllowedLoading } = useClientDataSWR(
+    orgId ? ['aico-my-allowed-models', orgId] : null,
+    () => lambdaClient.organization.getMyAllowedModels.query({ organizationId: orgId! }),
   );
 
-  const { data: catalog } = useClientDataSWR(
+  const { data: catalog, isLoading: isCatalogLoading } = useClientDataSWR(
     orgId ? ['aico-managed-model-catalog', orgId] : null,
     () => aiModelService.getAiProviderModelList(DEFAULT_PROVIDER),
   );
 
-  return useMemo(() => {
+  const isPending =
+    !billingContext ||
+    !!isManagedStatusLoading ||
+    (!!orgId && (!!isAllowedLoading || !!isCatalogLoading));
+
+  const list = useMemo(() => {
     const list = enabledChatModelList || [];
     const scoped = aicoManaged ? filterAicoManagedProviders(list) : list;
 
@@ -104,4 +121,9 @@ export const useEnabledChatModels = (): EnabledProviderWithModels[] => {
 
     return [orgProvider, ...byok];
   }, [aicoManaged, allowed, catalog, enabledChatModelList, orgId]);
+
+  return { isPending, list };
 };
+
+export const useEnabledChatModels = (): EnabledProviderWithModels[] =>
+  useEnabledChatModelsState().list;
