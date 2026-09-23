@@ -7,6 +7,8 @@
 #     exported with the moving :canary tag, so the admin panel never ran the
 #     image built from the deployed commit.
 #   - Control-plane images (~9.5 GB each) were never pruned.
+#   - Untagged images (left when a tag moved) are invisible to
+#     `docker images <repo>` on the containerd store, so 11 of them piled up.
 
 set -euo pipefail
 
@@ -24,7 +26,8 @@ trap 'rm -rf "$tmp"' EXIT
 # Fake docker. `pull` fails FAKE_PULL_FAILS times (or hangs with
 # FAKE_PULL_HANG=1), then succeeds; attempts are counted in $tmp/pulls.
 # `images` prints $tmp/images; `rmi` logs its argument to $tmp/rmi and refuses
-# the refs listed in $tmp/in-use.
+# the refs listed in $tmp/in-use; `image` logs its arguments to $tmp/prune and
+# fails with FAKE_PRUNE_FAIL=1.
 mkdir -p "$tmp/bin"
 cat >"$tmp/bin/docker" <<'EOF'
 #!/usr/bin/env bash
@@ -44,6 +47,12 @@ case "$1" in
     fi
     echo "$2" >>"$FAKE_DIR/rmi"
     ;;
+  image)
+    shift
+    echo "$*" >>"$FAKE_DIR/prune"
+    [[ "${FAKE_PRUNE_FAIL:-0}" == 1 ]] && { echo "Error response from daemon: a prune operation is already running" >&2; exit 1; }
+    printf 'Deleted Images:\ndeleted: sha256:5949dcdc4726\n\nTotal reclaimed space: 9.57GB\n'
+    ;;
 esac
 EOF
 chmod +x "$tmp/bin/docker"
@@ -60,8 +69,8 @@ source "$DEPLOY"
 set +e
 
 reset_fake() {
-  rm -f "$tmp/pulls" "$tmp/rmi" "$tmp/in-use"
-  unset FAKE_PULL_FAILS FAKE_PULL_HANG
+  rm -f "$tmp/pulls" "$tmp/rmi" "$tmp/in-use" "$tmp/prune"
+  unset FAKE_PULL_FAILS FAKE_PULL_HANG FAKE_PRUNE_FAIL
 }
 
 # 1. Transient pull failures are retried.
@@ -122,5 +131,23 @@ reset_fake
 printf 'aaaaaaaaaaaa %s:new1\n' "$CP" >"$tmp/images"
 prune_repo_images "$CP:new1" 2 >/dev/null 2>&1 || fail "prune with nothing stale must succeed"
 [[ ! -e "$tmp/rmi" ]] || fail "nothing should be removed: $(cat "$tmp/rmi")"
+
+# 7. Untagged images are pruned by our title label only: dangling-only prune
+#    (no -a), one per image CI builds.
+reset_fake
+prune_dangling_images >"$tmp/out.log" 2>&1 || fail "dangling prune must not fail: $(cat "$tmp/out.log")"
+expected="$(printf '%s\n' \
+  'prune -f --filter label=org.opencontainers.image.title=panachat' \
+  'prune -f --filter label=org.opencontainers.image.title=panachat-control-plane')"
+[[ "$(cat "$tmp/prune")" == "$expected" ]] || fail "unexpected prune calls: $(cat "$tmp/prune")"
+grep -q 'Untagged panachat-control-plane images: Total reclaimed space: 9.57GB' "$tmp/out.log" ||
+  fail "prune must log the reclaimed space: $(cat "$tmp/out.log")"
+
+# 8. A failed prune is reported but never fails the (already flipped) deploy.
+reset_fake
+export FAKE_PRUNE_FAIL=1
+prune_dangling_images >"$tmp/out.log" 2>&1 || fail "a failed prune must not fail the deploy"
+grep -q 'Pruning untagged panachat images failed (ignored): .*already running' "$tmp/out.log" ||
+  fail "a failed prune must say so: $(cat "$tmp/out.log")"
 
 echo "OK: panachat-deploy-remote"

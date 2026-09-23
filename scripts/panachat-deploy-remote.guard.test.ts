@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +36,47 @@ describe('control-plane CI/CD wiring', () => {
       expect(read(`.github/workflows/${file}`)).toContain('command_timeout: 75m');
     }
   });
+
+  it('prunes untagged images by the labels CI puts on them', () => {
+    const script = read('scripts/panachat-deploy-remote.sh');
+
+    // A renamed label would silently stop the prune from matching anything.
+    const titles = script
+      .match(/^IMAGE_TITLES=\(([^)]*)\)$/m)?.[1]
+      .split(/\s+/)
+      .sort();
+    for (const file of ['deploy-canary.yml', 'deploy-preview.yml']) {
+      const labels = [
+        ...read(`.github/workflows/${file}`).matchAll(/org\.opencontainers\.image\.title=(\S+)/g),
+      ].map((m) => m[1]);
+      expect(labels.sort()).toEqual(titles);
+    }
+
+    // Dangling only (no -a / --all), our labels only, nothing but images.
+    const code = script.replaceAll(/^\s*#.*$/gm, '');
+    expect(code.match(/docker \w+ prune/g)).toEqual(['docker image prune']);
+    expect(code).toContain(
+      'docker image prune -f \\\n      --filter "label=org.opencontainers.image.title=$title" 2>&1)"',
+    );
+    // Last step of a deploy, after the control plane released its old image.
+    expect(script).toMatch(/\n {2}deploy_control_plane\n {2}prune_dangling_images\n/);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'passes the deploy script shell tests',
+    () => {
+      const out = execFileSync(
+        'bash',
+        [path.join(root, 'scripts/panachat-deploy-remote.test.sh')],
+        {
+          encoding: 'utf8',
+          timeout: 60_000,
+        },
+      );
+      expect(out).toContain('OK: panachat-deploy-remote');
+    },
+    70_000,
+  );
 
   it('recreates the control-plane container without compose down -v', () => {
     const script = read('scripts/panachat-deploy-remote.sh');
