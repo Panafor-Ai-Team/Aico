@@ -28,6 +28,7 @@
 #   PANACHAT_PULL_TIMEOUT_SEC     per-attempt `docker pull` limit (default 600)
 #   PANACHAT_PULL_ATTEMPTS        pull attempts before the deploy fails (default 3)
 #   PANACHAT_PULL_BACKOFF_SEC     wait before retry n is n × this (default 15)
+#   PANACHAT_PRUNE_TIMEOUT_SEC    limit for each untagged-image prune (default 300)
 #   PANACHAT_SKIP_BACKUP=1
 #   PANACHAT_SKIP_NGINX=1
 #   PANACHAT_ALLOW_DB_DRIFT=1     allow deploy when live user count dropped vs fingerprint
@@ -47,6 +48,9 @@ CONTROL_PLANE_IMAGE_KEEP="${PANACHAT_CONTROL_PLANE_IMAGE_KEEP:-2}"
 PULL_TIMEOUT="${PANACHAT_PULL_TIMEOUT_SEC:-600}"
 PULL_ATTEMPTS="${PANACHAT_PULL_ATTEMPTS:-3}"
 PULL_BACKOFF="${PANACHAT_PULL_BACKOFF_SEC:-15}"
+PRUNE_TIMEOUT="${PANACHAT_PRUNE_TIMEOUT_SEC:-300}"
+# org.opencontainers.image.title of the images CI builds (deploy-*.yml labels).
+IMAGE_TITLES=(panachat panachat-control-plane)
 APP_ALIAS="panachat-app"
 
 # --- Environment mode (canary vs preview) ---------------------------------
@@ -92,7 +96,7 @@ STATE_FILE="$STATE_DIR/deploy.env"
 NETWORK_NAME="${PANACHAT_STACK}-network"
 
 usage() {
-  sed -n '2,34p' "$0" | sed 's/^# \?//'
+  sed -n '2,35p' "$0" | sed 's/^# \?//'
   exit "${1:-0}"
 }
 
@@ -540,6 +544,25 @@ prune_repo_images() {
   done
 }
 
+# prune_repo_images only sees tagged rows: the containerd image store does not
+# list an untagged image under `docker images <repo>`, so every image left behind
+# when a tag moved to a newer build (the old :canary control plane) stayed on
+# disk (11 images on prod, 2026-09-23). `docker image prune` without -a removes
+# only untagged images that no container, running or stopped, references; the
+# title label limits it to our images, never postgres, redis, stalwart, …
+# Cleanup must not fail a deploy that already moved traffic.
+prune_dangling_images() {
+  local title out
+  for title in "${IMAGE_TITLES[@]}"; do
+    if out="$(timeout -k 10 "$PRUNE_TIMEOUT" docker image prune -f \
+      --filter "label=org.opencontainers.image.title=$title" 2>&1)"; then
+      log "Untagged $title images: ${out##*$'\n'}"
+    else
+      err "Pruning untagged $title images failed (ignored): ${out##*$'\n'}"
+    fi
+  done
+}
+
 image_sha_tag() {
   local image="$1"
   if [[ "$image" == *:* ]]; then
@@ -690,6 +713,7 @@ cmd_deploy() {
   save_db_fingerprint
   prune_repo_images "$image" "$IMAGE_KEEP"
   deploy_control_plane
+  prune_dangling_images
 
   if [[ -n "${PANACHAT_PUBLIC_URL:-}" ]]; then
     local verify="$ROOT/.claude/skills/self-host-deploy/scripts/verify-deployment.sh"
