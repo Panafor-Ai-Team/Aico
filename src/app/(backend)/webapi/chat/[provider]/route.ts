@@ -45,10 +45,15 @@ const resolveBillingContext = (
 const recordManagedUsage = async (params: {
   billing: AicoBillingContext;
   db: LobeChatDatabase;
+  /**
+   * False under ledger shadow: the hold settle already wrote this request's
+   * priced row, so a placeholder here would only add a zero-cost duplicate.
+   */
+  logRow: boolean;
   modelId: string;
   userId: string;
 }): Promise<void> => {
-  const { billing, db, modelId, userId } = params;
+  const { billing, db, logRow, modelId, userId } = params;
 
   let orgId: string | null = null;
   let orgMemberId: string | null = null;
@@ -69,6 +74,8 @@ const recordManagedUsage = async (params: {
     // when they happen to open the billing page.
     await keyService.getUserRemaining(userId, { persist: true }).catch(() => null);
   }
+
+  if (!logRow) return;
 
   await new AicoBillingModel(db).recordUsage({
     billingSource: billing.source,
@@ -138,13 +145,17 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
       signal: req.signal,
     });
 
-    // Under ledger enforce, `usage_logs` is written when the hold settles.
-    if (billingContext && getLedgerConfig().mode !== 'enforce') {
-      // Best-effort and non-blocking: cost stays 0/`pending` until OpenRouter
-      // settlement, which is the source of truth for spend.
+    // Under ledger enforce, `usage_logs` is written when the hold settles and the
+    // hold is the spend. Under shadow the settle still writes the priced row, but
+    // the key read below is what moves the balance, so it keeps running.
+    const ledgerMode = getLedgerConfig().mode;
+    if (billingContext && ledgerMode !== 'enforce') {
+      // Best-effort and non-blocking. With the ledger off, the row's cost stays
+      // 0/`pending`; the gateway's key counter is the source of truth for spend.
       void recordManagedUsage({
         billing: billingContext,
         db: serverDB,
+        logRow: ledgerMode === 'off',
         modelId: data.model || provider,
         userId,
       }).catch((err) =>

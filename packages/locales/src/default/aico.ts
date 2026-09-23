@@ -412,6 +412,53 @@ export default {
   'platform.userEmailPlaceholder': 'user@example.com',
   'platform.userId': 'User wallet',
   'platform.userIdPlaceholder': 'Select from B2C wallets (optional if email set)',
+  'platform.debit.title': 'Reduce user balance',
+  'platform.debit.hint':
+    "Takes unspent money back from a personal wallet (for example an admin grant that was never paid for). Recorded as a manual_debit transaction and the user's key limit is lowered to match.",
+  'platform.debit.available': '{{amount}} available',
+  'platform.debit.tooMuch': 'More than the user has left unspent',
+  'platform.debit.submit': 'Reduce balance',
+  'platform.debit.confirmTitle': 'Reduce this balance?',
+  'platform.debit.confirm':
+    'Take {{amount}} from {{user}}. Available goes from {{available}} to {{after}}. This is recorded in the ledger and cannot be undone except by a new credit.',
+  'platform.debit.done': 'Balance reduced. Available now {{available}} (key: {{key}})',
+  'platform.debit.failed': 'Failed to reduce balance',
+  'platform.reissue.title': 'Reissue managed keys',
+  'platform.reissue.hint':
+    'Mints a fresh key for every funded wallet and member budget at its current remaining amount, then retires the old key. Use after the provider changes its key format. Users on a retired provider are migrated.',
+  'platform.reissue.submit': 'Reissue all keys',
+  'platform.reissue.confirm':
+    'Every live managed key will be replaced. Requests in flight on an old key may fail once. Continue?',
+  'platform.reissue.done': 'Reissued {{total}} key(s), {{failed}} need attention',
+  'platform.reissue.failed': 'Key reissue failed',
+  'platform.reconciliation.title': 'Books check',
+  'platform.reconciliation.runNow': 'Run now',
+  'platform.reconciliation.ran': 'Books check finished',
+  'platform.reconciliation.runFailed': 'Books check failed to run',
+  'platform.reconciliation.never':
+    'No check has run yet. It runs every 15 minutes, or press Run now.',
+  'platform.reconciliation.lastRun': 'Last run {{time}} ({{trigger}})',
+  'platform.reconciliation.trigger.cron': 'scheduled',
+  'platform.reconciliation.trigger.manual': 'manual',
+  'platform.reconciliation.floatSummary':
+    'Live keys can spend {{exposure}} of the {{float}} provider float ({{percent}}%)',
+  'platform.reconciliation.floatHint':
+    'Amber from 80%, red above 100%. Billed balance owed to users: {{promised}}.',
+  'platform.reconciliation.columns.check': 'Check',
+  'platform.reconciliation.columns.status': 'Status',
+  'platform.reconciliation.columns.issues': 'Issues',
+  'platform.reconciliation.status.ok': 'OK',
+  'platform.reconciliation.status.warn': 'Warning',
+  'platform.reconciliation.status.critical': 'Critical',
+  'platform.reconciliation.status.error': 'Error',
+  'platform.reconciliation.checks.wallet_ledger': 'Wallet transactions add up',
+  'platform.reconciliation.checks.org_ledger': 'Organization transactions add up',
+  'platform.reconciliation.checks.ledger_actor': 'Every transaction has an actor and reason',
+  'platform.reconciliation.checks.float_liability': 'Provider float vs live keys',
+  'platform.reconciliation.checks.key_drift': 'Keys match balances',
+  'platform.reconciliation.checks.key_hygiene': 'Key and renewal health',
+  'platform.reconciliation.checks.usage_coverage': 'Every request has a priced log',
+  'platform.reconciliation.checks.openrouter_orphans': 'No unused OpenRouter keys',
 
   'provider.managed.desc':
     'Models are provided by {{brandName}}. Usage is billed from your wallet or organization credit — no API key setup is required.',

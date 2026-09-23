@@ -344,7 +344,7 @@ describe('AicoUsageLedgerModel.settleHold', () => {
     });
   });
 
-  it('settles a shadow hold without touching the subject or usage_logs', async () => {
+  it('settles a shadow hold without touching the subject, but logs its cost', async () => {
     await seedWallet();
     const holdId = await ledger.recordShadowHold({
       ...holdParams(),
@@ -353,7 +353,11 @@ describe('AicoUsageLedgerModel.settleHold', () => {
     });
 
     expect(
-      await ledger.settleHold(holdId, { chargedRawMicroUsd: 50_000, reason: 'usage' }),
+      await ledger.settleHold(holdId, {
+        chargedRawMicroUsd: 50_000,
+        reason: 'usage',
+        tokens: { completion: 40, prompt: 100, reasoning: 0, total: 140 },
+      }),
     ).toEqual({ settled: true });
     expect(await getHold(holdId)).toMatchObject({
       chargedRawMicroUsd: 50_000,
@@ -366,7 +370,23 @@ describe('AicoUsageLedgerModel.settleHold', () => {
       rawUsedMicroUsd: 0,
       settledUsageMicroUsd: 0,
     });
-    expect(await serverDB.select().from(usageLogs)).toHaveLength(0);
+    // Regression: shadow used to leave per-request cost only on the hold, so
+    // every `usage_logs` row read 0.
+    const logs = await serverDB.select().from(usageLogs);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      completionTokens: 40,
+      costMicroUsd: applyMultiplierMicroUsd(50_000, 12_000),
+      holdId,
+      promptTokens: 100,
+      settlementStatus: 'shadow',
+      totalTokens: 140,
+      userId,
+    });
+
+    // A repeated settle neither re-charges nor duplicates the row.
+    expect(await ledger.settleHold(holdId, { reason: 'usage' })).toEqual({ settled: false });
+    expect(await serverDB.select().from(usageLogs)).toHaveLength(1);
   });
 });
 

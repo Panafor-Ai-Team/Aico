@@ -73,6 +73,20 @@ const managedErrorStatus = (error: unknown): number | null => {
   return match ? Number(match[1]) : null;
 };
 
+/** What an admin key operation did to one subject — ids only, never secrets. */
+export interface ReissueOutcome {
+  keyId: string | null;
+  status:
+    | 'ambiguous'
+    | 'kept'
+    | 'migrated'
+    | 'no_key'
+    | 'reissued'
+    | 'resized'
+    | 'shared'
+    | 'unsupported';
+}
+
 /**
  * Provisions / updates OpenRouter keys for B2C wallets and B2B member budgets.
  * Plaintext keys are encrypted with KeyVaultsGateKeeper and never returned to SPA.
@@ -631,6 +645,8 @@ export class AicoOpenRouterKeyService {
    * never be revoked, and a key minted larger than the wallet can actually spend.
    */
   private rotateUserKeyIfUnderfunded = async (params: {
+    /** Mint a replacement even when the key still covers the wallet (reissue). */
+    force?: boolean;
     rawCapacityMicro: number;
     userId: string;
     wallet: {
@@ -651,8 +667,10 @@ export class AicoOpenRouterKeyService {
     );
 
     // Still able to spend everything the wallet has left — nothing to mint. This
-    // also covers an exhausted wallet, where `unspentMicro` is 0.
-    if (read.remainingMicro >= unspentMicro) return keep;
+    // also covers an exhausted wallet, where `unspentMicro` is 0, which even a
+    // forced reissue leaves alone: a key with nothing to spend buys nothing.
+    if (unspentMicro <= 0) return keep;
+    if (!params.force && read.remainingMicro >= unspentMicro) return keep;
 
     // Mint and persist first, retire second: if the mint fails (the account's
     // key limit, a CVC outage) the wallet keeps a working key instead of
@@ -763,6 +781,8 @@ export class AicoOpenRouterKeyService {
 
   private rotateMemberKeyIfUnderfunded = async (params: {
     bp: number;
+    /** Mint a replacement even when the key still covers the cycle (reissue). */
+    force?: boolean;
     budget: UsageMultiplierCheckpoint & {
       managedKeyLimitMicroUsd?: number | null;
       openrouterKeyCiphertext?: string | null;
@@ -790,8 +810,9 @@ export class AicoOpenRouterKeyService {
     });
 
     // The key still covers the rest of the cycle — including an exhausted cycle,
-    // where the headroom is zero and a new key would buy nothing.
-    if (read.remainingMicro >= nextLimitMicro) return keep;
+    // where the headroom is zero and a new key would buy nothing (forced or not).
+    if (nextLimitMicro <= 0) return keep;
+    if (!params.force && read.remainingMicro >= nextLimitMicro) return keep;
 
     // As on the wallet path, the old key is retired only once its replacement
     // is persisted.
@@ -967,6 +988,148 @@ export class AicoOpenRouterKeyService {
         name: `aico-user-${userId}`,
         userId,
       });
+    });
+  };
+
+  /**
+   * Bring a wallet's live key down to what it can still spend, after an admin
+   * debit took capacity away. {@link ensureUserKey} only ever raises a key, so
+   * without this the old, larger limit would stay spendable upstream and only
+   * the pre-flight gate would stand between the user and the removed money.
+   *
+   * Resizes in place where the gateway allows it and otherwise reissues, which
+   * mints the replacement at the reduced size and retires the old key.
+   */
+  shrinkUserKey = async (userId: string): Promise<ReissueOutcome> => {
+    if (isSharedInferenceKey()) return { keyId: null, status: 'shared' };
+    const wallet = await this.billingModel.getUserWallet(userId);
+    if (!wallet?.openrouterKeyId || !this.isCurrentProviderKey(wallet.managedKeyProviderId)) {
+      return this.ensureUserKey(userId).then(({ created, keyId }) => ({
+        keyId,
+        status: created ? 'migrated' : 'kept',
+      }));
+    }
+
+    // OpenRouter limits are mutable: the ensure path pushes the lower capacity.
+    if (this.managed.capabilities.updateLimit) {
+      const { keyId } = await this.ensureUserKey(userId);
+      return { keyId, status: 'resized' };
+    }
+
+    const outcome = await runExclusive(`user-key:${userId}`, async () => {
+      const row = await this.billingModel.getUserWallet(userId);
+      if (!row?.openrouterKeyId || !row.openrouterKeyCiphertext) return 'unavailable' as const;
+      const targetMicro =
+        Number(row.rawCapacityMicroUsd ?? 0) -
+        Math.max(0, Number(row.rawUsageBeforeKeyMicroUsd ?? 0));
+      return this.resizeFixedLimitKey(
+        {
+          managedKeyLimitMicroUsd: row.managedKeyLimitMicroUsd,
+          openrouterKeyCiphertext: row.openrouterKeyCiphertext,
+          openrouterKeyId: row.openrouterKeyId,
+        },
+        {
+          active: Number(row.balanceMicroUsd ?? 0) > 0,
+          persistLimit: (micro) =>
+            this.billingModel.updateUserOpenRouterKey({
+              ciphertext: row.openrouterKeyCiphertext as string,
+              keyId: row.openrouterKeyId as string,
+              managedKeyLimitMicroUsd: micro,
+              userId,
+            }),
+          targetMicro: Math.max(0, targetMicro),
+        },
+      );
+    });
+    if (outcome === 'resized') return { keyId: wallet.openrouterKeyId, status: 'resized' };
+    // An unknown outcome is healed from a live read; reissuing on top of it
+    // would size the replacement from a limit we cannot vouch for.
+    if (outcome === 'ambiguous') return { keyId: wallet.openrouterKeyId, status: 'ambiguous' };
+    return this.reissueUserKey(userId);
+  };
+
+  /**
+   * Replace a wallet's managed key with a freshly minted one carrying the same
+   * remaining allowance — for a changed secret prefix, or a suspected leak.
+   *
+   * Mint and persist first, retire second, exactly as a top-up rotation does:
+   * a failed mint leaves the old key working. A key from the previous gateway
+   * takes the ordinary migration path instead.
+   */
+  reissueUserKey = async (userId: string): Promise<ReissueOutcome> => {
+    if (isSharedInferenceKey()) return { keyId: null, status: 'shared' };
+    const wallet = await this.billingModel.getUserWallet(userId);
+    if (!wallet?.openrouterKeyId) return { keyId: null, status: 'no_key' };
+    if (!this.isCurrentProviderKey(wallet.managedKeyProviderId)) {
+      const { created, keyId } = await this.ensureUserKey(userId);
+      return { keyId, status: created ? 'migrated' : 'kept' };
+    }
+    // An OpenRouter key's secret never changes shape; nothing to reissue for.
+    if (this.managed.capabilities.updateLimit) {
+      return { keyId: wallet.openrouterKeyId, status: 'unsupported' };
+    }
+
+    return runExclusive(`user-key:${userId}`, async () => {
+      const row = await this.billingModel.getUserWallet(userId);
+      if (!row?.openrouterKeyId || !row.openrouterKeyCiphertext) {
+        return { keyId: null, status: 'no_key' } as const;
+      }
+      const { created, keyId } = await this.rotateUserKeyIfUnderfunded({
+        force: true,
+        rawCapacityMicro: Number(row.rawCapacityMicroUsd ?? 0),
+        userId,
+        wallet: {
+          managedKeyLimitMicroUsd: row.managedKeyLimitMicroUsd,
+          openrouterKeyCiphertext: row.openrouterKeyCiphertext,
+          openrouterKeyId: row.openrouterKeyId,
+          rawUsageBeforeKeyMicroUsd: row.rawUsageBeforeKeyMicroUsd,
+        },
+      });
+      return { keyId, status: created ? 'reissued' : 'kept' };
+    });
+  };
+
+  /** The member-budget counterpart of {@link reissueUserKey}. */
+  reissueMemberKey = async (orgMemberId: string): Promise<ReissueOutcome> => {
+    if (isSharedInferenceKey()) return { keyId: null, status: 'shared' };
+    const budget = await this.orgModel.getMemberBudget(orgMemberId);
+    if (!budget?.openrouterKeyId) return { keyId: null, status: 'no_key' };
+    if (!this.isCurrentProviderKey(budget.managedKeyProviderId)) {
+      const { created, keyId } = await this.ensureMemberKey(orgMemberId);
+      return { keyId, status: created ? 'migrated' : 'kept' };
+    }
+    if (this.managed.capabilities.updateLimit) {
+      return { keyId: budget.openrouterKeyId, status: 'unsupported' };
+    }
+
+    return runExclusive(`member-key:${orgMemberId}`, async () => {
+      const row = await this.orgModel.getMemberBudget(orgMemberId);
+      if (!row?.openrouterKeyId || !row.openrouterKeyCiphertext) {
+        return { keyId: null, status: 'no_key' } as const;
+      }
+      // A frozen key cannot be read (`/v1/balance` answers 401), and minting a
+      // spendable replacement for a budget that must not spend is backwards.
+      const inactive =
+        !row.isActive ||
+        row.renewalStatus === 'renewal_pending' ||
+        row.renewalStatus === 'renewal_failed';
+      if (inactive) return { keyId: row.openrouterKeyId, status: 'kept' } as const;
+
+      const { created, keyId } = await this.rotateMemberKeyIfUnderfunded({
+        bp: await this.billingModel.getUsageMultiplierBp(),
+        budget: {
+          billedUsageBeforeBaselineMicroUsd: row.billedUsageBeforeBaselineMicroUsd,
+          checkpointMultiplierBp: row.checkpointMultiplierBp,
+          managedKeyLimitMicroUsd: row.managedKeyLimitMicroUsd,
+          openrouterKeyCiphertext: row.openrouterKeyCiphertext,
+          openrouterKeyId: row.openrouterKeyId,
+          usageBaselineMicroUsd: row.usageBaselineMicroUsd,
+        },
+        cycleCapMicro: currentCycleLimitMicroUsd(row),
+        force: true,
+        orgMemberId,
+      });
+      return { keyId, status: created ? 'reissued' : 'kept' };
     });
   };
 

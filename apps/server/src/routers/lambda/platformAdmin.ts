@@ -4,13 +4,13 @@ import {
   type ManagedProviderId,
 } from '@lobechat/business-const';
 import { TRPCError } from '@trpc/server';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { OrganizationModel } from '@/database/models/organization';
 import { PlatformAdminUserModel } from '@/database/models/platformAdminUser';
-import { aicoKeyOutbox, session, users, userWallets } from '@/database/schemas';
+import { aicoKeyOutbox, memberBudgets, session, users, userWallets } from '@/database/schemas';
 import {
   DEFAULT_USAGE_MULTIPLIER_BP,
   MAX_USAGE_MULTIPLIER_BP,
@@ -35,12 +35,16 @@ import {
   serializeSweepPreview,
   serializeSweepResult,
 } from '@/server/services/aico/orgBudgetSweep';
+import { listReconciliationRuns, runReconciliation } from '@/server/services/aico/reconciliation';
 import {
   resolveTopupAmount,
   topupAmountInputSchema,
 } from '@/server/services/aico/resolveTopupAmount';
 import { recordAicoSecurityEvent } from '@/server/services/aico/securityAudit';
-import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
+import {
+  AicoOpenRouterKeyService,
+  type ReissueOutcome,
+} from '@/server/services/openrouter/keyService';
 import { OpenRouterModelCatalogSyncService } from '@/server/services/openrouter/modelCatalogSync';
 
 /**
@@ -55,6 +59,42 @@ import { OpenRouterModelCatalogSyncService } from '@/server/services/openrouter/
 const managedProviderSchema = z.enum(
   MANAGED_PROVIDER_IDS as unknown as [ManagedProviderId, ...ManagedProviderId[]],
 );
+
+const userTargetSchema = {
+  email: z.string().email().optional(),
+  publicCode: z.string().min(1).max(32).optional(),
+  userId: z.string().min(1).optional(),
+};
+
+const resolveTargetUserId = async (
+  organizationModel: OrganizationModel,
+  input: { email?: string; publicCode?: string; userId?: string },
+) => {
+  let userId = input.userId;
+  if (!userId && input.email) {
+    userId = (await organizationModel.findUserIdByEmail(input.email)) ?? undefined;
+  }
+  if (!userId && input.publicCode) {
+    userId = (await organizationModel.getUserIdByPublicCode(input.publicCode)) ?? undefined;
+  }
+  if (!userId) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'userId, email, or publicCode of an existing user is required',
+    });
+  }
+  return userId;
+};
+
+const serializeReconciliationRun = (run: Awaited<ReturnType<typeof runReconciliation>>) => ({
+  checks: run.checks,
+  error: run.error,
+  finishedAt: run.finishedAt?.toISOString() ?? null,
+  id: run.id,
+  startedAt: run.startedAt.toISOString(),
+  status: run.status,
+  trigger: run.trigger,
+});
 
 const platformProcedure = platformAdminProcedure.use(serverDatabase).use(async ({ ctx, next }) => {
   const organizationModel = new OrganizationModel(ctx.serverDB);
@@ -734,7 +774,10 @@ export const platformAdminRouter = router({
           ctx.billingModel.getFxConfig(),
         ]);
       const fx = await getTomanPerUsd(fxConfig.tomanPerUsd);
-      const topups = txs.filter((t) => t.type === 'topup' || t.type === 'manual_credit');
+      // Admin debits net out the grants they take back.
+      const topups = txs.filter(
+        (t) => t.type === 'topup' || t.type === 'manual_credit' || t.type === 'manual_debit',
+      );
       const totalRevenueToman = topups.reduce((sum, t) => sum + Number(t.amountToman || 0), 0);
       const totalMicroCredited = Math.trunc(
         topups.reduce((sum, t) => sum + Number(t.amountMicroUsd || 0), 0),
@@ -806,6 +849,13 @@ export const platformAdminRouter = router({
         balanceMicroUsd: String(w.balanceMicroUsd ?? 0),
         balanceToman: tomanString(w.balanceToman ?? 0),
         balanceUsd: microUsdToDecimalString(w.balanceMicroUsd ?? 0),
+        /** What an admin debit may take back: balance less settled spend. */
+        availableUsd: microUsdToDecimalString(
+          Math.max(
+            0,
+            Number(w.balanceMicroUsd ?? 0) - Math.max(0, Number(w.settledUsageMicroUsd ?? 0)),
+          ),
+        ),
         banReason: identity?.banReason ?? null,
         banned: Boolean(identity?.banned),
         email: identity?.email ?? null,
@@ -913,6 +963,189 @@ export const platformAdminRouter = router({
       });
     }
     return status;
+  }),
+  /**
+   * Take unspent money back from a personal wallet (e.g. an admin grant that
+   * was never paid for). Ledgered as a negative `manual_debit`, then the live
+   * key is shrunk so it cannot spend what the books no longer hold.
+   */
+  addManualUserDebit: platformProcedure
+    .input(
+      z.object({
+        ...userTargetSchema,
+        amountUsd: z.string().regex(/^\d+(\.\d{1,6})?$/),
+        description: z.string().trim().min(1).max(500),
+        idempotencyKey: z.string().min(8).max(128),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const userId = await resolveTargetUserId(ctx.organizationModel, input);
+      const amountMicroUsd = Number(usdDecimalStringToMicro(input.amountUsd));
+      if (amountMicroUsd <= 0) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'AMOUNT_MUST_BE_POSITIVE' });
+      }
+
+      let result: Awaited<ReturnType<typeof ctx.billingModel.manualDebitUser>>;
+      try {
+        result = await ctx.billingModel.manualDebitUser({
+          amountMicroUsd,
+          createdByAdminId: ctx.adminId,
+          description: input.description,
+          idempotencyKey: input.idempotencyKey,
+          userId,
+        });
+      } catch (error) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: error instanceof Error ? error.message : 'Failed to debit user',
+        });
+      }
+
+      // The debit is committed; from here on only the key can lag behind it.
+      let key: ReissueOutcome | null = null;
+      try {
+        key = await new AicoOpenRouterKeyService(ctx.serverDB).shrinkUserKey(userId);
+      } catch (error) {
+        console.error('[aico] user debit committed but managed key shrink failed', error);
+      }
+      if (!key || key.status === 'ambiguous') {
+        await ctx.serverDB
+          .insert(aicoKeyOutbox)
+          .values({ action: 'sync_user_key', nextAttemptAt: new Date(), status: 'pending', userId })
+          .catch((enqueueError) =>
+            console.error('[aico] failed to enqueue sync_user_key retry', enqueueError),
+          );
+      }
+
+      await recordAicoSecurityEvent(ctx.serverDB, {
+        action: 'platform.credit.user_debit',
+        actorAdminId: ctx.adminId,
+        ipAddress: ctx.clientIp,
+        metadata: {
+          amountMicroUsd,
+          idempotencyKey: input.idempotencyKey,
+          keyStatus: key?.status ?? 'failed',
+          targetUserId: userId,
+          transactionId: result.transaction.id,
+        },
+        targetId: userId,
+        targetType: 'user',
+        userAgent: ctx.userAgent,
+      }).catch((error) => console.error('[aico] failed to record debit audit event', error));
+
+      return {
+        keyStatus: key?.status ?? 'queued',
+        transactionId: result.transaction.id,
+        userId,
+        wallet: {
+          availableUsd: microUsdToDecimalString(
+            Math.max(0, result.wallet.balanceMicroUsd - result.wallet.settledUsageMicroUsd),
+          ),
+          balanceUsd: microUsdToDecimalString(result.wallet.balanceMicroUsd ?? 0),
+        },
+      };
+    }),
+
+  /**
+   * Re-mint managed keys at their current headroom (e.g. after the provider's
+   * secret prefix changed), retiring the old ones. Subjects still on a retired
+   * provider are migrated instead. Sequential on purpose: CVC rate-limits.
+   */
+  reissueManagedKeys: platformProcedure
+    .input(
+      z.discriminatedUnion('scope', [
+        z.object({ scope: z.literal('all') }),
+        z.object({ scope: z.literal('user'), ...userTargetSchema }),
+        z.object({ orgMemberId: z.string().min(1), scope: z.literal('member') }),
+      ]),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const keyService = new AicoOpenRouterKeyService(ctx.serverDB);
+      const userIds: string[] = [];
+      const memberIds: string[] = [];
+
+      if (input.scope === 'user') {
+        userIds.push(await resolveTargetUserId(ctx.organizationModel, input));
+      } else if (input.scope === 'member') {
+        memberIds.push(input.orgMemberId);
+      } else {
+        const wallets = await ctx.serverDB
+          .select({ userId: userWallets.userId })
+          .from(userWallets)
+          .where(and(isNotNull(userWallets.openrouterKeyId), eq(userWallets.isActive, true)));
+        userIds.push(...wallets.map((w) => w.userId));
+        const budgets = await ctx.serverDB
+          .select({ orgMemberId: memberBudgets.orgMemberId })
+          .from(memberBudgets)
+          .where(and(isNotNull(memberBudgets.openrouterKeyId), eq(memberBudgets.isActive, true)));
+        memberIds.push(...budgets.map((b) => b.orgMemberId));
+      }
+
+      const results: {
+        error?: string;
+        id: string;
+        kind: 'member' | 'user';
+        outcome?: ReissueOutcome;
+      }[] = [];
+      for (const id of userIds) {
+        try {
+          results.push({ id, kind: 'user', outcome: await keyService.reissueUserKey(id) });
+        } catch (error) {
+          results.push({ error: (error as Error).message.slice(0, 200), id, kind: 'user' });
+        }
+      }
+      for (const id of memberIds) {
+        try {
+          results.push({ id, kind: 'member', outcome: await keyService.reissueMemberKey(id) });
+        } catch (error) {
+          results.push({ error: (error as Error).message.slice(0, 200), id, kind: 'member' });
+        }
+      }
+
+      await recordAicoSecurityEvent(ctx.serverDB, {
+        action: 'platform.keys.reissue',
+        actorAdminId: ctx.adminId,
+        ipAddress: ctx.clientIp,
+        metadata: {
+          results: results.map((r) => ({
+            error: r.error ?? null,
+            id: r.id,
+            kind: r.kind,
+            status: r.outcome?.status ?? 'error',
+          })),
+          scope: input.scope,
+        },
+        targetId: input.scope === 'all' ? 'all' : (userIds[0] ?? memberIds[0]),
+        targetType: input.scope === 'member' ? 'organization_member' : 'user',
+        userAgent: ctx.userAgent,
+      }).catch((error) => console.error('[aico] failed to record reissue audit event', error));
+
+      return results.map((r) => ({
+        error: r.error ?? null,
+        id: r.id,
+        kind: r.kind,
+        status: r.outcome?.status ?? 'error',
+      }));
+    }),
+
+  getReconciliationStatus: platformProcedure.query(async ({ ctx }) => {
+    const runs = await listReconciliationRuns(ctx.serverDB, 20);
+    return {
+      history: runs.map((r) => ({
+        finishedAt: r.finishedAt?.toISOString() ?? null,
+        id: r.id,
+        startedAt: r.startedAt.toISOString(),
+        status: r.status,
+        trigger: r.trigger,
+      })),
+      latest: runs[0] ? serializeReconciliationRun(runs[0]) : null,
+    };
+  }),
+
+  /** Manual "Run now"; within a minute of the last run it returns that run. */
+  runReconciliation: platformProcedure.mutation(async ({ ctx }) => {
+    const run = await runReconciliation(ctx.serverDB, { adminId: ctx.adminId, trigger: 'manual' });
+    return serializeReconciliationRun(run);
   }),
 });
 

@@ -42,6 +42,7 @@ const prefixes = {
   platformAdminSessions: 'opsess',
   platformAdminUsers: 'opusr',
   plugins: 'plg',
+  reconciliationRuns: 'rcn',
   renewalBatches: 'rnw',
   sessionGroups: 'sg',
   sessions: 'ssn',

@@ -29,7 +29,9 @@ import {
   MODEL_MULTIPLIERS_SWR_KEY,
   ModelMultiplierTable,
 } from '@/features/PlatformAdmin/ModelMultiplierTable';
+import { ReconciliationSection } from '@/features/PlatformAdmin/ReconciliationSection';
 import { UsageMultiplierSection } from '@/features/PlatformAdmin/UsageMultiplierSection';
+import { UserDebitSection } from '@/features/PlatformAdmin/UserDebitSection';
 import { useClientDataSWR } from '@/libs/swr';
 import { controlPlaneClient } from '@/libs/trpc/client/controlPlane';
 
@@ -228,6 +230,8 @@ export const PlatformAdminPanel = () => {
           onChange={setTab}
         />
       </div>
+
+      {tab === 'overview' && <ReconciliationSection />}
 
       {tab === 'overview' && (
         <Block className={aicoPanelStyles.section} variant="outlined">
@@ -1060,6 +1064,11 @@ export const PlatformAdminPanel = () => {
               </Form>
             </Flexbox>
           </Block>
+
+          <UserDebitSection
+            wallets={userWallets || []}
+            onChanged={() => Promise.all([mutateUserWallets(), mutateFinancials()])}
+          />
         </Flexbox>
       )}
     </Flexbox>

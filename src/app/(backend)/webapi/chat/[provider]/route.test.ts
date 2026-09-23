@@ -28,9 +28,14 @@ vi.mock('@/auth', () => ({
 
 // `vi.mock` factories run at import time, before top-level consts initialise,
 // so the spies have to be hoisted alongside them.
-const { getUserRemaining, syncMemberCycleUsage } = vi.hoisted(() => ({
+const { getUserRemaining, recordUsage, syncMemberCycleUsage } = vi.hoisted(() => ({
   getUserRemaining: vi.fn(),
+  recordUsage: vi.fn(),
   syncMemberCycleUsage: vi.fn(),
+}));
+
+vi.mock('@/database/models/aicoBilling', () => ({
+  AicoBillingModel: vi.fn(() => ({ recordUsage })),
 }));
 
 vi.mock('@/server/services/openrouter/keyService', () => ({
@@ -227,6 +232,42 @@ describe('POST handler', () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         expect(getUserRemaining).not.toHaveBeenCalled();
+      } finally {
+        ledger.mode = 'off';
+      }
+    });
+
+    it('logs a placeholder row only while the ledger is off', async () => {
+      const mockRuntime: LobeRuntimeAI = {
+        baseURL: 'abc',
+        chat: vi.fn().mockResolvedValue(new Response('ok')),
+      };
+      vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+      await POST(makeRequest({ model: 'test-model' }), {
+        params: Promise.resolve({ provider: 'openrouter' }),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(recordUsage).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps settling spend but leaves the priced row to the shadow hold', async () => {
+      ledger.mode = 'shadow';
+      try {
+        const mockRuntime: LobeRuntimeAI = {
+          baseURL: 'abc',
+          chat: vi.fn().mockResolvedValue(new Response('ok')),
+        };
+        vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+        await POST(makeRequest({ model: 'test-model' }), {
+          params: Promise.resolve({ provider: 'openrouter' }),
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        // Regression: shadow wrote a zero-cost row beside the hold's priced one.
+        expect(getUserRemaining).toHaveBeenCalledWith('test-user-id', { persist: true });
+        expect(recordUsage).not.toHaveBeenCalled();
       } finally {
         ledger.mode = 'off';
       }

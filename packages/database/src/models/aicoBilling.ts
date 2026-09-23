@@ -252,6 +252,123 @@ export class AicoBillingModel {
   };
 
   /**
+   * Platform-admin reduction of a B2C wallet — the ledgered inverse of
+   * {@link manualCreditUser}, for taking back a grant that was never paid for.
+   *
+   * Only unspent money can be taken: the amount must not exceed
+   * `balance − settled usage`. Balance, capacity and the toman mirror all fall
+   * by the same fraction, so the wallet keeps the rate its money was bought at
+   * and billed usage re-derived from capacity is unchanged. The caller shrinks
+   * the managed key afterwards; until then the pre-flight gate refuses spend
+   * past the new balance.
+   */
+  manualDebitUser = async (params: {
+    amountMicroUsd: number;
+    createdByAdminId?: string | null;
+    description: string;
+    /** Unique in wallet_transactions.gateway_ref_id — a retry returns the first debit. */
+    idempotencyKey: string;
+    userId: string;
+  }) => {
+    if (!Number.isInteger(params.amountMicroUsd) || params.amountMicroUsd <= 0) {
+      throw new Error('AMOUNT_MICRO_USD_MUST_BE_POSITIVE_INTEGER');
+    }
+    if (!params.description.trim()) throw new Error('DESCRIPTION_REQUIRED');
+
+    const replay = async () => {
+      const existingTx = await this.db.query.walletTransactions.findFirst({
+        where: eq(walletTransactions.gatewayRefId, params.idempotencyKey),
+      });
+      if (!existingTx) return null;
+      if (existingTx.userId !== params.userId || existingTx.type !== 'manual_debit') {
+        throw new Error('IDEMPOTENCY_KEY_CONFLICT');
+      }
+      return { transaction: existingTx, wallet: (await this.getUserWallet(params.userId))! };
+    };
+
+    const existing = await replay();
+    if (existing) return existing;
+
+    const applyDebit = () =>
+      this.db.transaction(async (tx) => {
+        const [before] = await tx
+          .select()
+          .from(userWallets)
+          .where(eq(userWallets.userId, params.userId))
+          .limit(1)
+          .for('update');
+        if (!before) throw new Error('WALLET_NOT_FOUND');
+        if (!before.isActive) throw new Error('WALLET_INACTIVE');
+
+        const balance = Number(before.balanceMicroUsd ?? 0);
+        const settled = Math.max(0, Number(before.settledUsageMicroUsd ?? 0));
+        const available = balance - settled;
+        if (params.amountMicroUsd > available) throw new Error('DEBIT_EXCEEDS_AVAILABLE');
+
+        const rawCapacity = Number(before.rawCapacityMicroUsd ?? 0);
+        const balanceToman = Number(before.balanceToman ?? 0);
+        // Same fraction off every figure the balance was bought with. Floor the
+        // removed capacity so rounding can only ever leave the user a hair more.
+        const rawRemoved = Math.floor((rawCapacity * params.amountMicroUsd) / balance);
+        const tomanRemoved = Math.floor((balanceToman * params.amountMicroUsd) / balance);
+
+        // The key limit is `rawCapacity − rawUsageBeforeKey`, and enforce holds
+        // count against capacity too — neither may be pushed below zero.
+        const rawFloor = Math.max(
+          Number(before.rawUsageBeforeKeyMicroUsd ?? 0),
+          Number(before.rawUsedMicroUsd ?? 0) + Number(before.rawHeldMicroUsd ?? 0),
+        );
+        if (rawCapacity - rawRemoved < rawFloor) throw new Error('DEBIT_EXCEEDS_AVAILABLE');
+
+        const [wallet] = await tx
+          .update(userWallets)
+          .set({
+            balanceMicroUsd: sql`${userWallets.balanceMicroUsd} - ${params.amountMicroUsd}`,
+            balanceToman: sql`${userWallets.balanceToman} - ${tomanRemoved}`,
+            rawCapacityMicroUsd: sql`${userWallets.rawCapacityMicroUsd} - ${rawRemoved}`,
+          })
+          .where(eq(userWallets.userId, params.userId))
+          .returning();
+
+        const [transaction] = await tx
+          .insert(walletTransactions)
+          .values({
+            // Negative, so `balance_after − balance_before == amount` holds.
+            amountMicroUsd: -params.amountMicroUsd,
+            amountToman: -tomanRemoved,
+            balanceAfterMicroUsd: Number(wallet.balanceMicroUsd),
+            balanceAfterToman: Number(wallet.balanceToman),
+            balanceBeforeMicroUsd: balance,
+            balanceBeforeToman: balanceToman,
+            createdByAdminId: params.createdByAdminId ?? null,
+            description: params.description,
+            gatewayRefId: params.idempotencyKey,
+            metadata: {
+              availableBeforeMicroUsd: available,
+              rawCapacityRemovedMicroUsd: rawRemoved,
+              settledUsageMicroUsd: settled,
+            },
+            type: 'manual_debit',
+            userId: params.userId,
+          })
+          .returning();
+
+        return { transaction, wallet };
+      });
+
+    try {
+      return await applyDebit();
+    } catch (error) {
+      // A concurrent submit with the same key committed first: return its debit
+      // rather than an error an admin would answer with a second debit.
+      if (!isUniqueConstraintViolation(error)) throw error;
+      const raced = await replay();
+      if (!raced) throw error;
+      return raced;
+    }
+  };
+
+  /**
    * Park a personal balance and the capacity it bought while the account is
    * disabled, and record the move on the ledger.
    *
