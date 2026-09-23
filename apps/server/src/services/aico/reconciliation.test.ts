@@ -153,6 +153,45 @@ describe('runReconciliation', () => {
     expect(ledger.details.join('\n')).toContain('previous row ended at $5.0000');
   });
 
+  it('follows the chain through rows written at the same instant', async () => {
+    // A refund and the renewal that re-spends it, in one transaction: same
+    // timestamp, and ids that sort the wrong way round.
+    const at = new Date(Date.now() + 1000);
+    const tie = {
+      amountToman: 0,
+      createdAt: at,
+      createdByUserId: userId,
+      description: 'x',
+      userId,
+    };
+    await db.insert(walletTransactions).values([
+      {
+        ...tie,
+        amountMicroUsd: -1_000_000,
+        balanceAfterMicroUsd: 5_000_000,
+        balanceBeforeMicroUsd: 6_000_000,
+        id: 'wtx_a_second',
+        type: 'adjustment',
+      },
+      {
+        ...tie,
+        amountMicroUsd: 1_000_000,
+        balanceAfterMicroUsd: 6_000_000,
+        balanceBeforeMicroUsd: 5_000_000,
+        id: 'wtx_b_first',
+        type: 'refund',
+      },
+    ]);
+
+    const run = await runReconciliation(
+      db,
+      { trigger: 'cron' },
+      deps({ floatUsd: 20, remainingUsd: 4 }),
+    );
+
+    expect(checkOf(run, 'wallet_ledger')).toMatchObject({ details: [], status: 'ok' });
+  });
+
   it('goes red when live keys can spend more than the float', async () => {
     const run = await runReconciliation(
       db,
