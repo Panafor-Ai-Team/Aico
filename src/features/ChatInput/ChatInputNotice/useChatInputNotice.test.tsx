@@ -32,6 +32,7 @@ const testState = vi.hoisted(() => ({
   },
   aiInfra: {
     enabledChatModelList: [] as TestProviderWithModels[],
+    isEnabledChatModelsPending: false,
     isInitAiProviderRuntimeState: false,
   },
   isDesktop: false,
@@ -73,7 +74,10 @@ vi.mock('@/features/ChatInput/hooks/useChatInputResourceAccess', () => ({
 }));
 
 vi.mock('@/hooks/useEnabledChatModels', () => ({
-  useEnabledChatModels: () => testState.aiInfra.enabledChatModelList,
+  useEnabledChatModelsState: () => ({
+    isPending: testState.aiInfra.isEnabledChatModelsPending,
+    list: testState.aiInfra.enabledChatModelList,
+  }),
 }));
 
 vi.mock('@/store/agent', () => ({
@@ -110,6 +114,7 @@ describe('useChatInputNotice', () => {
     testState.agent.model = 'gpt-4o';
     testState.agent.provider = 'openai';
     testState.aiInfra.enabledChatModelList = [];
+    testState.aiInfra.isEnabledChatModelsPending = false;
     testState.aiInfra.isInitAiProviderRuntimeState = false;
     testState.isDesktop = false;
     testState.resourceAccess = {
@@ -235,6 +240,17 @@ describe('useChatInputNotice', () => {
     testState.aiInfra.enabledChatModelList = [
       { children: [{ abilities: { functionCall: true }, id: 'gpt-4o' }], id: 'openai' },
     ];
+
+    const { result } = renderHook(() => useChatInputNotice());
+
+    expect(result.current).toBeUndefined();
+  });
+
+  it('does not return unavailable model copy while the org allow-list is still loading', () => {
+    // Cold load on an org wallet: the enabled list hides managed models until
+    // the team allow-list and catalog arrive, so the selected model looks absent.
+    testState.aiInfra.isInitAiProviderRuntimeState = true;
+    testState.aiInfra.isEnabledChatModelsPending = true;
 
     const { result } = renderHook(() => useChatInputNotice());
 
