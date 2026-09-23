@@ -30,7 +30,21 @@ RUN set -e && \
     cp /usr/lib/$(arch)-linux-gnu/librt.so.1 /distroless/lib/librt.so.1 && \
     cp /usr/local/bin/node /distroless/bin/node && \
     cp /etc/ssl/certs/ca-certificates.crt /distroless/etc/ssl/certs/ca-certificates.crt && \
+    find /distroless -exec touch -h -d @0 {} + && \
     rm -rf /tmp/* /var/lib/apt/lists/* /var/tmp/*
+
+## Workspace manifests only: the install layer below stays cached across
+## source-only commits, which keeps runtime node_modules byte-identical and
+## lets `docker pull` reuse that layer on deploy.
+FROM base AS manifests
+
+WORKDIR /src
+
+COPY packages ./packages
+
+RUN set -e && \
+    mkdir -p /out && \
+    find packages -name package.json -not -path '*/node_modules/*' -exec cp --parents {} /out/ \;
 
 ## Builder image, install all the dependencies and build the app
 FROM base AS builder
@@ -69,7 +83,7 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml ./
 COPY .npmrc ./
-COPY packages ./packages
+COPY --from=manifests /out/packages ./packages
 COPY patches ./patches
 # bring in desktop workspace manifest so pnpm can resolve it
 COPY apps/desktop/src/main/package.json ./apps/desktop/src/main/package.json
@@ -109,44 +123,59 @@ RUN set -eux; \
     mkdir -p "${next_dir}/node_modules/@swc/helpers"; \
     cp -a "${helper_src}/node_modules/@swc/helpers/." "${next_dir}/node_modules/@swc/helpers/"
 
-## Application image, copy all the files for production
-FROM busybox:latest AS app
+# Split the standalone tree so each part becomes its own image layer: deploys
+# then re-pull only the layers whose content changed. mtimes are zeroed only on
+# trees never served over HTTP (static ETags derive from size+mtime), so the
+# same deps produce the same layer digest. The standalone copies of public/_spa*
+# are dropped because the builder's public/_spa* are copied over them anyway.
+RUN set -eux; \
+    mkdir -p /out; \
+    mv .next/standalone/node_modules /out/node_modules; \
+    mv .next/standalone/dist /out/dist; \
+    rm -rf .next/standalone/public/_spa .next/standalone/public/_spa-auth .next/standalone/public/_spa-workbench; \
+    find /out/node_modules /deps/node_modules packages/database/migrations -exec touch -h -d @0 {} +
 
-COPY --from=base /distroless/ /
+## Production image. Not flattened: one layer per part (--link keeps each layer
+## independent of the ones before it), ownership set via --chown instead of
+## `chown -R`, which would duplicate the whole tree into another layer.
+FROM busybox:latest
 
-# Automatically leverage output traces to reduce image size
-# https://nextjs.org/docs/advanced-features/output-file-tracing
-COPY --from=builder /app/.next/standalone /app/
-COPY --from=builder /app/.next/static /app/.next/static
-# Copy SPA assets (Vite build output)
-COPY --from=builder /app/public/_spa /app/public/_spa
-COPY --from=builder /app/public/_spa-auth /app/public/_spa-auth
-COPY --from=builder /app/public/_spa-workbench /app/public/_spa-workbench
-# Copy database migrations
-COPY --from=builder /app/packages/database/migrations /app/migrations
-COPY --from=builder /app/docs/changelog /app/docs/changelog
-COPY --from=builder /app/scripts/migrateServerDB/docker.cjs /app/docker.cjs
-COPY --from=builder /app/scripts/migrateServerDB/errorHint.js /app/errorHint.js
-
-# copy dependencies
-COPY --from=builder /deps/node_modules/.pnpm /app/node_modules/.pnpm
-COPY --from=builder /deps/node_modules/pg /app/node_modules/pg
-COPY --from=builder /deps/node_modules/drizzle-orm /app/node_modules/drizzle-orm
-
-# Copy server launcher and shared scripts
-COPY --from=builder /app/scripts/serverLauncher/startServer.js /app/startServer.js
-COPY --from=builder /app/scripts/_shared /app/scripts/_shared
+COPY --link --from=base /distroless/ /
 
 RUN set -e && \
     addgroup -S -g 1001 nodejs && \
     adduser -D -G nodejs -H -S -h /app -u 1001 nextjs && \
-    chown -R nextjs:nodejs /app /etc/proxychains4.conf
+    mkdir -p /app && \
+    chown nextjs:nodejs /app /etc/proxychains4.conf
 
-## Production image, copy all the files and run next
-FROM scratch
+# Automatically leverage output traces to reduce image size
+# https://nextjs.org/docs/advanced-features/output-file-tracing
+COPY --link --chown=1001:1001 --from=builder /out/node_modules /app/node_modules
+COPY --link --chown=1001:1001 --from=builder /out/dist /app/dist
+COPY --link --chown=1001:1001 --from=builder /app/.next/standalone /app/
+COPY --link --chown=1001:1001 --from=builder /app/.next/static /app/.next/static
+# Copy SPA assets (Vite build output)
+COPY --link --chown=1001:1001 --from=builder /app/public/_spa /app/public/_spa
+COPY --link --chown=1001:1001 --from=builder /app/public/_spa-auth /app/public/_spa-auth
+COPY --link --chown=1001:1001 --from=builder /app/public/_spa-workbench /app/public/_spa-workbench
+# Copy database migrations
+COPY --link --chown=1001:1001 --from=builder /app/packages/database/migrations /app/migrations
+COPY --link --chown=1001:1001 --from=builder /app/docs/changelog /app/docs/changelog
+COPY --link --chown=1001:1001 --from=builder /app/scripts/migrateServerDB/docker.cjs /app/docker.cjs
+COPY --link --chown=1001:1001 --from=builder /app/scripts/migrateServerDB/errorHint.js /app/errorHint.js
 
-# Copy all the files from app, set the correct permission for prerender cache
-COPY --from=app / /
+# copy dependencies
+COPY --link --chown=1001:1001 --from=builder /deps/node_modules/.pnpm /app/node_modules/.pnpm
+COPY --link --chown=1001:1001 --from=builder /deps/node_modules/pg /app/node_modules/pg
+COPY --link --chown=1001:1001 --from=builder /deps/node_modules/drizzle-orm /app/node_modules/drizzle-orm
+
+# Copy server launcher and shared scripts
+COPY --link --chown=1001:1001 --from=builder /app/scripts/serverLauncher/startServer.js /app/startServer.js
+COPY --link --chown=1001:1001 --from=builder /app/scripts/_shared /app/scripts/_shared
+
+# --link layers may create parent dirs (/app, /app/.next, …) as root; restore the
+# previous ownership so Next can write .next/cache. Dirs only: a tiny layer.
+RUN find /app -type d ! -user 1001 -exec chown nextjs:nodejs {} +
 
 ENV NODE_ENV="production" \
     NODE_OPTIONS="--dns-result-order=ipv4first --use-openssl-ca" \

@@ -11,7 +11,21 @@
 
 ARG NODEJS_VERSION="24"
 
-FROM node:${NODEJS_VERSION}-bookworm-slim AS builder
+## Workspace manifests only: `pnpm i` below stays cached across source-only
+## commits, which keeps node_modules byte-identical so `docker pull` reuses
+## that (large) layer on deploy.
+FROM node:${NODEJS_VERSION}-bookworm-slim AS manifests
+
+WORKDIR /src
+
+COPY . .
+
+RUN set -e; \
+    mkdir -p /out; \
+    find . -name package.json -not -path '*/node_modules/*' -exec cp --parents {} /out/ \;; \
+    cp -a pnpm-workspace.yaml .npmrc patches /out/
+
+FROM node:${NODEJS_VERSION}-bookworm-slim AS deps
 
 # This repo sets lockfile=false. Do not use frozen-lockfile (headless install
 # fails) or pnpm's allow-all-builds config (conflicts with
@@ -34,13 +48,25 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && npm i -g corepack@latest && corepack enable
 
-COPY . .
+COPY --from=manifests /out/ ./
 
+# mtimes zeroed so an unchanged install yields an identical layer digest.
 RUN set -e; \
     grep -qE '^[[:space:]]*-[[:space:]]*esbuild$' pnpm-workspace.yaml \
       || sed -i '/^onlyBuiltDependencies:/a\  - esbuild' pnpm-workspace.yaml; \
     corepack use "$(sed -n 's/.*"packageManager": "\(.*\)".*/\1/p' package.json)"; \
-    pnpm i
+    pnpm i; \
+    cp pnpm-workspace.yaml /tmp/pnpm-workspace.yaml; \
+    find node_modules -exec touch -h -d @0 {} +
+
+# The runtime image takes node_modules from `deps`, not from here, so caches the
+# build writes into node_modules cannot change that layer.
+FROM deps AS builder
+
+COPY . .
+
+# `COPY . .` restores the pristine pnpm-workspace.yaml; keep the esbuild allowlist.
+RUN cp /tmp/pnpm-workspace.yaml pnpm-workspace.yaml
 
 RUN pnpm run build:spa:control-plane \
     && pnpm --filter @aico/control-plane build \
@@ -58,17 +84,22 @@ ENV NODE_ENV=production \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/apps/aico-control-plane/dist ./dist
-COPY --from=builder /app/apps/aico-control-plane/web/spa ./web/spa
-COPY --from=builder /app/apps/aico-control-plane/src/web ./src/web
-COPY --from=builder /app/apps/aico-control-plane/package.json ./package.json
-
-RUN groupadd --system --gid 1001 nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 1001 nodejs \
     && useradd --system --uid 1001 --gid nodejs --home-dir /app --no-create-home nextjs \
-    && chown -R nextjs:nodejs /app
+    && chown nextjs:nodejs /app
+
+# --chown instead of `chown -R`, which would duplicate node_modules into a
+# second multi-GB layer.
+COPY --link --chown=1001:1001 --from=deps /app/node_modules ./node_modules
+COPY --link --chown=1001:1001 --from=builder /app/apps/aico-control-plane/dist ./dist
+COPY --link --chown=1001:1001 --from=builder /app/apps/aico-control-plane/web/spa ./web/spa
+COPY --link --chown=1001:1001 --from=builder /app/apps/aico-control-plane/src/web ./src/web
+COPY --link --chown=1001:1001 --from=builder /app/apps/aico-control-plane/package.json ./package.json
+
+# --link layers may create parent dirs (/app/web, /app/src) as root; restore the
+# previous ownership. Dirs only: a tiny layer.
+RUN find /app -type d ! -user 1001 -exec chown nextjs:nodejs {} +
 
 USER nextjs
 EXPOSE 3020
