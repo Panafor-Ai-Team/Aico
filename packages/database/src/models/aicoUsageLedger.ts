@@ -106,6 +106,9 @@ const nonNegInt = (value: unknown): number => Math.max(0, toInt(value));
 const intOrNull = (value: unknown): number | null =>
   value === null || value === undefined ? null : nonNegInt(value);
 
+/** A cost measured by a shadow hold; the subject's balance was not touched by it. */
+export const SHADOW_SETTLEMENT_STATUS = 'shadow';
+
 const settlementStatusFor = (reason: SettleReason): string => {
   if (reason === 'usage') return 'synchronized';
   if (reason === 'released_rejected' || reason === 'not_metered') return 'released';
@@ -514,6 +517,29 @@ export class AicoUsageLedgerModel {
       })
       .where(eq(usageHolds.id, hold.id));
 
+    // Every settled call leaves one priced `usage_logs` row, in both modes: this
+    // is the per-request cost trail.
+    await tx
+      .insert(usageLogs)
+      .values({
+        billingSource: hold.billingSource,
+        completionTokens: nonNegInt(tokens?.completion),
+        costMicroUsd: chargedBilled,
+        holdId: hold.id,
+        modelId: params.resolvedModelId ?? hold.modelId,
+        multiplierBp: hold.multiplierBp,
+        orgId: hold.orgId,
+        orgMemberId: hold.orgMemberId,
+        promptTokens: nonNegInt(tokens?.prompt),
+        // Shadow holds carry the same per-request cost, but nothing was debited
+        // from the subject — the status says so.
+        settlementStatus:
+          hold.mode === 'enforce' ? settlementStatusFor(params.reason) : SHADOW_SETTLEMENT_STATUS,
+        totalTokens: nonNegInt(tokens?.total),
+        userId: hold.userId,
+      })
+      .onConflictDoNothing({ target: usageLogs.holdId });
+
     if (hold.mode !== 'enforce') return { settled: true };
 
     if (hold.subjectType === 'wallet') {
@@ -562,24 +588,6 @@ export class AicoUsageLedgerModel {
         })
         .where(eq(memberBudgets.id, hold.budgetId));
     }
-
-    await tx
-      .insert(usageLogs)
-      .values({
-        billingSource: hold.billingSource,
-        completionTokens: nonNegInt(tokens?.completion),
-        costMicroUsd: chargedBilled,
-        holdId: hold.id,
-        modelId: params.resolvedModelId ?? hold.modelId,
-        multiplierBp: hold.multiplierBp,
-        orgId: hold.orgId,
-        orgMemberId: hold.orgMemberId,
-        promptTokens: nonNegInt(tokens?.prompt),
-        settlementStatus: settlementStatusFor(params.reason),
-        totalTokens: nonNegInt(tokens?.total),
-        userId: hold.userId,
-      })
-      .onConflictDoNothing({ target: usageLogs.holdId });
 
     return { settled: true };
   };

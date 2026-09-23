@@ -749,4 +749,126 @@ describe('immutable-limit provider — member budgets', () => {
       expect(Number(synced?.settledUsageMicroUsd)).toBe(0);
     });
   });
+
+  describe('reissue (changed secret prefix)', () => {
+    it('mints a replacement with the cycle headroom and deletes the old key', async () => {
+      const provider = new RevocableImmutableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      const { member, orgModel } = await setupMember();
+      const first = await keys.ensureMemberKey(member.id);
+      provider.spend(first.keyId!, 4);
+
+      const outcome = await keys.reissueMemberKey(member.id);
+
+      expect(outcome.status).toBe('reissued');
+      expect(outcome.keyId).not.toBe(first.keyId);
+      expect([...provider.keys.keys()]).toEqual([outcome.keyId]);
+      // $12 at 1.2x is $10 raw, $4 of it spent: the new key gets the $6 left.
+      expect(provider.keys.get(outcome.keyId!)!.limitUsd).toBe(6);
+      const budget = await orgModel.getMemberBudget(member.id);
+      expect(budget?.openrouterKeyId).toBe(outcome.keyId);
+      // The spend on the retired key is billed into the checkpoint, not forgotten.
+      expect(Number(budget?.billedUsageBeforeBaselineMicroUsd)).toBe(usd(4.8));
+    });
+
+    it('leaves a budget that must not spend on its frozen key', async () => {
+      const provider = new RevocableImmutableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      const { member } = await setupMember();
+      const first = await keys.ensureMemberKey(member.id);
+      await db
+        .update(memberBudgets)
+        .set({ renewalStatus: 'renewal_failed' })
+        .where(eq(memberBudgets.orgMemberId, member.id));
+
+      expect(await keys.reissueMemberKey(member.id)).toEqual({
+        keyId: first.keyId,
+        status: 'kept',
+      });
+      expect([...provider.keys.keys()]).toEqual([first.keyId]);
+    });
+  });
+});
+
+describe('admin key operations — personal wallet', () => {
+  it('reissue mints a replacement with the unspent capacity and carries spend forward', async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    await creditUser(12);
+    const first = await keys.ensureUserKey(userId);
+    provider.spend(first.keyId!, 4);
+
+    const outcome = await keys.reissueUserKey(userId);
+
+    expect(outcome.status).toBe('reissued');
+    expect([...provider.keys.keys()]).toEqual([outcome.keyId]);
+    // $12 at 1.2x bought $10 raw; $4 spent leaves $6 on the new key.
+    expect(provider.keys.get(outcome.keyId!)!.limitUsd).toBe(6);
+    const wallet = await readWallet();
+    expect(wallet?.openrouterKeyId).toBe(outcome.keyId);
+    expect(wallet?.rawUsageBeforeKeyMicroUsd).toBe(usd(4));
+  });
+
+  it('reissue keeps a spent-out key and keeps the old key when the mint fails', async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    await creditUser(12);
+    const first = await keys.ensureUserKey(userId);
+
+    provider.createFails = true;
+    await expect(keys.reissueUserKey(userId)).rejects.toThrow(/409/);
+    expect((await readWallet())?.openrouterKeyId).toBe(first.keyId);
+
+    provider.createFails = false;
+    provider.spend(first.keyId!, 10);
+    expect(await keys.reissueUserKey(userId)).toEqual({ keyId: first.keyId, status: 'kept' });
+  });
+
+  describe('shrink after an admin debit', () => {
+    const debit = (amountUsd: number) =>
+      new AicoBillingModel(db).manualDebitUser({
+        amountMicroUsd: usd(amountUsd),
+        description: 'take back grant',
+        idempotencyKey: `debit-${amountUsd}-${Math.random()}`,
+        userId,
+      });
+
+    afterEach(() => {
+      resizeFlag.AICO_CVC_RESIZE_IN_PLACE = false;
+    });
+
+    it('reduces the same key in place', async () => {
+      resizeFlag.AICO_CVC_RESIZE_IN_PLACE = true;
+      const provider = new ResizableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      await creditUser(12);
+      const first = await keys.ensureUserKey(userId);
+      provider.spend(first.keyId!, 2);
+      await debit(6);
+
+      expect(await keys.shrinkUserKey(userId)).toEqual({
+        keyId: first.keyId,
+        status: 'resized',
+      });
+      // Half the grant gone: $10 raw of capacity becomes $5.
+      expect(provider.keys.get(first.keyId!)!.limitUsd).toBe(5);
+      expect((await readWallet())?.managedKeyLimitMicroUsd).toBe(usd(5));
+    });
+
+    it('reissues a smaller key where the limit cannot move', async () => {
+      const provider = new RevocableImmutableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      await creditUser(12);
+      const first = await keys.ensureUserKey(userId);
+      provider.spend(first.keyId!, 2);
+      await debit(6);
+
+      const outcome = await keys.shrinkUserKey(userId);
+
+      expect(outcome.status).toBe('reissued');
+      expect([...provider.keys.keys()]).toEqual([outcome.keyId]);
+      // $5 raw left, $2 already spent on the retired key.
+      expect(provider.keys.get(outcome.keyId!)!.limitUsd).toBe(3);
+    });
+  });
 });

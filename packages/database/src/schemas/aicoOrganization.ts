@@ -1154,3 +1154,44 @@ export const aicoSecurityAlertState = pgTable('aico_security_alert_state', {
 
 export type AicoSecurityAlertStateItem = typeof aicoSecurityAlertState.$inferSelect;
 export type NewAicoSecurityAlertState = typeof aicoSecurityAlertState.$inferInsert;
+
+/** One status of a reconciliation check or run, worst-wins when aggregated. */
+export type AicoReconciliationStatus = 'critical' | 'error' | 'ok' | 'warn';
+
+/** One check's verdict. Ids and amounts only — never a key secret. */
+export interface AicoReconciliationCheck {
+  /** Offending subjects, capped; each is a short human-readable line. */
+  details: string[];
+  id: string;
+  status: AicoReconciliationStatus;
+  /** Headline figures the admin panel renders (micro-USD unless named). */
+  values: Record<string, number | string | null>;
+}
+
+/**
+ * Books-balance checks (ledger chain, float vs promised limits, stored vs live
+ * key limits, key hygiene), run on a cron and by the admin's "Run now".
+ */
+export const aicoReconciliationRuns = pgTable(
+  'aico_reconciliation_runs',
+  {
+    id: text('id')
+      .$defaultFn(() => idGenerator('reconciliationRuns'))
+      .notNull()
+      .primaryKey(),
+    /** cron | manual */
+    trigger: text('trigger').notNull(),
+    status: text('status').$type<AicoReconciliationStatus>().notNull(),
+    checks: jsonb('checks').$type<AicoReconciliationCheck[]>().notNull().default([]),
+    error: text('error'),
+    triggeredByAdminId: text('triggered_by_admin_id').references(() => platformAdminUsers.id, {
+      onDelete: 'set null',
+    }),
+    startedAt: timestamptz('started_at').notNull().defaultNow(),
+    finishedAt: timestamptz('finished_at'),
+  },
+  (t) => [index('aico_reconciliation_runs_started_at_idx').on(t.startedAt)],
+);
+
+export type AicoReconciliationRunItem = typeof aicoReconciliationRuns.$inferSelect;
+export type NewAicoReconciliationRun = typeof aicoReconciliationRuns.$inferInsert;
