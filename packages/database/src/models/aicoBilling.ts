@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { MANAGED_PROVIDER_ID } from '@lobechat/business-const';
-import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, ne, notInArray, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import {
@@ -62,6 +62,13 @@ const stripPhoneNoise = (value: string): string =>
  */
 export const LEGACY_MANUAL_CREDIT_REASON =
   'Legacy manual credit — reason not recorded at the time (backfilled 2026-09-23)';
+
+/**
+ * Filled in by `manualCreditUser` when no reason is passed. Admins could leave
+ * the reason empty before it was required, so old user credits carry it; it
+ * says nothing about why and is never offered as a reason.
+ */
+export const DEFAULT_MANUAL_CREDIT_REASON = 'Manual credit';
 
 /** Normalizes an Iranian mobile number to E.164. Throws `INVALID_PHONE` if implausible. */
 export const normalizeIranianPhoneForFingerprint = (raw: string): string => {
@@ -224,7 +231,7 @@ export class AicoBillingModel {
             balanceBeforeToman,
             createdByAdminId: params.createdByAdminId ?? null,
             createdByUserId: params.createdByUserId ?? null,
-            description: params.description ?? 'Manual credit',
+            description: params.description ?? DEFAULT_MANUAL_CREDIT_REASON,
             fxRateTomanPerUsd: params.fxRateTomanPerUsd,
             gatewayRefId: params.idempotencyKey ?? null,
             // The rate this money was bought at — a later multiplier change
@@ -1085,7 +1092,7 @@ export class AicoBillingModel {
           eq(walletTransactions.type, kind === 'credit' ? 'manual_credit' : 'manual_debit'),
           isNotNull(walletTransactions.createdByAdminId),
           ne(reason, ''),
-          ne(reason, LEGACY_MANUAL_CREDIT_REASON),
+          notInArray(reason, [LEGACY_MANUAL_CREDIT_REASON, DEFAULT_MANUAL_CREDIT_REASON]),
         ),
       )
       .groupBy(reason)

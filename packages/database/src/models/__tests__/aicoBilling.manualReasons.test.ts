@@ -64,10 +64,12 @@ describe('AicoBillingModel.listManualReasons', () => {
     expect(await billingModel.listManualReasons('debit')).toEqual(['Grant never paid for']);
   });
 
-  it('leaves out blank reasons, the legacy backfill and credits no admin made', async () => {
+  it('leaves out blank reasons, placeholder text and credits no admin made', async () => {
     await record({ description: null });
     await record({ description: '   ' });
     await record({ description: LEGACY_MANUAL_CREDIT_REASON });
+    // What `manualCreditUser` filled in while the reason was optional.
+    await record({ description: ' Manual credit' });
     await record({ createdByAdminId: null, createdByUserId: userId, description: 'Org top-up' });
     await record({ description: 'Refund for outage', type: 'topup' });
 
