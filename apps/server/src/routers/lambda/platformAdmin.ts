@@ -424,10 +424,16 @@ export const platformAdminRouter = router({
       }
     }),
 
+  /** Past manual credit / debit reasons, for the admin forms to suggest. */
+  listManualReasons: platformProcedure
+    .input(z.object({ kind: z.enum(['credit', 'debit']) }))
+    .query(({ ctx, input }) => ctx.billingModel.listManualReasons(input.kind)),
+
   addManualCredit: platformProcedure
     .input(
       topupAmountInputSchema.extend({
-        description: z.string().max(500).optional(),
+        // Required: the books check flags any credit that does not say why.
+        description: z.string().trim().min(1).max(500),
         // FIN-013: required, not optional. A null gateway_ref_id skips the
         // partial unique index entirely, which left every manual credit
         // replayable by a simple retry.
@@ -566,7 +572,8 @@ export const platformAdminRouter = router({
   addManualUserCredit: platformProcedure
     .input(
       topupAmountInputSchema.extend({
-        description: z.string().max(500).optional(),
+        // Required — see addManualCredit above.
+        description: z.string().trim().min(1).max(500),
         email: z.string().email().optional(),
         // FIN-013: required — see addManualCredit above.
         idempotencyKey: z.string().min(8).max(128),

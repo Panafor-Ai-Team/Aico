@@ -8,12 +8,16 @@
 import { uuid } from '@lobechat/utils';
 import { Block, Flexbox, Text } from '@lobehub/ui';
 import { Button, confirmModal, Select, toast } from '@lobehub/ui/base-ui';
-import { Form, Input, InputNumber } from 'antd';
+import { Form, InputNumber } from 'antd';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { toastAicoError } from '@/business/client/resolveAicoErrorMessage';
 import { aicoPanelStyles } from '@/features/AicoPanels';
+import {
+  ManualReasonInput,
+  refreshManualReasons,
+} from '@/features/PlatformAdmin/ManualReasonInput';
 import { controlPlaneClient } from '@/libs/trpc/client/controlPlane';
 
 interface WalletOption {
@@ -72,7 +76,7 @@ export const UserDebitSection = ({ wallets, onChanged }: UserDebitSectionProps) 
             }),
           );
           form.resetFields(['amountUsd', 'description']);
-          await onChanged();
+          await Promise.all([onChanged(), refreshManualReasons('debit')]);
         } catch (err) {
           toastAicoError(err, t, 'platform.debit.failed');
         } finally {
@@ -162,7 +166,7 @@ export const UserDebitSection = ({ wallets, onChanged }: UserDebitSectionProps) 
               name="description"
               rules={[{ required: true, whitespace: true }]}
             >
-              <Input />
+              <ManualReasonInput kind="debit" />
             </Form.Item>
             <Button danger htmlType="submit" loading={busy}>
               {t('platform.debit.submit')}

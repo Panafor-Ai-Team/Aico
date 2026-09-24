@@ -293,6 +293,7 @@
   "platform.debit.title": "Reduce user balance",
   "platform.debit.tooMuch": "More than the user has left unspent",
   "platform.description": "Description",
+  "platform.descriptionPlaceholder": "Pick a past reason or type a new one",
   "platform.forbiddenDesc": "Only platform admins can open this page.",
   "platform.forbiddenTitle": "Access denied",
   "platform.fxCard": "FX (toman/$1)",

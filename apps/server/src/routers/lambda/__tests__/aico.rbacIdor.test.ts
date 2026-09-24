@@ -348,6 +348,7 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
     await expect(
       caller.addManualCredit({
         amountToman: 1000,
+        description: 'unauthorized',
         idempotencyKey: 'rbac-unauthorized-org',
         orgId: 'any',
       }),
@@ -355,11 +356,41 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
     await expect(
       caller.addManualUserCredit({
         amountToman: 1000,
+        description: 'unauthorized',
         email: 'stranger@rbac.test',
         idempotencyKey: 'rbac-unauthorized-user',
       }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     await expect(caller.listUserWallets()).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  });
+
+  it('refuses a manual credit that does not say why', async () => {
+    const ownerCaller = organizationRouter.createCaller(createTestContext(ownerId));
+    const org = await ownerCaller.create({ name: 'Reasonless Org' });
+    const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+
+    // Missing, empty and blank reasons: the books check flags every such credit.
+    for (const [i, description] of [undefined, '', '   '].entries()) {
+      await expect(
+        platformCaller.addManualCredit({
+          amountToman: 10_000,
+          description: description as string,
+          idempotencyKey: `no-reason-org-${i}`,
+          orgId: org.id,
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      await expect(
+        platformCaller.addManualUserCredit({
+          amountToman: 10_000,
+          description: description as string,
+          idempotencyKey: `no-reason-user-${i}`,
+          userId: strangerId,
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    }
+
+    const { walletTransactions } = await import('@/database/schemas/aicoOrganization');
+    expect(await testDB.select().from(walletTransactions)).toEqual([]);
   });
 
   describe('FIN-013 a committed credit is never reported as a failure', () => {

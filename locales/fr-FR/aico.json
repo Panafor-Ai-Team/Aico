@@ -293,6 +293,7 @@
   "platform.debit.title": "Réduire le solde utilisateur",
   "platform.debit.tooMuch": "Supérieur au solde non dépensé de l'utilisateur",
   "platform.description": "Description",
+  "platform.descriptionPlaceholder": "Choisissez un motif déjà utilisé ou saisissez-en un nouveau",
   "platform.forbiddenDesc": "Seuls les admins plateforme peuvent ouvrir cette page.",
   "platform.forbiddenTitle": "Accès refusé",
   "platform.fxCard": "FX (toman/$1)",
