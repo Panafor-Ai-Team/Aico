@@ -424,6 +424,11 @@ export const platformAdminRouter = router({
       }
     }),
 
+  /** Past manual credit / debit reasons, for the admin forms to suggest. */
+  listManualReasons: platformProcedure
+    .input(z.object({ kind: z.enum(['credit', 'debit']) }))
+    .query(({ ctx, input }) => ctx.billingModel.listManualReasons(input.kind)),
+
   addManualCredit: platformProcedure
     .input(
       topupAmountInputSchema.extend({

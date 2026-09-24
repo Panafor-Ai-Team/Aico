@@ -293,6 +293,7 @@
   "platform.debit.title": "کاهش موجودی کاربر",
   "platform.debit.tooMuch": "بیشتر از مبلغ خرج‌نشده کاربر است",
   "platform.description": "توضیحات",
+  "platform.descriptionPlaceholder": "یک دلیل قبلی را انتخاب کنید یا دلیل تازه بنویسید",
   "platform.forbiddenDesc": "فقط مدیران پلتفرم می‌توانند این صفحه را باز کنند.",
   "platform.forbiddenTitle": "دسترسی مجاز نیست",
   "platform.fxCard": "نرخ ارز (تومان/$۱)",

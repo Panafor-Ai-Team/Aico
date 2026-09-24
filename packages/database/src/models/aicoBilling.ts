@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { MANAGED_PROVIDER_ID } from '@lobechat/business-const';
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import {
@@ -55,6 +55,13 @@ const stripPhoneNoise = (value: string): string =>
   toAsciiDigits(value)
     .replaceAll(/[\s\-()]/g, '')
     .trim();
+
+/**
+ * Reason written onto the admin credits recorded before a reason was required
+ * (2026-09-23 backfill). It explains old rows and is never offered for new ones.
+ */
+export const LEGACY_MANUAL_CREDIT_REASON =
+  'Legacy manual credit — reason not recorded at the time (backfilled 2026-09-23)';
 
 /** Normalizes an Iranian mobile number to E.164. Throws `INVALID_PHONE` if implausible. */
 export const normalizeIranianPhoneForFingerprint = (raw: string): string => {
@@ -1061,6 +1068,30 @@ export class AicoBillingModel {
       .leftJoin(organizations, eq(walletTransactions.orgId, organizations.id))
       .orderBy(desc(walletTransactions.createdAt))
       .limit(limit);
+  };
+
+  /**
+   * Reasons platform admins have already given for a manual credit (org or
+   * user) or debit, most recently used first, for the admin forms to offer
+   * again. A new reason joins the list as soon as a transaction records it.
+   */
+  listManualReasons = async (kind: 'credit' | 'debit', limit = 50): Promise<string[]> => {
+    const reason = sql<string>`btrim(${walletTransactions.description})`;
+    const rows = await this.db
+      .select({ reason })
+      .from(walletTransactions)
+      .where(
+        and(
+          eq(walletTransactions.type, kind === 'credit' ? 'manual_credit' : 'manual_debit'),
+          isNotNull(walletTransactions.createdByAdminId),
+          ne(reason, ''),
+          ne(reason, LEGACY_MANUAL_CREDIT_REASON),
+        ),
+      )
+      .groupBy(reason)
+      .orderBy(desc(sql`max(${walletTransactions.createdAt})`))
+      .limit(limit);
+    return rows.map((row) => row.reason);
   };
 
   /** Sum of `usage_logs.cost_micro_usd` across all B2C + B2B traffic — real OpenRouter spend. */

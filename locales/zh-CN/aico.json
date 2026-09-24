@@ -285,6 +285,7 @@
   "platform.debit.title": "减少用户余额",
   "platform.debit.tooMuch": "超过用户未花费的余额",
   "platform.description": "说明",
+  "platform.descriptionPlaceholder": "选择以往的原因，或输入新的原因",
   "platform.forbiddenDesc": "仅平台管理员可访问此页。",
   "platform.forbiddenTitle": "无权访问",
   "platform.fxCard": "汇率（toman/$1）",

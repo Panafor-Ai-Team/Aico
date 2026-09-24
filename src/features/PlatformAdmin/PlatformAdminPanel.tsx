@@ -26,6 +26,10 @@ import { groupedNumberInputProps } from '@/features/AicoBilling/groupedNumberInp
 import { AICO_TABLE_SCROLL, aicoPanelStyles } from '@/features/AicoPanels';
 import { createBudgetSweepModal } from '@/features/OrgAdmin/BudgetSweepModal';
 import {
+  ManualReasonInput,
+  refreshManualReasons,
+} from '@/features/PlatformAdmin/ManualReasonInput';
+import {
   MODEL_MULTIPLIERS_SWR_KEY,
   ModelMultiplierTable,
 } from '@/features/PlatformAdmin/ModelMultiplierTable';
@@ -939,7 +943,11 @@ export const PlatformAdminPanel = () => {
                     toast.success(t('platform.credited'));
                     creditIdempotencyKeyRef.current = null;
                     creditForm.resetFields(['amountToman', 'amountUsd', 'description']);
-                    await Promise.all([mutate(), mutateFinancials()]);
+                    await Promise.all([
+                      mutate(),
+                      mutateFinancials(),
+                      refreshManualReasons('credit'),
+                    ]);
                   } catch (err) {
                     toastAicoError(err, t, 'platform.creditFailed');
                   } finally {
@@ -976,7 +984,7 @@ export const PlatformAdminPanel = () => {
                   name="description"
                   rules={[{ required: true, whitespace: true }]}
                 >
-                  <Input />
+                  <ManualReasonInput kind="credit" />
                 </Form.Item>
                 <Button htmlType="submit" loading={busy} type="primary">
                   {t('platform.creditSubmit')}
@@ -1012,7 +1020,11 @@ export const PlatformAdminPanel = () => {
                     toast.success(t('platform.userCredited'));
                     userCreditIdempotencyKeyRef.current = null;
                     userCreditForm.resetFields(['amountToman', 'amountUsd', 'description']);
-                    await Promise.all([mutateUserWallets(), mutateFinancials()]);
+                    await Promise.all([
+                      mutateUserWallets(),
+                      mutateFinancials(),
+                      refreshManualReasons('credit'),
+                    ]);
                   } catch (err) {
                     toastAicoError(err, t, 'platform.userCreditFailed');
                   } finally {
@@ -1064,7 +1076,7 @@ export const PlatformAdminPanel = () => {
                   name="description"
                   rules={[{ required: true, whitespace: true }]}
                 >
-                  <Input />
+                  <ManualReasonInput kind="credit" />
                 </Form.Item>
                 <Button htmlType="submit" loading={busy} type="primary">
                   {t('platform.userCreditSubmit')}

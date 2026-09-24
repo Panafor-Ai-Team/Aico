@@ -306,6 +306,7 @@ export default {
   'platform.userActive': 'Active',
   'platform.credited': 'Credit added',
   'platform.description': 'Description',
+  'platform.descriptionPlaceholder': 'Pick a past reason or type a new one',
   'platform.forbiddenDesc': 'Only platform admins can open this page.',
   'platform.forbiddenTitle': 'Access denied',
   'platform.loadErrorDesc':
