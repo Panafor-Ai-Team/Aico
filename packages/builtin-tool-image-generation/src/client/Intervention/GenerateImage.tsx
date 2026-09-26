@@ -162,7 +162,9 @@ const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImagePar
     const selectOptions = useMemo(
       () =>
         options.map((option) => ({
-          label: `${option.displayName} · ${option.providerName}`,
+          // Never append managed provider names (OpenRouter / aico) — users
+          // only need the model display name.
+          label: option.displayName,
           value: imageModelOptionKey(option),
         })),
       [options],

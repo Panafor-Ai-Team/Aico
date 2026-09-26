@@ -232,7 +232,7 @@ const formatMarkdownImageLines = (generations: GeneratedImageTask[]) =>
 
 const formatStartedContent = (state: GenerateImageState) =>
   [
-    `Image generation started with ${state.provider}/${state.model}.`,
+    `Image generation started with ${state.model}.`,
     state.batchId ? `Batch ID: ${state.batchId}` : undefined,
     'Generations:',
     ...formatGenerationLines(state.generations),
@@ -243,7 +243,7 @@ const formatStartedContent = (state: GenerateImageState) =>
 
 const formatCompletedContent = (state: GenerateImageState) =>
   [
-    `Image generation completed with ${state.provider}/${state.model}.`,
+    `Image generation completed with ${state.model}.`,
     state.batchId ? `Batch ID: ${state.batchId}` : undefined,
     'Images:',
     ...formatGenerationLines(state.generations, { includeImageUrl: false }),
@@ -255,7 +255,7 @@ const formatCompletedContent = (state: GenerateImageState) =>
 
 const formatFailedContent = (state: GenerateImageState) =>
   [
-    `Image generation finished with errors using ${state.provider}/${state.model}.`,
+    `Image generation finished with errors using ${state.model}.`,
     state.batchId ? `Batch ID: ${state.batchId}` : undefined,
     'Results:',
     ...formatGenerationLines(state.generations, { includeImageUrl: false }),
@@ -266,7 +266,7 @@ const formatFailedContent = (state: GenerateImageState) =>
 
 const formatTimedOutContent = (state: GenerateImageState, waitTimeoutMs: number) =>
   [
-    `Image generation started with ${state.provider}/${state.model} and is still processing after ${waitTimeoutMs}ms.`,
+    `Image generation started with ${state.model} and is still processing after ${waitTimeoutMs}ms.`,
     state.batchId ? `Batch ID: ${state.batchId}` : undefined,
     'Current generations:',
     ...formatGenerationLines(state.generations),
@@ -277,7 +277,7 @@ const formatTimedOutContent = (state: GenerateImageState, waitTimeoutMs: number)
 
 const formatWaitFailedContent = (state: GenerateImageState, message: string) =>
   [
-    `Image generation started with ${state.provider}/${state.model}, but the latest status could not be checked.`,
+    `Image generation started with ${state.model}, but the latest status could not be checked.`,
     state.batchId ? `Batch ID: ${state.batchId}` : undefined,
     'Generations:',
     ...formatGenerationLines(state.generations),

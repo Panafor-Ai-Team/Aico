@@ -279,6 +279,7 @@
   "builtins.lobe-image-generation.intervention.noModels": "هنوز هیچ مدل تصویرسازی برای این حساب در دسترس نیست.",
   "builtins.lobe-image-generation.intervention.title": "تأیید ساخت تصویر",
   "builtins.lobe-image-generation.render.generatedCount": "{{count}} تصویر",
+  "builtins.lobe-image-generation.render.generating": "در حال تولید تصویر…",
   "builtins.lobe-image-generation.render.generationFailed": "تولید تصویر ناموفق بود",
   "builtins.lobe-image-generation.render.imageAlt": "تصویر تولید شده {{index}}",
   "builtins.lobe-image-generation.render.modelList.empty": "مدل‌های تولید تصویر موجود نیستند",

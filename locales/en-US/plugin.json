@@ -279,6 +279,7 @@
   "builtins.lobe-image-generation.intervention.noModels": "No image generation model is available on this account yet.",
   "builtins.lobe-image-generation.intervention.title": "Confirm image generation",
   "builtins.lobe-image-generation.render.generatedCount": "{{count}} images",
+  "builtins.lobe-image-generation.render.generating": "Generating image…",
   "builtins.lobe-image-generation.render.generationFailed": "Image generation failed",
   "builtins.lobe-image-generation.render.imageAlt": "Generated image {{index}}",
   "builtins.lobe-image-generation.render.modelList.empty": "No available image generation models",

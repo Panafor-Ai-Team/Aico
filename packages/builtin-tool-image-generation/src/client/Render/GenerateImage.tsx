@@ -20,6 +20,7 @@ import type {
   GetImageGenerationStatusParams,
   GetImageGenerationStatusState,
 } from '../../types';
+import { formatImageGenerationModelLabel } from '../displayModel';
 
 const POLLING_INTERVAL = 3000;
 
@@ -255,8 +256,10 @@ export const GenerateImageRender = memo<
 
   if (generations.length === 0) return null;
 
-  const provider = pluginState?.provider || args?.provider;
-  const model = pluginState?.model || args?.model;
+  const model = formatImageGenerationModelLabel(
+    pluginState?.model || args?.model,
+    pluginState?.provider || args?.provider,
+  );
   const prompt = pluginState?.prompt || args?.prompt;
 
   return (
@@ -264,7 +267,7 @@ export const GenerateImageRender = memo<
       <div className={styles.header}>
         <div className={styles.meta}>
           <div className={styles.prompt}>{prompt}</div>
-          <div className={styles.model}>{[provider, model].filter(Boolean).join('/')}</div>
+          {model && <div className={styles.model}>{model}</div>}
         </div>
         <span className={styles.status}>
           {t('builtins.lobe-image-generation.render.generatedCount', {
