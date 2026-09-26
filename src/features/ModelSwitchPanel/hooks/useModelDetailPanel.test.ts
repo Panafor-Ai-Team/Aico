@@ -157,16 +157,19 @@ describe('useModelDetailPanel', () => {
 
     const { result } = renderModelDetailPanelHook();
 
-    // $2.5 / $5 / $0.3 / $1 → × 25_000 π per USD
+    // $2.5 / $5 / $0.3 / $1 → coefficient × · π (1× ≈ 1,000 π/M)
     expect(result.current.isCreditPricing).toBe(true);
-    expect(result.current.formatPrice?.input).toEqual({ current: '62,500', original: '125,000' });
+    expect(result.current.formatPrice?.input).toEqual({
+      current: '62.5× · 62,500',
+      original: '125× · 125,000',
+    });
     expect(result.current.formatPrice?.output).toEqual({
-      current: '312,500',
-      original: '625,000',
+      current: '312.5× · 312,500',
+      original: '625× · 625,000',
     });
     expect(result.current.formatPrice?.cachedInput).toEqual({
-      current: '7,500',
-      original: '25,000',
+      current: '7.5× · 7,500',
+      original: '25× · 25,000',
     });
     expect(result.current.hasCachedInputPricing).toBe(true);
     expect(result.current.getUnitPriceSuffix('millionTokens')).toBe(' π/M tokens');
@@ -174,14 +177,14 @@ describe('useModelDetailPanel', () => {
     expect(result.current.getUnitPriceSuffix('second')).toBe(' π/s');
   });
 
-  it('also formats openrouter managed catalog prices in π', () => {
+  it('also formats openrouter managed catalog prices with coefficient + π', () => {
     const { result } = renderModelDetailPanelHook({
       enabledList: createEnabledList('openrouter', basePricing),
       provider: 'openrouter',
     });
 
     expect(result.current.isCreditPricing).toBe(true);
-    expect(result.current.formatPrice?.input).toEqual({ current: '125,000' });
+    expect(result.current.formatPrice?.input).toEqual({ current: '125× · 125,000' });
     expect(result.current.getUnitPriceSuffix('millionTokens')).toBe(' π/M tokens');
   });
 

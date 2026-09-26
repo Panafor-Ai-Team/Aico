@@ -217,7 +217,7 @@ describe('ModelDetailPanel pricing', () => {
     );
   });
 
-  it('renders managed provider token pricing in π', () => {
+  it('renders managed provider token pricing as coefficient + π', () => {
     const { container } = render(
       <ModelDetailPanel
         enabledList={createEnabledList('openrouter', textPricing)}
@@ -226,8 +226,8 @@ describe('ModelDetailPanel pricing', () => {
       />,
     );
 
-    expect(screen.getByText('125,000 π/M tokens')).toBeInTheDocument();
-    expect(screen.getByText('625,000 π/M tokens')).toBeInTheDocument();
+    expect(screen.getByText('125× · 125,000 π/M tokens')).toBeInTheDocument();
+    expect(screen.getByText('625× · 625,000 π/M tokens')).toBeInTheDocument();
     expect(container).not.toHaveTextContent('$5.00');
   });
 
@@ -242,9 +242,9 @@ describe('ModelDetailPanel pricing', () => {
 
     const originalPrice = container.querySelector('.originalPriceText');
 
-    expect(originalPrice).toHaveTextContent('125,000');
+    expect(originalPrice).toHaveTextContent('125× · 125,000');
     expect(originalPrice).not.toHaveTextContent('π/M tokens');
-    expect(container).toHaveTextContent('62,500 π/M tokens');
+    expect(container).toHaveTextContent('62.5× · 62,500 π/M tokens');
   });
 
   it('keeps dollar pricing for non-managed providers', () => {

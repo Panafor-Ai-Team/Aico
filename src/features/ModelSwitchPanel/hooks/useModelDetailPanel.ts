@@ -32,13 +32,17 @@ import { useCallback, useMemo } from 'react';
 
 import { useBusinessModelPricing } from '@/business/client/hooks/useBusinessModelPricing';
 import { useBusinessModelRating } from '@/business/client/hooks/useBusinessModelRating';
-import { rawUsdToPiTokens } from '@/features/AicoBilling/piToken';
+import {
+  formatHybridPiRate,
+  formatPiRateAmount,
+  rawUsdToPiTokens,
+} from '@/features/AicoBilling/piToken';
 import { useEnabledChatModels } from '@/hooks/useEnabledChatModels';
 import { useGlobalStore } from '@/store/global';
 import type { ModelDetailPanelExpandedKey } from '@/store/global/initialState';
 import { systemStatusSelectors } from '@/store/global/selectors';
 import type { EnabledProviderWithModels } from '@/types/aiProvider';
-import { formatNumber, formatTokenNumber } from '@/utils/format';
+import { formatTokenNumber } from '@/utils/format';
 import { formatPriceByCurrency, getOriginalUnitRateByName, getUnitRateByName } from '@/utils/index';
 
 import type { PricingMode } from '../types';
@@ -70,13 +74,18 @@ export const isPiPricingProvider = (provider?: string): boolean => {
   return MANAGED_PROVIDER_IDS.includes(provider as ManagedProviderId);
 };
 
-/** Format a raw USD catalog rate as π (1 π = 1000 CVC). */
-export const formatPiRate = (rate: number) => {
-  const pi = rawUsdToPiTokens(rate);
-  if (!Number.isFinite(pi) || pi === 0) return '0';
-  if (pi >= 100) return formatNumber(Math.round(pi));
-  if (pi >= 1) return pi.toFixed(2);
-  return pi.toFixed(3);
+/** Format a raw USD catalog rate as π amount (no unit). */
+export const formatPiRate = (rate: number) => formatPiRateAmount(rawUsdToPiTokens(rate));
+
+/**
+ * Token rates: `4× · 4,000` (suffix adds ` π/M tokens`).
+ * Non-token units (image/video/…): π amount only.
+ */
+export const formatManagedPricingRate = (rate: number, unit?: PricingUnit['unit']): string => {
+  if (unit === 'millionTokens' || unit === undefined) {
+    return formatHybridPiRate(rate);
+  }
+  return formatPiRate(rate);
 };
 
 const formatPricingRate = (
@@ -87,7 +96,7 @@ const formatPricingRate = (
   if (typeof rate !== 'number') return '0';
 
   if (options.isCreditPricing) {
-    return formatPiRate(rate);
+    return formatManagedPricingRate(rate, options.unit);
   }
 
   return formatPriceByCurrency(rate, currency);
