@@ -8,10 +8,12 @@ export {
 } from './confirmation';
 export type { ImageGenerationRuntimeService } from './ExecutionRuntime';
 export {
+  buildDirectGenerateImageToolCall,
   extractPlainMessageText,
   findLatestUserMessageText,
   IMAGE_GENERATION_TOOL_FUNCTION_NAME,
   isImageGenerationUserIntent,
+  resolveDirectImageGenerationToolCall,
   resolveForcedImageGenerationToolChoice,
 } from './imageGenerationIntent';
 export { ImageGenerationManifest } from './manifest';

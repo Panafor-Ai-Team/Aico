@@ -6,6 +6,7 @@ import type {
 import {
   findLatestUserMessageText,
   isImageGenerationUserIntent,
+  resolveDirectImageGenerationToolCall,
   resolveForcedImageGenerationToolChoice,
 } from '@lobechat/builtin-tool-image-generation';
 
@@ -36,9 +37,17 @@ export class ServerContextBuilder implements ContextBuilder {
     } as Record<string, unknown>;
 
     // Clear image asks must call generateImage — reasoning models otherwise
-    // invent a plaintext prompt and never invoke the tool.
+    // invent a plaintext prompt and never invoke the tool. Prefer the Create →
+    // Image one-shot path (skip LLM) when the tool is offered; otherwise keep
+    // forcing tool_choice for providers that still need a model round-trip.
     const latestUserText = findLatestUserMessageText(result.processedMessages);
-    if (isImageGenerationUserIntent(latestUserText)) {
+    const directToolCall = resolveDirectImageGenerationToolCall({
+      executorMap: tooling.resolved.executorMap,
+      messages: result.processedMessages,
+      sourceMap: tooling.resolved.sourceMap,
+      tools: tooling.resolved.tools,
+    });
+    if (!directToolCall && isImageGenerationUserIntent(latestUserText)) {
       const toolChoice = resolveForcedImageGenerationToolChoice(tooling.resolved.tools);
       if (toolChoice) {
         modelParameters.tool_choice = toolChoice;
@@ -46,6 +55,7 @@ export class ServerContextBuilder implements ContextBuilder {
     }
 
     return {
+      ...(directToolCall ? { directToolCalls: [directToolCall] } : {}),
       messages: result.processedMessages,
       modelParameters,
       preserveThinking: result.preserveThinkingForPayload,

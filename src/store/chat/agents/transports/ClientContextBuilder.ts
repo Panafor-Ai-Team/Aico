@@ -7,6 +7,7 @@ import type {
 import {
   findLatestUserMessageText,
   isImageGenerationUserIntent,
+  resolveDirectImageGenerationToolCall,
   resolveForcedImageGenerationToolChoice,
 } from '@lobechat/builtin-tool-image-generation';
 import { ToolResolver, type ToolsEngine } from '@lobechat/context-engine';
@@ -103,11 +104,19 @@ export class ClientContextBuilder implements ContextBuilder {
     const { messages: preparedMessages = [], ...params } = prepared.params;
 
     const latestUserText = findLatestUserMessageText(preparedMessages);
-    const toolChoice = isImageGenerationUserIntent(latestUserText)
-      ? resolveForcedImageGenerationToolChoice(resolvedTools.tools)
-      : undefined;
+    const directToolCall = resolveDirectImageGenerationToolCall({
+      executorMap: resolvedTools.executorMap,
+      messages: preparedMessages,
+      sourceMap: resolvedTools.sourceMap,
+      tools: resolvedTools.tools,
+    });
+    const toolChoice =
+      !directToolCall && isImageGenerationUserIntent(latestUserText)
+        ? resolveForcedImageGenerationToolChoice(resolvedTools.tools)
+        : undefined;
 
     return {
+      ...(directToolCall ? { directToolCalls: [directToolCall] } : {}),
       messages: preparedMessages,
       modelParameters: {
         options: prepared.options,

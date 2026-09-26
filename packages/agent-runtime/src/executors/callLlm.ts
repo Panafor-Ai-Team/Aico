@@ -64,6 +64,30 @@ const isOperationInterrupted = async (host: AgentRuntimeHost) => {
 const runWithTrace = <T>(trace: LLMTrace | undefined, task: () => Promise<T>) =>
   trace ? trace.run(task) : task();
 
+const emptyDirectToolCallOutput = (
+  toolsCalling: NonNullable<ContextBuildOutput['directToolCalls']>,
+): LLMAttemptOutput => ({
+  answerSalvagedFromReasoning: false,
+  content: '',
+  contentParts: [],
+  finishReason: 'tool_calls',
+  grounding: null,
+  hasContentImages: false,
+  hasReasoningImages: false,
+  imageList: [],
+  reasoningParts: [],
+  thinkingContent: '',
+  toolCalls: toolsCalling.map((tool) => ({
+    function: {
+      arguments: tool.arguments,
+      name: `${tool.identifier}____${tool.apiName}`,
+    },
+    id: tool.id,
+    type: 'function' as const,
+  })),
+  toolsCalling,
+});
+
 const executePreparedCall = async (
   host: AgentRuntimeHost,
   llm: LLMCallTransport,
@@ -76,6 +100,25 @@ const executePreparedCall = async (
   let errorHandled = false;
   let lastOutput: LLMAttemptOutput | undefined;
   let terminalError: unknown;
+
+  // Clear photo asks: skip the chat model and run generateImage the same way
+  // Create → Image does (user text → image pipeline), so reasoning models cannot
+  // invent a plaintext prompt instead of producing a photo.
+  const directToolCalls = prepared.context.directToolCalls;
+  if (directToolCalls?.length) {
+    return await finalizeCallLlmTurn({
+      assistantMessageId: prepared.assistantMessageId,
+      events,
+      host,
+      model: prepared.model,
+      output: emptyDirectToolCallOutput(directToolCalls),
+      provider: prepared.provider,
+      recordResult: trace?.recordResult?.bind(trace),
+      shouldReplayAssistantReasoning: prepared.context.replayAssistantReasoning,
+      state: prepared.state,
+      stepLabel: prepared.stepLabel,
+    });
+  }
 
   try {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {

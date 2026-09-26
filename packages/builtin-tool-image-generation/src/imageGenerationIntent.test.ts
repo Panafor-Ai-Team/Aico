@@ -4,6 +4,7 @@ import {
   findLatestUserMessageText,
   IMAGE_GENERATION_TOOL_FUNCTION_NAME,
   isImageGenerationUserIntent,
+  resolveDirectImageGenerationToolCall,
   resolveForcedImageGenerationToolChoice,
 } from './imageGenerationIntent';
 
@@ -50,6 +51,47 @@ describe('resolveForcedImageGenerationToolChoice', () => {
       resolveForcedImageGenerationToolChoice([
         { function: { name: 'lobe-web-browsing____search' } },
       ]),
+    ).toBeUndefined();
+  });
+});
+
+describe('resolveDirectImageGenerationToolCall', () => {
+  it('builds a generateImage call from a clear Persian photo ask', () => {
+    const call = resolveDirectImageGenerationToolCall({
+      messages: [
+        {
+          content: 'عکس گورخری که مثل میمون از درخت آویزونه و یکی از چشماش چپه',
+          role: 'user',
+        },
+      ],
+      tools: [{ function: { name: IMAGE_GENERATION_TOOL_FUNCTION_NAME } }],
+    });
+
+    expect(call).toMatchObject({
+      apiName: 'generateImage',
+      identifier: 'lobe-image-generation',
+      type: 'builtin',
+    });
+    expect(JSON.parse(call!.arguments)).toEqual({
+      prompt: 'عکس گورخری که مثل میمون از درخت آویزونه و یکی از چشماش چپه',
+    });
+  });
+
+  it('returns nothing when the photo tool is not offered', () => {
+    expect(
+      resolveDirectImageGenerationToolCall({
+        messages: [{ content: 'Generate an image of a cat', role: 'user' }],
+        tools: [{ function: { name: 'lobe-web-browsing____search' } }],
+      }),
+    ).toBeUndefined();
+  });
+
+  it('returns nothing for ordinary chat', () => {
+    expect(
+      resolveDirectImageGenerationToolCall({
+        messages: [{ content: 'سلام', role: 'user' }],
+        tools: [{ function: { name: IMAGE_GENERATION_TOOL_FUNCTION_NAME } }],
+      }),
     ).toBeUndefined();
   });
 });

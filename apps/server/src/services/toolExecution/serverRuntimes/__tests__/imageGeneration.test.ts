@@ -232,12 +232,16 @@ describe('imageGenerationRuntime', () => {
       getAiProviderRuntimeState: vi.fn().mockResolvedValue({
         enabledImageAiProviders: [
           { id: 'google', name: 'Google' },
+          { id: 'cheapvibecode', name: 'CheapVibeCode' },
           { id: 'openrouter', name: 'OpenRouter' },
+          { id: 'aico', name: 'Aico' },
         ],
       }),
     });
     callerMocks.aiModel.mockReturnValue({
-      getAiProviderModelList: vi.fn().mockResolvedValue([{ id: 'or-image' }]),
+      getAiProviderModelList: vi
+        .fn()
+        .mockImplementation(async ({ id }: { id: string }) => [{ id: `${id}-image` }]),
     });
 
     const runtime = await imageGenerationRuntime.factory(factoryContext);
@@ -245,8 +249,11 @@ describe('imageGenerationRuntime', () => {
 
     expect(result).toMatchObject({
       state: {
-        providers: [{ id: 'openrouter', models: [{ id: 'or-image' }] }],
-        totalModels: 1,
+        providers: [
+          { id: 'openrouter', models: [{ id: 'openrouter-image' }] },
+          { id: 'aico', models: [{ id: 'aico-image' }] },
+        ],
+        totalModels: 2,
       },
       success: true,
     });

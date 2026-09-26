@@ -17,7 +17,6 @@ import { agentByIdSelectors } from '@/store/agent/selectors';
 import { aiProviderSelectors, getAiInfraStoreState } from '@/store/aiInfra';
 import { filterHiddenProviderModels } from '@/utils/aiProvider';
 
-import { getConfirmedImageModel } from '../../confirmation';
 import { ImageGenerationExecutionRuntime } from '../../ExecutionRuntime';
 import { ImageGenerationManifest } from '../../manifest';
 import type {
@@ -187,14 +186,9 @@ class ImageGenerationExecutor extends BaseExecutor<typeof ImageGenerationApiName
       : undefined;
     const runtime = createClientImageGenerationRuntime(topicVisibility);
 
-    // Reuse the model the user confirmed for this conversation whenever the model
-    // did not name one itself. Without this, a follow-up image request would fall
-    // back to catalog order and quietly generate on a model the user never picked.
-    const confirmed = getConfirmedImageModel(ctx?.topicId);
-    const resolvedParams: GenerateImageParams =
-      confirmed && !params.model ? { ...params, ...confirmed } : params;
-
-    return this.toResult(await runtime.generateImage(resolvedParams, { signal: ctx?.signal }));
+    // Same one-shot path as Create → Image: no confirmation overlay; the runtime
+    // pins gpt-image-2 / openai/gpt-image-2 when the caller omits provider/model.
+    return this.toResult(await runtime.generateImage(params, { signal: ctx?.signal }));
   };
 
   getImageGenerationStatus = async (

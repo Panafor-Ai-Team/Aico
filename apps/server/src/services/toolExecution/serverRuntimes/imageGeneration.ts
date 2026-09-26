@@ -9,13 +9,18 @@ import { aiProviderRouter } from '@/server/routers/lambda/aiProvider';
 import { generationRouter } from '@/server/routers/lambda/generation';
 import { generationTopicRouter } from '@/server/routers/lambda/generationTopic';
 import { imageRouter } from '@/server/routers/lambda/image';
-import {
-  filterManagedGenerationProviders,
-  resolvePreferredGenerationBilling,
-} from '@/server/services/aico/generationBilling';
+import { resolvePreferredGenerationBilling } from '@/server/services/aico/generationBilling';
 import { filterHiddenProviderModels } from '@/utils/aiProvider';
 
 import { type ServerRuntimeRegistration } from './types';
+
+/**
+ * Same provider surface as Create → Image (`filterAicoManagedProviders`):
+ * wallet-backed `aico` / `openrouter` only. CheapVibeCode stays behind the
+ * `openrouter` managed slot in production catalogs.
+ */
+const isCreatePageImageProvider = (providerId: string) =>
+  providerId === 'aico' || providerId === 'openrouter';
 
 const normalizeModel = (model: AiProviderModelListItem): ImageGenerationModelSummary => ({
   description: model.description,
@@ -60,6 +65,7 @@ export const imageGenerationRuntime: ServerRuntimeRegistration = {
             ? { visibility: context.agentVisibility }
             : {}),
         }),
+      // Same lambda as Create → Image (`imageService.createImage` → image.createImage).
       createImage: (payload) => imageCaller.createImage({ ...payload, aicoBilling }),
       getGenerationStatus: async ({ asyncTaskId, generationId }) => {
         const result = await generationCaller.getGenerationStatus({ asyncTaskId, generationId });
@@ -71,11 +77,11 @@ export const imageGenerationRuntime: ServerRuntimeRegistration = {
       },
       listImageModels: async ({ provider, limit }) => {
         const runtimeState = await aiProviderCaller.getAiProviderRuntimeState({});
-        const enabledProviders = filterManagedGenerationProviders(
+        const enabledProviders = (
           provider
             ? runtimeState.enabledImageAiProviders.filter((item) => item.id === provider)
-            : runtimeState.enabledImageAiProviders,
-        );
+            : runtimeState.enabledImageAiProviders
+        ).filter((item) => isCreatePageImageProvider(item.id));
         const providers = await Promise.all(
           enabledProviders.map(async (item) => {
             /**
