@@ -1,4 +1,9 @@
-import { BRANDING_PROVIDER } from '@lobechat/business-const';
+import {
+  BRANDING_PROVIDER,
+  DEFAULT_MANAGED_PROVIDER_ID,
+  MANAGED_PROVIDER_IDS,
+  type ManagedProviderId,
+} from '@lobechat/business-const';
 import { getCachedTextInputUnitRate } from '@lobechat/utils';
 import type { TFunction } from 'i18next';
 import type { LucideIcon } from 'lucide-react';
@@ -54,7 +59,19 @@ interface FormatPricingRateOptions {
   unit?: PricingUnit['unit'];
 }
 
-const formatPiRate = (rate: number) => {
+/**
+ * Managed / branding catalog prices are shown in π (raw USD × CVC bridge).
+ * Direct third-party providers (openai, anthropic, …) keep `$`.
+ */
+export const isPiPricingProvider = (provider?: string): boolean => {
+  if (!provider) return false;
+  if (provider === BRANDING_PROVIDER) return true;
+  if (provider === DEFAULT_MANAGED_PROVIDER_ID) return true;
+  return MANAGED_PROVIDER_IDS.includes(provider as ManagedProviderId);
+};
+
+/** Format a raw USD catalog rate as π (1 π = 1000 CVC). */
+export const formatPiRate = (rate: number) => {
   const pi = rawUsdToPiTokens(rate);
   if (!Number.isFinite(pi) || pi === 0) return '0';
   if (pi >= 100) return formatNumber(Math.round(pi));
@@ -320,7 +337,7 @@ export const useModelDetailPanel = ({
     () => applyBusinessModelPricing({ model: modelId, pricing, provider }),
     [applyBusinessModelPricing, modelId, pricing, provider],
   );
-  const isCreditPricing = provider === BRANDING_PROVIDER;
+  const isCreditPricing = isPiPricingProvider(provider);
   const hasPricing = !!displayPricing;
   const formatPrice = displayPricing ? getPrice(displayPricing, isCreditPricing) : null;
   const hasCachedInputPricing = displayPricing
