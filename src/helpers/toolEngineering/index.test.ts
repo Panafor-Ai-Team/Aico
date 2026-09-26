@@ -478,8 +478,14 @@ describe('toolEngineering', () => {
       });
 
       // lobe-agent is always-on (alwaysOnToolIds), so it rides along with user tools.
-      expect(result.enabledToolIds).toEqual(['search', 'lobe-web-browsing', 'lobe-agent']);
-      expect(result.enabledToolIds).toHaveLength(3);
+      // Image generation is a default agent-mode tool when the model lacks native imageOutput.
+      expect(result.enabledToolIds).toEqual([
+        'search',
+        'lobe-web-browsing',
+        'lobe-image-generation',
+        'lobe-agent',
+      ]);
+      expect(result.enabledToolIds).toHaveLength(4);
     });
 
     it('should enable lobe-agent when it is injected into runtime plugin ids', () => {
@@ -553,7 +559,9 @@ describe('toolEngineering', () => {
       });
     });
 
-    it('should not enable image generation by default in agent mode', () => {
+    it('should enable image generation by default in agent mode when model lacks native image output', () => {
+      mockImageOutputSupport = false;
+
       const toolsEngine = createAgentToolsEngine({
         model: 'gpt-4',
         provider: 'openai',
@@ -562,6 +570,41 @@ describe('toolEngineering', () => {
       const result = toolsEngine.generateToolsDetailed({
         model: 'gpt-4',
         provider: 'openai',
+        toolIds: [],
+      });
+
+      expect(result.enabledToolIds).toContain('lobe-image-generation');
+    });
+
+    it('should not enable image generation in agent mode when model has native image output', () => {
+      mockImageOutputSupport = true;
+
+      const toolsEngine = createAgentToolsEngine({
+        model: 'gpt-image-chat',
+        provider: 'openai',
+      });
+
+      const result = toolsEngine.generateToolsDetailed({
+        model: 'gpt-image-chat',
+        provider: 'openai',
+        toolIds: [],
+      });
+
+      expect(result.enabledToolIds).not.toContain('lobe-image-generation');
+    });
+
+    it('should not enable image generation in agent mode when model cannot call tools', () => {
+      mockIsCanUseFC = false;
+      mockImageOutputSupport = false;
+
+      const toolsEngine = createAgentToolsEngine({
+        model: 'plain-text-model',
+        provider: 'test',
+      });
+
+      const result = toolsEngine.generateToolsDetailed({
+        model: 'plain-text-model',
+        provider: 'test',
         toolIds: [],
       });
 

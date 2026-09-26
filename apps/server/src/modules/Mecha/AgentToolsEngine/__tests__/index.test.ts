@@ -385,7 +385,7 @@ describe('createServerAgentToolsEngine', () => {
     expect(result.enabledToolIds).not.toContain(ImageGenerationManifest.identifier);
   });
 
-  it('should not enable ImageGeneration by default in agent mode', () => {
+  it('should enable ImageGeneration by default in agent mode when model lacks native image output', () => {
     const context = createMockContext();
     const engine = createServerAgentToolsEngine(context, {
       agentConfig: { plugins: [] },
@@ -397,6 +397,44 @@ describe('createServerAgentToolsEngine', () => {
     const result = engine.generateToolsDetailed({
       model: 'gpt-4',
       provider: 'openai',
+      toolIds: [],
+    });
+
+    expect(result.enabledToolIds).toContain(ImageGenerationManifest.identifier);
+  });
+
+  it('should not enable ImageGeneration in agent mode when model has native image output', () => {
+    const context = createMockContext();
+    const engine = createServerAgentToolsEngine(context, {
+      agentConfig: { plugins: [] },
+      model: 'gpt-image-chat',
+      modelAbilities: { functionCall: true, imageOutput: true },
+      provider: 'openai',
+    });
+
+    const result = engine.generateToolsDetailed({
+      model: 'gpt-image-chat',
+      provider: 'openai',
+      toolIds: [],
+    });
+
+    expect(result.enabledToolIds).not.toContain(ImageGenerationManifest.identifier);
+  });
+
+  it('should not enable ImageGeneration in agent mode when model cannot call tools', () => {
+    const context = createMockContext({
+      isModelSupportToolUse: () => false,
+    });
+    const engine = createServerAgentToolsEngine(context, {
+      agentConfig: { plugins: [] },
+      model: 'plain-text-model',
+      modelAbilities: { functionCall: false, imageOutput: false },
+      provider: 'test',
+    });
+
+    const result = engine.generateToolsDetailed({
+      model: 'plain-text-model',
+      provider: 'test',
       toolIds: [],
     });
 
