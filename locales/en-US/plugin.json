@@ -298,7 +298,7 @@
   "builtins.lobe-image-generation.render.status.processing": "Generating",
   "builtins.lobe-image-generation.render.status.success": "Completed",
   "builtins.lobe-image-generation.render.statusCheckFailed": "Failed to check image status",
-  "builtins.lobe-image-generation.title": "Image Generation",
+  "builtins.lobe-image-generation.title": "Image Generation Assistant",
   "builtins.lobe-knowledge-base.apiName.readKnowledge": "Read Library content",
   "builtins.lobe-knowledge-base.apiName.searchKnowledgeBase": "Search Library",
   "builtins.lobe-knowledge-base.inspector.andMoreFiles": "and {{count}} more",

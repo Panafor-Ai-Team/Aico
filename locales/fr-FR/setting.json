@@ -1274,6 +1274,8 @@
   "tools.builtins.lobe-group-agent-builder.title": "Générateur de Groupe d’Agents",
   "tools.builtins.lobe-group-management.description": "Orchestrer et gérer les conversations de groupes multi-agents",
   "tools.builtins.lobe-group-management.title": "Gestion de Groupe",
+  "tools.builtins.lobe-image-generation.description": "Générer des images depuis le chat via le pipeline intégré. Par défaut : gpt-image-2 en qualité medium.",
+  "tools.builtins.lobe-image-generation.title": "Assistant de génération d'images",
   "tools.builtins.lobe-knowledge-base.description": "Rechercher dans les documents importés et la base de connaissances via la recherche vectorielle sémantique — pour une référence persistante et réutilisable",
   "tools.builtins.lobe-knowledge-base.title": "Base de Connaissances",
   "tools.builtins.lobe-local-system.description": "Accédez à votre système de fichiers local sur ordinateur. Lisez, écrivez, recherchez et organisez des fichiers. Exécutez des commandes shell avec prise en charge des tâches en arrière-plan et recherchez du contenu avec des motifs regex.",

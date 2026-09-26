@@ -298,7 +298,7 @@
   "builtins.lobe-image-generation.render.status.processing": "در حال تولید",
   "builtins.lobe-image-generation.render.status.success": "تکمیل شد",
   "builtins.lobe-image-generation.render.statusCheckFailed": "بررسی وضعیت تصویر ناموفق بود",
-  "builtins.lobe-image-generation.title": "تولید تصویر",
+  "builtins.lobe-image-generation.title": "دستیار ساخت عکس",
   "builtins.lobe-knowledge-base.apiName.readKnowledge": "خواندن محتوای کتابخانه",
   "builtins.lobe-knowledge-base.apiName.searchKnowledgeBase": "جستجوی کتابخانه",
   "builtins.lobe-knowledge-base.inspector.andMoreFiles": "و {{count}} مورد دیگر",

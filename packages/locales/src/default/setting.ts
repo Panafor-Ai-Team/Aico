@@ -3043,6 +3043,9 @@ When I am ___, I need ___
   'tools.builtins.lobe-group-management.description':
     'Orchestrate and manage multi-agent group conversations',
   'tools.builtins.lobe-group-management.title': 'Group Management',
+  'tools.builtins.lobe-image-generation.description':
+    'Generate images from chat through the built-in image pipeline. Defaults to gpt-image-2 at medium quality.',
+  'tools.builtins.lobe-image-generation.title': 'Image Generation Assistant',
   'tools.builtins.lobe-knowledge-base.description':
     'Search uploaded documents and domain knowledge via semantic vector search — for persistent, reusable reference',
   'tools.builtins.lobe-knowledge-base.title': 'Knowledge Base',

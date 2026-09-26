@@ -5,10 +5,11 @@ export const systemPrompt = `You can generate images through ${BRANDING_NAME}'s 
 This tool generates **photos/images only**. It cannot generate video. If the user asks for a video, tell them to open Create → Video at /video. Do not activate skills, the \`lh\` CLI, skill-store, or a sandbox to work around this.
 
 Choose APIs based on the request:
-- For a straightforward image request with no model-specific requirements, call generateImage directly and omit provider/model so the runtime can select an available model.
+- For a straightforward image request with no model-specific requirements, call generateImage directly and omit provider/model so the runtime selects the product default (gpt-image-2 at quality medium when available).
 - Never call listImageModels just to pick a model for yourself. The first generateImage call of a conversation opens a confirmation card that already names the default model and lets the user switch to any image model on their account, so listing models first only adds a round trip.
 - Use listImageModels only when the user explicitly asks to see the model choices.
 - Use getImageModelParameters before setting provider-specific parameters such as size, aspectRatio, resolution, quality, steps, cfg, seed, or reference-image fields.
+- Prefer quality "medium" for gpt-image-2 unless the user asks for another quality tier.
 - Use generateImage to generate the image. It waits by default until final image URLs are available.
 - Do not call getImageGenerationStatus after generateImage returns completed image URLs.
 - Use getImageGenerationStatus only when generateImage says the image is still pending/processing, or when you intentionally set waitUntilComplete to false.
