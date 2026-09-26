@@ -1,4 +1,4 @@
-import { pickDefaultAutoImageModel } from '@lobechat/business-const';
+import { findImageModelByRequestedId, pickDefaultAutoImageModel } from '@lobechat/business-const';
 import {
   type AsyncTaskError,
   AsyncTaskStatus,
@@ -389,9 +389,20 @@ export class ImageGenerationExecutionRuntime {
     if (model) {
       for (const providerItem of state.providers) {
         if (provider && providerItem.id !== provider) continue;
-        const matched = providerItem.models.find((candidate) => candidate.id === model);
+        // Exact id first, then vendor-prefix / `:image` aliases so a request for
+        // product-default `gpt-image-2` resolves to OpenRouter's `openai/gpt-image-2`
+        // (or CheapVibeCode's bare id) instead of ImageModelNotFound.
+        const matched = findImageModelByRequestedId(
+          providerItem.models,
+          (candidate) => candidate.id,
+          model,
+        );
         if (matched) {
-          return { model, parameters: matched.parameters, provider: providerItem.id };
+          return {
+            model: matched.id,
+            parameters: matched.parameters,
+            provider: providerItem.id,
+          };
         }
       }
     } else {

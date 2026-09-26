@@ -30,6 +30,25 @@ describe('resolvePreferredImageModel', () => {
     expect(PREFERRED_AI_IMAGE_MODEL_IDS[0]).toBe(DEFAULT_AI_IMAGE_MODEL);
   });
 
+  it('prefers OpenRouter vendor-prefixed openai/gpt-image-2 over Muse', () => {
+    const list: EnabledProviderWithModels[] = [
+      {
+        children: [
+          { abilities: {}, displayName: 'Muse', id: 'meta/muse-image' },
+          { abilities: {}, displayName: 'GPT Image 2', id: 'openai/gpt-image-2' },
+        ],
+        id: 'openrouter',
+        name: 'OpenRouter',
+        source: 'builtin',
+      },
+    ];
+
+    expect(resolvePreferredImageModel(list)).toEqual({
+      model: 'openai/gpt-image-2',
+      provider: 'openrouter',
+    });
+  });
+
   it('falls back to Nano Banana by display name when preferred ids are absent', () => {
     const list: EnabledProviderWithModels[] = [
       {

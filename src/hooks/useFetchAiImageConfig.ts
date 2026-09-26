@@ -1,3 +1,4 @@
+import { findImageModelByRequestedId, pickDefaultAutoImageModel } from '@lobechat/business-const';
 import { useEffect, useMemo } from 'react';
 
 import { useEnabledImageModels } from '@/hooks/useEnabledImageModels';
@@ -5,10 +6,7 @@ import { aiProviderSelectors, useAiInfraStore } from '@/store/aiInfra';
 import { useGlobalStore } from '@/store/global';
 import { systemStatusSelectors } from '@/store/global/selectors';
 import { useImageStore } from '@/store/image';
-import {
-  DEFAULT_AI_IMAGE_MODEL,
-  DEFAULT_AI_IMAGE_PROVIDER,
-} from '@/store/image/slices/generationConfig/initialState';
+import { DEFAULT_AI_IMAGE_MODEL } from '@/store/image/slices/generationConfig/initialState';
 import { useUserStore } from '@/store/user';
 import { authSelectors } from '@/store/user/selectors';
 import { type EnabledProviderWithModels } from '@/types/aiProvider';
@@ -19,13 +17,15 @@ const checkModelEnabled = (
   model: string,
 ) => {
   return enabledImageModelList.some(
-    (p) => p.id === provider && p.children.some((m) => m.id === model),
+    (p) =>
+      p.id === provider && Boolean(findImageModelByRequestedId(p.children, (m) => m.id, model)),
   );
 };
 
 /** Fall back to the Nano Banana family when the default is missing from the list. */
 export const PREFERRED_AI_IMAGE_MODEL_IDS = [
   DEFAULT_AI_IMAGE_MODEL,
+  'openai/gpt-image-2',
   'google/gemini-3.1-flash-image-preview:image',
   'google/gemini-2.5-flash-image:image',
   'google/gemini-3-pro-image-preview:image',
@@ -33,19 +33,29 @@ export const PREFERRED_AI_IMAGE_MODEL_IDS = [
 
 /**
  * Pick the best available Image Create model from the enabled list.
- * Prefers the default and then Nano Banana ids, then any "Nano Banana*" display name,
- * then the first enabled model.
+ * Prefers the product default (including OpenRouter's `openai/gpt-image-2`),
+ * then Nano Banana ids / display names, then the first enabled model.
  */
 export const resolvePreferredImageModel = (
   enabledImageModelList: EnabledProviderWithModels[],
 ): { model: string; provider: string } | undefined => {
   if (enabledImageModelList.length === 0) return undefined;
 
+  const flat = enabledImageModelList.flatMap((providerGroup) =>
+    providerGroup.children.map((child) => ({
+      model: child.id,
+      provider: providerGroup.id,
+    })),
+  );
+
+  const pinned = pickDefaultAutoImageModel(flat, (entry) => entry.model);
+  if (pinned) return pinned;
+
   for (const modelId of PREFERRED_AI_IMAGE_MODEL_IDS) {
-    const providerGroup = enabledImageModelList.find((p) =>
-      p.children.some((m) => m.id === modelId),
-    );
-    if (providerGroup) return { model: modelId, provider: providerGroup.id };
+    for (const providerGroup of enabledImageModelList) {
+      const matched = findImageModelByRequestedId(providerGroup.children, (m) => m.id, modelId);
+      if (matched) return { model: matched.id, provider: providerGroup.id };
+    }
   }
 
   for (const providerGroup of enabledImageModelList) {
@@ -103,16 +113,10 @@ export const useFetchAiImageConfig = () => {
       return { model: lastSelectedImageModel, provider: lastSelectedImageProvider };
     }
 
-    // 2. Prefer default OpenRouter Nano Banana when present
-    if (
-      checkModelEnabled(enabledImageModelList, DEFAULT_AI_IMAGE_PROVIDER, DEFAULT_AI_IMAGE_MODEL)
-    ) {
-      return { model: undefined, provider: undefined }; // Use initialState defaults
-    }
-
-    // 3. Prefer Nano Banana family / first available model
-    const preferred = resolvePreferredImageModel(enabledImageModelList);
-    if (preferred) return preferred;
+    // 2. Prefer the product default image model (bare gpt-image-2 or
+    //    OpenRouter's openai/gpt-image-2) when present in the enabled list.
+    const preferredDefault = resolvePreferredImageModel(enabledImageModelList);
+    if (preferredDefault) return preferredDefault;
 
     // No enabled models
     return { model: undefined, provider: undefined };

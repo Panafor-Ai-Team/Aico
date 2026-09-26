@@ -73,6 +73,9 @@ export const DEFAULT_ENABLED_OPENROUTER_PINNED_CHAT_MODEL_IDS = [
  */
 export const DEFAULT_ENABLED_OPENROUTER_IMAGE_MODEL_IDS = [
   'gpt-image-2',
+  // OpenRouter lists GPT Image 2 under the vendor prefix; pin both spellings so
+  // catalog sync enables the id the live gateway actually serves.
+  'openai/gpt-image-2',
   'meta/muse-image',
   'google/gemini-3.1-flash-image-preview:image',
   'google/gemini-2.5-flash-image:image',
@@ -91,20 +94,43 @@ export const DEFAULT_AUTO_IMAGE_MODEL_PROVIDER = 'openrouter';
 
 /**
  * Default image generators used when the chat model is the Auto router, in
- * preference order. GPT Image 2 (medium quality via its schema default) is
- * served by CheapVibeCode; OpenRouter does not offer that id, so a deployment
- * on OpenRouter falls through to Muse.
+ * preference order. CheapVibeCode serves the bare id `gpt-image-2`; OpenRouter
+ * lists the same model as `openai/gpt-image-2`. Matching accepts both (and the
+ * `:image` sibling) so chat Auto does not fall through to Muse — or fail
+ * outright — when the assistant names the product default.
  */
 export const DEFAULT_AUTO_IMAGE_MODEL_IDS = ['gpt-image-2', 'meta/muse-image'] as const;
 
 export const DEFAULT_AUTO_IMAGE_MODEL_ID = DEFAULT_AUTO_IMAGE_MODEL_IDS[0];
 
-const matchesImageModelId = (id: string, defaultId: string) =>
-  id === defaultId || id === `${defaultId}${IMAGE_MODEL_SUFFIX}`;
+/**
+ * True when `id` is the same generator as `target`, including:
+ * - exact id / `:image` sibling (catalog clones)
+ * - vendor-prefixed OpenRouter forms (`openai/gpt-image-2` ↔ `gpt-image-2`)
+ */
+export const matchesImageModelId = (id: string, target: string): boolean => {
+  if (!id || !target) return false;
+  if (id === target) return true;
+  if (id === `${target}${IMAGE_MODEL_SUFFIX}` || target === `${id}${IMAGE_MODEL_SUFFIX}`) {
+    return true;
+  }
+
+  const stripImage = (value: string) =>
+    value.endsWith(IMAGE_MODEL_SUFFIX) ? value.slice(0, -IMAGE_MODEL_SUFFIX.length) : value;
+  const baseId = stripImage(id);
+  const baseTarget = stripImage(target);
+  if (baseId === baseTarget) return true;
+
+  // `openai/gpt-image-2` matches target `gpt-image-2`, and the reverse.
+  if (baseId.endsWith(`/${baseTarget}`) || baseTarget.endsWith(`/${baseId}`)) return true;
+
+  return false;
+};
 
 /**
  * Catalog sync stores chat models with image output under an `:image` suffix, so
- * a pinned default can legitimately show up under either id.
+ * a pinned default can legitimately show up under either id. OpenRouter also
+ * vendor-prefixes the same generator (`openai/gpt-image-2`).
  */
 export const isDefaultAutoImageModelId = (id: string): boolean =>
   DEFAULT_AUTO_IMAGE_MODEL_IDS.some((defaultId) => matchesImageModelId(id, defaultId));
@@ -119,6 +145,21 @@ export const pickDefaultAutoImageModel = <T>(
     if (match) return match;
   }
   return undefined;
+};
+
+/**
+ * Resolve a requested image model id against a catalog list. Prefers an exact
+ * id hit, then vendor-prefix / `:image` aliases (e.g. `gpt-image-2` →
+ * `openai/gpt-image-2` on OpenRouter).
+ */
+export const findImageModelByRequestedId = <T>(
+  candidates: T[],
+  getId: (candidate: T) => string,
+  requestedId: string,
+): T | undefined => {
+  const exact = candidates.find((candidate) => getId(candidate) === requestedId);
+  if (exact) return exact;
+  return candidates.find((candidate) => matchesImageModelId(getId(candidate), requestedId));
 };
 
 export type OpenRouterDefaultModelCandidate = {

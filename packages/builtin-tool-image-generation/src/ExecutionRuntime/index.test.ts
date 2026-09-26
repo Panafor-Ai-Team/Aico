@@ -121,6 +121,52 @@ describe('ImageGenerationExecutionRuntime', () => {
     );
   });
 
+  it('resolves bare gpt-image-2 onto OpenRouter openai/gpt-image-2', async () => {
+    const service = createService({
+      listImageModels: vi.fn().mockResolvedValue({
+        providers: [
+          {
+            id: 'openrouter',
+            models: [{ id: 'meta/muse-image' }, { id: 'openai/gpt-image-2' }],
+            name: 'Panachat',
+          },
+        ],
+        totalModels: 2,
+      }),
+    });
+
+    await new ImageGenerationExecutionRuntime(service).generateImage({
+      model: 'gpt-image-2',
+      prompt: 'a cat',
+      provider: 'openrouter',
+    });
+
+    expect(service.createImage).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'openai/gpt-image-2', provider: 'openrouter' }),
+    );
+  });
+
+  it('pins openai/gpt-image-2 when omitting model on an OpenRouter-only catalog', async () => {
+    const service = createService({
+      listImageModels: vi.fn().mockResolvedValue({
+        providers: [
+          {
+            id: 'openrouter',
+            models: [{ id: 'meta/muse-image' }, { id: 'openai/gpt-image-2' }],
+            name: 'Panachat',
+          },
+        ],
+        totalModels: 2,
+      }),
+    });
+
+    await new ImageGenerationExecutionRuntime(service).generateImage({ prompt: 'a cat' });
+
+    expect(service.createImage).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'openai/gpt-image-2', provider: 'openrouter' }),
+    );
+  });
+
   it('sends the model schema defaults, with explicit parameters winning', async () => {
     const service = createService({
       listImageModels: vi.fn().mockResolvedValue({
