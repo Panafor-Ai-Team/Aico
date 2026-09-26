@@ -210,7 +210,7 @@ export const createServerAgentToolsEngine = (
     isGroupSupervisor = false,
     manifestContext,
     model,
-    modelAbilities,
+    modelAbilities: _modelAbilities,
     provider,
     useApplicationBuiltinSearchTool,
   } = params;
@@ -255,8 +255,11 @@ export const createServerAgentToolsEngine = (
 
   const searchMode = agentConfig.chatConfig?.searchMode ?? 'auto';
   const isSearchEnabled = useApplicationBuiltinSearchTool ?? searchMode !== 'off';
-  const imageGenerationEnabled =
-    context.isModelSupportToolUse(model, provider) && !modelAbilities?.imageOutput;
+  // Same Create → Image pipeline via `lobe-image-generation`. Offer it whenever
+  // the chat model can call tools — including models with native `imageOutput`.
+  // Gating those out left Auto / Gemini-image chat turns with an inbox prompt
+  // that promised photo gen, then the model apologizing that the tool is missing.
+  const imageGenerationEnabled = context.isModelSupportToolUse(model, provider);
   // Tool mode: explicit `toolMode` wins; otherwise derive from `enableAgentMode`
   // (undefined = agent). `custom` = toolset is exactly the agent's plugins.
   const toolMode = resolveToolMode(agentConfig.chatConfig ?? undefined);
@@ -282,8 +285,6 @@ export const createServerAgentToolsEngine = (
   // web-browsing needs search on). `allowExplicitActivation` is off so the
   // activator can't smuggle anything else in.
   const chatModeRules = {
-    // Example: Claude can call tools but lacks native imageOutput, so expose the
-    // image-generation fallback; image-output models should use their native path.
     [ImageGenerationManifest.identifier]: imageGenerationEnabled,
     [KnowledgeBaseManifest.identifier]: hasEnabledKnowledgeBases,
     [MemoryManifest.identifier]: globalMemoryEnabled,
@@ -346,8 +347,6 @@ export const createServerAgentToolsEngine = (
     // physical walls drop it for `canUseDevice=false` turns.
     [RemoteDeviceManifest.identifier]: deviceCapable && hasDeviceProxy && !deviceLocked,
     [WebBrowsingManifest.identifier]: isSearchEnabled,
-    // Example: Claude can call tools but lacks native imageOutput, so expose the
-    // image-generation fallback; image-output models should use their native path.
     [ImageGenerationManifest.identifier]: imageGenerationEnabled,
   };
 

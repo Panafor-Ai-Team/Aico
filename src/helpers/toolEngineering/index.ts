@@ -25,7 +25,6 @@ import { isToolAvailableInCurrentEnv } from '@/helpers/toolAvailability';
 import { patchManifestWithPermissions } from '@/libs/mcp/patchManifestPermissions';
 import { getAgentStoreState } from '@/store/agent';
 import { agentChatConfigSelectors, agentSelectors } from '@/store/agent/selectors';
-import { aiModelSelectors, getAiInfraStoreState } from '@/store/aiInfra';
 import { getToolStoreState } from '@/store/tool';
 import {
   composioStoreSelectors,
@@ -241,16 +240,13 @@ export const createAgentToolsEngine = (
   // stays permissive so a working deployment never loses the tool mid-session.
   const cloudSandboxConfigured =
     window.global_serverConfigStore?.getState()?.serverConfig?.enableCloudSandbox !== false;
-  const imageGenerationEnabled =
-    isCanUseFC(workingModel.model, workingModel.provider) &&
-    !aiModelSelectors.isModelSupportImageOutput(
-      workingModel.model,
-      workingModel.provider,
-    )(getAiInfraStoreState());
+  // Same Create → Image pipeline via `lobe-image-generation`. Offer it whenever
+  // the chat model can call tools — including models with native `imageOutput`.
+  // Gating those out left Auto / Gemini-image chat turns with an inbox prompt
+  // that promised photo gen, then the model apologizing that the tool is missing.
+  const imageGenerationEnabled = isCanUseFC(workingModel.model, workingModel.provider);
 
   const chatModeRules = {
-    // Example: Claude can call tools but lacks native imageOutput, so expose the
-    // image-generation fallback; image-output models should use their native path.
     [ImageGenerationManifest.identifier]: imageGenerationEnabled,
     [KnowledgeBaseManifest.identifier]: kbEnabled,
     [MemoryManifest.identifier]: memoryEnabled,
@@ -283,8 +279,6 @@ export const createAgentToolsEngine = (
     [LocalSystemManifest.identifier]: agentChatConfigSelectors.isLocalSystemEnabled(agentState),
     [MemoryManifest.identifier]: memoryEnabled,
     [WebBrowsingManifest.identifier]: webBrowsingEnabled,
-    // Example: Claude can call tools but lacks native imageOutput, so expose the
-    // image-generation fallback; image-output models should use their native path.
     [ImageGenerationManifest.identifier]: imageGenerationEnabled,
   };
 
