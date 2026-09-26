@@ -1,4 +1,8 @@
-import { findImageModelByRequestedId, pickDefaultAutoImageModel } from '@lobechat/business-const';
+import {
+  DEFAULT_AUTO_IMAGE_MODEL_PROVIDER,
+  findImageModelByRequestedId,
+  pickDefaultAutoImageModel,
+} from '@lobechat/business-const';
 import {
   type AsyncTaskError,
   AsyncTaskStatus,
@@ -406,15 +410,17 @@ export class ImageGenerationExecutionRuntime {
         }
       }
     } else {
-      // Pin the product default first. Falling straight through to "whichever
-      // generator sorts first" is what made Auto walk the catalog, failing and
-      // burning credits one paid model at a time.
-      const pinned = pickDefaultAutoImageModel(
-        state.providers.flatMap((providerItem) =>
-          providerItem.models.map((candidate) => ({ candidate, providerId: providerItem.id })),
-        ),
-        (entry) => entry.candidate.id,
+      // Same pin as Create → Image: product default (gpt-image-2 family) first,
+      // preferring the managed OpenRouter slot Create uses as DEFAULT_AI_IMAGE_PROVIDER.
+      const flat = state.providers.flatMap((providerItem) =>
+        providerItem.models.map((candidate) => ({ candidate, providerId: providerItem.id })),
       );
+      const preferredProviderModels = flat.filter(
+        (entry) => entry.providerId === DEFAULT_AUTO_IMAGE_MODEL_PROVIDER,
+      );
+      const pinned =
+        pickDefaultAutoImageModel(preferredProviderModels, (entry) => entry.candidate.id) ??
+        pickDefaultAutoImageModel(flat, (entry) => entry.candidate.id);
       if (pinned) {
         return {
           model: pinned.candidate.id,

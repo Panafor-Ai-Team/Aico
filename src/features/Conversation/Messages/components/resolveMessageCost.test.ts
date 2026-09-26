@@ -23,18 +23,20 @@ describe('resolveMessageCost', () => {
 });
 
 describe('formatMessageCostUsd', () => {
-  it('keeps at least two decimals for typical amounts', () => {
-    expect(formatMessageCostUsd(0.37)).toBe('$0.37');
-    expect(formatMessageCostUsd(1)).toBe('$1.00');
+  it('formats typical costs as π tokens', () => {
+    // 0.37 raw USD × 25_000_000 CVC/USD ÷ 1000 = 9_250 π
+    expect(formatMessageCostUsd(0.37)).toBe('9,250 π');
+    expect(formatMessageCostUsd(1)).toBe('25,000 π');
   });
 
-  it('preserves micro-USD precision for small OpenRouter charges', () => {
-    expect(formatMessageCostUsd(0.00015)).toBe('$0.00015');
-    expect(formatMessageCostUsd(0.0042)).toBe('$0.0042');
+  it('keeps readable precision for small OpenRouter charges', () => {
+    // 0.00015 × 25_000 = 3.75 π
+    expect(formatMessageCostUsd(0.00015)).toBe('3.75 π');
+    expect(formatMessageCostUsd(0.0042)).toBe('105 π');
   });
 
-  it('trims trailing zeros beyond two places', () => {
-    expect(formatMessageCostUsd(0.12)).toBe('$0.12');
-    expect(formatMessageCostUsd(1.23)).toBe('$1.23');
+  it('rounds large π amounts for display', () => {
+    expect(formatMessageCostUsd(0.12)).toBe('3,000 π');
+    expect(formatMessageCostUsd(1.23)).toBe('30,750 π');
   });
 });

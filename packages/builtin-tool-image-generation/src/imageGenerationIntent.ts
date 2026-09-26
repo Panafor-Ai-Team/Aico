@@ -89,3 +89,62 @@ export const resolveForcedImageGenerationToolChoice = (
 
   return { function: { name }, type: 'function' };
 };
+
+export interface DirectGenerateImageToolCall {
+  apiName: typeof ImageGenerationApiName.generateImage;
+  arguments: string;
+  executor?: 'client' | 'server';
+  id: string;
+  identifier: typeof ImageGenerationIdentifier;
+  source?: 'builtin' | 'client' | 'mcp' | 'composio' | 'lobehubSkill';
+  type: 'builtin';
+}
+
+/**
+ * Build a one-shot `generateImage` tool call the same way Create → Image
+ * would: the user's photo request is the prompt. Callers skip the LLM and
+ * execute this payload when intent is clear and the tool is offered.
+ */
+export const buildDirectGenerateImageToolCall = (params: {
+  executor?: 'client' | 'server';
+  prompt: string;
+  source?: DirectGenerateImageToolCall['source'];
+}): DirectGenerateImageToolCall => {
+  const prompt = params.prompt.trim();
+  const id =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? `call_${crypto.randomUUID()}`
+      : `call_img_${Date.now().toString(36)}`;
+
+  return {
+    apiName: ImageGenerationApiName.generateImage,
+    arguments: JSON.stringify({ prompt }),
+    ...(params.executor ? { executor: params.executor } : {}),
+    id,
+    identifier: ImageGenerationIdentifier,
+    ...(params.source ? { source: params.source } : {}),
+    type: 'builtin',
+  };
+};
+
+/**
+ * When the latest user turn is a clear photo ask and `generateImage` is in the
+ * offered tools, return a Create-parity direct tool call. Otherwise undefined
+ * (fall through to normal LLM tool selection).
+ */
+export const resolveDirectImageGenerationToolCall = (params: {
+  executorMap?: Record<string, 'client' | 'server' | undefined>;
+  messages: Array<{ content?: unknown; role?: string }> | null | undefined;
+  sourceMap?: Record<string, DirectGenerateImageToolCall['source'] | undefined>;
+  tools: ToolLike[] | null | undefined;
+}): DirectGenerateImageToolCall | undefined => {
+  const prompt = findLatestUserMessageText(params.messages);
+  if (!isImageGenerationUserIntent(prompt)) return undefined;
+  if (!resolveForcedImageGenerationToolChoice(params.tools)) return undefined;
+
+  return buildDirectGenerateImageToolCall({
+    executor: params.executorMap?.[ImageGenerationIdentifier],
+    prompt,
+    source: params.sourceMap?.[ImageGenerationIdentifier] ?? 'builtin',
+  });
+};

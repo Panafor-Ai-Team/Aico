@@ -1,3 +1,5 @@
+import type { ModelUsage } from '@lobechat/types';
+
 import { formatPiTokens, rawUsdToPiTokens } from '@/features/AicoBilling/piToken';
 
 /** Prefer structured `usage.cost`; fall back to deprecated flat `metadata.cost`. */

@@ -1,6 +1,7 @@
 import { mutate } from '@/libs/swr';
 
 import { AICO_BILLING_SOURCES_SWR_KEY, AICO_MY_WALLET_SWR_KEY } from './cacheKeys';
+import { DEFAULT_PI_PER_USD } from './piToken';
 import type { AicoBillingContext, AicoBillingSourcesResponse } from './types';
 
 const BILLING_RECONCILE_DELAY_MS = 1500;
@@ -31,11 +32,13 @@ const applyOptimisticDebit = (
       if (!Number.isSafeInteger(remainingMicroUsd)) return source;
 
       const nextRemainingMicroUsd = Math.max(0, remainingMicroUsd - costMicroUsd);
+      const nextRemainingUsd = nextRemainingMicroUsd / 1_000_000;
 
       return {
         ...source,
         remainingMicroUsd: String(nextRemainingMicroUsd),
-        remainingUsd: (nextRemainingMicroUsd / 1_000_000).toFixed(6),
+        remainingPi: String(Math.round(nextRemainingUsd * DEFAULT_PI_PER_USD)),
+        remainingUsd: nextRemainingUsd.toFixed(6),
       };
     }),
   };

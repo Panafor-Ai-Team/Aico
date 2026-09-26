@@ -250,6 +250,53 @@ describe('callLlm executor', () => {
     expect(transport.trace.close).toHaveBeenCalledWith(undefined);
   });
 
+  it('skips the model when context provides directToolCalls', async () => {
+    const state = createState();
+    const transport = createCallTransport();
+    const messages = createMessageTransport();
+    const stream = createStreamSink();
+    const directToolCalls = [
+      {
+        apiName: 'generateImage',
+        arguments: JSON.stringify({ prompt: 'عکس یک گربه' }),
+        id: 'call_direct_1',
+        identifier: 'lobe-image-generation',
+        type: 'builtin' as const,
+      },
+    ];
+    const context: ContextBuilder = {
+      build: vi.fn().mockResolvedValue({
+        ...contextOutput,
+        directToolCalls,
+      }),
+    };
+    const host = createHost(transport.llm, messages, stream, context);
+
+    const result = await callLlm(host)(instruction, state);
+
+    expect(transport.runAttempt).not.toHaveBeenCalled();
+    expect(result.nextContext).toMatchObject({
+      payload: {
+        hasToolsCalling: true,
+        toolsCalling: directToolCalls,
+      },
+      phase: 'llm_result',
+    });
+    expect(messages.update).toHaveBeenCalledWith(
+      'assistant-1',
+      expect.objectContaining({
+        content: '',
+        tools: expect.arrayContaining([
+          expect.objectContaining({
+            apiName: 'generateImage',
+            id: 'call_direct_1',
+            identifier: 'lobe-image-generation',
+          }),
+        ]),
+      }),
+    );
+  });
+
   it('reuses an existing assistant message without creating a new one', async () => {
     const state = createState();
     const transport = createCallTransport();

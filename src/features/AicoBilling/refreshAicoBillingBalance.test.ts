@@ -16,6 +16,7 @@ const billingSources: AicoBillingSourcesResponse = {
       hasManagedKey: true,
       isActive: true,
       remainingMicroUsd: '2000000',
+      remainingPi: '40000',
       remainingToman: '100000',
       remainingUsd: '2.000000',
       source: 'personal',
@@ -27,6 +28,7 @@ const billingSources: AicoBillingSourcesResponse = {
       organizationId: 'org-1',
       organizationName: 'One',
       remainingMicroUsd: '5000000',
+      remainingPi: '100000',
       remainingUsd: '5.000000',
       renewalBlocked: false,
       source: 'organization',
@@ -60,6 +62,7 @@ describe('refreshAicoBillingBalance', () => {
         {
           ...billingSources.sources[0],
           remainingMicroUsd: '1750000',
+          remainingPi: '35000',
           remainingUsd: '1.750000',
         },
         billingSources.sources[1],
