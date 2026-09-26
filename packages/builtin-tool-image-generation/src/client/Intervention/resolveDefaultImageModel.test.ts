@@ -20,6 +20,28 @@ describe('resolveDefaultImageModelOption', () => {
     expect(resolveDefaultImageModelOption(options)?.model).toBe('gpt-image-2');
   });
 
+  it('defaults to OpenRouter vendor-prefixed openai/gpt-image-2 over Muse', () => {
+    const options = [
+      option('openrouter', 'meta/muse-image'),
+      option('openrouter', 'openai/gpt-image-2'),
+      option('openrouter', 'some/other-image-model'),
+    ];
+
+    expect(resolveDefaultImageModelOption(options)?.model).toBe('openai/gpt-image-2');
+  });
+
+  it('maps an assistant request for bare gpt-image-2 onto openai/gpt-image-2', () => {
+    const options = [
+      option('openrouter', 'meta/muse-image'),
+      option('openrouter', 'openai/gpt-image-2'),
+    ];
+
+    expect(
+      resolveDefaultImageModelOption(options, { model: 'gpt-image-2', provider: 'openrouter' })
+        ?.model,
+    ).toBe('openai/gpt-image-2');
+  });
+
   it('defaults to Muse when gpt-image-2 is unavailable', () => {
     const options = [
       option('openrouter', 'some/other-image-model'),

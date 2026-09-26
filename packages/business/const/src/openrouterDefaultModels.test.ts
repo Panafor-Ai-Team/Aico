@@ -162,6 +162,7 @@ describe('isDefaultAutoImageModelId', () => {
   it('matches the pinned default image model and its synthesized :image sibling', () => {
     expect(isDefaultAutoImageModelId(DEFAULT_AUTO_IMAGE_MODEL_ID)).toBe(true);
     expect(isDefaultAutoImageModelId(`${DEFAULT_AUTO_IMAGE_MODEL_ID}:image`)).toBe(true);
+    expect(isDefaultAutoImageModelId('openai/gpt-image-2')).toBe(true);
     expect(isDefaultAutoImageModelId('google/gemini-2.5-flash-image:image')).toBe(false);
   });
 
@@ -188,6 +189,12 @@ describe('default auto image model', () => {
       'meta/muse-image:image',
     );
     expect(pickDefaultAutoImageModel(['some/other'], (id) => id)).toBeUndefined();
+  });
+
+  it('picks OpenRouter vendor-prefixed openai/gpt-image-2 as the product default', () => {
+    expect(pickDefaultAutoImageModel(['meta/muse-image', 'openai/gpt-image-2'], (id) => id)).toBe(
+      'openai/gpt-image-2',
+    );
   });
 });
 
