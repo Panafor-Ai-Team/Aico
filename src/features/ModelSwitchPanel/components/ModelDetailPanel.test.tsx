@@ -108,12 +108,12 @@ vi.mock('@/store/global/selectors', () => ({
 const translations: Record<string, string> = {
   'ModelSwitchPanel.detail.context': 'Context Length',
   'ModelSwitchPanel.detail.pricing': 'Pricing',
-  'ModelSwitchPanel.detail.pricing.credits.input': 'Input {{amount}} credits/M tokens',
-  'ModelSwitchPanel.detail.pricing.credits.output': 'Output {{amount}} credits/M tokens',
-  'ModelSwitchPanel.detail.pricing.credits.perImage': '~ {{amount}} credits / image',
-  'ModelSwitchPanel.detail.pricing.credits.perVideo': '~ {{amount}} credits / video',
-  'ModelSwitchPanel.detail.pricing.credits.image': 'credits/img',
-  'ModelSwitchPanel.detail.pricing.credits.millionTokens': 'credits/M tokens',
+  'ModelSwitchPanel.detail.pricing.credits.input': 'Input {{amount}} π/M tokens',
+  'ModelSwitchPanel.detail.pricing.credits.output': 'Output {{amount}} π/M tokens',
+  'ModelSwitchPanel.detail.pricing.credits.perImage': '~ {{amount}} π / image',
+  'ModelSwitchPanel.detail.pricing.credits.perVideo': '~ {{amount}} π / video',
+  'ModelSwitchPanel.detail.pricing.credits.image': 'π/img',
+  'ModelSwitchPanel.detail.pricing.credits.millionTokens': 'π/M tokens',
   'ModelSwitchPanel.detail.pricing.group.image': 'Image',
   'ModelSwitchPanel.detail.pricing.group.text': 'Text',
   'ModelSwitchPanel.detail.pricing.input': 'Input ${{amount}}/M',
@@ -217,37 +217,37 @@ describe('ModelDetailPanel pricing', () => {
     );
   });
 
-  it('renders branding provider token pricing in credits', () => {
+  it('renders managed provider token pricing as coefficient + π', () => {
     const { container } = render(
       <ModelDetailPanel
-        enabledList={createEnabledList('lobehub', textPricing)}
+        enabledList={createEnabledList('openrouter', textPricing)}
         model="test-model"
-        provider="lobehub"
+        provider="openrouter"
       />,
     );
 
-    expect(screen.getByText('5M credits/M tokens')).toBeInTheDocument();
-    expect(screen.getByText('25M credits/M tokens')).toBeInTheDocument();
+    expect(screen.getByText('125× · 125,000 π/M tokens')).toBeInTheDocument();
+    expect(screen.getByText('625× · 625,000 π/M tokens')).toBeInTheDocument();
     expect(container).not.toHaveTextContent('$5.00');
   });
 
-  it('renders the original branding price without repeating the unit suffix', () => {
+  it('renders the original managed price without repeating the unit suffix', () => {
     const { container } = render(
       <ModelDetailPanel
-        enabledList={createEnabledList('lobehub', discountedTextPricing)}
+        enabledList={createEnabledList('openrouter', discountedTextPricing)}
         model="test-model"
-        provider="lobehub"
+        provider="openrouter"
       />,
     );
 
     const originalPrice = container.querySelector('.originalPriceText');
 
-    expect(originalPrice).toHaveTextContent('5M');
-    expect(originalPrice).not.toHaveTextContent('credits/M tokens');
-    expect(container).toHaveTextContent('2.5M credits/M tokens');
+    expect(originalPrice).toHaveTextContent('125× · 125,000');
+    expect(originalPrice).not.toHaveTextContent('π/M tokens');
+    expect(container).toHaveTextContent('62.5× · 62,500 π/M tokens');
   });
 
-  it('keeps dollar pricing for non-branding providers', () => {
+  it('keeps dollar pricing for non-managed providers', () => {
     const { container } = render(
       <ModelDetailPanel
         enabledList={createEnabledList('openai', textPricing)}
@@ -258,49 +258,49 @@ describe('ModelDetailPanel pricing', () => {
 
     expect(container).toHaveTextContent('$5.00/M tokens');
     expect(container).toHaveTextContent('$25.00/M tokens');
-    expect(container).not.toHaveTextContent('credits/M tokens');
+    expect(container).not.toHaveTextContent('π/M tokens');
   });
 
-  it('renders branding provider image and video pricing in credits', () => {
+  it('renders managed provider image and video pricing in π', () => {
     const imageResult = render(
       <ModelDetailPanel
-        enabledList={createEnabledList('lobehub', imagePricing)}
+        enabledList={createEnabledList('openrouter', imagePricing)}
         model="test-model"
         pricingMode="image"
-        provider="lobehub"
+        provider="openrouter"
       />,
     );
 
-    expect(imageResult.container).toHaveTextContent('~ 40.0K credits / image');
-    expect(imageResult.container).toHaveTextContent('40.0K credits/img');
+    expect(imageResult.container).toHaveTextContent('~ 1,000 π / image');
+    expect(imageResult.container).toHaveTextContent('1,000 π/img');
     expect(imageResult.container).not.toHaveTextContent('$0.04');
 
     imageResult.unmount();
 
     const videoResult = render(
       <ModelDetailPanel
-        enabledList={createEnabledList('lobehub', imagePricing)}
+        enabledList={createEnabledList('openrouter', imagePricing)}
         model="test-model"
         pricingMode="video"
-        provider="lobehub"
+        provider="openrouter"
       />,
     );
 
-    expect(videoResult.container).toHaveTextContent('~ 800.0K credits / video');
+    expect(videoResult.container).toHaveTextContent('~ 20,000 π / video');
     expect(videoResult.container).not.toHaveTextContent('$0.80');
   });
 
   it('renders a placeholder for empty lookup pricing tables', () => {
     const { container } = render(
       <ModelDetailPanel
-        enabledList={createEnabledList('lobehub', emptyLookupPricing)}
+        enabledList={createEnabledList('openrouter', emptyLookupPricing)}
         model="test-model"
-        provider="lobehub"
+        provider="openrouter"
       />,
     );
 
     expect(container).toHaveTextContent('Image Generation');
-    expect(container).toHaveTextContent('- credits/img');
+    expect(container).toHaveTextContent('- π/img');
   });
 });
 

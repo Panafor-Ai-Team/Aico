@@ -17,6 +17,49 @@ export const rawUsdToPiTokens = (
   return (rawUsd * cvcTokensPerUsd) / CVC_TOKENS_PER_PI;
 };
 
+/**
+ * CVC usage coefficient for a catalog USD rate.
+ * At default 25M CVC/$: 1× ≈ $0.04/M tokens ≈ 1,000 π/M tokens.
+ */
+export const rawUsdToCvcCoefficient = (
+  rawUsd: number,
+  cvcTokensPerUsd: number = DEFAULT_CVC_TOKENS_PER_USD,
+): number => {
+  if (!Number.isFinite(rawUsd) || rawUsd <= 0) return 0;
+  return (rawUsd * cvcTokensPerUsd) / 1_000_000;
+};
+
+/** Format a CVC coefficient for UI (`4×`, `0.33×`, `62.5×`). */
+export const formatCvcCoefficient = (coefficient: number): string => {
+  if (!Number.isFinite(coefficient) || coefficient === 0) return '0×';
+  // One decimal from 10× up (keeps 62.5× / 312.5×); two decimals below 10×.
+  const rounded =
+    coefficient >= 10 ? Math.round(coefficient * 10) / 10 : Math.round(coefficient * 100) / 100;
+  const text = Number.isInteger(rounded) ? String(rounded) : String(parseFloat(rounded.toFixed(2)));
+  return `${text}×`;
+};
+
+/** Format a π amount number (no unit) for rate rows. */
+export const formatPiRateAmount = (pi: number): string => {
+  if (!Number.isFinite(pi) || pi === 0) return '0';
+  if (pi >= 100) return Math.round(pi).toLocaleString();
+  if (pi >= 1) return pi.toFixed(2);
+  return pi.toFixed(3);
+};
+
+/**
+ * Hybrid token rate for managed catalogs: coefficient primary, π secondary.
+ * Example: `$0.16/M` → `4× · 4,000` (caller appends ` π/M tokens`).
+ */
+export const formatHybridPiRate = (
+  rawUsd: number,
+  cvcTokensPerUsd: number = DEFAULT_CVC_TOKENS_PER_USD,
+): string => {
+  const coefficient = formatCvcCoefficient(rawUsdToCvcCoefficient(rawUsd, cvcTokensPerUsd));
+  const pi = formatPiRateAmount(rawUsdToPiTokens(rawUsd, cvcTokensPerUsd));
+  return `${coefficient} · ${pi}`;
+};
+
 /** Format a π amount for UI (balances are integers; tiny costs keep decimals). */
 export const formatPiTokens = (pi: number | string | null | undefined): string => {
   const n = typeof pi === 'string' ? Number(pi) : Number(pi ?? 0);

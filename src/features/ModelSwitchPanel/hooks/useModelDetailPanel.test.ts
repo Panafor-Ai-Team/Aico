@@ -48,13 +48,13 @@ vi.mock('@/store/global/selectors', () => ({
 }));
 
 const translations: Record<string, string> = {
-  'ModelSwitchPanel.detail.pricing.credits.input': 'Input {{amount}} credits/M tokens',
-  'ModelSwitchPanel.detail.pricing.credits.millionTokens': 'credits/M tokens',
-  'ModelSwitchPanel.detail.pricing.credits.second': 'credits/s',
-  'ModelSwitchPanel.detail.pricing.credits.video': 'credits/video',
-  'ModelSwitchPanel.detail.pricing.credits.output': 'Output {{amount}} credits/M tokens',
-  'ModelSwitchPanel.detail.pricing.credits.perImage': '~ {{amount}} credits / image',
-  'ModelSwitchPanel.detail.pricing.credits.perVideo': '~ {{amount}} credits / video',
+  'ModelSwitchPanel.detail.pricing.credits.input': 'Input {{amount}} π/M tokens',
+  'ModelSwitchPanel.detail.pricing.credits.millionTokens': 'π/M tokens',
+  'ModelSwitchPanel.detail.pricing.credits.second': 'π/s',
+  'ModelSwitchPanel.detail.pricing.credits.video': 'π/video',
+  'ModelSwitchPanel.detail.pricing.credits.output': 'Output {{amount}} π/M tokens',
+  'ModelSwitchPanel.detail.pricing.credits.perImage': '~ {{amount}} π / image',
+  'ModelSwitchPanel.detail.pricing.credits.perVideo': '~ {{amount}} π / video',
 };
 
 const t = ((key: string, options?: Record<string, string>) => {
@@ -149,7 +149,7 @@ describe('useModelDetailPanel', () => {
     useBusinessModelPricingMock.mockReturnValue(({ pricing }: { pricing?: Pricing }) => pricing);
   });
 
-  it('applies business pricing before formatting LobeHub credit prices', () => {
+  it('formats managed and branding providers in π tokens', () => {
     useBusinessModelPricingMock.mockReturnValue(
       ({ pricing, model, provider }: { model?: string; pricing?: Pricing; provider?: string }) =>
         provider === BRANDING_PROVIDER && model === 'test-model' ? discountedPricing : pricing,
@@ -157,23 +157,41 @@ describe('useModelDetailPanel', () => {
 
     const { result } = renderModelDetailPanelHook();
 
+    // $2.5 / $5 / $0.3 / $1 → coefficient × · π (1× ≈ 1,000 π/M)
     expect(result.current.isCreditPricing).toBe(true);
-    expect(result.current.formatPrice?.input).toEqual({ current: '2.5M', original: '5M' });
-    expect(result.current.formatPrice?.output).toEqual({ current: '12.5M', original: '25M' });
+    expect(result.current.formatPrice?.input).toEqual({
+      current: '62.5× · 62,500',
+      original: '125× · 125,000',
+    });
+    expect(result.current.formatPrice?.output).toEqual({
+      current: '312.5× · 312,500',
+      original: '625× · 625,000',
+    });
     expect(result.current.formatPrice?.cachedInput).toEqual({
-      current: '0.3M',
-      original: '1M',
+      current: '7.5× · 7,500',
+      original: '25× · 25,000',
     });
     expect(result.current.hasCachedInputPricing).toBe(true);
-    expect(result.current.getUnitPriceSuffix('millionTokens')).toBe(' credits/M tokens');
-    expect(result.current.getUnitPriceSuffix('video')).toBe(' credits/video');
-    expect(result.current.getUnitPriceSuffix('second')).toBe(' credits/s');
+    expect(result.current.getUnitPriceSuffix('millionTokens')).toBe(' π/M tokens');
+    expect(result.current.getUnitPriceSuffix('video')).toBe(' π/video');
+    expect(result.current.getUnitPriceSuffix('second')).toBe(' π/s');
   });
 
-  it('uses unit suffixes including /video when not on credit pricing', () => {
+  it('also formats openrouter managed catalog prices with coefficient + π', () => {
     const { result } = renderModelDetailPanelHook({
-      enabledList: createEnabledList('openrouter', unitPricing),
+      enabledList: createEnabledList('openrouter', basePricing),
       provider: 'openrouter',
+    });
+
+    expect(result.current.isCreditPricing).toBe(true);
+    expect(result.current.formatPrice?.input).toEqual({ current: '125× · 125,000' });
+    expect(result.current.getUnitPriceSuffix('millionTokens')).toBe(' π/M tokens');
+  });
+
+  it('uses dollar unit suffixes for non-managed providers', () => {
+    const { result } = renderModelDetailPanelHook({
+      enabledList: createEnabledList('openai', unitPricing),
+      provider: 'openai',
     });
 
     expect(result.current.isCreditPricing).toBe(false);
@@ -182,18 +200,19 @@ describe('useModelDetailPanel', () => {
     expect(result.current.getUnitPriceSuffix('megapixel')).toBe('/MP');
   });
 
-  it('formats original unit prices for tiered and lookup units', () => {
+  it('formats original unit prices for tiered and lookup units in π', () => {
     const { result } = renderModelDetailPanelHook({
       enabledList: createEnabledList(BRANDING_PROVIDER, unitPricing),
     });
 
+    // $0.02 / $0.05 → 500 / 1,250 π; $0.30 / $0.50 → 7,500 / 12,500 π
     expect(result.current.formatUnitPrice(unitPricing.units[0])).toEqual({
-      current: '20.0K',
-      original: '50.0K',
+      current: '500',
+      original: '1,250',
     });
     expect(result.current.formatUnitPrice(unitPricing.units[1])).toEqual({
-      current: '300.0K',
-      original: '500.0K',
+      current: '7,500',
+      original: '12,500',
     });
   });
 
@@ -228,7 +247,8 @@ describe('useModelDetailPanel', () => {
       provider: 'openrouter',
     });
 
-    expect(result.current.approximatePriceLabel).toBe('~ $0.05 / image');
+    // $0.05 → 1,250 π
+    expect(result.current.approximatePriceLabel).toBe('~ 1,250 π / image');
   });
 
   it('prefers an explicit pricing.approximatePricePerImage when the model has no top-level field', () => {
@@ -244,7 +264,7 @@ describe('useModelDetailPanel', () => {
       provider: 'openrouter',
     });
 
-    expect(result.current.approximatePriceLabel).toBe('~ $0.04 / image');
+    expect(result.current.approximatePriceLabel).toBe('~ 1,000 π / image');
   });
 
   it('updates expanded detail sections', () => {
