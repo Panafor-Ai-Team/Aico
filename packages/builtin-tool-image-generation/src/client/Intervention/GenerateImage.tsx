@@ -29,12 +29,12 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
    * punctuation on the correct side when the surrounding UI is RTL (fa-IR).
    */
   code: css`
+    direction: ltr;
     unicode-bidi: isolate;
 
     font-family: ${cssVar.fontFamilyCode};
     font-size: 12px;
     color: ${cssVar.colorTextSecondary};
-    direction: ltr;
   `,
   header: css`
     display: flex;
@@ -87,7 +87,7 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImageParams>>(
   ({ args, messageId, onArgsChange, registerBeforeApprove }) => {
     const { t } = useTranslation('plugin');
-    const { list } = useEnabledImageModels();
+    const { isLoading, list } = useEnabledImageModels();
     const topicId = useConversationStore(
       (s) => dataSelectors.getDbMessageById(messageId)(s)?.topicId,
     );
@@ -128,12 +128,17 @@ const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImagePar
 
     // Write the choice into the tool call right before it is approved: the tool
     // then runs on exactly the model shown here, and the conversation stops
-    // asking.
+    // asking. Refuse approval while models are still loading or none are available.
     useEffect(() => {
       if (!registerBeforeApprove) return;
 
       return registerBeforeApprove('image-generation-model-confirm', async () => {
-        if (!selected) return;
+        if (isLoading) {
+          throw new Error('Image models are still loading. Wait a moment and try again.');
+        }
+        if (!selected) {
+          throw new Error('No image generation model is available on this account yet.');
+        }
 
         setConfirmedImageModel(topicId, { model: selected.model, provider: selected.provider });
 
@@ -141,7 +146,7 @@ const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImagePar
           await onArgsChange?.({ ...args, model: selected.model, provider: selected.provider });
         }
       });
-    }, [args, onArgsChange, registerBeforeApprove, selected, topicId]);
+    }, [args, isLoading, onArgsChange, registerBeforeApprove, selected, topicId]);
 
     // Once the user overrides the proposal, the copy must stop calling it "the
     // default" — it is now their pick.
@@ -163,6 +168,17 @@ const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImagePar
       [options],
     );
 
+    const statusLabel = isLoading
+      ? t('builtins.lobe-image-generation.intervention.loading')
+      : selected
+        ? t(
+            isDefaultSelected
+              ? 'builtins.lobe-image-generation.intervention.description'
+              : 'builtins.lobe-image-generation.intervention.descriptionChanged',
+            { model: selected.displayName },
+          )
+        : t('builtins.lobe-image-generation.intervention.noModels');
+
     return (
       <Block variant={'outlined'}>
         <div className={styles.header}>
@@ -171,16 +187,7 @@ const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImagePar
           </div>
         </div>
         <Flexbox className={styles.body} gap={12}>
-          <div className={styles.label}>
-            {selected
-              ? t(
-                  isDefaultSelected
-                    ? 'builtins.lobe-image-generation.intervention.description'
-                    : 'builtins.lobe-image-generation.intervention.descriptionChanged',
-                  { model: selected.displayName },
-                )
-              : t('builtins.lobe-image-generation.intervention.noModels')}
-          </div>
+          <div className={styles.label}>{statusLabel}</div>
 
           {args?.prompt && (
             <div className={styles.prompt} dir={'auto'}>

@@ -274,6 +274,7 @@
   "builtins.lobe-image-generation.intervention.description": "这张图片将默认使用 {{model}} 生成。如需更换，可在下方选择其他模型。",
   "builtins.lobe-image-generation.intervention.descriptionChanged": "这张图片将使用 {{model}} 生成。",
   "builtins.lobe-image-generation.intervention.hint": "你的选择会在本次会话中沿用，不会再次询问。",
+  "builtins.lobe-image-generation.intervention.loading": "正在加载可用的图片模型…",
   "builtins.lobe-image-generation.intervention.modelLabel": "图片模型",
   "builtins.lobe-image-generation.intervention.noModels": "当前账户暂无可用的图片生成模型。",
   "builtins.lobe-image-generation.intervention.title": "确认生成图片",

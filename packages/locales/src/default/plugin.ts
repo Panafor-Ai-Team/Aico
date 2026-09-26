@@ -222,6 +222,7 @@ export default {
     'This image will be generated with {{model}}.',
   'builtins.lobe-image-generation.intervention.hint':
     'Your choice is used for the rest of this conversation, so you will not be asked again.',
+  'builtins.lobe-image-generation.intervention.loading': 'Loading available image models…',
   'builtins.lobe-image-generation.intervention.modelLabel': 'Image model',
   'builtins.lobe-image-generation.intervention.noModels':
     'No image generation model is available on this account yet.',
