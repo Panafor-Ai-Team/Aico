@@ -341,7 +341,7 @@ describe('createServerAgentToolsEngine', () => {
     expect(result.enabledToolIds).toContain(ImageGenerationManifest.identifier);
   });
 
-  it('should not enable ImageGeneration in chat mode when model has native image output', () => {
+  it('should enable ImageGeneration in chat mode when model can call tools, even with native image output', () => {
     const context = createMockContext();
     const engine = createServerAgentToolsEngine(context, {
       agentConfig: {
@@ -359,7 +359,7 @@ describe('createServerAgentToolsEngine', () => {
       toolIds: [],
     });
 
-    expect(result.enabledToolIds).not.toContain(ImageGenerationManifest.identifier);
+    expect(result.enabledToolIds).toContain(ImageGenerationManifest.identifier);
   });
 
   it('should not enable ImageGeneration in chat mode when model cannot call tools', () => {
@@ -403,7 +403,7 @@ describe('createServerAgentToolsEngine', () => {
     expect(result.enabledToolIds).toContain(ImageGenerationManifest.identifier);
   });
 
-  it('should not enable ImageGeneration in agent mode when model has native image output', () => {
+  it('should enable ImageGeneration by default in agent mode when model can call tools, even with native image output', () => {
     const context = createMockContext();
     const engine = createServerAgentToolsEngine(context, {
       agentConfig: { plugins: [] },
@@ -418,7 +418,7 @@ describe('createServerAgentToolsEngine', () => {
       toolIds: [],
     });
 
-    expect(result.enabledToolIds).not.toContain(ImageGenerationManifest.identifier);
+    expect(result.enabledToolIds).toContain(ImageGenerationManifest.identifier);
   });
 
   it('should not enable ImageGeneration in agent mode when model cannot call tools', () => {

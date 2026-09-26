@@ -365,7 +365,7 @@ describe('toolEngineering', () => {
       expect(result.enabledToolIds).toContain('lobe-image-generation');
     });
 
-    it('should not enable image generation in chat mode when model has native image output', () => {
+    it('should enable image generation in chat mode when model can call tools, even with native image output', () => {
       mockCurrentChatConfig = { enableAgentMode: false };
       mockImageOutputSupport = true;
 
@@ -380,7 +380,7 @@ describe('toolEngineering', () => {
         provider: 'openai',
       });
 
-      expect(result.enabledToolIds).not.toContain('lobe-image-generation');
+      expect(result.enabledToolIds).toContain('lobe-image-generation');
     });
 
     it('should not enable image generation in chat mode when model cannot call tools', () => {
@@ -478,7 +478,7 @@ describe('toolEngineering', () => {
       });
 
       // lobe-agent is always-on (alwaysOnToolIds), so it rides along with user tools.
-      // Image generation is a default agent-mode tool when the model lacks native imageOutput.
+      // Image generation is a default agent-mode tool when the model can call tools.
       expect(result.enabledToolIds).toEqual([
         'search',
         'lobe-web-browsing',
@@ -576,7 +576,7 @@ describe('toolEngineering', () => {
       expect(result.enabledToolIds).toContain('lobe-image-generation');
     });
 
-    it('should not enable image generation in agent mode when model has native image output', () => {
+    it('should enable image generation by default in agent mode when model can call tools, even with native image output', () => {
       mockImageOutputSupport = true;
 
       const toolsEngine = createAgentToolsEngine({
@@ -590,7 +590,7 @@ describe('toolEngineering', () => {
         toolIds: [],
       });
 
-      expect(result.enabledToolIds).not.toContain('lobe-image-generation');
+      expect(result.enabledToolIds).toContain('lobe-image-generation');
     });
 
     it('should not enable image generation in agent mode when model cannot call tools', () => {
