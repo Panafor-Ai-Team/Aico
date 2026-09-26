@@ -38,8 +38,8 @@ export class ServerContextBuilder implements ContextBuilder {
 
     // Clear image asks must call generateImage — reasoning models otherwise
     // invent a plaintext prompt and never invoke the tool. Prefer the Create →
-    // Image one-shot path (skip LLM) when the tool is offered; otherwise keep
-    // forcing tool_choice for providers that still need a model round-trip.
+    // Image one-shot path (skip LLM) on clear intent even when the tool is
+    // missing from the offer set; otherwise keep forcing tool_choice.
     const latestUserText = findLatestUserMessageText(result.processedMessages);
     const directToolCall = resolveDirectImageGenerationToolCall({
       executorMap: tooling.resolved.executorMap,

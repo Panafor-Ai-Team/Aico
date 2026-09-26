@@ -103,7 +103,7 @@ export interface DirectGenerateImageToolCall {
 /**
  * Build a one-shot `generateImage` tool call the same way Create → Image
  * would: the user's photo request is the prompt. Callers skip the LLM and
- * execute this payload when intent is clear and the tool is offered.
+ * execute this payload when intent is clear.
  */
 export const buildDirectGenerateImageToolCall = (params: {
   executor?: 'client' | 'server';
@@ -128,19 +128,24 @@ export const buildDirectGenerateImageToolCall = (params: {
 };
 
 /**
- * When the latest user turn is a clear photo ask and `generateImage` is in the
- * offered tools, return a Create-parity direct tool call. Otherwise undefined
- * (fall through to normal LLM tool selection).
+ * When the latest user turn is a clear photo ask, return a Create-parity
+ * direct `generateImage` tool call so the runtime skips the chat model.
+ *
+ * Do **not** gate on the tool being present in the current offer set: when
+ * `generateImage` is missing (FC gap, stale client, custom toolMode), the
+ * model answers with a plaintext promise ("Preparing image generation" /
+ * "I'll make a cute cartoon…") and never produces a photo. Create → Image
+ * never asks the LLM first — chat should match that for clear photo asks.
  */
 export const resolveDirectImageGenerationToolCall = (params: {
   executorMap?: Record<string, 'client' | 'server' | undefined>;
   messages: Array<{ content?: unknown; role?: string }> | null | undefined;
   sourceMap?: Record<string, DirectGenerateImageToolCall['source'] | undefined>;
-  tools: ToolLike[] | null | undefined;
+  /** @deprecated Ignored — kept so existing call sites keep compiling. */
+  tools?: ToolLike[] | null | undefined;
 }): DirectGenerateImageToolCall | undefined => {
   const prompt = findLatestUserMessageText(params.messages);
   if (!isImageGenerationUserIntent(prompt)) return undefined;
-  if (!resolveForcedImageGenerationToolChoice(params.tools)) return undefined;
 
   return buildDirectGenerateImageToolCall({
     executor: params.executorMap?.[ImageGenerationIdentifier],
