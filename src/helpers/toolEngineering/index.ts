@@ -283,6 +283,9 @@ export const createAgentToolsEngine = (
     [LocalSystemManifest.identifier]: agentChatConfigSelectors.isLocalSystemEnabled(agentState),
     [MemoryManifest.identifier]: memoryEnabled,
     [WebBrowsingManifest.identifier]: webBrowsingEnabled,
+    // Example: Claude can call tools but lacks native imageOutput, so expose the
+    // image-generation fallback; image-output models should use their native path.
+    [ImageGenerationManifest.identifier]: imageGenerationEnabled,
   };
 
   return createToolsEngine({

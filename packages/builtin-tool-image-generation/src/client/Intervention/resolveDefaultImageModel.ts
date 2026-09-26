@@ -1,7 +1,4 @@
-import {
-  DEFAULT_AUTO_IMAGE_MODEL_PROVIDER,
-  pickDefaultAutoImageModel,
-} from '@lobechat/business-const';
+import { pickDefaultAutoImageModel } from '@lobechat/business-const';
 
 export interface ImageModelOption {
   displayName: string;
@@ -19,8 +16,10 @@ export const imageModelOptionKey = (option: { model: string; provider: string })
 /**
  * Pick what the confirmation card should propose:
  * 1. the model the assistant explicitly asked for, when the account has it;
- * 2. the pinned product default (GPT Image 2, else Muse on OpenRouter) — this
- *    is the branch the Auto router lands on, since Auto never names an image model;
+ * 2. the pinned product default (gpt-image-2, else Muse) across every provider —
+ *    Auto never names an image model, and gpt-image-2 may not live under the
+ *    OpenRouter provider id (managed / CheapVibeCode slot), so do not filter by
+ *    provider first or Muse wins incorrectly;
  * 3. otherwise the first model the account has.
  */
 export const resolveDefaultImageModelOption = (
@@ -38,11 +37,5 @@ export const resolveDefaultImageModelOption = (
     if (matched) return matched;
   }
 
-  const pinned =
-    pickDefaultAutoImageModel(
-      options.filter((option) => option.provider === DEFAULT_AUTO_IMAGE_MODEL_PROVIDER),
-      (option) => option.model,
-    ) ?? pickDefaultAutoImageModel(options, (option) => option.model);
-
-  return pinned ?? options[0];
+  return pickDefaultAutoImageModel(options, (option) => option.model) ?? options[0];
 };

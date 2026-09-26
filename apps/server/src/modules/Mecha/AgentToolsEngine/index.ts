@@ -346,6 +346,9 @@ export const createServerAgentToolsEngine = (
     // physical walls drop it for `canUseDevice=false` turns.
     [RemoteDeviceManifest.identifier]: deviceCapable && hasDeviceProxy && !deviceLocked,
     [WebBrowsingManifest.identifier]: isSearchEnabled,
+    // Example: Claude can call tools but lacks native imageOutput, so expose the
+    // image-generation fallback; image-output models should use their native path.
+    [ImageGenerationManifest.identifier]: imageGenerationEnabled,
   };
 
   const excludedIdentifiers = new Set(disabledPluginIds);

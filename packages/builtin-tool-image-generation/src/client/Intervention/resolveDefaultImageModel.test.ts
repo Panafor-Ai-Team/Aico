@@ -10,7 +10,17 @@ const option = (provider: string, model: string): ImageModelOption => ({
 });
 
 describe('resolveDefaultImageModelOption', () => {
-  it('defaults to the pinned OpenRouter model instead of catalog order', () => {
+  it('defaults to gpt-image-2 over Muse even when Muse is listed under OpenRouter', () => {
+    const options = [
+      option('openrouter', 'meta/muse-image'),
+      option('openrouter', 'some/other-image-model'),
+      option('cheapvibecode', 'gpt-image-2'),
+    ];
+
+    expect(resolveDefaultImageModelOption(options)?.model).toBe('gpt-image-2');
+  });
+
+  it('defaults to Muse when gpt-image-2 is unavailable', () => {
     const options = [
       option('openrouter', 'some/other-image-model'),
       option('openrouter', 'meta/muse-image'),
@@ -22,10 +32,10 @@ describe('resolveDefaultImageModelOption', () => {
   it('matches the pinned model through its synthesized :image sibling', () => {
     const options = [
       option('openrouter', 'some/other-image-model'),
-      option('openrouter', 'meta/muse-image:image'),
+      option('openrouter', 'gpt-image-2:image'),
     ];
 
-    expect(resolveDefaultImageModelOption(options)?.model).toBe('meta/muse-image:image');
+    expect(resolveDefaultImageModelOption(options)?.model).toBe('gpt-image-2:image');
   });
 
   it('honours a model the assistant explicitly requested', () => {

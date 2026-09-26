@@ -91,8 +91,9 @@ export const DEFAULT_AUTO_IMAGE_MODEL_PROVIDER = 'openrouter';
 
 /**
  * Default image generators used when the chat model is the Auto router, in
- * preference order. GPT Image 2 is served by CheapVibeCode; OpenRouter does not
- * offer that id, so a deployment on OpenRouter falls through to Muse.
+ * preference order. GPT Image 2 (medium quality via its schema default) is
+ * served by CheapVibeCode; OpenRouter does not offer that id, so a deployment
+ * on OpenRouter falls through to Muse.
  */
 export const DEFAULT_AUTO_IMAGE_MODEL_IDS = ['gpt-image-2', 'meta/muse-image'] as const;
 

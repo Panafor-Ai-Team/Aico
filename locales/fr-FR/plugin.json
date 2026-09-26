@@ -298,7 +298,7 @@
   "builtins.lobe-image-generation.render.status.processing": "Génération en cours",
   "builtins.lobe-image-generation.render.status.success": "Terminé",
   "builtins.lobe-image-generation.render.statusCheckFailed": "Échec de la vérification du statut de l'image",
-  "builtins.lobe-image-generation.title": "Génération d'images",
+  "builtins.lobe-image-generation.title": "Assistant de génération d'images",
   "builtins.lobe-knowledge-base.apiName.readKnowledge": "Lire le contenu de la Bibliothèque",
   "builtins.lobe-knowledge-base.apiName.searchKnowledgeBase": "Rechercher dans la Bibliothèque",
   "builtins.lobe-knowledge-base.inspector.andMoreFiles": "et {{count}} de plus",

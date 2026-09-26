@@ -248,7 +248,7 @@ export default {
   'builtins.lobe-image-generation.render.status.pending': 'Pending',
   'builtins.lobe-image-generation.render.status.processing': 'Generating',
   'builtins.lobe-image-generation.render.status.success': 'Completed',
-  'builtins.lobe-image-generation.title': 'Image Generation',
+  'builtins.lobe-image-generation.title': 'Image Generation Assistant',
   'builtins.lobe-agent.apiName.clearTodos': 'Clear todos',
   'builtins.lobe-agent.apiName.clearTodos.modeAll': 'all',
   'builtins.lobe-agent.apiName.clearTodos.modeCompleted': 'completed',

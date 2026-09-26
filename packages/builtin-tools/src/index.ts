@@ -46,6 +46,7 @@ export const defaultToolIds = [
   SkillsManifest.identifier,
   SkillStoreManifest.identifier,
   WebBrowsingManifest.identifier,
+  ImageGenerationManifest.identifier,
   KnowledgeBaseManifest.identifier,
   MemoryManifest.identifier,
   LocalSystemManifest.identifier,

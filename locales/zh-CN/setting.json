@@ -1274,6 +1274,8 @@
   "tools.builtins.lobe-group-agent-builder.title": "群组助手构建器",
   "tools.builtins.lobe-group-management.description": "编排并管理多助手群组对话",
   "tools.builtins.lobe-group-management.title": "群组管理",
+  "tools.builtins.lobe-image-generation.description": "通过内置图像流水线在对话中生成图片。默认使用 gpt-image-2，质量为 medium。",
+  "tools.builtins.lobe-image-generation.title": "图像生成助手",
   "tools.builtins.lobe-knowledge-base.description": "通过语义向量检索搜索已上传的文档与领域知识 — 适用于持久、可复用的参考资料",
   "tools.builtins.lobe-knowledge-base.title": "知识库",
   "tools.builtins.lobe-local-system.description": "访问和管理本地文件，在桌面端运行 Shell 命令",

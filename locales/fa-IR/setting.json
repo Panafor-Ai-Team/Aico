@@ -1274,6 +1274,8 @@
   "tools.builtins.lobe-group-agent-builder.title": "سازنده ایجنت گروهی",
   "tools.builtins.lobe-group-management.description": "هماهنگ‌سازی و مدیریت گفتگوهای گروه‌های چند دستیاری",
   "tools.builtins.lobe-group-management.title": "مدیریت گروه",
+  "tools.builtins.lobe-image-generation.description": "ساخت تصویر از داخل گفتگو از طریق خط لولهٔ داخلی. پیش‌فرض: gpt-image-2 با کیفیت medium.",
+  "tools.builtins.lobe-image-generation.title": "دستیار ساخت عکس",
   "tools.builtins.lobe-knowledge-base.description": "جستجوی اسناد بارگذاری‌شده و دانش حوزه‌ای از طریق جستجوی برداری معنایی — برای مرجع دائمی و قابل استفاده مجدد",
   "tools.builtins.lobe-knowledge-base.title": "پایگاه دانش",
   "tools.builtins.lobe-local-system.description": "دسترسی به سیستم فایل محلی در دسکتاپ. خواندن، نوشتن، جستجو و سازماندهی فایل‌ها. اجرای دستورات شِل با پشتیبانی از وظایف پس‌زمینه و جستجوی محتوا با الگوهای regex.",

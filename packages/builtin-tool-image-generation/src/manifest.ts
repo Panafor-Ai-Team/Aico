@@ -155,8 +155,8 @@ export const ImageGenerationManifest: BuiltinToolManifest = {
   meta: {
     avatar: '🎨',
     description:
-      'Generate images from chat through LobeHub image generation models, including models that are not native image-output chat models.',
-    title: 'Image Generation',
+      'Generate images from chat through the built-in image pipeline, including models that are not native image-output chat models. Defaults to gpt-image-2 at medium quality.',
+    title: 'Image Generation Assistant',
   },
   systemRole: systemPrompt,
   type: 'builtin',
