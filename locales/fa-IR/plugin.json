@@ -274,6 +274,7 @@
   "builtins.lobe-image-generation.intervention.description": "این تصویر به‌صورت پیش‌فرض با مدل {{model}} ساخته می‌شود. اگر ترجیح می‌دهید، از فهرست زیر مدل دیگری انتخاب کنید.",
   "builtins.lobe-image-generation.intervention.descriptionChanged": "این تصویر با مدل {{model}} ساخته می‌شود.",
   "builtins.lobe-image-generation.intervention.hint": "انتخاب شما تا پایان همین گفت‌وگو استفاده می‌شود و دوباره از شما پرسیده نمی‌شود.",
+  "builtins.lobe-image-generation.intervention.loading": "در حال بارگذاری مدل‌های تصویر…",
   "builtins.lobe-image-generation.intervention.modelLabel": "مدل تصویرسازی",
   "builtins.lobe-image-generation.intervention.noModels": "هنوز هیچ مدل تصویرسازی برای این حساب در دسترس نیست.",
   "builtins.lobe-image-generation.intervention.title": "تأیید ساخت تصویر",

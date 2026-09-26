@@ -274,6 +274,7 @@
   "builtins.lobe-image-generation.intervention.description": "Cette image sera générée avec {{model}}, le modèle par défaut. Choisissez un autre modèle ci-dessous si vous le souhaitez.",
   "builtins.lobe-image-generation.intervention.descriptionChanged": "Cette image sera générée avec {{model}}.",
   "builtins.lobe-image-generation.intervention.hint": "Votre choix sera utilisé pour le reste de cette conversation : la question ne vous sera plus posée.",
+  "builtins.lobe-image-generation.intervention.loading": "Chargement des modèles d'image disponibles…",
   "builtins.lobe-image-generation.intervention.modelLabel": "Modèle d'image",
   "builtins.lobe-image-generation.intervention.noModels": "Aucun modèle de génération d'images n'est disponible sur ce compte.",
   "builtins.lobe-image-generation.intervention.title": "Confirmer la génération d'image",

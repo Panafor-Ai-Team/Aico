@@ -360,6 +360,24 @@ describe('AiAgentService.execAgent - device tool pipeline ()', () => {
       expect(executorMap[LocalSystemManifest.identifier]).toBeUndefined();
     });
 
+    it('should NOT mark image-generation as client when gateway is NOT configured', async () => {
+      const { ImageGenerationManifest } = await import('@lobechat/builtin-tool-image-generation');
+      const { deviceGateway } = await import('@/server/services/deviceGateway');
+      vi.spyOn(deviceGateway, 'isConfigured', 'get').mockReturnValue(false);
+
+      mockGetEnabledPluginManifests.mockReturnValue(
+        new Map([[ImageGenerationManifest.identifier, ImageGenerationManifest]]),
+      );
+      mockGetAgentConfig.mockResolvedValue(createBaseAgentConfig());
+
+      await service.execAgent({ agentId: 'agent-1', prompt: 'Hello' });
+
+      const executorMap = mockCreateOperation.mock.calls[0][0].toolSet.executorMap;
+      // Dual-executor cloud tools must stay on the server runtime so chat image
+      // gen does not depend on browser WS when DEVICE_GATEWAY is unset.
+      expect(executorMap[ImageGenerationManifest.identifier]).toBeUndefined();
+    });
+
     it('should mark stdio MCP plugin as client only when gateway is NOT configured', async () => {
       const stdioPlugin = {
         customParams: { mcp: { type: 'stdio' } },

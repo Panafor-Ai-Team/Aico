@@ -3324,11 +3324,12 @@ export class AiAgentService {
         toolSourceMap[manifest.identifier] = 'composio';
       }
 
-      // Mark tools that must run on the user's machine (local-system, stdio
-      // MCP) for direct client dispatch only in the standalone deployment
-      // where no DEVICE_GATEWAY is configured. In that mode the legacy
-      // Remote Device proxy isn't available and the embedded Electron runs
-      // both the server and the executor, so tools route in-process.
+      // Mark tools that must run on the user's machine (local-system, browser)
+      // for direct client dispatch only in the standalone deployment where no
+      // DEVICE_GATEWAY is configured. Dual-executor cloud tools such as image
+      // generation keep the server runtime — forcing them to `client` made
+      // chat image gen depend on browser WS/Redis while /image (lambda) still
+      // worked.
       //
       // With a device-gateway configured, every caller (desktop UI, web,
       // IM/bot) converges on the device-gateway path: tool calls tunnel to
@@ -3336,7 +3337,7 @@ export class AiAgentService {
       // RemoteDevice proxy resolves the route.
       if (!gatewayConfigured) {
         for (const id of Object.keys(toolManifestMap)) {
-          if (toolManifestMap[id]?.executors?.includes('client')) {
+          if (isDeviceToolIdentifier(id)) {
             toolExecutorMap[id] = 'client';
           }
         }

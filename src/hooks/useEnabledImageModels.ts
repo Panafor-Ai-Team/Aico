@@ -28,6 +28,7 @@ import { type EnabledProviderWithModels } from '@/types/aiProvider';
  *   mirroring how Auto is handled for chat.
  */
 export const useEnabledImageModels = (): {
+  isLoading: boolean;
   isManagedStatusLoading: boolean;
   list: EnabledProviderWithModels[];
 } => {
@@ -84,8 +85,13 @@ export const useEnabledImageModels = (): {
     return [orgProvider, ...byok];
   }, [allowed, catalog, enabledImageModelList, isLoading, managedStatus, orgId]);
 
+  const isOrgScopeLoading = Boolean(orgId && (!allowed || !catalog));
+  const isManagedStatusLoading = managedStatus === undefined && Boolean(isLoading);
+
   return {
-    isManagedStatusLoading: managedStatus === undefined && Boolean(isLoading),
+    /** True while any dependency of the picker list is still hydrating. */
+    isLoading: isManagedStatusLoading || isOrgScopeLoading,
+    isManagedStatusLoading,
     list,
   };
 };
