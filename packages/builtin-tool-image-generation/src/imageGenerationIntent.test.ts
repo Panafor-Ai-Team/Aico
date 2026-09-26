@@ -77,13 +77,20 @@ describe('resolveDirectImageGenerationToolCall', () => {
     });
   });
 
-  it('returns nothing when the photo tool is not offered', () => {
-    expect(
-      resolveDirectImageGenerationToolCall({
-        messages: [{ content: 'Generate an image of a cat', role: 'user' }],
-        tools: [{ function: { name: 'lobe-web-browsing____search' } }],
-      }),
-    ).toBeUndefined();
+  it('still builds a direct call when the photo tool is missing from the offer set', () => {
+    const call = resolveDirectImageGenerationToolCall({
+      messages: [{ content: 'Generate an image of a cat', role: 'user' }],
+      tools: [{ function: { name: 'lobe-web-browsing____search' } }],
+    });
+
+    expect(call).toMatchObject({
+      apiName: 'generateImage',
+      identifier: 'lobe-image-generation',
+      type: 'builtin',
+    });
+    expect(JSON.parse(call!.arguments)).toEqual({
+      prompt: 'Generate an image of a cat',
+    });
   });
 
   it('returns nothing for ordinary chat', () => {
