@@ -134,9 +134,7 @@ export const GetImageModelParametersRender = memo<
         >
           <Flexbox flex={1} gap={1}>
             <span className={styles.modelName}>{displayName}</span>
-            <span className={styles.modelId}>
-              {pluginState.provider}/{pluginState.model}
-            </span>
+            {pluginState.model && <span className={styles.modelId}>{pluginState.model}</span>}
           </Flexbox>
           <span className={styles.count}>
             {t('builtins.lobe-image-generation.render.parameterList.parameters', {

@@ -54,6 +54,7 @@ import {
   ImageGenerationInspectors,
   ImageGenerationInterventions,
   ImageGenerationManifest,
+  ImageGenerationPlaceholders,
   ImageGenerationRenders,
 } from '@lobechat/builtin-tool-image-generation/client';
 import {
@@ -287,6 +288,11 @@ export const registerBuiltinToolSurfaces = (): void => {
       string,
       BuiltinStreaming
     >,
+    // Same loading card as the placeholder — covers the args-streaming / no-result phase.
+    [ImageGenerationManifest.identifier]: ImageGenerationPlaceholders as Record<
+      string,
+      BuiltinStreaming
+    >,
     [LobeAgentManifest.identifier]: LobeAgentStreamings as Record<string, BuiltinStreaming>,
     [LocalSystemManifest.identifier]: LocalSystemStreamings as Record<string, BuiltinStreaming>,
     [MemoryManifest.identifier]: MemoryStreamings as Record<string, BuiltinStreaming>,
@@ -327,6 +333,10 @@ export const registerBuiltinToolSurfaces = (): void => {
   });
 
   registerBuiltinPlaceholders({
+    [ImageGenerationManifest.identifier]: ImageGenerationPlaceholders as Record<
+      string,
+      BuiltinPlaceholder
+    >,
     [LocalSystemIdentifier]: {
       [LocalSystemApiName.searchFiles]: LocalSystemSearchFilesPlaceholder as BuiltinPlaceholder,
       [LocalSystemApiName.listFiles]: LocalSystemListFilesPlaceholder as BuiltinPlaceholder,
