@@ -21,6 +21,7 @@ import { isDev } from '@/utils/env';
 import { formatNumber } from '@/utils/format';
 
 import { contextSelectors, useConversationStore } from '../../../../store';
+import { formatMessageCostUsd } from '../../resolveMessageCost';
 import TokenDetail from './UsageDetail';
 
 export const styles = createStaticStyles(({ css, cssVar }) => ({
@@ -31,10 +32,10 @@ export const styles = createStaticStyles(({ css, cssVar }) => ({
 }));
 
 // Cheap messages don't need a cost callout — only surface it once it's
-// expensive enough to matter.
+// expensive enough to matter (~0.2 USD ≈ 5000 π at default CVC rates).
 const MIN_DISPLAY_COST = 0.2;
 
-const formatCost = (cost: number) => cost.toFixed(2);
+const formatCost = (cost: number) => formatMessageCostUsd(cost);
 
 interface UsageProps {
   model: string;

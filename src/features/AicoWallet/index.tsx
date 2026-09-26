@@ -1,6 +1,7 @@
 'use client';
 
 import { BRANDING_NAME } from '@lobechat/business-const';
+// eslint-disable-next-line no-restricted-imports -- Text/Tag not in base-ui yet
 import { Block, Flexbox, Tag, Text } from '@lobehub/ui';
 import { Button, toast } from '@lobehub/ui/base-ui';
 import { Form, Table } from 'antd';
@@ -19,14 +20,11 @@ import type {
 } from '@/features/AicoBilling';
 import {
   AICO_MY_WALLET_SWR_KEY,
-  formatRemainingUsd,
+  formatRemainingPi,
   useAicoBillingSources,
 } from '@/features/AicoBilling';
-import {
-  type FxTopupChargeField,
-  FxTopupFields,
-  type FxTopupFormValues,
-} from '@/features/AicoBilling/FxTopupFields';
+import { FxTopupFields, type FxTopupFormValues } from '@/features/AicoBilling/FxTopupFields';
+import { formatPiTokens } from '@/features/AicoBilling/piToken';
 import { AICO_TABLE_SCROLL, aicoPanelStyles } from '@/features/AicoPanels';
 import { buildPhoneVerifyRedirectUrl } from '@/libs/better-auth/phone';
 import { useClientDataSWR } from '@/libs/swr';
@@ -79,7 +77,6 @@ const sourceTitle = (source: AicoBillingSource, t: LooseTFunction): string => {
 export const AicoWallet = () => {
   const { t } = useTranslation('aico');
   const [busy, setBusy] = useState(false);
-  const [chargeField, setChargeField] = useState<FxTopupChargeField>('toman');
   const [topupForm] = Form.useForm<FxTopupFormValues>();
   const phoneVerified = useUserStore((s) =>
     Boolean(userProfileSelectors.userProfile(s)?.phoneNumberVerified),
@@ -107,8 +104,7 @@ export const AicoWallet = () => {
   );
 
   const display = resolveWalletDisplay({
-    paidInToman: wallet?.balanceToman,
-    paidInUsd: wallet?.balanceUsd,
+    paidInPi: wallet?.paidInPi,
     personal: personalSource,
   });
 
@@ -139,17 +135,10 @@ export const AicoWallet = () => {
 
       <div className={aicoPanelStyles.grid}>
         <StatisticCard
-          title={t('wallet.remainingUsd')}
+          title={t('wallet.remainingPi')}
           statistic={{
-            description: cardFooter(display.paidInUsd),
-            value: display.remainingUsd ?? t('wallet.remainingUnknown'),
-          }}
-        />
-        <StatisticCard
-          title={t('wallet.remainingToman')}
-          statistic={{
-            description: cardFooter(display.paidInToman),
-            value: display.remainingToman ?? t('wallet.remainingUnknown'),
+            description: cardFooter(display.paidInPi),
+            value: display.remainingPi ?? t('wallet.remainingUnknown'),
           }}
         />
         <StatisticCard
@@ -173,7 +162,7 @@ export const AicoWallet = () => {
                 const ctx = sourceToContext(source);
                 const selected = isSelected(ctx);
                 const title = sourceTitle(source, t);
-                const remaining = formatRemainingUsd(source.remainingUsd);
+                const remaining = formatRemainingPi(source.remainingPi);
 
                 return (
                   <button
@@ -227,11 +216,10 @@ export const AicoWallet = () => {
           <Form form={topupForm} layout="vertical">
             <FxTopupFields
               disabled
-              chargeField={chargeField}
               form={topupForm}
               fxRate={fx?.tomanPerUsd}
               fxSource={fx?.source}
-              onChargeFieldChange={setChargeField}
+              piPerUsd={fx?.piPerUsd ?? wallet?.topupPiPerUsd}
             />
             <Button disabled type="primary">
               {t('wallet.onlineTopupSubmit')}
@@ -323,14 +311,9 @@ export const AicoWallet = () => {
               columns={[
                 { dataIndex: 'type', title: t('wallet.columns.type') },
                 {
-                  dataIndex: 'amountUsd',
-                  title: t('wallet.columns.usd'),
-                  render: (v) => (v == null ? '—' : Number(v).toFixed(4)),
-                },
-                {
-                  dataIndex: 'amountToman',
-                  title: t('wallet.columns.toman'),
-                  render: (v: number | string) => Number(v ?? 0).toLocaleString(),
+                  dataIndex: 'amountPi',
+                  title: t('wallet.columns.pi'),
+                  render: (v: number | string | null) => (v == null ? '—' : formatPiTokens(v)),
                 },
                 {
                   dataIndex: 'createdAt',

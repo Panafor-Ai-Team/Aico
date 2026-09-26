@@ -12,6 +12,7 @@
  * one is still editable so a switch does not need a deploy to set its rate.
  */
 
+// eslint-disable-next-line no-restricted-imports -- Text/Tag not in base-ui yet
 import { Block, Flexbox, Tag, Text } from '@lobehub/ui';
 import { Button, toast } from '@lobehub/ui/base-ui';
 import { InputNumber } from 'antd';
@@ -29,6 +30,7 @@ const BP_SCALE = 10_000;
 interface ProviderRow {
   isActive: boolean;
   multiplierBp: number;
+  piPerUsd: number;
   providerId: string;
 }
 
@@ -111,7 +113,9 @@ export const UsageMultiplierSection = () => {
             </Button>
             <Text type="secondary">
               {t('platform.multiplierPreview', {
-                value: (provider.multiplierBp / BP_SCALE).toFixed(2),
+                pi: Math.floor(
+                  25_000 / (drafts[provider.providerId] ?? provider.multiplierBp / BP_SCALE),
+                ).toLocaleString(),
               })}
             </Text>
           </Flexbox>

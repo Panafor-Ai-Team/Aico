@@ -46,7 +46,7 @@ vi.mock('@/server/services/openrouter/keyService', () => ({
 vi.mock('@/server/services/aico/usageMultiplier', () => ({
   resolveManagedPricingContext: vi
     .fn()
-    .mockResolvedValue({ costMultiplierBp: 12_000, plan: 'aico', scope: 'personal' }),
+    .mockResolvedValue({ costMultiplierBp: 10_000, plan: 'aico', scope: 'personal' }),
 }));
 
 const ledger = vi.hoisted(() => ({ mode: 'off' as 'enforce' | 'off' | 'shadow' }));
@@ -156,9 +156,8 @@ describe('POST handler', () => {
       // fails strict APIs: OpenAI-style Responses rejects it as an unsupported
       // parameter, which broke every GPT-5.x model behind CheapVibeCode.
       expect(mockRuntime.chat).toHaveBeenCalledWith(mockChatPayload, {
-        // Managed traffic always carries the platform usage multiplier so the
-        // cost reported with the stream is the billed figure.
-        pricingContext: { costMultiplierBp: 12_000, plan: 'aico', scope: 'personal' },
+        // Managed traffic uses identity cost multiplier — margin is at top-up (π yield).
+        pricingContext: { costMultiplierBp: 10_000, plan: 'aico', scope: 'personal' },
         user: 'test-user-id',
         signal: expect.anything(),
       });

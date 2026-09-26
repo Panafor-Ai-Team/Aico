@@ -5,6 +5,8 @@ export type AicoPersonalBillingSource = {
   hasManagedKey: boolean;
   isActive: boolean;
   remainingMicroUsd: string;
+  /** Spendable balance in π tokens (derived from raw capacity). */
+  remainingPi: string;
   /** FIN-016: toman still spendable, pro-rated from what was paid in. */
   remainingToman: string;
   remainingUsd: string;
@@ -23,6 +25,7 @@ export type AicoOrganizationBillingSource = {
   organizationId: string;
   organizationName: string;
   remainingMicroUsd: string;
+  remainingPi: string;
   remainingUsd: string;
   renewalBlocked: boolean;
   source: 'organization';

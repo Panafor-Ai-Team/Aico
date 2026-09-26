@@ -517,3 +517,117 @@ export const billedUsageFromCapacity = (params: {
     }),
   );
 };
+
+/**
+ * User-facing π tokens (Aico product unit).
+ *
+ * 1 π = {@link CVC_TOKENS_PER_PI} CheapVibeCode tokens. π is derived from **raw**
+ * upstream USD (what the managed key can spend), not billed USD — the usage
+ * multiplier is applied only at top-up as a yield haircut ($1 → fewer π).
+ *
+ * At defaults (`AICO_CVC_TOKENS_PER_USD` = 25M, CVC multiplier 1.25×):
+ *   $1 billed → $0.80 raw → 20_000_000 CVC → 20_000 π.
+ */
+export const CVC_TOKENS_PER_PI = 1000;
+export const DEFAULT_CVC_TOKENS_PER_USD = 25_000_000;
+
+const safeCvcTokensPerUsd = (cvcTokensPerUsd: number | null | undefined): number => {
+  const value = Math.trunc(Number(cvcTokensPerUsd ?? DEFAULT_CVC_TOKENS_PER_USD));
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_CVC_TOKENS_PER_USD;
+  return value;
+};
+
+/**
+ * Raw micro-USD → whole π tokens. Floor so remaining never looks more generous
+ * than the upstream key can spend.
+ *
+ *   π = floor(raw_usd × cvc_per_usd / 1000)
+ *     = floor(raw_micro × cvc_per_usd / 1_000_000_000)
+ */
+export const rawMicroUsdToPiTokens = (
+  rawMicroUsd: number,
+  cvcTokensPerUsd: number | null | undefined = DEFAULT_CVC_TOKENS_PER_USD,
+): number => {
+  const raw = Math.trunc(Number(rawMicroUsd ?? 0));
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  const cvcPerUsd = BigInt(safeCvcTokensPerUsd(cvcTokensPerUsd));
+  const denom = MICRO_USD_PER_USD * BigInt(CVC_TOKENS_PER_PI);
+  return Number((BigInt(raw) * cvcPerUsd) / denom);
+};
+
+/**
+ * Whole π tokens → raw micro-USD. Floor so we never credit more capacity than
+ * the π figure implies.
+ */
+export const piTokensToRawMicroUsd = (
+  piTokens: number,
+  cvcTokensPerUsd: number | null | undefined = DEFAULT_CVC_TOKENS_PER_USD,
+): number => {
+  const pi = Math.trunc(Number(piTokens ?? 0));
+  if (!Number.isFinite(pi) || pi <= 0) return 0;
+  const cvcPerUsd = BigInt(safeCvcTokensPerUsd(cvcTokensPerUsd));
+  if (cvcPerUsd <= 0n) return 0;
+  const numer = BigInt(pi) * MICRO_USD_PER_USD * BigInt(CVC_TOKENS_PER_PI);
+  return Number(numer / cvcPerUsd);
+};
+
+/**
+ * How many π a $1 billed top-up credits at the given multiplier.
+ * Default CVC path: 25_000_000 / 1.25 / 1000 = 20_000.
+ */
+export const topupPiTokensPerUsd = (
+  multiplierBp: number | null | undefined,
+  cvcTokensPerUsd: number | null | undefined = DEFAULT_CVC_TOKENS_PER_USD,
+): number =>
+  rawMicroUsdToPiTokens(rawCapacityFromDeposit(1_000_000, multiplierBp), cvcTokensPerUsd);
+
+/** π credited for a billed deposit (toman/USD top-up after FX). */
+export const topupPiTokensFromDeposit = (
+  depositMicroUsd: number,
+  multiplierBp: number | null | undefined,
+  cvcTokensPerUsd: number | null | undefined = DEFAULT_CVC_TOKENS_PER_USD,
+): number =>
+  rawMicroUsdToPiTokens(rawCapacityFromDeposit(depositMicroUsd, multiplierBp), cvcTokensPerUsd);
+
+/**
+ * Convert a billed micro-USD amount (wallet remaining, message cost after markup,
+ * org budget remaining) into π via the wallet's blended rate — i.e. undo the
+ * top-up haircut so π tracks raw CVC capacity 1:1.
+ */
+export const billedMicroUsdToPiTokens = (params: {
+  balanceMicroUsd?: number | null;
+  billedMicroUsd: number;
+  cvcTokensPerUsd?: number | null;
+  fallbackBp?: number | null;
+  multiplierBp?: number | null;
+  rawCapacityMicroUsd?: number | null;
+}): number => {
+  const billed = Math.trunc(Number(params.billedMicroUsd ?? 0));
+  if (!Number.isFinite(billed) || billed <= 0) return 0;
+
+  const bp =
+    params.multiplierBp != null
+      ? safeBp(params.multiplierBp)
+      : blendedMultiplierBp({
+          balanceMicroUsd: Number(params.balanceMicroUsd ?? 0),
+          fallbackBp: params.fallbackBp,
+          rawCapacityMicroUsd: Number(params.rawCapacityMicroUsd ?? 0),
+        });
+
+  return rawMicroUsdToPiTokens(
+    removeMultiplierMicroUsd(billed, bp),
+    params.cvcTokensPerUsd ?? DEFAULT_CVC_TOKENS_PER_USD,
+  );
+};
+
+/**
+ * Fractional π for tiny costs / model rates (not balances).
+ * Uses IEEE only for *display* of sub-π amounts; balances stay integer.
+ */
+export const rawUsdToPiTokensDecimal = (
+  rawUsd: number,
+  cvcTokensPerUsd: number | null | undefined = DEFAULT_CVC_TOKENS_PER_USD,
+): number => {
+  if (!Number.isFinite(rawUsd) || rawUsd <= 0) return 0;
+  return (rawUsd * safeCvcTokensPerUsd(cvcTokensPerUsd)) / CVC_TOKENS_PER_PI;
+};

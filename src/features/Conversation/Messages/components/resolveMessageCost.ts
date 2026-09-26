@@ -1,4 +1,4 @@
-import { type ModelUsage } from '@lobechat/types';
+import { formatPiTokens, rawUsdToPiTokens } from '@/features/AicoBilling/piToken';
 
 /** Prefer structured `usage.cost`; fall back to deprecated flat `metadata.cost`. */
 export const resolveMessageCost = (
@@ -14,15 +14,10 @@ export const resolveMessageCost = (
 };
 
 /**
- * Format USD with micro-precision (up to 6 dp). Trims trailing zeros but keeps
- * at least 2 fractional digits so small OpenRouter charges stay accurate.
+ * Format a raw USD cost as π tokens (1 π = 1000 CVC). Costs arrive as raw
+ * upstream USD after the identity pricing context.
  */
 export const formatMessageCostUsd = (cost: number): string => {
-  if (!Number.isFinite(cost)) return '$0.00';
-  const fixed = Math.abs(cost).toFixed(6);
-  const [whole, frac = '000000'] = fixed.split('.');
-  const trimmed = frac.replace(/0+$/, '');
-  const decimals = trimmed.length > 2 ? trimmed : frac.slice(0, 2);
-  const sign = cost < 0 ? '-' : '';
-  return `${sign}$${whole}.${decimals}`;
+  if (!Number.isFinite(cost)) return formatPiTokens(0);
+  return formatPiTokens(rawUsdToPiTokens(cost));
 };

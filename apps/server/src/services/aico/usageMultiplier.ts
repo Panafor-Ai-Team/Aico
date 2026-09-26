@@ -34,19 +34,18 @@ export const getCachedUsageMultiplierBp = async (
 };
 
 /**
- * Pricing context for managed (resold) traffic. Carrying the multiplier here is
- * what makes the cost attached to a chat/image/video response the billed
- * figure — the raw upstream rate never leaves the server.
+ * Pricing context for managed (resold) traffic.
  *
- * Per-model coefficients are not adjusted here: they come from the upstream
- * catalog, and the model picker applies the same single markup in
- * `withUsageMultiplier`.
+ * Cost attached to chat/image/video responses uses the **raw** upstream rate
+ * (identity multiplier). Platform margin is applied only at top-up as π yield
+ * ($1 → fewer π); see `topupPiTokensPerUsd`. Wallet/key enforcement still uses
+ * billed micro-USD + `getCachedUsageMultiplierBp`.
  */
 export const resolveManagedPricingContext = async (
-  db: LobeChatDatabase,
-  providerId: string = MANAGED_PROVIDER_ID,
+  _db: LobeChatDatabase,
+  _providerId: string = MANAGED_PROVIDER_ID,
 ): Promise<ModelPricingContext> => ({
-  costMultiplierBp: await getCachedUsageMultiplierBp(db, providerId),
+  costMultiplierBp: 10_000,
   plan: 'aico',
   scope: 'personal',
 });

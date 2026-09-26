@@ -4,16 +4,22 @@ import {
   applyMultiplierMicroUsd,
   assertValidModelMultiplierBp,
   assertValidMultiplierBp,
+  billedMicroUsdToPiTokens,
   billedUsageFromCapacity,
   billedUsageFromRaw,
   blendedMultiplierBp,
   defaultMultiplierBpForProvider,
   keyLimitFromBilled,
+  piTokensToRawMicroUsd,
   rawCapacityFromDeposit,
+  rawMicroUsdToPiTokens,
   rawUsageFromRemaining,
+  rawUsdToPiTokensDecimal,
   rebaseCheckpoint,
   removeMultiplierMicroUsd,
   rotateCheckpointToNewKey,
+  topupPiTokensFromDeposit,
+  topupPiTokensPerUsd,
   type UsageMultiplierCheckpoint,
 } from './aicoMoney';
 
@@ -356,5 +362,43 @@ describe('rawUsageFromRemaining (CheapVibeCode reports only what is left)', () =
 
   it('floors at zero when a stale limit is below the reported remaining', () => {
     expect(rawUsageFromRemaining({ limitMicroUsd: 500_000, remainingMicroUsd: 800_000 })).toBe(0);
+  });
+});
+
+describe('π tokens (user-facing unit)', () => {
+  const CVC = 25_000_000;
+
+  it('maps $0.80 raw to 20_000 π at the CVC bridge rate', () => {
+    expect(rawMicroUsdToPiTokens(800_000, CVC)).toBe(20_000);
+    expect(rawMicroUsdToPiTokens(1 * USD, CVC)).toBe(25_000);
+  });
+
+  it('credits 20_000 π for a $1 top-up at 1.25×', () => {
+    expect(topupPiTokensPerUsd(12_500, CVC)).toBe(20_000);
+    expect(topupPiTokensFromDeposit(1 * USD, 12_500, CVC)).toBe(20_000);
+    expect(topupPiTokensFromDeposit(5 * USD, 12_500, CVC)).toBe(100_000);
+  });
+
+  it('converts billed remaining to π via the blended wallet rate', () => {
+    // $5 billed bought $4 raw → remaining $2.5 billed ≡ $2 raw ≡ 50_000 π
+    expect(
+      billedMicroUsdToPiTokens({
+        balanceMicroUsd: 5 * USD,
+        billedMicroUsd: 2.5 * USD,
+        cvcTokensPerUsd: CVC,
+        rawCapacityMicroUsd: 4 * USD,
+      }),
+    ).toBe(50_000);
+  });
+
+  it('round-trips whole π amounts through raw micro-USD', () => {
+    expect(piTokensToRawMicroUsd(20_000, CVC)).toBe(800_000);
+    expect(rawMicroUsdToPiTokens(piTokensToRawMicroUsd(20_000, CVC), CVC)).toBe(20_000);
+  });
+
+  it('floors fractional π so remaining never overstates capacity', () => {
+    // 1 micro-USD at 25M/USD → 0.025 π → floor 0
+    expect(rawMicroUsdToPiTokens(1, CVC)).toBe(0);
+    expect(rawUsdToPiTokensDecimal(0.000_001, CVC)).toBeCloseTo(0.025, 6);
   });
 });

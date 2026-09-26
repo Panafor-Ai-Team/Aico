@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 
+import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { OrganizationModel } from '@/database/models/organization';
 import { aicoKeyOutbox, users } from '@/database/schemas';
 import type { LobeChatDatabase } from '@/database/type';
@@ -23,6 +24,7 @@ import {
   serializeSweepPreview,
   serializeSweepResult,
 } from '@/server/services/aico/orgBudgetSweep';
+import { piFromBilledMicro } from '@/server/services/aico/piToken';
 import { recordAicoSecurityEvent } from '@/server/services/aico/securityAudit';
 import { EmailService } from '@/server/services/email';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
@@ -649,10 +651,13 @@ export const organizationRouter = router({
       await requireOrgManager(ctx.organizationModel, ctx.userId, input.orgId);
       const org = await ctx.organizationModel.getById(input.orgId);
       if (!org) throw new TRPCError({ code: 'NOT_FOUND', message: 'Organization not found' });
+      const balanceMicroUsd = Number(org.walletBalanceMicroUsd ?? 0);
+      const multiplierBp = await new AicoBillingModel(ctx.serverDB).getUsageMultiplierBp();
       return {
-        balanceMicroUsd: String(org.walletBalanceMicroUsd ?? 0),
+        balanceMicroUsd: String(balanceMicroUsd),
+        balancePi: String(piFromBilledMicro({ billedMicroUsd: balanceMicroUsd, multiplierBp })),
         balanceToman: tomanString(org.walletBalanceToman ?? 0),
-        balanceUsd: microUsdToDecimalString(org.walletBalanceMicroUsd ?? 0),
+        balanceUsd: microUsdToDecimalString(balanceMicroUsd),
         status: org.status,
       };
     }),
@@ -675,39 +680,58 @@ export const organizationRouter = router({
       );
 
       const stats = await ctx.organizationModel.getOrgDashboardStats(input.orgId);
+      const multiplierBp = await new AicoBillingModel(ctx.serverDB).getUsageMultiplierBp();
+      const toPi = (billedMicro: number) =>
+        String(
+          piFromBilledMicro({
+            billedMicroUsd: billedMicro,
+            multiplierBp,
+          }),
+        );
       return {
         ...stats,
         allocatedMicroUsd: String(stats.allocatedMicroUsd),
+        allocatedPi: toPi(stats.allocatedMicroUsd),
         allocatedUsd: microUsdToDecimalString(stats.allocatedMicroUsd),
         balanceMicroUsd: String(stats.balanceMicroUsd),
+        balancePi: toPi(stats.balanceMicroUsd),
         balanceToman: tomanString(stats.balanceToman),
         balanceUsd: microUsdToDecimalString(stats.balanceMicroUsd),
         estimatedUnusedMicroUsd: String(
           Math.max(0, stats.allocatedMicroUsd - stats.settledUsageMicroUsd),
         ),
+        estimatedUnusedPi: toPi(Math.max(0, stats.allocatedMicroUsd - stats.settledUsageMicroUsd)),
         estimatedUnusedUsd: microUsdToDecimalString(
           Math.max(0, stats.allocatedMicroUsd - stats.settledUsageMicroUsd),
         ),
         grossNextRenewalMicroUsd: String(stats.grossNextRenewalMicroUsd),
+        grossNextRenewalPi: toPi(stats.grossNextRenewalMicroUsd),
         grossNextRenewalUsd: microUsdToDecimalString(stats.grossNextRenewalMicroUsd),
         members: stats.members.map((m) => ({
           ...m,
           pendingPeriodAmountMicroUsd: String(m.pendingPeriodAmountMicroUsd),
+          pendingPeriodAmountPi: toPi(m.pendingPeriodAmountMicroUsd),
           pendingPeriodAmountUsd: microUsdToDecimalString(m.pendingPeriodAmountMicroUsd),
           periodAmountMicroUsd: String(m.periodAmountMicroUsd),
+          periodAmountPi: toPi(m.periodAmountMicroUsd),
           periodAmountUsd: microUsdToDecimalString(m.periodAmountMicroUsd),
           remainingMicroUsd: String(m.remainingMicroUsd),
+          remainingPi: toPi(m.remainingMicroUsd),
           remainingUsd: microUsdToDecimalString(m.remainingMicroUsd),
           reservedMicroUsd: String(m.reservedMicroUsd),
           settledUsageMicroUsd: String(m.settledUsageMicroUsd),
+          settledUsagePi: toPi(m.settledUsageMicroUsd),
           settledUsageUsd: microUsdToDecimalString(m.settledUsageMicroUsd),
         })),
         nextRenewalAt: stats.nextRenewalAt?.toISOString() ?? null,
         settledUsageMicroUsd: String(stats.settledUsageMicroUsd),
+        settledUsagePi: toPi(stats.settledUsageMicroUsd),
         settledUsageUsd: microUsdToDecimalString(stats.settledUsageMicroUsd),
         shortfallMicroUsd: String(stats.shortfallMicroUsd),
+        shortfallPi: toPi(stats.shortfallMicroUsd),
         shortfallUsd: microUsdToDecimalString(stats.shortfallMicroUsd),
         unallocatedMicroUsd: String(stats.unallocatedMicroUsd),
+        unallocatedPi: toPi(stats.unallocatedMicroUsd),
         unallocatedUsd: microUsdToDecimalString(stats.unallocatedMicroUsd),
       };
     }),

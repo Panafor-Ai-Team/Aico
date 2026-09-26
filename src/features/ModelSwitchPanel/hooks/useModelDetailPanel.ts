@@ -27,12 +27,13 @@ import { useCallback, useMemo } from 'react';
 
 import { useBusinessModelPricing } from '@/business/client/hooks/useBusinessModelPricing';
 import { useBusinessModelRating } from '@/business/client/hooks/useBusinessModelRating';
+import { rawUsdToPiTokens } from '@/features/AicoBilling/piToken';
 import { useEnabledChatModels } from '@/hooks/useEnabledChatModels';
 import { useGlobalStore } from '@/store/global';
 import type { ModelDetailPanelExpandedKey } from '@/store/global/initialState';
 import { systemStatusSelectors } from '@/store/global/selectors';
 import type { EnabledProviderWithModels } from '@/types/aiProvider';
-import { formatNumber, formatShortenNumber, formatTokenNumber } from '@/utils/format';
+import { formatNumber, formatTokenNumber } from '@/utils/format';
 import { formatPriceByCurrency, getOriginalUnitRateByName, getUnitRateByName } from '@/utils/index';
 
 import type { PricingMode } from '../types';
@@ -48,18 +49,17 @@ interface TextPriceSummary {
   output: FormattedUnitPrice;
 }
 
-const BRANDING_CREDIT_UNIT = 1_000_000;
-const MILLION_SCALE_UNITS = new Set<PricingUnit['unit']>(['millionCharacters', 'millionTokens']);
-
 interface FormatPricingRateOptions {
   isCreditPricing?: boolean;
   unit?: PricingUnit['unit'];
 }
 
-const formatBrandingCreditRate = (rate: number, unit?: PricingUnit['unit']) => {
-  if (unit && MILLION_SCALE_UNITS.has(unit)) return `${formatNumber(rate)}M`;
-
-  return String(formatShortenNumber(Math.round(rate * BRANDING_CREDIT_UNIT)));
+const formatPiRate = (rate: number) => {
+  const pi = rawUsdToPiTokens(rate);
+  if (!Number.isFinite(pi) || pi === 0) return '0';
+  if (pi >= 100) return formatNumber(Math.round(pi));
+  if (pi >= 1) return pi.toFixed(2);
+  return pi.toFixed(3);
 };
 
 const formatPricingRate = (
@@ -69,9 +69,11 @@ const formatPricingRate = (
 ) => {
   if (typeof rate !== 'number') return '0';
 
-  return options.isCreditPricing
-    ? formatBrandingCreditRate(rate, options.unit)
-    : formatPriceByCurrency(rate, currency);
+  if (options.isCreditPricing) {
+    return formatPiRate(rate);
+  }
+
+  return formatPriceByCurrency(rate, currency);
 };
 
 const getFormattedUnitPrice = (
@@ -343,7 +345,7 @@ export const useModelDetailPanel = ({
       model?.approximatePricePerVideo ?? displayPricing.approximatePricePerVideo;
     if (pricingMode === 'image' && typeof approximatePricePerImage === 'number') {
       const amount = isCreditPricing
-        ? formatBrandingCreditRate(approximatePricePerImage, 'image')
+        ? formatPiRate(approximatePricePerImage)
         : formatPriceByCurrency(approximatePricePerImage, currency);
       return t(
         isCreditPricing
@@ -351,13 +353,13 @@ export const useModelDetailPanel = ({
           : 'ModelSwitchPanel.detail.pricing.perImage',
         {
           amount,
-          defaultValue: isCreditPricing ? '~ {{amount}} credits / image' : '~ ${{amount}} / image',
+          defaultValue: isCreditPricing ? '~ {{amount}} π / image' : '~ ${{amount}} / image',
         },
       );
     }
     if (pricingMode === 'video' && typeof approximatePricePerVideo === 'number') {
       const amount = isCreditPricing
-        ? formatBrandingCreditRate(approximatePricePerVideo)
+        ? formatPiRate(approximatePricePerVideo)
         : formatPriceByCurrency(approximatePricePerVideo, currency);
       return t(
         isCreditPricing
@@ -365,7 +367,7 @@ export const useModelDetailPanel = ({
           : 'ModelSwitchPanel.detail.pricing.perVideo',
         {
           amount,
-          defaultValue: isCreditPricing ? '~ {{amount}} credits / video' : '~ ${{amount}} / video',
+          defaultValue: isCreditPricing ? '~ {{amount}} π / video' : '~ ${{amount}} / video',
         },
       );
     }
@@ -375,7 +377,7 @@ export const useModelDetailPanel = ({
   const getCreditsUnitLabel = useCallback(
     (unit: PricingUnit['unit']) =>
       t(`ModelSwitchPanel.detail.pricing.credits.${unit}` as any, {
-        defaultValue: `credits${UNIT_LABEL_MAP[unit] || ''}`,
+        defaultValue: `π${UNIT_LABEL_MAP[unit] || ''}`,
       }),
     [t],
   );

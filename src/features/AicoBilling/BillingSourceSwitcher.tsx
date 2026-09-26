@@ -1,5 +1,6 @@
 'use client';
 
+// eslint-disable-next-line no-restricted-imports -- Text/Tag not in base-ui yet
 import { Center, Flexbox, Text } from '@lobehub/ui';
 import { createStaticStyles, cx } from 'antd-style';
 import { CheckIcon, ChevronDownIcon, WalletIcon } from 'lucide-react';
@@ -10,7 +11,8 @@ import { toastAicoError } from '@/business/client/resolveAicoErrorMessage';
 import ActionDropdown from '@/features/ChatInput/ActionBar/components/ActionDropdown';
 import { type LooseTFunction } from '@/types/looseTranslation';
 
-import { type AicoBillingContext, type AicoBillingSource, formatRemainingUsd } from './types';
+import { formatRemainingPi } from './piToken';
+import { type AicoBillingContext, type AicoBillingSource } from './types';
 import { useAicoBillingSources } from './useAicoBillingSources';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
@@ -84,7 +86,7 @@ const BillingSourceSwitcher = memo(() => {
       const ctx = sourceToContext(source);
       const selected = isSelected(ctx);
       const label = sourceLabel(source, t);
-      const remaining = formatRemainingUsd(source.remainingUsd);
+      const remaining = formatRemainingPi(source.remainingPi);
 
       return {
         icon: WalletIcon,
@@ -128,7 +130,7 @@ const BillingSourceSwitcher = memo(() => {
   if (!activeSource) return null;
 
   const label = sourceLabel(activeSource, t);
-  const remaining = formatRemainingUsd(activeSource.remainingUsd);
+  const remaining = formatRemainingPi(activeSource.remainingPi);
 
   const trigger = (
     <Center

@@ -20,15 +20,6 @@ vi.mock('@lobechat/business-model-bank/model-config', async () => {
 let db: LobeChatDatabase;
 let repo: AiInfraRepos;
 
-/**
- * Stub the multiplier rather than writing the platform config row: that row is
- * global, and other suites sharing this database read it concurrently.
- */
-const setMultiplier = (bp: number) => {
-  __resetUsageMultiplierCache();
-  vi.spyOn(repo as any, 'resolveUsageMultiplierBp').mockResolvedValue(bp);
-};
-
 const rate = (models: { id: string; pricing?: { units?: any[] } }[], id: string) =>
   (models.find((m) => m.id === id)?.pricing?.units?.[0] as { rate: number } | undefined)?.rate;
 
@@ -40,9 +31,8 @@ beforeEach(async () => {
   repo = new AiInfraRepos(db, 'test-user-id', { openrouter: { enabled: true } });
 }, 30_000);
 
-describe('AICO-180 usage multiplier on the model serve path', () => {
-  it('marks catalog prices up and never leaks the raw payload price', async () => {
-    setMultiplier(12_000);
+describe('π yield — raw catalog prices on the model serve path', () => {
+  it('serves catalog prices without platform markup (margin is at top-up)', async () => {
     await new OpenRouterModelCatalogModel(db).replaceCatalog({
       models: [
         {
@@ -63,13 +53,11 @@ describe('AICO-180 usage multiplier on the model serve path', () => {
 
     const models = (await (repo as any).fetchBuiltinModels('openrouter')) as any[];
 
-    expect(rate(models, 'openai/gpt-test')).toBeCloseTo(3.6, 10);
+    expect(rate(models, 'openai/gpt-test')).toBeCloseTo(3, 10);
     expect(models.find((m) => m.id === 'openai/gpt-test')).not.toHaveProperty('pricing.prompt');
   });
 
-  it('marks the static model-bank fallback up too, so an empty catalog is not a bypass', async () => {
-    setMultiplier(15_000);
-    // Bootstrap sync is unavailable in tests, so this exercises the fallback.
+  it('serves the static model-bank fallback at raw rates too', async () => {
     vi.spyOn(repo as any, 'getModelBankModels').mockResolvedValue([
       {
         id: 'fallback/model',
@@ -83,33 +71,7 @@ describe('AICO-180 usage multiplier on the model serve path', () => {
 
     const models = (await (repo as any).fetchBuiltinModels('openrouter')) as any[];
 
-    expect(rate(models, 'fallback/model')).toBeCloseTo(3, 10);
-  });
-
-  it('applies a multiplier change to the next request without a re-sync', async () => {
-    setMultiplier(12_000);
-    await new OpenRouterModelCatalogModel(db).replaceCatalog({
-      models: [
-        {
-          id: 'openai/gpt-test',
-          pricing: {
-            units: [{ name: 'textInput', rate: 3, strategy: 'fixed', unit: 'millionTokens' }],
-          },
-          type: 'chat',
-        } as any,
-      ],
-      triggeredBy: 'test',
-    });
-
-    expect(
-      rate(await (repo as any).fetchBuiltinModels('openrouter'), 'openai/gpt-test'),
-    ).toBeCloseTo(3.6, 10);
-
-    setMultiplier(20_000);
-
-    expect(
-      rate(await (repo as any).fetchBuiltinModels('openrouter'), 'openai/gpt-test'),
-    ).toBeCloseTo(6, 10);
+    expect(rate(models, 'fallback/model')).toBeCloseTo(2, 10);
   });
 });
 
@@ -122,10 +84,7 @@ describe('per-model coefficients on the serve path', () => {
       .where(eq(platformModelMultiplierOverrides.modelId, MODEL_ID));
   });
 
-  it('ignores a stored admin override: only the catalog coefficient and the markup apply', async () => {
-    // Regression: an admin typed CVC's own x4 for claude-opus-5 as an override,
-    // and the serve path multiplied it on top of the x4 already in the catalog.
-    setMultiplier(12_500);
+  it('ignores a stored admin override: catalog coefficient alone is served', async () => {
     await db.insert(platformModelMultiplierOverrides).values({
       modelId: MODEL_ID,
       multiplierBp: 40_000,
@@ -146,7 +105,6 @@ describe('per-model coefficients on the serve path', () => {
 
     const models = (await (repo as any).fetchBuiltinModels('openrouter')) as any[];
 
-    // 0.16 x 1.25 — not 0.16 x 1.25 x 4.
-    expect(rate(models, MODEL_ID)).toBeCloseTo(0.2, 10);
+    expect(rate(models, MODEL_ID)).toBeCloseTo(0.16, 10);
   });
 });
