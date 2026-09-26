@@ -1,40 +1,31 @@
 import type { AicoPersonalBillingSource } from '@/features/AicoBilling';
+import { formatPiTokens } from '@/features/AicoBilling/piToken';
 
 export interface WalletDisplayInput {
-  /** Cumulative deposits from `getMyWallet`. Monotonic — never a credit figure. */
-  paidInToman: number | string | null | undefined;
-  paidInUsd: number | string | null | undefined;
+  /** Cumulative π from raw capacity (`getMyWallet.paidInPi`). */
+  paidInPi: number | string | null | undefined;
   personal: AicoPersonalBillingSource | undefined;
 }
 
 export interface WalletDisplay {
-  paidInToman: string;
-  paidInUsd: string;
+  paidInPi: string;
   /** `null` means "we could not compute it" — render an explicit unknown, not a zero. */
-  remainingToman: string | null;
-  remainingUsd: string | null;
+  remainingPi: string | null;
   /** The remaining figures are a held fallback, not a live reading (FIN-018). */
   stale: boolean;
 }
 
 /**
- * What the wallet page is allowed to show, and under which label (FIN-016).
+ * What the wallet page is allowed to show (π tokens).
  *
- * `balanceUsd` / `balanceToman` are cumulative deposits: they are monotonic by
- * design and can never decrease, so they may only appear under an explicit
- * "paid in" label. The credit figures come from `remaining` and from nowhere
- * else — the old `personalRemainingUsd ?? wallet.balanceUsd` fallback meant a
- * failed lookup silently redisplayed the deposit as spendable credit, which is
- * indistinguishable from having spent nothing.
+ * Paid-in π comes from cumulative raw capacity. Remaining π comes only from
+ * `personal.remainingPi` — never fall back to the deposit total.
  */
 export const resolveWalletDisplay = ({
-  paidInToman,
-  paidInUsd,
+  paidInPi,
   personal,
 }: WalletDisplayInput): WalletDisplay => ({
-  paidInToman: Number(paidInToman ?? 0).toLocaleString(),
-  paidInUsd: `$${Number(paidInUsd ?? 0).toFixed(4)}`,
-  remainingToman: personal ? Number(personal.remainingToman ?? 0).toLocaleString() : null,
-  remainingUsd: personal ? `$${Number(personal.remainingUsd ?? 0).toFixed(4)}` : null,
+  paidInPi: formatPiTokens(paidInPi ?? 0),
+  remainingPi: personal ? formatPiTokens(personal.remainingPi ?? 0) : null,
   stale: Boolean(personal && !personal.usageKnown),
 });

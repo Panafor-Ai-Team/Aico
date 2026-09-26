@@ -6,6 +6,7 @@
  */
 
 import { uuid } from '@lobechat/utils';
+// eslint-disable-next-line no-restricted-imports -- Text/Tag not in base-ui yet
 import { Block, Flexbox, Tag, Text } from '@lobehub/ui';
 import { Button, Select, Switch, Tabs, toast } from '@lobehub/ui/base-ui';
 import { Form, Input, InputNumber, Table } from 'antd';
@@ -970,10 +971,12 @@ export const PlatformAdminPanel = () => {
                   />
                 </Form.Item>
                 <FxTopupFields
+                  allowUsd
                   chargeField={creditChargeField}
                   form={creditForm}
                   fxRate={fx?.tomanPerUsd}
                   fxSource={fx?.source}
+                  piPerUsd={fx?.piPerUsd}
                   tomanLabelKey="platform.amountToman"
                   tomanMin={1}
                   usdLabelKey="platform.amountUsd"
@@ -1062,10 +1065,12 @@ export const PlatformAdminPanel = () => {
                   </Form.Item>
                 </div>
                 <FxTopupFields
+                  allowUsd
                   chargeField={userCreditChargeField}
                   form={userCreditForm}
                   fxRate={fx?.tomanPerUsd}
                   fxSource={fx?.source}
+                  piPerUsd={fx?.piPerUsd}
                   tomanLabelKey="platform.amountToman"
                   tomanMin={1}
                   usdLabelKey="platform.amountUsd"

@@ -1,11 +1,13 @@
 'use client';
 
+// eslint-disable-next-line no-restricted-imports -- Text/Tag not in base-ui yet
 import { Text } from '@lobehub/ui';
 import { Form, InputNumber } from 'antd';
 import { type FormInstance } from 'antd/es/form';
 import { createStaticStyles } from 'antd-style';
 import { useTranslation } from 'react-i18next';
 
+import { formatPiTokens } from '@/features/AicoBilling/piToken';
 import { type LooseTFunction } from '@/types/looseTranslation';
 
 import { groupedNumberInputProps } from './groupedNumberInput';
@@ -19,7 +21,7 @@ export interface FxTopupFormValues {
 
 export const resolveFxTopupPayload = (
   values: FxTopupFormValues,
-  chargeField: FxTopupChargeField,
+  chargeField: FxTopupChargeField = 'toman',
 ): { amountToman: number } | { amountUsd: string } | null => {
   if (chargeField === 'usd' && values.amountUsd != null && values.amountUsd > 0) {
     return { amountUsd: Number(values.amountUsd).toFixed(6) };
@@ -30,14 +32,18 @@ export const resolveFxTopupPayload = (
   return null;
 };
 
-const previewUsdFromToman = (toman: number | undefined, rate: number | undefined): string => {
-  if (!toman || !rate) return '—';
-  return (toman / rate).toFixed(2);
+const previewPiFromToman = (
+  toman: number | undefined,
+  tomanPerUsd: number | undefined,
+  piPerUsd: number | undefined,
+): string => {
+  if (!toman || !tomanPerUsd || !piPerUsd) return '—';
+  return formatPiTokens(Math.floor((toman / tomanPerUsd) * piPerUsd));
 };
 
-const previewTomanFromUsd = (usd: number | undefined, rate: number | undefined): string => {
-  if (!usd || !rate) return '—';
-  return Math.floor(usd * rate).toLocaleString();
+const previewPiFromUsd = (usd: number | undefined, piPerUsd: number | undefined): string => {
+  if (!usd || !piPerUsd) return '—';
+  return formatPiTokens(Math.floor(usd * piPerUsd));
 };
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
@@ -76,12 +82,15 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 }));
 
 interface FxTopupFieldsProps {
-  chargeField: FxTopupChargeField;
+  /** When true, show USD field too (platform/org admin credits). Default: toman only. */
+  allowUsd?: boolean;
+  chargeField?: FxTopupChargeField;
   disabled?: boolean;
   form: FormInstance<FxTopupFormValues>;
   fxRate?: number;
   fxSource?: string;
-  onChargeFieldChange: (field: FxTopupChargeField) => void;
+  onChargeFieldChange?: (field: FxTopupChargeField) => void;
+  piPerUsd?: number;
   tomanLabelKey?: string;
   tomanMin?: number;
   usdLabelKey?: string;
@@ -89,19 +98,20 @@ interface FxTopupFieldsProps {
 }
 
 export const FxTopupFields = ({
-  chargeField,
+  allowUsd = false,
+  chargeField = 'toman',
   disabled = false,
   form,
   fxRate,
   fxSource,
   onChargeFieldChange,
+  piPerUsd,
   tomanMin = 1000,
   usdMin = 0.01,
   tomanLabelKey = 'wallet.amountToman',
   usdLabelKey = 'wallet.amountUsd',
 }: FxTopupFieldsProps) => {
   const { t } = useTranslation('aico');
-  // Label keys arrive as props, so they are not in the namespace's literal key union.
   const translate = t as LooseTFunction;
   const amountToman = Form.useWatch('amountToman', form);
   const amountUsd = Form.useWatch('amountUsd', form);
@@ -110,11 +120,51 @@ export const FxTopupFields = ({
     <>
       <div className={styles.fxBanner}>
         <span className={styles.fxRate}>
-          {t('wallet.fxHint', { rate: fxRate?.toLocaleString() ?? '—' })}
+          {t('wallet.fxHintPi', {
+            pi: (piPerUsd ?? 0).toLocaleString(),
+            rate: fxRate?.toLocaleString() ?? '—',
+          })}
         </span>
         {fxSource ? <span className={styles.fxSource}>{fxSource}</span> : null}
       </div>
-      <div className={styles.row}>
+      {allowUsd ? (
+        <div className={styles.row}>
+          <Form.Item
+            label={translate(tomanLabelKey)}
+            name="amountToman"
+            style={{ marginBottom: 0 }}
+          >
+            <InputNumber
+              {...groupedNumberInputProps}
+              disabled={disabled}
+              min={tomanMin}
+              step={1000}
+              style={{ width: '100%' }}
+              onChange={(value) => {
+                onChargeFieldChange?.('toman');
+                if (value != null && fxRate) {
+                  form.setFieldValue('amountUsd', Number((Number(value) / fxRate).toFixed(6)));
+                }
+              }}
+            />
+          </Form.Item>
+          <Form.Item label={translate(usdLabelKey)} name="amountUsd" style={{ marginBottom: 0 }}>
+            <InputNumber
+              {...groupedNumberInputProps}
+              disabled={disabled}
+              min={usdMin}
+              step={0.5}
+              style={{ width: '100%' }}
+              onChange={(value) => {
+                onChargeFieldChange?.('usd');
+                if (value != null && fxRate) {
+                  form.setFieldValue('amountToman', Math.floor(Number(value) * fxRate));
+                }
+              }}
+            />
+          </Form.Item>
+        </div>
+      ) : (
         <Form.Item label={translate(tomanLabelKey)} name="amountToman" style={{ marginBottom: 0 }}>
           <InputNumber
             {...groupedNumberInputProps}
@@ -122,34 +172,16 @@ export const FxTopupFields = ({
             min={tomanMin}
             step={1000}
             style={{ width: '100%' }}
-            onChange={(value) => {
-              onChargeFieldChange('toman');
-              if (value != null && fxRate) {
-                form.setFieldValue('amountUsd', Number((Number(value) / fxRate).toFixed(6)));
-              }
-            }}
           />
         </Form.Item>
-        <Form.Item label={translate(usdLabelKey)} name="amountUsd" style={{ marginBottom: 0 }}>
-          <InputNumber
-            {...groupedNumberInputProps}
-            disabled={disabled}
-            min={usdMin}
-            step={0.5}
-            style={{ width: '100%' }}
-            onChange={(value) => {
-              onChargeFieldChange('usd');
-              if (value != null && fxRate) {
-                form.setFieldValue('amountToman', Math.floor(Number(value) * fxRate));
-              }
-            }}
-          />
-        </Form.Item>
-      </div>
+      )}
       <Text type="secondary">
-        {chargeField === 'toman'
-          ? t('wallet.previewUsd', { usd: previewUsdFromToman(amountToman, fxRate) })
-          : t('wallet.previewToman', { toman: previewTomanFromUsd(amountUsd, fxRate) })}
+        {t('wallet.previewPi', {
+          pi:
+            allowUsd && chargeField === 'usd'
+              ? previewPiFromUsd(amountUsd, piPerUsd)
+              : previewPiFromToman(amountToman, fxRate, piPerUsd),
+        })}
       </Text>
     </>
   );

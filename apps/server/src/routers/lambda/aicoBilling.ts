@@ -17,6 +17,13 @@ import { authedProcedure, router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { getTomanPerUsd } from '@/server/services/aico/fxService';
 import { isSharedInferenceKey } from '@/server/services/aico/ledger/config';
+import {
+  cvcTokensPerUsd,
+  piFromBilledMicro,
+  piFromDepositMicro,
+  piFromRawMicro,
+  piPerUsdAtMultiplier,
+} from '@/server/services/aico/piToken';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 
 const billingProcedure = authedProcedure.use(serverDatabase).use(async ({ ctx, next }) => {
@@ -60,17 +67,31 @@ const toIntegerFxRate = (rate: number): number => {
 
 export const aicoBillingRouter = router({
   getFxRate: billingProcedure.query(async ({ ctx }) => {
-    const config = await ctx.billingModel.getFxConfig();
+    const [config, multiplierBp] = await Promise.all([
+      ctx.billingModel.getFxConfig(),
+      ctx.billingModel.getUsageMultiplierBp(),
+    ]);
     const { rate, source } = await getTomanPerUsd(config.tomanPerUsd);
-    return { source, tomanPerUsd: toIntegerFxRate(rate) };
+    const tomanPerUsd = toIntegerFxRate(rate);
+    const cvcPerUsd = cvcTokensPerUsd();
+    const piPerUsd = piPerUsdAtMultiplier(multiplierBp);
+    return {
+      cvcTokensPerUsd: cvcPerUsd,
+      multiplierBp,
+      piPerUsd,
+      source,
+      tomanPerUsd,
+    };
   }),
 
   getMyWallet: billingProcedure.query(async ({ ctx }) => {
-    const [wallet, publicCode] = await Promise.all([
+    const [wallet, publicCode, multiplierBp] = await Promise.all([
       ctx.billingModel.getOrCreateUserWallet(ctx.userId),
       ctx.organizationModel.ensureUserPublicCode(ctx.userId),
+      ctx.billingModel.getUsageMultiplierBp(),
     ]);
     const balanceMicroUsd = Number(wallet.balanceMicroUsd ?? 0);
+    const rawCapacityMicroUsd = Number(wallet.rawCapacityMicroUsd ?? 0);
     return {
       // Money is always a string: micro-USD integers and 6-decimal USD, never a float.
       balanceMicroUsd: String(balanceMicroUsd),
@@ -79,9 +100,13 @@ export const aicoBillingRouter = router({
       // Under the shared inference key no subject needs its own key.
       hasManagedKey: isSharedInferenceKey() || Boolean(wallet.openrouterKeyId),
       isActive: wallet.isActive,
+      paidInPi: String(piFromRawMicro(rawCapacityMicroUsd)),
       preferredBillingSource: wallet.preferredBillingSource as 'personal' | 'organization',
       preferredOrganizationId: wallet.preferredOrganizationId,
       publicCode,
+      rawCapacityMicroUsd: String(rawCapacityMicroUsd),
+      // Yield preview for top-up copy ($1 → N π at current multiplier).
+      topupPiPerUsd: piPerUsdAtMultiplier(multiplierBp),
       // Never expose key material
     };
   }),
@@ -93,12 +118,13 @@ export const aicoBillingRouter = router({
    * settled usage from OpenRouter when a managed key exists.
    */
   getMyBillingSources: billingProcedure.query(async ({ ctx }) => {
-    const [wallet, orgs, trialConfig, trialRow, trialActiveRaw] = await Promise.all([
+    const [wallet, orgs, trialConfig, trialRow, trialActiveRaw, multiplierBp] = await Promise.all([
       ctx.billingModel.getOrCreateUserWallet(ctx.userId),
       ctx.organizationModel.listForUser(ctx.userId),
       ctx.billingModel.getTrialConfig(),
       ctx.billingModel.getUserTrial(ctx.userId),
       ctx.billingModel.isTrialActive(ctx.userId),
+      ctx.billingModel.getUsageMultiplierBp(),
     ]);
 
     // Same gate as getMyTrial / managed policy — never advertise a trial chat cannot use.
@@ -125,11 +151,18 @@ export const aicoBillingRouter = router({
         };
       });
     const personalRemaining = personalReading.remainingMicroUsd;
+    const personalRemainingPi = piFromBilledMicro({
+      balanceMicroUsd: wallet.balanceMicroUsd,
+      billedMicroUsd: personalRemaining,
+      fallbackBp: multiplierBp,
+      rawCapacityMicroUsd: wallet.rawCapacityMicroUsd,
+    });
 
     const personal = {
       hasManagedKey: isSharedInferenceKey() || hasValidManagedKeyId(wallet.openrouterKeyId),
       isActive: Boolean(wallet.isActive),
       remainingMicroUsd: String(personalRemaining),
+      remainingPi: String(personalRemainingPi),
       // FIN-016: the toman card had no `remaining` counterpart at any layer, so
       // the primary currency for the fa-IR user base could never move.
       remainingToman: String(
@@ -191,12 +224,20 @@ export const aicoBillingRouter = router({
             remainingMicroUsd = orgRemaining();
           }
 
+          const checkpointBp = Number(budget?.checkpointMultiplierBp ?? multiplierBp);
+
           return {
             hasManagedKey: sharedKey || hasValidManagedKeyId(budget?.openrouterKeyId),
             isActive: Boolean(budget?.isActive),
             organizationId: org.id,
             organizationName: org.name,
             remainingMicroUsd: String(remainingMicroUsd),
+            remainingPi: String(
+              piFromBilledMicro({
+                billedMicroUsd: remainingMicroUsd,
+                multiplierBp: checkpointBp,
+              }),
+            ),
             remainingUsd: microUsdToDecimalString(remainingMicroUsd),
             renewalBlocked,
             source: 'organization' as const,
@@ -209,6 +250,7 @@ export const aicoBillingRouter = router({
       organizationId: string;
       organizationName: string;
       remainingMicroUsd: string;
+      remainingPi: string;
       remainingUsd: string;
       renewalBlocked: boolean;
       source: 'organization';
@@ -247,16 +289,27 @@ export const aicoBillingRouter = router({
   getMyTransactions: billingProcedure
     .input(z.object({ limit: z.number().int().min(1).max(100).optional() }).optional())
     .query(async ({ ctx, input }) => {
-      const rows = await ctx.billingModel.listUserTransactions(ctx.userId, input?.limit ?? 50);
-      return rows.map((row) => ({
-        amountMicroUsd: String(row.amountMicroUsd),
-        amountToman: String(row.amountToman),
-        amountUsd: microUsdToDecimalString(row.amountMicroUsd),
-        createdAt: row.createdAt,
-        description: row.description,
-        id: row.id,
-        type: row.type,
-      }));
+      const [rows, multiplierBp] = await Promise.all([
+        ctx.billingModel.listUserTransactions(ctx.userId, input?.limit ?? 50),
+        ctx.billingModel.getUsageMultiplierBp(),
+      ]);
+      return rows.map((row) => {
+        const amountMicro = Number(row.amountMicroUsd ?? 0);
+        // Credits use the multiplier stamped at payment when present; else live rate.
+        const metaBp = Number((row.metadata as { multiplierBp?: number } | null)?.multiplierBp);
+        const bp = Number.isFinite(metaBp) && metaBp > 0 ? metaBp : multiplierBp;
+        const absPi = piFromDepositMicro(Math.abs(amountMicro), bp);
+        return {
+          amountMicroUsd: String(row.amountMicroUsd),
+          amountPi: String(amountMicro < 0 ? -absPi : absPi),
+          amountToman: String(row.amountToman),
+          amountUsd: microUsdToDecimalString(row.amountMicroUsd),
+          createdAt: row.createdAt,
+          description: row.description,
+          id: row.id,
+          type: row.type,
+        };
+      });
     }),
 
   /**

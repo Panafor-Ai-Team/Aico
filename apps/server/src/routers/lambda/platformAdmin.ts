@@ -35,6 +35,7 @@ import {
   serializeSweepPreview,
   serializeSweepResult,
 } from '@/server/services/aico/orgBudgetSweep';
+import { cvcTokensPerUsd, piPerUsdAtMultiplier } from '@/server/services/aico/piToken';
 import { listReconciliationRuns, runReconciliation } from '@/server/services/aico/reconciliation';
 import {
   resolveTopupAmount,
@@ -134,9 +135,18 @@ export const platformAdminRouter = router({
 
   /** FX helper for the control-plane admin UI (replaces aicoBilling.getFxRate there). */
   getFxRate: platformProcedure.query(async ({ ctx }) => {
-    const config = await ctx.billingModel.getFxConfig();
+    const [config, multiplierBp] = await Promise.all([
+      ctx.billingModel.getFxConfig(),
+      ctx.billingModel.getUsageMultiplierBp(),
+    ]);
     const { rate, source } = await getTomanPerUsd(config.tomanPerUsd);
-    return { source, tomanPerUsd: Math.round(rate) };
+    return {
+      cvcTokensPerUsd: cvcTokensPerUsd(),
+      multiplierBp,
+      piPerUsd: piPerUsdAtMultiplier(multiplierBp),
+      source,
+      tomanPerUsd: Math.round(rate),
+    };
   }),
 
   updateFxRate: platformProcedure
@@ -186,12 +196,16 @@ export const platformAdminRouter = router({
     const rows = await ctx.billingModel.listUsageMultipliers([...MANAGED_PROVIDER_IDS]);
     return {
       activeProviderId: MANAGED_PROVIDER_ID,
-      providers: rows.map((row) => ({
-        isActive: row.id === MANAGED_PROVIDER_ID,
-        multiplierBp: Number(row.multiplierBp ?? DEFAULT_USAGE_MULTIPLIER_BP),
-        providerId: row.id,
-        updatedAt: row.updatedAt ?? null,
-      })),
+      providers: rows.map((row) => {
+        const multiplierBp = Number(row.multiplierBp ?? DEFAULT_USAGE_MULTIPLIER_BP);
+        return {
+          isActive: row.id === MANAGED_PROVIDER_ID,
+          multiplierBp,
+          piPerUsd: piPerUsdAtMultiplier(multiplierBp),
+          providerId: row.id,
+          updatedAt: row.updatedAt ?? null,
+        };
+      }),
     };
   }),
 

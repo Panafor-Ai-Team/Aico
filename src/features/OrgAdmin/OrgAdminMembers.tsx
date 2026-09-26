@@ -1,6 +1,7 @@
 'use client';
 
 import { BarChart, BarList } from '@lobehub/charts';
+// eslint-disable-next-line no-restricted-imports -- Text/Tag not in base-ui yet
 import { Block, Flexbox, Tag, Text } from '@lobehub/ui';
 import { Button, Select, Tabs, toast } from '@lobehub/ui/base-ui';
 import { DatePicker, Form, Input, InputNumber, Table } from 'antd';
@@ -13,12 +14,13 @@ import { Link, useNavigate, useParams } from 'react-router';
 
 import { toastAicoError } from '@/business/client/resolveAicoErrorMessage';
 import StatisticCard from '@/components/StatisticCard';
-import {
-  type FxTopupChargeField,
-  FxTopupFields,
-  type FxTopupFormValues,
-} from '@/features/AicoBilling/FxTopupFields';
+import { FxTopupFields, type FxTopupFormValues } from '@/features/AicoBilling/FxTopupFields';
 import { groupedNumberInputProps } from '@/features/AicoBilling/groupedNumberInput';
+import {
+  DEFAULT_PI_PER_USD,
+  formatPiTokens,
+  piTokensToBilledUsdString,
+} from '@/features/AicoBilling/piToken';
 import { AICO_TABLE_SCROLL, aicoPanelStyles } from '@/features/AicoPanels';
 import { createBudgetSweepModal } from '@/features/OrgAdmin/BudgetSweepModal';
 import { presentInviteLink } from '@/features/OrgAdmin/InviteLinkModal';
@@ -56,7 +58,7 @@ type InviteForm = {
   role: 'admin' | 'member';
 };
 
-const usd = (n: number | string | undefined | null) => `$${Number(n ?? 0).toFixed(2)}`;
+const pi = (n: number | string | undefined | null) => formatPiTokens(n);
 
 const nextUtcBoundaryLocal = (period: 'daily' | 'weekly' | 'monthly' | undefined): string => {
   if (!period) return '—';
@@ -109,9 +111,8 @@ export const OrgAdminMembers = () => {
   const inviteType = Form.useWatch('identifierType', form) ?? 'email';
   const [teamForm] = Form.useForm<{ name: string }>();
   const [topupForm] = Form.useForm<FxTopupFormValues>();
-  const [topupChargeField, setTopupChargeField] = useState<FxTopupChargeField>('toman');
   const [allocForm] = Form.useForm<{
-    amountUsd: number;
+    amountPi: number;
     orgMemberId: string;
     period: 'daily' | 'weekly' | 'monthly';
   }>();
@@ -413,18 +414,18 @@ export const OrgAdminMembers = () => {
 
       <div className={aicoPanelStyles.grid}>
         <StatisticCard
-          statistic={{ prefix: <WalletIcon size={16} />, value: usd(dashboard?.unallocatedUsd) }}
+          statistic={{ prefix: <WalletIcon size={16} />, value: pi(dashboard?.unallocatedPi) }}
           title={t('org.stat.unallocated')}
         />
         <StatisticCard
           title={t('org.stat.allocated')}
           statistic={{
             prefix: <DollarSignIcon size={16} />,
-            value: usd(dashboard?.allocatedUsd),
+            value: pi(dashboard?.allocatedPi),
           }}
         />
         <StatisticCard
-          statistic={{ value: usd(dashboard?.settledUsageUsd) }}
+          statistic={{ value: pi(dashboard?.settledUsagePi) }}
           title={t('org.stat.used')}
         />
         <StatisticCard
@@ -474,7 +475,7 @@ export const OrgAdminMembers = () => {
                   categories={[spendCategory]}
                   data={chartData}
                   index="date"
-                  valueFormatter={(v) => usd(v)}
+                  valueFormatter={(v) => pi(v)}
                 />
               ) : (
                 <Text type="secondary">{t('org.usageEmpty')}</Text>
@@ -486,7 +487,7 @@ export const OrgAdminMembers = () => {
             <Flexbox gap={12}>
               <Text strong>{t('org.memberUsageTitle')}</Text>
               {usageBars.length > 0 ? (
-                <BarList data={usageBars} valueFormatter={(v) => usd(v)} />
+                <BarList data={usageBars} valueFormatter={(v) => pi(v)} />
               ) : null}
               <div className={aicoPanelStyles.tableScroll}>
                 <Table
@@ -527,19 +528,19 @@ export const OrgAdminMembers = () => {
                       render: (v: string | null) => t(periodLabelKey(v)),
                     },
                     {
-                      dataIndex: 'periodAmountUsd',
+                      dataIndex: 'periodAmountPi',
                       title: t('org.columns.limit'),
-                      render: (v: string) => usd(v),
+                      render: (v: string) => pi(v),
                     },
                     {
-                      dataIndex: 'settledUsageUsd',
+                      dataIndex: 'settledUsagePi',
                       title: t('org.columns.used'),
-                      render: (v: string) => usd(v),
+                      render: (v: string) => pi(v),
                     },
                     {
-                      dataIndex: 'remainingUsd',
+                      dataIndex: 'remainingPi',
                       title: t('org.columns.remaining'),
-                      render: (v: string) => usd(v),
+                      render: (v: string) => pi(v),
                     },
                     {
                       dataIndex: 'nextRenewalAt',
@@ -551,7 +552,7 @@ export const OrgAdminMembers = () => {
                       title: t('org.columns.pending'),
                       render: (_, row) =>
                         row.pendingPeriod
-                          ? `${t(periodLabelKey(row.pendingPeriod))} ${usd(row.pendingPeriodAmountUsd)}`
+                          ? `${t(periodLabelKey(row.pendingPeriod))} ${pi(row.pendingPeriodAmountPi)}`
                           : '—',
                     },
                     {
@@ -653,7 +654,10 @@ export const OrgAdminMembers = () => {
                   setBusy(true);
                   try {
                     await lambdaClient.organization.allocateMemberCredit.mutate({
-                      amountUsd: Number(values.amountUsd).toFixed(6),
+                      amountUsd: piTokensToBilledUsdString(
+                        Number(values.amountPi),
+                        fx?.piPerUsd ?? DEFAULT_PI_PER_USD,
+                      ),
                       idempotencyKey: allocIdempotencyKeyRef.current,
                       orgId: selectedOrgId,
                       orgMemberId: values.orgMemberId,
@@ -661,7 +665,7 @@ export const OrgAdminMembers = () => {
                     });
                     toast.success(t('org.allocateSuccess'));
                     allocIdempotencyKeyRef.current = null;
-                    allocForm.resetFields(['amountUsd', 'period']);
+                    allocForm.resetFields(['amountPi', 'period']);
                     await refreshAll();
                   } catch (err) {
                     toastAicoError(err, t, 'org.allocateFailed');
@@ -704,15 +708,15 @@ export const OrgAdminMembers = () => {
                     />
                   </Form.Item>
                   <Form.Item
-                    label={t('org.amountUsd')}
-                    name="amountUsd"
+                    label={t('org.amountPi')}
+                    name="amountPi"
                     rules={[{ required: true }]}
                     style={{ minWidth: 140 }}
                   >
                     <InputNumber
                       {...groupedNumberInputProps}
-                      min={0.01}
-                      step={0.5}
+                      min={1}
+                      step={1000}
                       style={{ width: '100%' }}
                     />
                   </Form.Item>
@@ -1035,7 +1039,8 @@ export const OrgAdminMembers = () => {
                 <Text strong>{t('org.walletTitle')}</Text>
               </Flexbox>
               <Text>
-                {t('org.walletUsd')}: <Text strong>{usd(wallet?.balanceUsd)}</Text>
+                {t('org.walletPi')}:{' '}
+                <Text strong>{pi(wallet?.balancePi ?? dashboard?.balancePi)}</Text>
               </Text>
               <Flexbox horizontal align="center" gap={8}>
                 <Text strong>{t('org.onlineTopupTitle')}</Text>
@@ -1046,13 +1051,11 @@ export const OrgAdminMembers = () => {
               <Form form={topupForm} layout="vertical">
                 <FxTopupFields
                   disabled
-                  chargeField={topupChargeField}
                   form={topupForm}
                   fxRate={fx?.tomanPerUsd}
                   fxSource={fx?.source}
+                  piPerUsd={fx?.piPerUsd}
                   tomanLabelKey="org.amountToman"
-                  usdLabelKey="org.amountUsd"
-                  onChargeFieldChange={setTopupChargeField}
                 />
                 <Button disabled type="primary">
                   {t('org.onlineTopupSubmit')}
@@ -1119,7 +1122,7 @@ export const OrgAdminMembers = () => {
                       {
                         dataIndex: 'amountUsd',
                         title: t('wallet.columns.usd'),
-                        render: (v: string) => usd(v),
+                        render: (v: string) => pi(v),
                       },
                       {
                         dataIndex: 'description',
