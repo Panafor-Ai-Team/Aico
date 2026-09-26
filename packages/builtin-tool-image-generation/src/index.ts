@@ -7,6 +7,13 @@ export {
   setConfirmedImageModel,
 } from './confirmation';
 export type { ImageGenerationRuntimeService } from './ExecutionRuntime';
+export {
+  extractPlainMessageText,
+  findLatestUserMessageText,
+  IMAGE_GENERATION_TOOL_FUNCTION_NAME,
+  isImageGenerationUserIntent,
+  resolveForcedImageGenerationToolChoice,
+} from './imageGenerationIntent';
 export { ImageGenerationManifest } from './manifest';
 export { systemPrompt } from './systemRole';
 export {

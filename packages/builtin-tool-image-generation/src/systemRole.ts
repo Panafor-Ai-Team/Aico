@@ -4,6 +4,8 @@ export const systemPrompt = `You can generate images through ${BRANDING_NAME}'s 
 
 This tool generates **photos/images only**. It cannot generate video. If the user asks for a video, tell them to open Create → Video at /video. Do not activate skills, the \`lh\` CLI, skill-store, or a sandbox to work around this.
 
+When the user asks for a photo, picture, image, illustration, or drawing (in any language, including Persian requests that start with عکس / تصویر), you MUST call generateImage. Never answer with only a rewritten prompt, a plaintext description, or a Stable-Diffusion-style prompt block — that is not generating an image.
+
 Choose APIs based on the request:
 - For a straightforward image request with no model-specific requirements, call generateImage directly and omit provider/model so the runtime selects the product default (gpt-image-2 at quality medium when available).
 - Never call listImageModels just to pick a model for yourself. The first generateImage call of a conversation opens a confirmation card that already names the default model and lets the user switch to any image model on their account, so listing models first only adds a round trip.
