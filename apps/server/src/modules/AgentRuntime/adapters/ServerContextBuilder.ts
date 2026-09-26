@@ -3,6 +3,11 @@ import type {
   ContextBuildInput,
   ContextBuildOutput,
 } from '@lobechat/agent-runtime';
+import {
+  findLatestUserMessageText,
+  isImageGenerationUserIntent,
+  resolveForcedImageGenerationToolChoice,
+} from '@lobechat/builtin-tool-image-generation';
 
 import type { RuntimeExecutorContext } from '../context';
 import { buildServerCallLlmContext } from './serverCallLlmContextBuilder';
@@ -26,9 +31,23 @@ export class ServerContextBuilder implements ContextBuilder {
       tooling,
     });
 
+    const modelParameters = {
+      ...result.resolvedExtendParams,
+    } as Record<string, unknown>;
+
+    // Clear image asks must call generateImage — reasoning models otherwise
+    // invent a plaintext prompt and never invoke the tool.
+    const latestUserText = findLatestUserMessageText(result.processedMessages);
+    if (isImageGenerationUserIntent(latestUserText)) {
+      const toolChoice = resolveForcedImageGenerationToolChoice(tooling.resolved.tools);
+      if (toolChoice) {
+        modelParameters.tool_choice = toolChoice;
+      }
+    }
+
     return {
       messages: result.processedMessages,
-      modelParameters: result.resolvedExtendParams,
+      modelParameters,
       preserveThinking: result.preserveThinkingForPayload,
       replayAssistantReasoning: result.shouldReplayAssistantReasoning,
       resolvedTools: tooling.resolved,
