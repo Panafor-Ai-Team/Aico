@@ -2,10 +2,12 @@
 
 import type { BuiltinPlaceholderProps } from '@lobechat/types';
 import { Block, Text } from '@lobehub/ui';
-import { createStaticStyles, cssVar } from 'antd-style';
+import { createStaticStyles } from 'antd-style';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { GenerationElapsedTime } from '@/components/GenerationElapsedTime';
+import NeuralNetworkLoading from '@/components/NeuralNetworkLoading';
 import { shinyTextStyles } from '@/styles';
 
 import type { GenerateImageParams } from '../../types';
@@ -79,12 +81,17 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   `,
 }));
 
+/** Registered as both placeholder and streaming renderer; both paths pass `toolCallId`. */
+type GenerateImagePlaceholderProps = BuiltinPlaceholderProps<GenerateImageParams> & {
+  toolCallId?: string;
+};
+
 /**
  * Loading card while `generateImage` is running. Mirrors the result layout
  * without leaking the managed provider id (openrouter / aico).
  */
-export const GenerateImagePlaceholder = memo<BuiltinPlaceholderProps<GenerateImageParams>>(
-  ({ args }) => {
+export const GenerateImagePlaceholder = memo<GenerateImagePlaceholderProps>(
+  ({ args, toolCallId }) => {
     const { t } = useTranslation('plugin');
     const prompt = typeof args?.prompt === 'string' ? args.prompt.trim() : undefined;
     const model = formatImageGenerationModelLabel(args?.model, args?.provider);
@@ -105,14 +112,8 @@ export const GenerateImagePlaceholder = memo<BuiltinPlaceholderProps<GenerateIma
           </span>
         </div>
         <div className={styles.tile}>
-          <Text
-            as={'span'}
-            className={shinyTextStyles.shinyText}
-            color={cssVar.colorTextSecondary}
-            fontSize={12}
-          >
-            {t('builtins.lobe-image-generation.render.generating')}
-          </Text>
+          <NeuralNetworkLoading size={48} />
+          {toolCallId && <GenerationElapsedTime isActive timerKey={toolCallId} />}
         </div>
       </Block>
     );

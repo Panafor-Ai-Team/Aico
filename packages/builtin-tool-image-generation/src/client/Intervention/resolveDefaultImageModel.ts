@@ -14,6 +14,17 @@ export const imageModelOptionKey = (option: { model: string; provider: string })
   `${option.provider}/${option.model}`;
 
 /**
+ * Select options for the confirmation card. Labels carry only the model display
+ * name — managed provider ids (openrouter / aico) must never reach the UI; the
+ * `provider/model` key stays internal as the select value.
+ */
+export const toImageModelSelectOptions = (options: ImageModelOption[]) =>
+  options.map((option) => ({
+    label: option.displayName,
+    value: imageModelOptionKey(option),
+  }));
+
+/**
  * Pick what the confirmation card should propose:
  * 1. the model the assistant explicitly asked for, when the account has it
  *    (including vendor-prefix aliases like `gpt-image-2` → `openai/gpt-image-2`);

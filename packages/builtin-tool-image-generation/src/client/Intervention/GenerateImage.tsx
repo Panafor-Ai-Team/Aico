@@ -17,24 +17,13 @@ import {
   type ImageModelOption,
   imageModelOptionKey,
   resolveDefaultImageModelOption,
+  toImageModelSelectOptions,
 } from './resolveDefaultImageModel';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   body: css`
     padding-block: 12px;
     padding-inline: 12px;
-  `,
-  /**
-   * Model ids and provider names are always Latin. Isolating them keeps the
-   * punctuation on the correct side when the surrounding UI is RTL (fa-IR).
-   */
-  code: css`
-    direction: ltr;
-    unicode-bidi: isolate;
-
-    font-family: ${cssVar.fontFamilyCode};
-    font-size: 12px;
-    color: ${cssVar.colorTextSecondary};
   `,
   header: css`
     display: flex;
@@ -159,16 +148,7 @@ const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImagePar
       if (typeof value === 'string') setSelectedKey(value);
     }, []);
 
-    const selectOptions = useMemo(
-      () =>
-        options.map((option) => ({
-          // Never append managed provider names (OpenRouter / aico) — users
-          // only need the model display name.
-          label: option.displayName,
-          value: imageModelOptionKey(option),
-        })),
-      [options],
-    );
+    const selectOptions = useMemo(() => toImageModelSelectOptions(options), [options]);
 
     const statusLabel = isLoading
       ? t('builtins.lobe-image-generation.intervention.loading')
@@ -210,7 +190,6 @@ const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImagePar
                 variant={'filled'}
                 onChange={handleChange}
               />
-              {selected && <span className={styles.code}>{imageModelOptionKey(selected)}</span>}
             </Flexbox>
           )}
 
