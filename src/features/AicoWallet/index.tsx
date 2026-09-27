@@ -1,7 +1,6 @@
 'use client';
 
 import { BRANDING_NAME } from '@lobechat/business-const';
-// eslint-disable-next-line no-restricted-imports -- Text/Tag not in base-ui yet
 import { Block, Flexbox, Tag, Text } from '@lobehub/ui';
 import { Button, toast } from '@lobehub/ui/base-ui';
 import { Form, Table } from 'antd';
@@ -20,11 +19,11 @@ import type {
 } from '@/features/AicoBilling';
 import {
   AICO_MY_WALLET_SWR_KEY,
-  formatRemainingPi,
+  PiAmount,
+  PiTokenIcon,
   useAicoBillingSources,
 } from '@/features/AicoBilling';
 import { FxTopupFields, type FxTopupFormValues } from '@/features/AicoBilling/FxTopupFields';
-import { formatPiTokens } from '@/features/AicoBilling/piToken';
 import { AICO_TABLE_SCROLL, aicoPanelStyles } from '@/features/AicoPanels';
 import { buildPhoneVerifyRedirectUrl } from '@/libs/better-auth/phone';
 import { useClientDataSWR } from '@/libs/swr';
@@ -138,6 +137,7 @@ export const AicoWallet = () => {
           title={t('wallet.remainingPi')}
           statistic={{
             description: cardFooter(display.paidInPi),
+            suffix: display.remainingPi == null ? undefined : <PiTokenIcon size={22} />,
             value: display.remainingPi ?? t('wallet.remainingUnknown'),
           }}
         />
@@ -162,7 +162,6 @@ export const AicoWallet = () => {
                 const ctx = sourceToContext(source);
                 const selected = isSelected(ctx);
                 const title = sourceTitle(source, t);
-                const remaining = formatRemainingPi(source.remainingPi);
 
                 return (
                   <button
@@ -191,9 +190,7 @@ export const AicoWallet = () => {
                       </Flexbox>
                       {selected ? <CheckIcon size={14} /> : null}
                     </Flexbox>
-                    <Text style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums' }}>
-                      {remaining}
-                    </Text>
+                    <PiAmount iconSize={18} style={{ fontSize: 18 }} value={source.remainingPi} />
                     <Text style={{ fontSize: 12 }} type="secondary">
                       {source.hasManagedKey ? t('wallet.keyProvisioned') : t('wallet.keyPending')}
                     </Text>
@@ -313,7 +310,7 @@ export const AicoWallet = () => {
                 {
                   dataIndex: 'amountPi',
                   title: t('wallet.columns.pi'),
-                  render: (v: number | string | null) => (v == null ? '—' : formatPiTokens(v)),
+                  render: (v: number | string | null) => (v == null ? '—' : <PiAmount value={v} />),
                 },
                 {
                   dataIndex: 'createdAt',

@@ -1,7 +1,6 @@
 'use client';
 
 import { BarChart, BarList } from '@lobehub/charts';
-// eslint-disable-next-line no-restricted-imports -- Text/Tag not in base-ui yet
 import { Block, Flexbox, Tag, Text } from '@lobehub/ui';
 import { Button, Select, Tabs, toast } from '@lobehub/ui/base-ui';
 import { DatePicker, Form, Input, InputNumber, Table } from 'antd';
@@ -18,9 +17,11 @@ import { FxTopupFields, type FxTopupFormValues } from '@/features/AicoBilling/Fx
 import { groupedNumberInputProps } from '@/features/AicoBilling/groupedNumberInput';
 import {
   DEFAULT_PI_PER_USD,
+  formatPiAmount,
   formatPiTokens,
   piTokensToBilledUsdString,
 } from '@/features/AicoBilling/piToken';
+import { PiAmount, PiTokenIcon } from '@/features/AicoBilling/PiTokenIcon';
 import { AICO_TABLE_SCROLL, aicoPanelStyles } from '@/features/AicoPanels';
 import { createBudgetSweepModal } from '@/features/OrgAdmin/BudgetSweepModal';
 import { presentInviteLink } from '@/features/OrgAdmin/InviteLinkModal';
@@ -414,19 +415,27 @@ export const OrgAdminMembers = () => {
 
       <div className={aicoPanelStyles.grid}>
         <StatisticCard
-          statistic={{ prefix: <WalletIcon size={16} />, value: pi(dashboard?.unallocatedPi) }}
           title={t('org.stat.unallocated')}
+          statistic={{
+            prefix: <WalletIcon size={16} />,
+            suffix: <PiTokenIcon size={20} />,
+            value: formatPiAmount(dashboard?.unallocatedPi),
+          }}
         />
         <StatisticCard
           title={t('org.stat.allocated')}
           statistic={{
             prefix: <DollarSignIcon size={16} />,
-            value: pi(dashboard?.allocatedPi),
+            suffix: <PiTokenIcon size={20} />,
+            value: formatPiAmount(dashboard?.allocatedPi),
           }}
         />
         <StatisticCard
-          statistic={{ value: pi(dashboard?.settledUsagePi) }}
           title={t('org.stat.used')}
+          statistic={{
+            suffix: <PiTokenIcon size={20} />,
+            value: formatPiAmount(dashboard?.settledUsagePi),
+          }}
         />
         <StatisticCard
           statistic={{ prefix: <UsersIcon size={16} />, value: dashboard?.memberCount ?? 0 }}
@@ -530,17 +539,17 @@ export const OrgAdminMembers = () => {
                     {
                       dataIndex: 'periodAmountPi',
                       title: t('org.columns.limit'),
-                      render: (v: string) => pi(v),
+                      render: (v: string) => <PiAmount value={v} />,
                     },
                     {
                       dataIndex: 'settledUsagePi',
                       title: t('org.columns.used'),
-                      render: (v: string) => pi(v),
+                      render: (v: string) => <PiAmount value={v} />,
                     },
                     {
                       dataIndex: 'remainingPi',
                       title: t('org.columns.remaining'),
-                      render: (v: string) => pi(v),
+                      render: (v: string) => <PiAmount value={v} />,
                     },
                     {
                       dataIndex: 'nextRenewalAt',
@@ -1040,7 +1049,10 @@ export const OrgAdminMembers = () => {
               </Flexbox>
               <Text>
                 {t('org.walletPi')}:{' '}
-                <Text strong>{pi(wallet?.balancePi ?? dashboard?.balancePi)}</Text>
+                <PiAmount
+                  style={{ fontWeight: 600 }}
+                  value={wallet?.balancePi ?? dashboard?.balancePi}
+                />
               </Text>
               <Flexbox horizontal align="center" gap={8}>
                 <Text strong>{t('org.onlineTopupTitle')}</Text>

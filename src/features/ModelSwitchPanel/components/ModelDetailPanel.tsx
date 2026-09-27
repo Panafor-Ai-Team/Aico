@@ -5,6 +5,7 @@ import type { FC } from 'react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { PiTokenIcon } from '@/features/AicoBilling/PiTokenIcon';
 import type { EnabledProviderWithModels } from '@/types/aiProvider';
 
 import type { FormattedUnitPrice } from '../hooks/useModelDetailPanel';
@@ -72,7 +73,12 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   priceValue: css`
     display: inline-flex;
     gap: 4px;
-    align-items: baseline;
+    align-items: center;
+  `,
+  priceAmount: css`
+    display: inline-flex;
+    gap: 3px;
+    align-items: center;
   `,
   titleText: css`
     font-size: 14px;
@@ -84,10 +90,11 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 interface PriceValueProps {
   prefix?: string;
   price: FormattedUnitPrice;
+  showPiIcon?: boolean;
   suffix?: string;
 }
 
-const PriceValue: FC<PriceValueProps> = ({ price, prefix = '', suffix = '' }) => (
+const PriceValue: FC<PriceValueProps> = ({ price, prefix = '', showPiIcon, suffix = '' }) => (
   <span className={styles.priceValue}>
     {price.original && (
       <span className={styles.originalPriceText}>
@@ -95,9 +102,10 @@ const PriceValue: FC<PriceValueProps> = ({ price, prefix = '', suffix = '' }) =>
         {price.original}
       </span>
     )}
-    <span>
+    <span className={styles.priceAmount}>
       {prefix}
       {price.current}
+      {showPiIcon && price.current !== '-' && <PiTokenIcon size={12} />}
       {suffix}
     </span>
   </span>
@@ -114,12 +122,14 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
   ({ model: modelId, provider, enabledList: enabledListProp, pricingMode }) => {
     const { t } = useTranslation(['components', 'models']);
     const {
+      approximatePiPrice,
       approximatePriceLabel,
       contextWindowLabel,
       enabledAbilities,
       expandedKeys,
       formatPrice,
       formatUnitPrice,
+      getCreditsUnitLabel,
       getPricingTooltip,
       getUnitPriceSuffix,
       handleExpandedChange,
@@ -128,7 +138,9 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
       hasPricing,
       isAbilitiesExpanded,
       isCreditPricing,
+      isPiAmountUnit,
       isPricingExpanded,
+      isSingleTextRate,
       model,
       pricingGroups,
       rating,
@@ -161,6 +173,16 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
       : [];
     const ratedDimensions = ratingDimensions.filter((item) => item.score !== undefined);
     const hasRating = ratedDimensions.length > 0;
+
+    const approximatePrice = approximatePiPrice ? (
+      <span className={styles.priceAmount}>
+        ~ {approximatePiPrice.amount}
+        <PiTokenIcon size={14} />
+        {getCreditsUnitLabel(approximatePiPrice.unit)}
+      </span>
+    ) : (
+      approximatePriceLabel
+    );
 
     const description = model.description
       ? String(
@@ -340,7 +362,7 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
             )}
 
             {/* Pricing */}
-            {hasPricing && (formatPrice || approximatePriceLabel) && (
+            {hasPricing && (formatPrice || approximatePrice) && (
               <AccordionItem
                 alwaysShowAction
                 itemKey="pricing"
@@ -348,8 +370,14 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
                 paddingInline={8}
                 action={
                   !isPricingExpanded &&
-                  (approximatePriceLabel ? (
-                    <span className={styles.actionText}>{approximatePriceLabel}</span>
+                  (approximatePrice ? (
+                    <span className={styles.actionText}>{approximatePrice}</span>
+                  ) : isSingleTextRate ? (
+                    <Tooltip title={getPricingTooltip('coefficient', formatPrice!.input.current)}>
+                      <span className={styles.actionText}>
+                        <PriceValue price={formatPrice!.input} />
+                      </span>
+                    </Tooltip>
                   ) : (
                     <Flexbox horizontal align={'center'} className={styles.actionText} gap={8}>
                       {hasCachedInputPricing && (
@@ -393,9 +421,9 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
                 }
               >
                 <Flexbox gap={8}>
-                  {approximatePriceLabel && (
+                  {approximatePrice && (
                     <Flexbox className={styles.row} style={{ fontWeight: 500 }}>
-                      {approximatePriceLabel}
+                      {approximatePrice}
                     </Flexbox>
                   )}
                   {pricingGroups.map(({ group, units }) => (
@@ -405,29 +433,36 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
                           {t(`ModelSwitchPanel.detail.pricing.group.${group}` as any)}
                         </Flexbox>
                       )}
-                      {units.map((unit) => (
-                        <Flexbox
-                          horizontal
-                          align={'center'}
-                          className={styles.row}
-                          justify={'space-between'}
-                          key={unit.name}
-                        >
-                          <Flexbox horizontal align={'center'} gap={6}>
-                            {UNIT_ICON_MAP[unit.name] && (
-                              <Icon icon={UNIT_ICON_MAP[unit.name]!} size={'small'} />
-                            )}
-                            <span>
-                              {t(`ModelSwitchPanel.detail.pricing.unit.${unit.name}` as any)}
-                            </span>
+                      {units.map((unit) => {
+                        const isCoefficientRow = isSingleTextRate && unit.name === 'textInput';
+
+                        return (
+                          <Flexbox
+                            horizontal
+                            align={'center'}
+                            className={styles.row}
+                            justify={'space-between'}
+                            key={unit.name}
+                          >
+                            <Flexbox horizontal align={'center'} gap={6}>
+                              {!isCoefficientRow && UNIT_ICON_MAP[unit.name] && (
+                                <Icon icon={UNIT_ICON_MAP[unit.name]!} size={'small'} />
+                              )}
+                              <span>
+                                {isCoefficientRow
+                                  ? t('ModelSwitchPanel.detail.pricing.credits.coefficientLabel')
+                                  : t(`ModelSwitchPanel.detail.pricing.unit.${unit.name}` as any)}
+                              </span>
+                            </Flexbox>
+                            <PriceValue
+                              prefix={isCreditPricing ? '' : '$'}
+                              price={formatUnitPrice(unit)}
+                              showPiIcon={isPiAmountUnit(unit.unit)}
+                              suffix={getUnitPriceSuffix(unit.unit)}
+                            />
                           </Flexbox>
-                          <PriceValue
-                            prefix={isCreditPricing ? '' : '$'}
-                            price={formatUnitPrice(unit)}
-                            suffix={getUnitPriceSuffix(unit.unit)}
-                          />
-                        </Flexbox>
-                      ))}
+                        );
+                      })}
                     </Flexbox>
                   ))}
                 </Flexbox>

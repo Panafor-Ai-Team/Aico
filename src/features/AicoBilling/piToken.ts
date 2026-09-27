@@ -39,38 +39,26 @@ export const formatCvcCoefficient = (coefficient: number): string => {
   return `${text}×`;
 };
 
-/** Format a π amount number (no unit) for rate rows. */
-export const formatPiRateAmount = (pi: number): string => {
-  if (!Number.isFinite(pi) || pi === 0) return '0';
-  if (pi >= 100) return Math.round(pi).toLocaleString();
-  if (pi >= 1) return pi.toFixed(2);
-  return pi.toFixed(3);
-};
-
-/**
- * Hybrid token rate for managed catalogs: coefficient primary, π secondary.
- * Example: `$0.16/M` → `4× · 4,000` (caller appends ` π/M tokens`).
- */
-export const formatHybridPiRate = (
+/** Managed token rate as its CVC coefficient only: `$0.16/M` → `4×`. */
+export const formatTokenCoefficient = (
   rawUsd: number,
   cvcTokensPerUsd: number = DEFAULT_CVC_TOKENS_PER_USD,
-): string => {
-  const coefficient = formatCvcCoefficient(rawUsdToCvcCoefficient(rawUsd, cvcTokensPerUsd));
-  const pi = formatPiRateAmount(rawUsdToPiTokens(rawUsd, cvcTokensPerUsd));
-  return `${coefficient} · ${pi}`;
-};
+): string => formatCvcCoefficient(rawUsdToCvcCoefficient(rawUsd, cvcTokensPerUsd));
 
-/** Format a π amount for UI (balances are integers; tiny costs keep decimals). */
-export const formatPiTokens = (pi: number | string | null | undefined): string => {
+/** Format a π amount without its unit (balances are integers; tiny costs keep decimals). */
+export const formatPiAmount = (pi: number | string | null | undefined): string => {
   const n = typeof pi === 'string' ? Number(pi) : Number(pi ?? 0);
-  if (!Number.isFinite(n)) return '0 π';
+  if (!Number.isFinite(n) || n === 0) return '0';
   const abs = Math.abs(n);
   const sign = n < 0 ? '-' : '';
-  if (abs >= 100) return `${sign}${Math.round(abs).toLocaleString()} π`;
-  if (abs >= 1) return `${sign}${abs.toFixed(2)} π`;
-  if (abs === 0) return '0 π';
-  return `${sign}${abs.toFixed(3)} π`;
+  if (abs >= 100) return `${sign}${Math.round(abs).toLocaleString()}`;
+  if (abs >= 1) return `${sign}${abs.toFixed(2)}`;
+  return `${sign}${abs.toFixed(3)}`;
 };
+
+/** Plain-text π amount for strings (tooltips, toasts, i18n sentences). */
+export const formatPiTokens = (pi: number | string | null | undefined): string =>
+  `${formatPiAmount(pi)} π`;
 
 export const formatRemainingPi = (remainingPi: string | number | undefined): string =>
   formatPiTokens(remainingPi ?? 0);

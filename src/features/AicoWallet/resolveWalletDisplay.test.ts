@@ -24,7 +24,7 @@ describe('resolveWalletDisplay (π tokens)', () => {
   it('shows remaining π, not the deposit total', () => {
     const display = resolveWalletDisplay({ ...paidIn, personal: personal() });
 
-    expect(display.remainingPi).toBe('192,000 π');
+    expect(display.remainingPi).toBe('192,000');
     expect(display.paidInPi).toBe('200,000 π');
   });
 
@@ -48,7 +48,7 @@ describe('resolveWalletDisplay (π tokens)', () => {
       personal: personal({ remainingMicroUsd: '0', remainingPi: '0', remainingUsd: '0.000000' }),
     });
 
-    expect(display.remainingPi).toBe('0 π');
+    expect(display.remainingPi).toBe('0');
     expect(display.paidInPi).toBe('200,000 π');
   });
 });
