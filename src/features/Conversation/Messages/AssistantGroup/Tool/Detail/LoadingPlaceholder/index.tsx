@@ -11,11 +11,12 @@ interface LoadingPlaceholderProps {
   loading?: boolean;
   messageId: string;
   requestArgs?: string;
+  startTime?: number;
   toolCallId: string;
 }
 
 const LoadingPlaceholder = memo<LoadingPlaceholderProps>(
-  ({ identifier, requestArgs, apiName, loading, toolCallId, messageId }) => {
+  ({ identifier, requestArgs, apiName, loading, startTime, toolCallId, messageId }) => {
     const Render =
       getBuiltinPlaceholder(identifier, apiName) || getBuiltinStreaming(identifier, apiName);
 
@@ -26,6 +27,7 @@ const LoadingPlaceholder = memo<LoadingPlaceholderProps>(
           args={safeParseJSON(requestArgs) || {}}
           identifier={identifier}
           messageId={messageId}
+          startTime={startTime}
           toolCallId={toolCallId}
         />
       );

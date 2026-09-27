@@ -903,6 +903,28 @@ describe('Operation Selectors', () => {
       expect(operationSelectors.getRunningToolCallStartTime('tool-1')(result.current)).toBe(1000);
     });
 
+    it('should match the running executeToolCall by tool message id when tool_call_id is missing', () => {
+      const { result } = renderHook(() => useChatStore());
+
+      act(() => {
+        result.current.startOperation({
+          type: 'executeToolCall',
+          context: { agentId: 'session1', messageId: 'tool_msg' },
+          metadata: { startTime: 1500 },
+        });
+      });
+
+      expect(operationSelectors.getRunningToolCallStartTime('tool-1')(result.current)).toBe(
+        undefined,
+      );
+      expect(
+        operationSelectors.getRunningToolCallStartTime('tool-1', 'tool_msg')(result.current),
+      ).toBe(1500);
+      expect(
+        operationSelectors.getRunningToolCallStartTime('tool-1', 'other_msg')(result.current),
+      ).toBe(undefined);
+    });
+
     it('should ignore completed and unrelated tool operations', () => {
       const { result } = renderHook(() => useChatStore());
 

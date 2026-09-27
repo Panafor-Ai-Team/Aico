@@ -3,8 +3,12 @@
 import { Text } from '@lobehub/ui';
 import { useEffect, useRef, useState } from 'react';
 
+import { formatGenerationElapsedTime } from './formatElapsedTime';
+
 interface GenerationElapsedTimeProps {
   isActive: boolean;
+  /** Known start timestamp (ms); takes precedence over the stored/first-mount time. */
+  startTime?: number;
   /** Stable key for the timer (generation id, tool call id, ...). */
   timerKey: string;
 }
@@ -14,11 +18,15 @@ const getSessionStorageKey = (timerKey: string) => `generation_start_time_${time
 /**
  * Display elapsed time for a running generation
  * - Less than 1 minute: show seconds with 0.1s precision
- * - 1 minute or more: show minutes with 1 decimal precision
+ * - 1 minute or more: show whole minutes and seconds
  * - Uses sessionStorage to maintain accurate timing across page refreshes
  */
-export function GenerationElapsedTime({ timerKey, isActive }: GenerationElapsedTimeProps) {
-  const [elapsedTime, setElapsedTime] = useState<number | null>(null);
+export function GenerationElapsedTime({
+  timerKey,
+  isActive,
+  startTime,
+}: GenerationElapsedTimeProps) {
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const frameRef = useRef<number | null>(null);
   const lastUpdateRef = useRef<number>(0);
 
@@ -33,14 +41,18 @@ export function GenerationElapsedTime({ timerKey, isActive }: GenerationElapsedT
       // Clear data from sessionStorage
       const storageKey = getSessionStorageKey(timerKey);
       sessionStorage.removeItem(storageKey);
-      setElapsedTime(null);
+      setElapsedMs(null);
       return;
     }
 
     const storageKey = getSessionStorageKey(timerKey);
 
-    // Only set start time when the component mounts
     const clientStartTime = (() => {
+      if (startTime !== undefined) {
+        sessionStorage.setItem(storageKey, startTime.toString());
+        return startTime;
+      }
+
       const stored = sessionStorage.getItem(storageKey);
       if (stored) return Number(stored);
 
@@ -51,8 +63,7 @@ export function GenerationElapsedTime({ timerKey, isActive }: GenerationElapsedT
 
     const update = (timestamp: number) => {
       if (timestamp - lastUpdateRef.current >= 100) {
-        const elapsed = (Date.now() - clientStartTime) / 100;
-        setElapsedTime(Math.max(0, elapsed));
+        setElapsedMs(Math.max(0, Date.now() - clientStartTime));
         lastUpdateRef.current = timestamp;
       }
       frameRef.current = requestAnimationFrame(update);
@@ -65,27 +76,11 @@ export function GenerationElapsedTime({ timerKey, isActive }: GenerationElapsedT
         cancelAnimationFrame(frameRef.current);
       }
     };
-  }, [timerKey, isActive]);
-
-  // Format elapsed time display
-  const formattedTime = (() => {
-    if (elapsedTime === null) return '';
-
-    const totalSeconds = elapsedTime / 10;
-
-    // Less than 60 seconds: show seconds with 0.1s precision
-    if (totalSeconds < 60) {
-      return `${totalSeconds.toFixed(1)}s`;
-    }
-
-    // 60 seconds or more: show minutes with 1 decimal precision
-    const minutes = totalSeconds / 60;
-    return `${minutes.toFixed(1)}min`;
-  })();
+  }, [timerKey, isActive, startTime]);
 
   return (
     <Text code fontSize={10} type={'secondary'}>
-      {formattedTime}
+      {elapsedMs === null ? '' : formatGenerationElapsedTime(elapsedMs)}
     </Text>
   );
 }

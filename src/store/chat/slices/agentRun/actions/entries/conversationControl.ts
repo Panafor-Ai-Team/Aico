@@ -499,7 +499,8 @@ export class ConversationControlActionImpl {
       ...initialContext,
       phase: 'human_approved_tool',
       payload: {
-        approvedToolCall: toolMessage.plugin,
+        // DB-loaded `plugin` carries no `id`; the tool call id lives on `tool_call_id`.
+        approvedToolCall: { ...toolMessage.plugin, id: toolMessage.tool_call_id! },
         parentMessageId: toolMessageId,
         skipCreateToolMessage: true,
       },

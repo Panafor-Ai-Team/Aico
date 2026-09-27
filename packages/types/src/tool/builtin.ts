@@ -457,6 +457,8 @@ export interface BuiltinStreamingProps<Arguments = any> {
   args: Arguments;
   identifier: string;
   messageId: string;
+  /** Start time (ms) of the running tool call, when it is executing. */
+  startTime?: number;
   toolCallId: string;
 }
 
