@@ -10,8 +10,8 @@ import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { AiProviderModelListItem, ModelAbilities, Pricing } from 'model-bank';
 import { AiModelSourceEnum, normalizeAiModelType } from 'model-bank';
 import {
+  cheapVibeCodeGptImage2Parameters,
   cheapVibeCodePromptOnlyImageParameters,
-  gptImage2Schema,
 } from 'model-bank/imageParameters';
 import { cheapVibeCodeGrokImagineVideoParameters } from 'model-bank/videoParameters';
 
@@ -98,7 +98,12 @@ const EMBEDDING_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
  * catalog never offers ids its upstream would reject.
  */
 const CHEAPVIBECODE_GENERATION_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
-  { displayName: 'GPT Image 2', id: 'gpt-image-2', parameters: gptImage2Schema, type: 'image' },
+  {
+    displayName: 'GPT Image 2',
+    id: 'gpt-image-2',
+    parameters: cheapVibeCodeGptImage2Parameters,
+    type: 'image',
+  },
   {
     displayName: 'Nano Banana 2',
     id: 'nano-banana-2',

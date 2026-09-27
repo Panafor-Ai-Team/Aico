@@ -63,7 +63,7 @@ export const createCheapVibeCodeVideo = async (
   options: CreateVideoOptions,
 ): Promise<CreateVideoResponse> => {
   const { model, params } = payload;
-  const { aspectRatio, duration, imageUrl, prompt, resolution } = params;
+  const { aspectRatio, duration, imageUrl, imageUrls, prompt, resolution } = params;
 
   const body: Record<string, unknown> = { model, prompt };
   if (typeof duration === 'number' && Number.isFinite(duration)) {
@@ -71,8 +71,14 @@ export const createCheapVibeCodeVideo = async (
   }
   if (resolution) body.resolution = resolution;
   if (aspectRatio) body.aspect_ratio = aspectRatio;
-  // xAI's start-frame shape, which CheapVibeCode's mirrored video API follows.
-  if (imageUrl) body.image = { url: imageUrl };
+
+  // xAI's shapes, which CheapVibeCode's mirrored video API follows: one image is
+  // the start frame, several are references. The two cannot be combined.
+  const images = [imageUrl, ...(imageUrls ?? [])].filter(
+    (url): url is string => typeof url === 'string' && url.length > 0,
+  );
+  if (images.length === 1) body.image = { url: images[0] };
+  else if (images.length > 1) body.reference_images = images.map((url) => ({ url }));
 
   log('Creating video - model: %s, body: %O', model, body);
 

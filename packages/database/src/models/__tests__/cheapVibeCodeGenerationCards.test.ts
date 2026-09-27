@@ -62,7 +62,32 @@ describe('CheapVibeCode generation models', () => {
     expect(models['grok-imagine-video']).toMatchObject({ type: 'video' });
   });
 
-  it('offers a start-frame upload for Grok Imagine Video even from a row synced before it', async () => {
+  it('lets GPT Image 2 and Grok Imagine Video take several reference images', async () => {
+    const { OpenRouterModelCatalogModel } = await import('../openrouterModelCatalog');
+    await db.insert(openrouterModelCatalog).values([
+      { enabled: true, id: 'openrouter/auto', payload: {}, syncedAt: new Date(), type: 'chat' },
+      {
+        enabled: true,
+        id: 'gpt-image-2',
+        // Single-image schema persisted by an earlier sync.
+        payload: { parameters: { imageUrls: { default: [], maxCount: 1 }, prompt: {} } },
+        syncedAt: new Date(),
+        type: 'image',
+      },
+    ]);
+
+    const models = byId(await new OpenRouterModelCatalogModel(db).listAsProviderModels()) as any;
+
+    expect(models['gpt-image-2'].parameters.imageUrls.maxCount).toBe(16);
+    expect(models['gpt-image-2'].parameters.quality.default).toBe('medium');
+    expect(models['grok-imagine-video'].parameters.imageUrls).toMatchObject({
+      default: [],
+      maxCount: 7,
+    });
+    expect(models['grok-imagine-video'].parameters.imageUrl).toBeUndefined();
+  });
+
+  it('offers an image upload for Grok Imagine Video even from a row synced before it', async () => {
     const { OpenRouterModelCatalogModel } = await import('../openrouterModelCatalog');
     await db.insert(openrouterModelCatalog).values([
       { enabled: true, id: 'openrouter/auto', payload: {}, syncedAt: new Date(), type: 'chat' },
@@ -80,7 +105,7 @@ describe('CheapVibeCode generation models', () => {
       'grok-imagine-video'
     ] as any;
 
-    expect(video.parameters.imageUrl).toEqual({ default: null });
+    expect(video.parameters.imageUrls).toMatchObject({ default: [] });
     expect(video.enabled).toBe(true);
   });
 
