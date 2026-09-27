@@ -81,8 +81,13 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   `,
 }));
 
-/** Registered as both placeholder and streaming renderer; both paths pass `toolCallId`. */
+/**
+ * Registered as both placeholder and streaming renderer; both paths pass
+ * `toolCallId`. `startTime` (the running tool-call operation start) keeps this
+ * timer in step with the tool-row timer.
+ */
 type GenerateImagePlaceholderProps = BuiltinPlaceholderProps<GenerateImageParams> & {
+  startTime?: number;
   toolCallId?: string;
 };
 
@@ -91,7 +96,7 @@ type GenerateImagePlaceholderProps = BuiltinPlaceholderProps<GenerateImageParams
  * without leaking the managed provider id (openrouter / aico).
  */
 export const GenerateImagePlaceholder = memo<GenerateImagePlaceholderProps>(
-  ({ args, toolCallId }) => {
+  ({ args, startTime, toolCallId }) => {
     const { t } = useTranslation('plugin');
     const prompt = typeof args?.prompt === 'string' ? args.prompt.trim() : undefined;
     const model = formatImageGenerationModelLabel(args?.model, args?.provider);
@@ -113,7 +118,9 @@ export const GenerateImagePlaceholder = memo<GenerateImagePlaceholderProps>(
         </div>
         <div className={styles.tile}>
           <NeuralNetworkLoading size={48} />
-          {toolCallId && <GenerationElapsedTime isActive timerKey={toolCallId} />}
+          {toolCallId && (
+            <GenerationElapsedTime isActive startTime={startTime} timerKey={toolCallId} />
+          )}
         </div>
       </Block>
     );

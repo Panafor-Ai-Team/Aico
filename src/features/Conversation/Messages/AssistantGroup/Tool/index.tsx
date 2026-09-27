@@ -87,7 +87,9 @@ const Tool = memo<GroupToolProps>(({ assistantMessageId, disableEditing, id }) =
     operationSelectors.isMessageProcessing(assistantMessageId),
   );
 
-  const toolCallStartTime = useChatStore(operationSelectors.getRunningToolCallStartTime(id));
+  const toolCallStartTime = useChatStore(
+    operationSelectors.getRunningToolCallStartTime(id, toolMessageId),
+  );
   const isToolCalling = resolveIsToolCalling({
     hasRunningToolCallOperation: toolCallStartTime !== undefined,
     isArgumentsStreaming,
@@ -183,6 +185,7 @@ const Tool = memo<GroupToolProps>(({ assistantMessageId, disableEditing, id }) =
             result={result}
             showCustomToolRender={showCustomToolRender}
             toolCallId={id}
+            toolCallStartTime={toolCallStartTime}
             toolMessageId={toolMessageId}
             type={type}
           />

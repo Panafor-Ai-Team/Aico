@@ -668,19 +668,19 @@ const isMessageInToolCalling =
  */
 const getRunningToolOperationStartTime = (
   type: OperationType,
-  toolCallId: string,
   s: ChatStoreState,
+  { toolCallId, toolMessageId }: { toolCallId: string; toolMessageId?: string },
 ) => {
   const operationIds = s.operationsByType[type] ?? [];
   let startTime: number | undefined;
 
   for (const id of operationIds) {
     const operation = s.operations[id];
-    if (
-      !operation ||
-      operation.status !== 'running' ||
-      operation.metadata.tool_call_id !== toolCallId
-    ) {
+    if (!operation || operation.status !== 'running') continue;
+
+    const matchesToolCall = !!toolCallId && operation.metadata.tool_call_id === toolCallId;
+    const matchesToolMessage = !!toolMessageId && operation.context.messageId === toolMessageId;
+    if (!matchesToolCall && !matchesToolMessage) {
       continue;
     }
 
@@ -697,13 +697,17 @@ const getRunningToolOperationStartTime = (
  * Get the stable start time for a running tool call.
  * Prefer the actual execution phase; fall back to the parent tool call while
  * the execution operation has not been created yet.
+ *
+ * `toolMessageId` also matches the execution operation, whose context carries
+ * the tool message id, so a tool call id missing from operation metadata does
+ * not hide the running state.
  */
 const getRunningToolCallStartTime =
-  (toolCallId: string) =>
+  (toolCallId: string, toolMessageId?: string) =>
   (s: ChatStoreState): number | undefined => {
     return (
-      getRunningToolOperationStartTime('executeToolCall', toolCallId, s) ??
-      getRunningToolOperationStartTime('toolCalling', toolCallId, s)
+      getRunningToolOperationStartTime('executeToolCall', s, { toolCallId, toolMessageId }) ??
+      getRunningToolOperationStartTime('toolCalling', s, { toolCallId })
     );
   };
 

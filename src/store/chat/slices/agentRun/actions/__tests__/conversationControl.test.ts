@@ -664,6 +664,64 @@ describe('ConversationControl actions', () => {
       );
     });
 
+    it('passes the tool_call_id as the approved tool call id (DB plugin payload has no id)', async () => {
+      const { result } = renderHook(() => useChatStore());
+
+      const agentId = 'agent-1';
+      const topicId = 'topic-1';
+      const toolMessage = createMockMessage({
+        id: 'tool-msg-1',
+        plugin: {
+          apiName: 'generateImage',
+          arguments: '{"prompt":"a crow"}',
+          identifier: 'lobe-image-generation',
+          type: 'builtin',
+        },
+        role: 'tool',
+        tool_call_id: 'call_image_1',
+      });
+      const key = messageMapKey({ agentId, topicId });
+
+      act(() => {
+        useChatStore.setState({
+          activeAgentId: agentId,
+          activeTopicId: topicId,
+          activeThreadId: undefined,
+          dbMessagesMap: { [key]: [toolMessage] },
+          messagesMap: { [key]: [toolMessage] },
+        });
+      });
+
+      vi.spyOn(result.current, 'optimisticUpdateMessagePlugin').mockResolvedValue(undefined);
+      vi.spyOn(result.current, 'internal_createAgentState').mockReturnValue({
+        state: {} as any,
+        context: { phase: 'init' } as any,
+        agentConfig: createMockResolvedAgentConfig(),
+      });
+      const executeClientAgentSpy = vi
+        .spyOn(result.current, 'executeClientAgent')
+        .mockResolvedValue(undefined);
+
+      await act(async () => {
+        await result.current.approveToolCalling('tool-msg-1', 'group-1');
+      });
+
+      expect(executeClientAgentSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          initialContext: expect.objectContaining({
+            payload: expect.objectContaining({
+              approvedToolCall: expect.objectContaining({
+                apiName: 'generateImage',
+                id: 'call_image_1',
+                identifier: 'lobe-image-generation',
+              }),
+            }),
+            phase: 'human_approved_tool',
+          }),
+        }),
+      );
+    });
+
     it('should not execute when tool message not found', async () => {
       const { result } = renderHook(() => useChatStore());
 
