@@ -60,6 +60,24 @@ describe('createCheapVibeCodeVideo', () => {
     expect(init.headers.Authorization).toBe('Bearer test-api-key');
   });
 
+  it('sends an attached start frame in the xAI image shape', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-3' }));
+
+    await createCheapVibeCodeVideo(
+      {
+        model: 'grok-imagine-video',
+        params: { imageUrl: 'https://s3.example.com/frame.png', prompt: 'Make it move' },
+      },
+      mockOptions,
+    );
+
+    expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).toEqual({
+      image: { url: 'https://s3.example.com/frame.png' },
+      model: 'grok-imagine-video',
+      prompt: 'Make it move',
+    });
+  });
+
   it('honours CHEAPVIBECODE_VIDEO_BASE_URL', async () => {
     process.env.CHEAPVIBECODE_VIDEO_BASE_URL = 'https://mirror.cheapvibecode.ru/';
     global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-2' }));

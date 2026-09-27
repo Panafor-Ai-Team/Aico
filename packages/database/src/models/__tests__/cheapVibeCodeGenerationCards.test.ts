@@ -62,6 +62,28 @@ describe('CheapVibeCode generation models', () => {
     expect(models['grok-imagine-video']).toMatchObject({ type: 'video' });
   });
 
+  it('offers a start-frame upload for Grok Imagine Video even from a row synced before it', async () => {
+    const { OpenRouterModelCatalogModel } = await import('../openrouterModelCatalog');
+    await db.insert(openrouterModelCatalog).values([
+      { enabled: true, id: 'openrouter/auto', payload: {}, syncedAt: new Date(), type: 'chat' },
+      {
+        enabled: true,
+        id: 'grok-imagine-video',
+        // Text-to-video-only schema persisted by an earlier sync.
+        payload: { parameters: { duration: { default: 6 }, prompt: { default: '' } } },
+        syncedAt: new Date(),
+        type: 'video',
+      },
+    ]);
+
+    const video = byId(await new OpenRouterModelCatalogModel(db).listAsProviderModels())[
+      'grok-imagine-video'
+    ] as any;
+
+    expect(video.parameters.imageUrl).toEqual({ default: null });
+    expect(video.enabled).toBe(true);
+  });
+
   it('keeps an admin switching a generator off across the next sync', async () => {
     const { OpenRouterModelCatalogModel } = await import('../openrouterModelCatalog');
     const catalog = new OpenRouterModelCatalogModel(db);

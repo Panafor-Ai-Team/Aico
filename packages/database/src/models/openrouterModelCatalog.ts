@@ -122,6 +122,24 @@ const CHEAPVIBECODE_GENERATION_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
 const managedGenerationCatalogCards = (): OpenRouterCatalogModelInput[] =>
   MANAGED_PROVIDER_ID === 'cheapvibecode' ? CHEAPVIBECODE_GENERATION_CATALOG_CARDS : [];
 
+/**
+ * The generator cards are defined here, not by the upstream, so their parameter
+ * schema in code is authoritative. Rows persisted by an earlier sync would
+ * otherwise keep serving a stale schema (e.g. no start-frame upload) until the
+ * next cron run.
+ */
+const withManagedGenerationParameters = (
+  models: AiProviderModelListItem[],
+): AiProviderModelListItem[] => {
+  const cards = new Map(managedGenerationCatalogCards().map((card) => [card.id, card]));
+  if (cards.size === 0) return models;
+
+  return models.map((model) => {
+    const parameters = cards.get(model.id)?.parameters;
+    return parameters ? ({ ...model, parameters } as AiProviderModelListItem) : model;
+  });
+};
+
 const toProviderCard = (card: OpenRouterCatalogModelInput): AiProviderModelListItem =>
   ({
     abilities: {},
@@ -297,7 +315,7 @@ export class OpenRouterModelCatalogModel {
   listAsProviderModels = async (): Promise<AiProviderModelListItem[]> => {
     const rows = await this.db.select().from(openrouterModelCatalog);
 
-    const mapped = rows.map((row) => {
+    const rowModels = rows.map((row) => {
       // AICO-180: `payload` is the raw OpenRouter model JSON. Drop every
       // cost-bearing field before spreading it into a client-visible response —
       // the marked-up `pricing` below is the only price a caller may see.
@@ -321,6 +339,7 @@ export class OpenRouterModelCatalogModel {
         type: normalizeAiModelType(row.type),
       } as AiProviderModelListItem;
     });
+    const mapped = withManagedGenerationParameters(rowModels);
 
     if (mapped.some((m) => m.id === OPENROUTER_AUTO_MODEL_ID)) {
       // Serve path must be self-healing: a catalog synced before the embedding
