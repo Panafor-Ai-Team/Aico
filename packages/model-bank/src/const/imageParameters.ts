@@ -136,3 +136,13 @@ export const grokImagineImageParameters: ModelParamsSchema = {
 export const cheapVibeCodePromptOnlyImageParameters: ModelParamsSchema = {
   prompt: { default: '' },
 };
+
+/**
+ * GPT Image 2 behind CheapVibeCode. Same options as {@link gptImage2Schema}, but
+ * reference images are capped at OpenAI's `/images/edits` limit of 16 rather
+ * than one.
+ */
+export const cheapVibeCodeGptImage2Parameters: ModelParamsSchema = {
+  ...gptImage2Schema,
+  imageUrls: { default: [], maxCount: 16, maxFileSize: 5 * 1024 * 1024 },
+};
