@@ -1,6 +1,5 @@
 import { getBuiltinRender } from '@lobechat/builtin-tools/renders';
 import { getBuiltinStreaming } from '@lobechat/builtin-tools/streamings';
-import { LOADING_FLAT } from '@lobechat/const';
 import { AccordionItem, Flexbox, Skeleton } from '@lobehub/ui';
 import { Divider } from 'antd';
 import isEqual from 'fast-deep-equal';
@@ -16,6 +15,7 @@ import { toolSelectors } from '@/store/tool/selectors';
 import { dataSelectors, useConversationStore } from '../../../store';
 import Actions from './Actions';
 import Inspectors from './Inspector';
+import { resolveIsToolCalling } from './toolCallingState';
 
 const Debug = dynamic(() => import('./Debug'), {
   loading: () => <Skeleton.Block active height={300} width={'100%'} />,
@@ -87,16 +87,14 @@ const Tool = memo<GroupToolProps>(({ assistantMessageId, disableEditing, id }) =
     operationSelectors.isMessageProcessing(assistantMessageId),
   );
 
-  const hasError = !!result?.error;
-  // This tool's own result is the source of truth for completion. The
-  // message-level toolCalling flag stays true while sibling tools are still
-  // running, so without this guard a finished tool flips back into "loading".
-  const hasFinishedResult =
-    hasError || (!!result && result.content !== LOADING_FLAT && !!result.content);
-  const looksLikeWaitingForToolResult = !hasError && !isArgumentsStreaming && !hasFinishedResult;
-  const isToolCallingFallback = looksLikeWaitingForToolResult && isAssistantMessageBusy;
-  const isToolCalling = !hasFinishedResult && (isToolCallingFromOperation || isToolCallingFallback);
   const toolCallStartTime = useChatStore(operationSelectors.getRunningToolCallStartTime(id));
+  const isToolCalling = resolveIsToolCalling({
+    hasRunningToolCallOperation: toolCallStartTime !== undefined,
+    isArgumentsStreaming,
+    isAssistantMessageBusy,
+    isToolCallingFromOperation,
+    result,
+  });
 
   const hasCustomRender = !!getBuiltinRender(identifier, apiName);
   // Only allow toggle when has custom render and not in pending/reject/abort state
