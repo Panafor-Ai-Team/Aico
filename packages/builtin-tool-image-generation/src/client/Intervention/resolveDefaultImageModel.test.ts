@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { type ImageModelOption, resolveDefaultImageModelOption } from './resolveDefaultImageModel';
+import {
+  type ImageModelOption,
+  resolveDefaultImageModelOption,
+  toImageModelSelectOptions,
+} from './resolveDefaultImageModel';
 
 const option = (provider: string, model: string): ImageModelOption => ({
   displayName: model,
@@ -87,5 +91,27 @@ describe('resolveDefaultImageModelOption', () => {
 
   it('returns nothing when the account has no image model', () => {
     expect(resolveDefaultImageModelOption([])).toBeUndefined();
+  });
+});
+
+describe('toImageModelSelectOptions', () => {
+  it('labels options with the model display name only, never the managed provider', () => {
+    const options: ImageModelOption[] = [
+      {
+        displayName: 'Nano Banana Pro',
+        model: 'google/gemini-3-pro-image-preview',
+        provider: 'openrouter',
+        providerName: 'OpenRouter',
+      },
+      { displayName: 'GPT Image 2', model: 'gpt-image-2', provider: 'aico', providerName: 'aico' },
+    ];
+
+    const selectOptions = toImageModelSelectOptions(options);
+
+    expect(selectOptions.map((o) => o.label)).toEqual(['Nano Banana Pro', 'GPT Image 2']);
+    for (const { label } of selectOptions) {
+      expect(label).not.toMatch(/openrouter|aico/i);
+    }
+    expect(selectOptions[0].value).toBe('openrouter/google/gemini-3-pro-image-preview');
   });
 });

@@ -3,20 +3,21 @@
 import { Text } from '@lobehub/ui';
 import { useEffect, useRef, useState } from 'react';
 
-interface ElapsedTimeProps {
-  generationId: string;
+interface GenerationElapsedTimeProps {
   isActive: boolean;
+  /** Stable key for the timer (generation id, tool call id, ...). */
+  timerKey: string;
 }
 
-const getSessionStorageKey = (generationId: string) => `generation_start_time_${generationId}`;
+const getSessionStorageKey = (timerKey: string) => `generation_start_time_${timerKey}`;
 
 /**
- * Display elapsed time for image generation
+ * Display elapsed time for a running generation
  * - Less than 1 minute: show seconds with 0.1s precision
  * - 1 minute or more: show minutes with 1 decimal precision
  * - Uses sessionStorage to maintain accurate timing across page refreshes
  */
-export function ElapsedTime({ generationId, isActive }: ElapsedTimeProps) {
+export function GenerationElapsedTime({ timerKey, isActive }: GenerationElapsedTimeProps) {
   const [elapsedTime, setElapsedTime] = useState<number | null>(null);
   const frameRef = useRef<number | null>(null);
   const lastUpdateRef = useRef<number>(0);
@@ -30,13 +31,13 @@ export function ElapsedTime({ generationId, isActive }: ElapsedTimeProps) {
       }
 
       // Clear data from sessionStorage
-      const storageKey = getSessionStorageKey(generationId);
+      const storageKey = getSessionStorageKey(timerKey);
       sessionStorage.removeItem(storageKey);
       setElapsedTime(null);
       return;
     }
 
-    const storageKey = getSessionStorageKey(generationId);
+    const storageKey = getSessionStorageKey(timerKey);
 
     // Only set start time when the component mounts
     const clientStartTime = (() => {
@@ -64,7 +65,7 @@ export function ElapsedTime({ generationId, isActive }: ElapsedTimeProps) {
         cancelAnimationFrame(frameRef.current);
       }
     };
-  }, [generationId, isActive]);
+  }, [timerKey, isActive]);
 
   // Format elapsed time display
   const formattedTime = (() => {
@@ -88,3 +89,5 @@ export function ElapsedTime({ generationId, isActive }: ElapsedTimeProps) {
     </Text>
   );
 }
+
+export default GenerationElapsedTime;

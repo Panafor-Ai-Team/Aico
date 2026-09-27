@@ -8,6 +8,8 @@ import { memo, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { GenerationCostBadge } from '@/components/GenerationCostBadge';
+import { GenerationElapsedTime } from '@/components/GenerationElapsedTime';
+import NeuralNetworkLoading from '@/components/NeuralNetworkLoading';
 import { useClientDataSWR } from '@/libs/swr';
 import { imageKeys } from '@/libs/swr/keys';
 import { normalizeAsyncError } from '@/libs/swr/normalizeError';
@@ -117,6 +119,8 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 
 const isTerminalStatus = (status?: string) => status === 'success' || status === 'error';
 
+const isRunningStatus = (status?: string) => status === 'pending' || status === 'processing';
+
 const getAssetUrl = (state?: GetImageGenerationStatusState) => {
   const asset = state?.generation?.asset;
   return asset?.url || asset?.thumbnailUrl || asset?.originalUrl;
@@ -211,6 +215,11 @@ const GenerationTile = memo<{ index: number; task: GeneratedImageTask }>(({ inde
           className={styles.image}
           src={url}
         />
+      ) : isRunningStatus(status) ? (
+        <div className={styles.tileBody}>
+          <NeuralNetworkLoading size={48} />
+          <GenerationElapsedTime isActive timerKey={task.generationId} />
+        </div>
       ) : (
         <div className={styles.tileBody}>
           <Text
