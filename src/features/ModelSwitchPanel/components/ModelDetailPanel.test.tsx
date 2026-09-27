@@ -108,12 +108,13 @@ vi.mock('@/store/global/selectors', () => ({
 const translations: Record<string, string> = {
   'ModelSwitchPanel.detail.context': 'Context Length',
   'ModelSwitchPanel.detail.pricing': 'Pricing',
-  'ModelSwitchPanel.detail.pricing.credits.input': 'Input {{amount}} π/M tokens',
-  'ModelSwitchPanel.detail.pricing.credits.output': 'Output {{amount}} π/M tokens',
-  'ModelSwitchPanel.detail.pricing.credits.perImage': '~ {{amount}} π / image',
-  'ModelSwitchPanel.detail.pricing.credits.perVideo': '~ {{amount}} π / video',
-  'ModelSwitchPanel.detail.pricing.credits.image': 'π/img',
-  'ModelSwitchPanel.detail.pricing.credits.millionTokens': 'π/M tokens',
+  'ModelSwitchPanel.detail.pricing.credits.coefficient':
+    'Usage coefficient {{amount}} (same for input and output)',
+  'ModelSwitchPanel.detail.pricing.credits.coefficientLabel': 'Usage coefficient',
+  'ModelSwitchPanel.detail.pricing.credits.image': '/img',
+  'ModelSwitchPanel.detail.pricing.credits.input': 'Input coefficient {{amount}}',
+  'ModelSwitchPanel.detail.pricing.credits.output': 'Output coefficient {{amount}}',
+  'ModelSwitchPanel.detail.pricing.credits.video': '/video',
   'ModelSwitchPanel.detail.pricing.group.image': 'Image',
   'ModelSwitchPanel.detail.pricing.group.text': 'Text',
   'ModelSwitchPanel.detail.pricing.input': 'Input ${{amount}}/M',
@@ -217,7 +218,7 @@ describe('ModelDetailPanel pricing', () => {
     );
   });
 
-  it('renders managed provider token pricing as coefficient + π', () => {
+  it('renders managed provider token pricing as a coefficient only', () => {
     const { container } = render(
       <ModelDetailPanel
         enabledList={createEnabledList('openrouter', textPricing)}
@@ -226,12 +227,15 @@ describe('ModelDetailPanel pricing', () => {
       />,
     );
 
-    expect(screen.getByText('125× · 125,000 π/M tokens')).toBeInTheDocument();
-    expect(screen.getByText('625× · 625,000 π/M tokens')).toBeInTheDocument();
+    expect(screen.getByText('125×')).toBeInTheDocument();
+    expect(screen.getByText('625×')).toBeInTheDocument();
+    expect(container).not.toHaveTextContent('125,000');
+    expect(container).toHaveTextContent('PricingInput125×Output625×');
     expect(container).not.toHaveTextContent('$5.00');
+    expect(container.querySelector('img[alt="π"]')).not.toBeInTheDocument();
   });
 
-  it('renders the original managed price without repeating the unit suffix', () => {
+  it('renders the original managed coefficient next to the discounted one', () => {
     const { container } = render(
       <ModelDetailPanel
         enabledList={createEnabledList('openrouter', discountedTextPricing)}
@@ -240,11 +244,50 @@ describe('ModelDetailPanel pricing', () => {
       />,
     );
 
-    const originalPrice = container.querySelector('.originalPriceText');
+    expect(container.querySelector('.originalPriceText')).toHaveTextContent('125×');
+    expect(container).toHaveTextContent('62.5×');
+    expect(container).not.toHaveTextContent('62,500');
+  });
 
-    expect(originalPrice).toHaveTextContent('125× · 125,000');
-    expect(originalPrice).not.toHaveTextContent('π/M tokens');
-    expect(container).toHaveTextContent('62.5× · 62,500 π/M tokens');
+  it('merges equal managed input and output rates into one usage coefficient', () => {
+    const equalPricing = {
+      currency: 'USD',
+      units: [
+        { name: 'textInput', rate: 0.16, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 0.16, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    };
+
+    const expanded = render(
+      <ModelDetailPanel
+        enabledList={createEnabledList('openrouter', equalPricing)}
+        model="test-model"
+        provider="openrouter"
+      />,
+    );
+
+    expect(expanded.container).toHaveTextContent('Usage coefficient');
+    expect(expanded.container).toHaveTextContent('4×');
+    expect(expanded.container).not.toHaveTextContent('Output');
+    expanded.unmount();
+
+    globalState.status.modelDetailPanelExpandedKeys = [];
+    try {
+      const collapsed = render(
+        <ModelDetailPanel
+          enabledList={createEnabledList('openrouter', equalPricing)}
+          model="test-model"
+          provider="openrouter"
+        />,
+      );
+
+      expect(collapsed.container).toHaveTextContent(
+        'Usage coefficient 4× (same for input and output)',
+      );
+      expect(collapsed.container).not.toHaveTextContent('Output coefficient');
+    } finally {
+      globalState.status.modelDetailPanelExpandedKeys = ['pricing'];
+    }
   });
 
   it('keeps dollar pricing for non-managed providers', () => {
@@ -258,10 +301,10 @@ describe('ModelDetailPanel pricing', () => {
 
     expect(container).toHaveTextContent('$5.00/M tokens');
     expect(container).toHaveTextContent('$25.00/M tokens');
-    expect(container).not.toHaveTextContent('π/M tokens');
+    expect(container).not.toHaveTextContent('×');
   });
 
-  it('renders managed provider image and video pricing in π', () => {
+  it('renders managed provider image and video pricing as π amounts with the coin', () => {
     const imageResult = render(
       <ModelDetailPanel
         enabledList={createEnabledList('openrouter', imagePricing)}
@@ -271,8 +314,9 @@ describe('ModelDetailPanel pricing', () => {
       />,
     );
 
-    expect(imageResult.container).toHaveTextContent('~ 1,000 π / image');
-    expect(imageResult.container).toHaveTextContent('1,000 π/img');
+    expect(imageResult.container).toHaveTextContent('~ 1,000/img');
+    expect(imageResult.container).toHaveTextContent('Image Generation1,000/img');
+    expect(imageResult.container.querySelectorAll('img[alt="π"]').length).toBeGreaterThan(0);
     expect(imageResult.container).not.toHaveTextContent('$0.04');
 
     imageResult.unmount();
@@ -286,7 +330,7 @@ describe('ModelDetailPanel pricing', () => {
       />,
     );
 
-    expect(videoResult.container).toHaveTextContent('~ 20,000 π / video');
+    expect(videoResult.container).toHaveTextContent('~ 20,000/video');
     expect(videoResult.container).not.toHaveTextContent('$0.80');
   });
 
@@ -300,7 +344,8 @@ describe('ModelDetailPanel pricing', () => {
     );
 
     expect(container).toHaveTextContent('Image Generation');
-    expect(container).toHaveTextContent('- π/img');
+    expect(container).toHaveTextContent('-/img');
+    expect(container.querySelector('img[alt="π"]')).not.toBeInTheDocument();
   });
 });
 

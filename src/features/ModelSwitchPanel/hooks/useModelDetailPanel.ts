@@ -33,8 +33,8 @@ import { useCallback, useMemo } from 'react';
 import { useBusinessModelPricing } from '@/business/client/hooks/useBusinessModelPricing';
 import { useBusinessModelRating } from '@/business/client/hooks/useBusinessModelRating';
 import {
-  formatHybridPiRate,
-  formatPiRateAmount,
+  formatPiAmount,
+  formatTokenCoefficient,
   rawUsdToPiTokens,
 } from '@/features/AicoBilling/piToken';
 import { useEnabledChatModels } from '@/hooks/useEnabledChatModels';
@@ -75,18 +75,16 @@ export const isPiPricingProvider = (provider?: string): boolean => {
 };
 
 /** Format a raw USD catalog rate as π amount (no unit). */
-export const formatPiRate = (rate: number) => formatPiRateAmount(rawUsdToPiTokens(rate));
+export const formatPiRate = (rate: number) => formatPiAmount(rawUsdToPiTokens(rate));
+
+const isTokenUnit = (unit?: PricingUnit['unit']) => unit === 'millionTokens' || unit === undefined;
 
 /**
- * Token rates: `4× · 4,000` (suffix adds ` π/M tokens`).
- * Non-token units (image/video/…): π amount only.
+ * Token rates: coefficient only (`4×`).
+ * Non-token units (image/video/…): π amount, rendered next to the π coin.
  */
-export const formatManagedPricingRate = (rate: number, unit?: PricingUnit['unit']): string => {
-  if (unit === 'millionTokens' || unit === undefined) {
-    return formatHybridPiRate(rate);
-  }
-  return formatPiRate(rate);
-};
+export const formatManagedPricingRate = (rate: number, unit?: PricingUnit['unit']): string =>
+  isTokenUnit(unit) ? formatTokenCoefficient(rate) : formatPiRate(rate);
 
 const formatPricingRate = (
   rate: number | undefined,
@@ -153,6 +151,20 @@ const UNIT_GROUP_MAP: Record<PricingUnitName, PricingGroup> = {
 };
 
 const GROUP_ORDER: PricingGroup[] = ['text', 'image', 'audio', 'video'];
+
+/**
+ * CVC bills input and output at one coefficient; when a managed catalog says
+ * the same, the picker shows one rate instead of two identical ones.
+ */
+export const hasSingleTextRate = (pricing: Pricing): boolean => {
+  const textUnits = pricing.units.filter((unit) => UNIT_GROUP_MAP[unit.name] === 'text');
+  if (textUnits.some((unit) => unit.name !== 'textInput' && unit.name !== 'textOutput')) {
+    return false;
+  }
+  const input = getUnitRateByName(pricing, 'textInput');
+  const output = getUnitRateByName(pricing, 'textOutput');
+  return typeof input === 'number' && input === output;
+};
 
 export const UNIT_ICON_MAP: Partial<Record<PricingUnitName, LucideIcon>> = {
   audioInput: ArrowUpFromDot,
@@ -352,13 +364,33 @@ export const useModelDetailPanel = ({
   const hasCachedInputPricing = displayPricing
     ? !!getCachedTextInputUnitRate(displayPricing)
     : false;
-  const pricingGroups = useMemo(
-    () => (displayPricing ? groupPricingUnits(displayPricing.units) : []),
-    [displayPricing],
-  );
+  const isSingleTextRate = isCreditPricing && !!displayPricing && hasSingleTextRate(displayPricing);
+  const pricingGroups = useMemo(() => {
+    if (!displayPricing) return [];
+    const units = isSingleTextRate
+      ? displayPricing.units.filter((unit) => unit.name !== 'textOutput')
+      : displayPricing.units;
+    return groupPricingUnits(units);
+  }, [displayPricing, isSingleTextRate]);
+
+  /** Managed image/video estimate as a bare π amount; the panel renders the coin. */
+  const approximatePiPrice = useMemo(() => {
+    if (!isCreditPricing || !displayPricing || !pricingMode) return null;
+    const rate =
+      pricingMode === 'image'
+        ? (model?.approximatePricePerImage ?? displayPricing.approximatePricePerImage)
+        : pricingMode === 'video'
+          ? (model?.approximatePricePerVideo ?? displayPricing.approximatePricePerVideo)
+          : undefined;
+    if (typeof rate !== 'number') return null;
+    return {
+      amount: formatPiRate(rate),
+      unit: pricingMode === 'image' ? 'image' : 'video',
+    } as const;
+  }, [displayPricing, isCreditPricing, model, pricingMode]);
 
   const approximatePriceLabel = useMemo(() => {
-    if (!displayPricing || !pricingMode) return null;
+    if (isCreditPricing || !displayPricing || !pricingMode) return null;
     const currency = displayPricing.currency as ModelPriceCurrency | undefined;
     // Prefer the per-model approximatePricePerImage/Video field: it is computed
     // by resolveImageSinglePrice/resolveVideoSinglePrice from the pricing units
@@ -370,32 +402,16 @@ export const useModelDetailPanel = ({
     const approximatePricePerVideo =
       model?.approximatePricePerVideo ?? displayPricing.approximatePricePerVideo;
     if (pricingMode === 'image' && typeof approximatePricePerImage === 'number') {
-      const amount = isCreditPricing
-        ? formatPiRate(approximatePricePerImage)
-        : formatPriceByCurrency(approximatePricePerImage, currency);
-      return t(
-        isCreditPricing
-          ? 'ModelSwitchPanel.detail.pricing.credits.perImage'
-          : 'ModelSwitchPanel.detail.pricing.perImage',
-        {
-          amount,
-          defaultValue: isCreditPricing ? '~ {{amount}} π / image' : '~ ${{amount}} / image',
-        },
-      );
+      return t('ModelSwitchPanel.detail.pricing.perImage', {
+        amount: formatPriceByCurrency(approximatePricePerImage, currency),
+        defaultValue: '~ ${{amount}} / image',
+      });
     }
     if (pricingMode === 'video' && typeof approximatePricePerVideo === 'number') {
-      const amount = isCreditPricing
-        ? formatPiRate(approximatePricePerVideo)
-        : formatPriceByCurrency(approximatePricePerVideo, currency);
-      return t(
-        isCreditPricing
-          ? 'ModelSwitchPanel.detail.pricing.credits.perVideo'
-          : 'ModelSwitchPanel.detail.pricing.perVideo',
-        {
-          amount,
-          defaultValue: isCreditPricing ? '~ {{amount}} π / video' : '~ ${{amount}} / video',
-        },
-      );
+      return t('ModelSwitchPanel.detail.pricing.perVideo', {
+        amount: formatPriceByCurrency(approximatePricePerVideo, currency),
+        defaultValue: '~ ${{amount}} / video',
+      });
     }
     return null;
   }, [displayPricing, isCreditPricing, model, pricingMode, t]);
@@ -403,13 +419,13 @@ export const useModelDetailPanel = ({
   const getCreditsUnitLabel = useCallback(
     (unit: PricingUnit['unit']) =>
       t(`ModelSwitchPanel.detail.pricing.credits.${unit}` as any, {
-        defaultValue: `π${UNIT_LABEL_MAP[unit] || ''}`,
+        defaultValue: UNIT_LABEL_MAP[unit] || '',
       }),
     [t],
   );
 
   const getPricingTooltip = useCallback(
-    (key: 'cachedInput' | 'input' | 'output', amount: string): string => {
+    (key: 'cachedInput' | 'coefficient' | 'input' | 'output', amount: string): string => {
       if (isCreditPricing) {
         return t(`ModelSwitchPanel.detail.pricing.credits.${key}` as any, { amount });
       }
@@ -431,9 +447,17 @@ export const useModelDetailPanel = ({
   );
 
   const getUnitPriceSuffix = useCallback(
-    (unit: PricingUnit['unit']) =>
-      isCreditPricing ? ` ${getCreditsUnitLabel(unit)}` : UNIT_LABEL_MAP[unit] || '',
+    (unit: PricingUnit['unit']) => {
+      if (!isCreditPricing) return UNIT_LABEL_MAP[unit] || '';
+      return isTokenUnit(unit) ? '' : getCreditsUnitLabel(unit);
+    },
     [getCreditsUnitLabel, isCreditPricing],
+  );
+
+  /** Managed non-token units show a π amount, so the panel renders the coin before the suffix. */
+  const isPiAmountUnit = useCallback(
+    (unit: PricingUnit['unit']) => isCreditPricing && !isTokenUnit(unit),
+    [isCreditPricing],
   );
 
   const handleExpandedChange = useCallback(
@@ -458,12 +482,14 @@ export const useModelDetailPanel = ({
   );
 
   return {
+    approximatePiPrice,
     approximatePriceLabel,
     contextWindowLabel,
     enabledAbilities,
     expandedKeys,
     formatPrice,
     formatUnitPrice,
+    getCreditsUnitLabel,
     getPricingTooltip,
     getUnitPriceSuffix,
     handleExpandedChange,
@@ -472,7 +498,9 @@ export const useModelDetailPanel = ({
     hasPricing,
     isAbilitiesExpanded: expandedKeys.includes('abilities'),
     isCreditPricing,
+    isPiAmountUnit,
     isPricingExpanded: expandedKeys.includes('pricing'),
+    isSingleTextRate,
     model,
     pricingGroups,
     rating,

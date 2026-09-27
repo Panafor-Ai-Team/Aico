@@ -1,6 +1,5 @@
 'use client';
 
-// eslint-disable-next-line no-restricted-imports -- Text/Tag not in base-ui yet
 import { Center, Flexbox, Text } from '@lobehub/ui';
 import { createStaticStyles, cx } from 'antd-style';
 import { CheckIcon, ChevronDownIcon, WalletIcon } from 'lucide-react';
@@ -12,6 +11,7 @@ import ActionDropdown from '@/features/ChatInput/ActionBar/components/ActionDrop
 import { type LooseTFunction } from '@/types/looseTranslation';
 
 import { formatRemainingPi } from './piToken';
+import { PiAmount } from './PiTokenIcon';
 import { type AicoBillingContext, type AicoBillingSource } from './types';
 import { useAicoBillingSources } from './useAicoBillingSources';
 
@@ -143,7 +143,7 @@ const BillingSourceSwitcher = memo(() => {
     >
       <WalletIcon size={12} style={{ opacity: 0.65 }} />
       <span className={styles.label}>{label}</span>
-      <span className={styles.remaining}>{remaining}</span>
+      <PiAmount className={styles.remaining} iconSize={12} value={activeSource.remainingPi} />
       {canSwitch ? <ChevronDownIcon className={styles.chevron} size={12} /> : null}
     </Center>
   );

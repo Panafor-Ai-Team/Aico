@@ -1,5 +1,5 @@
 import type { AicoPersonalBillingSource } from '@/features/AicoBilling';
-import { formatPiTokens } from '@/features/AicoBilling/piToken';
+import { formatPiAmount, formatPiTokens } from '@/features/AicoBilling/piToken';
 
 export interface WalletDisplayInput {
   /** Cumulative π from raw capacity (`getMyWallet.paidInPi`). */
@@ -9,7 +9,10 @@ export interface WalletDisplayInput {
 
 export interface WalletDisplay {
   paidInPi: string;
-  /** `null` means "we could not compute it" — render an explicit unknown, not a zero. */
+  /**
+   * Bare amount (no symbol) — the page renders the π coin next to it.
+   * `null` means "we could not compute it" — render an explicit unknown, not a zero.
+   */
   remainingPi: string | null;
   /** The remaining figures are a held fallback, not a live reading (FIN-018). */
   stale: boolean;
@@ -26,6 +29,6 @@ export const resolveWalletDisplay = ({
   personal,
 }: WalletDisplayInput): WalletDisplay => ({
   paidInPi: formatPiTokens(paidInPi ?? 0),
-  remainingPi: personal ? formatPiTokens(personal.remainingPi ?? 0) : null,
+  remainingPi: personal ? formatPiAmount(personal.remainingPi ?? 0) : null,
   stale: Boolean(personal && !personal.usageKnown),
 });

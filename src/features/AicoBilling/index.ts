@@ -13,11 +13,13 @@ export {
 export {
   DEFAULT_CVC_TOKENS_PER_USD,
   DEFAULT_PI_PER_USD,
+  formatPiAmount,
   formatPiTokens,
   formatRemainingPi,
   piTokensToBilledUsdString,
   rawUsdToPiTokens,
 } from './piToken';
+export { PI_TOKEN_ICON_SRC, PiAmount, PiTokenIcon } from './PiTokenIcon';
 export { FUNDS_BLOCKED_SOUND_URL, playFundsBlockedSound } from './playFundsBlockedSound';
 export { refreshAicoBillingBalance } from './refreshAicoBillingBalance';
 export {

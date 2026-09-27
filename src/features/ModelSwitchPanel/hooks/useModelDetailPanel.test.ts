@@ -48,13 +48,13 @@ vi.mock('@/store/global/selectors', () => ({
 }));
 
 const translations: Record<string, string> = {
-  'ModelSwitchPanel.detail.pricing.credits.input': 'Input {{amount}} π/M tokens',
-  'ModelSwitchPanel.detail.pricing.credits.millionTokens': 'π/M tokens',
-  'ModelSwitchPanel.detail.pricing.credits.second': 'π/s',
-  'ModelSwitchPanel.detail.pricing.credits.video': 'π/video',
-  'ModelSwitchPanel.detail.pricing.credits.output': 'Output {{amount}} π/M tokens',
-  'ModelSwitchPanel.detail.pricing.credits.perImage': '~ {{amount}} π / image',
-  'ModelSwitchPanel.detail.pricing.credits.perVideo': '~ {{amount}} π / video',
+  'ModelSwitchPanel.detail.pricing.credits.coefficient':
+    'Usage coefficient {{amount}} (same for input and output)',
+  'ModelSwitchPanel.detail.pricing.credits.image': '/img',
+  'ModelSwitchPanel.detail.pricing.credits.input': 'Input coefficient {{amount}}',
+  'ModelSwitchPanel.detail.pricing.credits.second': '/s',
+  'ModelSwitchPanel.detail.pricing.credits.video': '/video',
+  'ModelSwitchPanel.detail.pricing.credits.output': 'Output coefficient {{amount}}',
 };
 
 const t = ((key: string, options?: Record<string, string>) => {
@@ -149,7 +149,7 @@ describe('useModelDetailPanel', () => {
     useBusinessModelPricingMock.mockReturnValue(({ pricing }: { pricing?: Pricing }) => pricing);
   });
 
-  it('formats managed and branding providers in π tokens', () => {
+  it('formats managed and branding token prices as coefficients only', () => {
     useBusinessModelPricingMock.mockReturnValue(
       ({ pricing, model, provider }: { model?: string; pricing?: Pricing; provider?: string }) =>
         provider === BRANDING_PROVIDER && model === 'test-model' ? discountedPricing : pricing,
@@ -157,35 +157,68 @@ describe('useModelDetailPanel', () => {
 
     const { result } = renderModelDetailPanelHook();
 
-    // $2.5 / $5 / $0.3 / $1 → coefficient × · π (1× ≈ 1,000 π/M)
+    // $2.5 / $5 / $0.3 / $1 per M → coefficient (1× ≈ $0.04/M)
     expect(result.current.isCreditPricing).toBe(true);
-    expect(result.current.formatPrice?.input).toEqual({
-      current: '62.5× · 62,500',
-      original: '125× · 125,000',
-    });
-    expect(result.current.formatPrice?.output).toEqual({
-      current: '312.5× · 312,500',
-      original: '625× · 625,000',
-    });
-    expect(result.current.formatPrice?.cachedInput).toEqual({
-      current: '7.5× · 7,500',
-      original: '25× · 25,000',
-    });
+    expect(result.current.formatPrice?.input).toEqual({ current: '62.5×', original: '125×' });
+    expect(result.current.formatPrice?.output).toEqual({ current: '312.5×', original: '625×' });
+    expect(result.current.formatPrice?.cachedInput).toEqual({ current: '7.5×', original: '25×' });
     expect(result.current.hasCachedInputPricing).toBe(true);
-    expect(result.current.getUnitPriceSuffix('millionTokens')).toBe(' π/M tokens');
-    expect(result.current.getUnitPriceSuffix('video')).toBe(' π/video');
-    expect(result.current.getUnitPriceSuffix('second')).toBe(' π/s');
+    expect(result.current.isSingleTextRate).toBe(false);
+    expect(result.current.getUnitPriceSuffix('millionTokens')).toBe('');
+    expect(result.current.getUnitPriceSuffix('video')).toBe('/video');
+    expect(result.current.getUnitPriceSuffix('second')).toBe('/s');
+    expect(result.current.isPiAmountUnit('millionTokens')).toBe(false);
+    expect(result.current.isPiAmountUnit('video')).toBe(true);
   });
 
-  it('also formats openrouter managed catalog prices with coefficient + π', () => {
+  it('also formats openrouter managed catalog prices as coefficients', () => {
     const { result } = renderModelDetailPanelHook({
       enabledList: createEnabledList('openrouter', basePricing),
       provider: 'openrouter',
     });
 
     expect(result.current.isCreditPricing).toBe(true);
-    expect(result.current.formatPrice?.input).toEqual({ current: '125× · 125,000' });
-    expect(result.current.getUnitPriceSuffix('millionTokens')).toBe(' π/M tokens');
+    expect(result.current.formatPrice?.input).toEqual({ current: '125×' });
+    expect(result.current.getUnitPriceSuffix('millionTokens')).toBe('');
+  });
+
+  it('merges input and output into one coefficient when managed rates are equal', () => {
+    const equalPricing = {
+      currency: 'USD',
+      units: [
+        { name: 'textInput', rate: 0.16, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 0.16, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    } as Pricing;
+
+    const { result } = renderModelDetailPanelHook({
+      enabledList: createEnabledList(BRANDING_PROVIDER, equalPricing),
+    });
+
+    expect(result.current.isSingleTextRate).toBe(true);
+    expect(result.current.formatPrice?.input).toEqual({ current: '4×' });
+    const textUnits = result.current.pricingGroups.find((group) => group.group === 'text')?.units;
+    expect(textUnits?.map((unit) => unit.name)).toEqual(['textInput']);
+    expect(result.current.getPricingTooltip('coefficient', '4×')).toBe(
+      'Usage coefficient 4× (same for input and output)',
+    );
+  });
+
+  it('keeps input and output separate for non-managed providers even when rates are equal', () => {
+    const equalPricing = {
+      currency: 'USD',
+      units: [
+        { name: 'textInput', rate: 1, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 1, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    } as Pricing;
+
+    const { result } = renderModelDetailPanelHook({
+      enabledList: createEnabledList('openai', equalPricing),
+      provider: 'openai',
+    });
+
+    expect(result.current.isSingleTextRate).toBe(false);
   });
 
   it('uses dollar unit suffixes for non-managed providers', () => {
@@ -248,7 +281,8 @@ describe('useModelDetailPanel', () => {
     });
 
     // $0.05 → 1,250 π
-    expect(result.current.approximatePriceLabel).toBe('~ 1,250 π / image');
+    expect(result.current.approximatePiPrice).toEqual({ amount: '1,250', unit: 'image' });
+    expect(result.current.approximatePriceLabel).toBeNull();
   });
 
   it('prefers an explicit pricing.approximatePricePerImage when the model has no top-level field', () => {
@@ -264,7 +298,7 @@ describe('useModelDetailPanel', () => {
       provider: 'openrouter',
     });
 
-    expect(result.current.approximatePriceLabel).toBe('~ 1,000 π / image');
+    expect(result.current.approximatePiPrice).toEqual({ amount: '1,000', unit: 'image' });
   });
 
   it('updates expanded detail sections', () => {
