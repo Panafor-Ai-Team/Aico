@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { acceptsInlineVideoImages, type InlineImageContext, inlineOwnedImage } from './inlineImage';
@@ -22,6 +23,8 @@ const PNG_BYTES = Uint8Array.from(
     'base64',
   ),
 );
+
+const decodeDataUrl = (dataUrl: string) => Buffer.from(dataUrl.split(',')[1], 'base64');
 
 const createContext = () => {
   const findFirst = vi.fn();
@@ -49,7 +52,53 @@ describe('inlineOwnedImage', () => {
 
     expect(findById).toHaveBeenCalledWith('file-1');
     expect(context.fileService.getFileByteArray).toHaveBeenCalledWith('files/user-1/cat.png');
-    expect(dataUrl).toBe(`data:image/png;base64,${Buffer.from(PNG_BYTES).toString('base64')}`);
+    expect(dataUrl).toMatch(/^data:image\/jpeg;base64,/);
+    const frame = await sharp(decodeDataUrl(dataUrl!)).metadata();
+    expect(frame).toMatchObject({ format: 'jpeg', height: 1, width: 1 });
+  });
+
+  it('re-encodes large transparent uploads as a bounded, upright JPEG', async () => {
+    const { context } = createContext();
+    findById.mockResolvedValue({ url: 'files/user-1/poster.png' });
+    const largePng = await sharp({
+      create: {
+        background: { alpha: 0, b: 0, g: 0, r: 0 },
+        channels: 4,
+        height: 3000,
+        width: 4000,
+      },
+    })
+      .png()
+      .toBuffer();
+    vi.mocked(context.fileService.getFileByteArray).mockResolvedValueOnce(
+      Uint8Array.from(largePng),
+    );
+
+    const dataUrl = await inlineOwnedImage('https://chat.example.com/f/poster', context);
+
+    const frame = await sharp(decodeDataUrl(dataUrl!)).metadata();
+    expect(frame).toMatchObject({ format: 'jpeg', hasAlpha: false, height: 1440, width: 1920 });
+  });
+
+  it('applies EXIF orientation so portrait phone photos stay portrait', async () => {
+    const { context } = createContext();
+    findById.mockResolvedValue({ url: 'files/user-1/phone.jpg' });
+    // Stored landscape with orientation 6 (rotate 90° clockwise to display).
+    const phoneJpeg = await sharp({
+      create: { background: '#336699', channels: 3, height: 300, width: 400 },
+    })
+      .jpeg()
+      .withMetadata({ orientation: 6 })
+      .toBuffer();
+    vi.mocked(context.fileService.getFileByteArray).mockResolvedValueOnce(
+      Uint8Array.from(phoneJpeg),
+    );
+
+    const dataUrl = await inlineOwnedImage('https://chat.example.com/f/phone', context);
+
+    const frame = await sharp(decodeDataUrl(dataUrl!)).metadata();
+    expect(frame).toMatchObject({ height: 400, width: 300 });
+    expect(frame.orientation ?? 1).toBe(1);
   });
 
   it('inlines a storage URL only when the caller owns the file', async () => {
@@ -58,7 +107,7 @@ describe('inlineOwnedImage', () => {
 
     expect(
       await inlineOwnedImage('https://s3.example.com/bucket/files/user-1/cat.png', context),
-    ).toMatch(/^data:image\/png;base64,/);
+    ).toMatch(/^data:image\/jpeg;base64,/);
 
     findFirst.mockResolvedValue(undefined);
     expect(

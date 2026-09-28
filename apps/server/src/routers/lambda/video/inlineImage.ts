@@ -2,6 +2,7 @@ import type { LobeChatDatabase } from '@lobechat/database';
 import { resolveMimeTypeFromBytes } from '@lobechat/utils';
 import debug from 'debug';
 import { and, eq } from 'drizzle-orm';
+import sharp from 'sharp';
 
 import { FileModel } from '@/database/models/file';
 import { files } from '@/database/schemas';
@@ -17,6 +18,27 @@ const log = debug('lobe-video:inline-image');
 const DATA_URL_IMAGE_RUNTIMES = new Set(['cheapvibecode', 'openrouter']);
 
 const MAX_INLINE_IMAGE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * xAI Imagine rejects oversized or non-JPEG/PNG/WebP frames with
+ * `imagine_request_rejected` ("Bad Gateway"), so every inlined frame is sent
+ * as an upright JPEG no longer than this on its longest edge.
+ */
+const MAX_FRAME_EDGE = 1920;
+const FRAME_JPEG_QUALITY = 85;
+
+const toFrameJpeg = (bytes: Uint8Array) =>
+  sharp(bytes)
+    .rotate()
+    .resize({
+      fit: 'inside',
+      height: MAX_FRAME_EDGE,
+      width: MAX_FRAME_EDGE,
+      withoutEnlargement: true,
+    })
+    .flatten({ background: '#ffffff' })
+    .jpeg({ quality: FRAME_JPEG_QUALITY })
+    .toBuffer();
 
 export interface InlineImageContext {
   db: LobeChatDatabase;
@@ -54,10 +76,11 @@ const findOwnedFileKey = async (url: string, ctx: InlineImageContext) => {
 };
 
 /**
- * The caller's uploaded image as a data URL, read straight from storage.
+ * The caller's uploaded image as a JPEG data URL, read straight from storage.
  * Providers fetch image URLs from their own network, where the app / S3 host
  * may be unreachable (xAI: `image_download_error=image_fetch_failed`).
- * Returns `undefined` to keep the URL for anything not owned, not an image or too large.
+ * Returns `undefined` to keep the URL for anything not owned, not a decodable
+ * image or too large.
  */
 export const inlineOwnedImage = async (
   url: string,
@@ -75,7 +98,8 @@ export const inlineOwnedImage = async (
     const mimeType = await resolveMimeTypeFromBytes(undefined, bytes);
     if (!mimeType.startsWith('image/')) return;
 
-    return `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}`;
+    const frame = await toFrameJpeg(bytes);
+    return `data:image/jpeg;base64,${frame.toString('base64')}`;
   } catch (error) {
     log('Keeping image URL, inlining failed for %s: %O', url, error);
     return;
