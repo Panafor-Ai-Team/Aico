@@ -149,7 +149,7 @@ describe('findPendingUserMessage', () => {
     });
   });
 
-  it('drops context the pipeline appended to the user text', () => {
+  it('drops appended context but keeps the images it lists for non-vision chat models', () => {
     expect(
       findPendingUserMessage([
         {
@@ -161,8 +161,19 @@ describe('findPendingUserMessage', () => {
           ],
           role: 'user',
         },
-      ])?.text,
-    ).toBe('ویدیو ۲ ثانیه بساز');
+      ]),
+    ).toEqual({
+      imageUrls: ['https://cdn.example.com/files/download/cat.png'],
+      text: 'ویدیو ۲ ثانیه بساز',
+    });
+  });
+
+  it('ignores image tags the user typed outside the injected context', () => {
+    expect(
+      findPendingUserMessage([
+        { content: 'ویدیو بساز <image url="https://evil.example.com/x.png">', role: 'user' },
+      ])?.imageUrls,
+    ).toEqual([]);
   });
 
   it('returns nothing once a tool already answered the latest user turn', () => {
@@ -245,9 +256,31 @@ describe('resolveDirectVideoGenerationToolCall', () => {
 
     expect(JSON.parse(call!.arguments)).toEqual({
       duration: 2,
+      imageUrls: ['https://cdn.example.com/files/download/cat.png'],
       prompt: 'یه ویدیو ۲ ثانیه‌ای با کیفیت 480p از این عکس بساز',
       resolution: '480p',
     });
+  });
+
+  it('forwards an attached image once when the chat model also got it as an image part', () => {
+    const call = resolveDirectVideoGenerationToolCall({
+      messages: [
+        {
+          content: [
+            { text: `این عکس رو متحرک کن و ویدیو بساز\n\n${filesContext}`, type: 'text' },
+            {
+              image_url: { url: 'https://cdn.example.com/files/download/cat.png' },
+              type: 'image_url',
+            },
+          ],
+          role: 'user',
+        },
+      ],
+    });
+
+    expect(JSON.parse(call!.arguments).imageUrls).toEqual([
+      'https://cdn.example.com/files/download/cat.png',
+    ]);
   });
 
   it('does not fire again after the tool result', () => {
