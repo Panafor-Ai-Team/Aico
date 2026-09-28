@@ -64,7 +64,7 @@ export interface VideoGenerationRuntimeService {
   ) => Promise<ListVideoModelsState>;
 }
 
-interface ResolvedVideoModel {
+export interface ResolvedVideoModel {
   model: string;
   parameters?: VideoModelParamsSchema;
   provider: string;
@@ -306,6 +306,74 @@ const resolveOutputSettings = (
 
 const OUTPUT_SETTING_KEYS = new Set(['aspectRatio', 'duration', 'resolution']);
 
+interface VideoModelCatalogEntry {
+  id: string;
+  models: Array<{ id: string; parameters?: VideoModelParamsSchema }>;
+}
+
+/**
+ * The model `generateVideo` runs on: the requested one, else the product
+ * default (preferring the managed default provider), else the first listed.
+ */
+export const selectVideoModel = (
+  providers: VideoModelCatalogEntry[],
+  model?: string,
+): ResolvedVideoModel | undefined => {
+  const flat = providers.flatMap((providerItem) =>
+    providerItem.models.map((candidate) => ({ candidate, providerId: providerItem.id })),
+  );
+
+  const matched = model
+    ? findVideoModelByRequestedId(flat, (entry) => entry.candidate.id, model)
+    : (pickDefaultVideoModel(
+        flat.filter((entry) => entry.providerId === DEFAULT_VIDEO_MODEL_PROVIDER),
+        (entry) => entry.candidate.id,
+      ) ??
+      pickDefaultVideoModel(flat, (entry) => entry.candidate.id) ??
+      flat[0]);
+
+  if (!matched) return;
+  return {
+    model: matched.candidate.id,
+    parameters: matched.candidate.parameters,
+    provider: matched.providerId,
+  };
+};
+
+/**
+ * The exact params `generateVideo` sends for these arguments on a model with
+ * this parameter card, plus the settings and notes it reports back.
+ */
+export const resolveVideoRequest = (
+  args: GenerateVideoParams,
+  parameters?: VideoModelParamsSchema,
+) => {
+  const schema = limitVideoParamsToSingleImage(resolveVideoModelParamsSchema(parameters));
+  const { ignoredReferenceCount, params: referenceParams } = resolveReferenceParams(args, schema);
+  const { notes, params: settingParams } = resolveOutputSettings(args, schema);
+  const callerParams = Object.fromEntries(
+    Object.entries(args.parameters ?? {}).filter(
+      ([key]) => !REFERENCE_PARAM_KEYS.has(key) && !OUTPUT_SETTING_KEYS.has(key),
+    ),
+  );
+  const params = {
+    // Schema defaults first (duration, resolution, aspect ratio) so the tool
+    // sends what Create → Video would; explicit arguments still win.
+    ...schemaDefaultParams(schema),
+    ...callerParams,
+    ...settingParams,
+    ...referenceParams,
+    prompt: args.prompt?.trim() ?? '',
+  } as RuntimeVideoGenParams & Record<string, unknown>;
+  const settings: GeneratedVideoSettings = {
+    aspectRatio: typeof params.aspectRatio === 'string' ? params.aspectRatio : undefined,
+    duration: typeof params.duration === 'number' ? params.duration : undefined,
+    resolution: typeof params.resolution === 'string' ? params.resolution : undefined,
+  };
+
+  return { ignoredReferenceCount, notes, params, settings };
+};
+
 const formatModelList = (state: ListVideoModelsState) => {
   if (state.totalModels === 0) {
     return 'No available video generation models were found.';
@@ -454,26 +522,9 @@ export class VideoGenerationExecutionRuntime {
       limit: MAX_PARAMETER_LOOKUP_LIMIT,
       provider,
     });
-    const flat = state.providers.flatMap((providerItem) =>
-      providerItem.models.map((candidate) => ({ candidate, providerId: providerItem.id })),
-    );
 
-    const matched = model
-      ? findVideoModelByRequestedId(flat, (entry) => entry.candidate.id, model)
-      : (pickDefaultVideoModel(
-          flat.filter((entry) => entry.providerId === DEFAULT_VIDEO_MODEL_PROVIDER),
-          (entry) => entry.candidate.id,
-        ) ??
-        pickDefaultVideoModel(flat, (entry) => entry.candidate.id) ??
-        flat[0]);
-
-    if (matched) {
-      return {
-        model: matched.candidate.id,
-        parameters: matched.candidate.parameters,
-        provider: matched.providerId,
-      };
-    }
+    const matched = selectVideoModel(state.providers, model);
+    if (matched) return matched;
 
     const requestedSelection = [provider, model].filter(Boolean).join('/');
     throw new Error(
@@ -531,30 +582,12 @@ export class VideoGenerationExecutionRuntime {
     }
 
     const { model, provider } = selection;
-    const schema = limitVideoParamsToSingleImage(
-      resolveVideoModelParamsSchema(selection.parameters),
-    );
-    const { ignoredReferenceCount, params: referenceParams } = resolveReferenceParams(args, schema);
-    const { notes: settingNotes, params: settingParams } = resolveOutputSettings(args, schema);
-    const callerParams = Object.fromEntries(
-      Object.entries(args.parameters ?? {}).filter(
-        ([key]) => !REFERENCE_PARAM_KEYS.has(key) && !OUTPUT_SETTING_KEYS.has(key),
-      ),
-    );
-    const params = {
-      // Schema defaults first (duration, resolution, aspect ratio) so the tool
-      // sends what Create → Video would; explicit arguments still win.
-      ...schemaDefaultParams(schema),
-      ...callerParams,
-      ...settingParams,
-      ...referenceParams,
-      prompt,
-    } as RuntimeVideoGenParams & Record<string, unknown>;
-    const settings: GeneratedVideoSettings = {
-      aspectRatio: typeof params.aspectRatio === 'string' ? params.aspectRatio : undefined,
-      duration: typeof params.duration === 'number' ? params.duration : undefined,
-      resolution: typeof params.resolution === 'string' ? params.resolution : undefined,
-    };
+    const {
+      ignoredReferenceCount,
+      notes: settingNotes,
+      params,
+      settings,
+    } = resolveVideoRequest({ ...args, prompt }, selection.parameters);
     const waitUntilComplete = args.waitUntilComplete !== false;
 
     try {

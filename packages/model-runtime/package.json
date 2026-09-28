@@ -4,6 +4,8 @@
   "private": true,
   "exports": {
     ".": "./src/index.ts",
+    "./computeImageCost": "./src/core/usageConverters/utils/computeImageCost.ts",
+    "./computeVideoCost": "./src/core/usageConverters/utils/computeVideoCost.ts",
     "./errors": "./src/errors/index.ts",
     "./getModelPropertyWithFallback": "./src/utils/getFallbackModelProperty.ts",
     "./helpers/parseToolCalls": "./src/helpers/parseToolCalls.ts",

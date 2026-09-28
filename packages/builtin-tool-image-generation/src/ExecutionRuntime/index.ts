@@ -28,7 +28,7 @@ import type {
 const DEFAULT_LIST_LIMIT = 20;
 
 /** Schema defaults the request should carry; prompt and reference images come from the call. */
-const schemaDefaultParams = (schema?: ModelParamsSchema): Record<string, unknown> => {
+export const imageSchemaDefaults = (schema?: ModelParamsSchema): Record<string, unknown> => {
   if (!schema) return {};
   const {
     imageUrl: _imageUrl,
@@ -72,6 +72,10 @@ const clampInteger = (value: number | undefined, fallback: number, max: number) 
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(1, Math.floor(value as number)));
 };
+
+/** Images `generateImage` produces for an `imageNum` argument. */
+export const resolveImageNum = (value: number | undefined) =>
+  clampInteger(value, DEFAULT_IMAGE_NUM, MAX_IMAGE_NUM);
 
 const formatErrorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : typeof error === 'string' ? error : fallback;
@@ -500,7 +504,7 @@ export class ImageGenerationExecutionRuntime {
       return errorOutput('InvalidToolArguments', '`prompt` is required.');
     }
 
-    const imageNum = clampInteger(args.imageNum, DEFAULT_IMAGE_NUM, MAX_IMAGE_NUM);
+    const imageNum = resolveImageNum(args.imageNum);
     if (typeof args.imageNum === 'number' && args.imageNum !== imageNum) {
       return errorOutput(
         'InvalidToolArguments',
@@ -522,7 +526,7 @@ export class ImageGenerationExecutionRuntime {
     const params = {
       // Schema defaults first (e.g. GPT Image 2's `quality: 'medium'`), so the
       // tool sends what the Create page would; explicit arguments still win.
-      ...schemaDefaultParams(parametersSchema),
+      ...imageSchemaDefaults(parametersSchema),
       ...args.parameters,
       ...referenceUrls,
       prompt,
