@@ -18,6 +18,10 @@ import {
 import { LobeAgentManifest } from '@lobechat/builtin-tool-lobe-agent';
 import { createPathScopeAudit } from '@lobechat/builtin-tool-local-system';
 import { PageAgentIdentifier } from '@lobechat/builtin-tool-page-agent';
+import {
+  VIDEO_GENERATION_CONFIRM_AUDIT,
+  videoGenerationSettingsConfirmAudit,
+} from '@lobechat/builtin-tool-video-generation';
 import { manualModeExcludeToolIds } from '@lobechat/builtin-tools';
 import { isDesktop, resolveSubAgentModel } from '@lobechat/const';
 import { type ToolsEngine } from '@lobechat/context-engine';
@@ -67,9 +71,9 @@ import type { RunParkedReason, RunScope } from '../../lifecycle/types';
 const log = debug('lobe-store:streaming-executor');
 
 const dynamicInterventionAudits = {
-  // First image generation of a conversation asks once, naming the model that
-  // will be charged; every later call runs straight through.
+  // Image / video generation always opens the settings + confirm card first.
   [IMAGE_GENERATION_CONFIRM_AUDIT]: imageGenerationModelConfirmAudit,
+  [VIDEO_GENERATION_CONFIRM_AUDIT]: videoGenerationSettingsConfirmAudit,
   pathScopeAudit: createPathScopeAudit({
     areAllPathsSafe: async ({ paths, resolveAgainstScope }) => {
       if (!isDesktop) return false;

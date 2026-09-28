@@ -2,6 +2,8 @@
   "config.aspectRatio.label": "宽高比",
   "config.cameraFixed.label": "固定镜头",
   "config.duration.label": "时长",
+  "config.duration.labelWithUnit": "时长（秒）",
+  "config.duration.value": "{{seconds}} 秒",
   "config.endImageUrl.label": "结束画面",
   "config.generateAudio.label": "生成音频",
   "config.header.title": "视频",

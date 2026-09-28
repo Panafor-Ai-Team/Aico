@@ -1,5 +1,6 @@
 import type { BuiltinToolManifest } from '@lobechat/types';
 
+import { VIDEO_GENERATION_CONFIRM_AUDIT } from './confirmation';
 import { systemPrompt } from './systemRole';
 import { VideoGenerationApiName, VideoGenerationIdentifier } from './types';
 
@@ -52,6 +53,14 @@ export const VideoGenerationManifest: BuiltinToolManifest = {
       defaultTimeoutMs: 180_000,
       description:
         'Generate a video with the same pipeline as Create → Video and wait for the result. Returns a still-processing result when rendering takes longer than the wait window; the video then appears in the chat automatically.',
+      /**
+       * Interactive chats confirm every generation on a card where the user picks
+       * quality, frame shape and duration (see `videoGenerationSettingsConfirmAudit`);
+       * headless runs skip it. `always` so auto-run users still get the card.
+       */
+      humanIntervention: {
+        dynamic: { default: 'never', policy: 'always', type: VIDEO_GENERATION_CONFIRM_AUDIT },
+      },
       name: VideoGenerationApiName.generateVideo,
       parameters: {
         additionalProperties: false,
