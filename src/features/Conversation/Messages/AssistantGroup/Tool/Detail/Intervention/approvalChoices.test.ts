@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveApprovalChoices } from './approvalChoices';
+import { resolveApprovalChoices, resolveApprovalFooterButtons } from './approvalChoices';
+
+describe('resolveApprovalFooterButtons', () => {
+  it('gives confirm / cancel cards both a Cancel and a Confirm button', () => {
+    expect(resolveApprovalFooterButtons({ confirmCancel: true })).toEqual(['cancel', 'confirm']);
+  });
+
+  it('keeps the single Submit button for regular approval cards', () => {
+    expect(resolveApprovalFooterButtons({})).toEqual(['submit']);
+  });
+});
 
 describe('resolveApprovalChoices', () => {
   it('offers approve and reject in manual mode', () => {
@@ -15,11 +25,11 @@ describe('resolveApprovalChoices', () => {
     ]);
   });
 
-  it('offers only Confirm on confirm-only cards, with no reject or remember', () => {
-    expect(resolveApprovalChoices({ confirmOnly: true, isAllowListMode: true })).toEqual([
+  it('has no reject-reason or remember rows on confirm / cancel cards', () => {
+    expect(resolveApprovalChoices({ confirmCancel: true, isAllowListMode: true })).toEqual([
       'approve',
     ]);
-    expect(resolveApprovalChoices({ confirmOnly: true, isAllowListMode: false })).toEqual([
+    expect(resolveApprovalChoices({ confirmCancel: true, isAllowListMode: false })).toEqual([
       'approve',
     ]);
   });

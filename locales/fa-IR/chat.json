@@ -1323,6 +1323,7 @@
   "tokenTag.used": "مصرف‌شده",
   "tool.intervention.approvalMode": "حالت تأیید",
   "tool.intervention.approve": "تأیید",
+  "tool.intervention.cancel": "لغو",
   "tool.intervention.confirm": "تأیید",
   "tool.intervention.mode.allowList": "فهرست مجاز",
   "tool.intervention.mode.allowListDesc": "فقط ابزارهای تأییدشده به‌طور خودکار اجرا شوند",

@@ -1,6 +1,6 @@
 import {
   getBuiltinIntervention,
-  isConfirmOnlyIntervention,
+  isConfirmCancelIntervention,
 } from '@lobechat/builtin-tools/interventions';
 import { safeParseJSON } from '@lobechat/utils';
 import { Flexbox } from '@lobehub/ui';
@@ -212,7 +212,7 @@ const Intervention = memo<InterventionProps>(
             apiName={apiName}
             approvalMode={approvalMode}
             assistantGroupId={assistantGroupId}
-            confirmOnly={isConfirmOnlyIntervention(identifier, apiName)}
+            confirmCancel={isConfirmCancelIntervention(identifier, apiName)}
             identifier={identifier}
             messageId={id}
             toolCallId={toolCallId}
