@@ -11,15 +11,22 @@ import { useUserStore } from '@/store/user';
 
 import { useConversationResourceAccess } from '../../../../../hooks/useConversationResourceAccess';
 import { useConversationStore } from '../../../../../store';
-import { type ApprovalChoice, resolveApprovalChoices } from './approvalChoices';
+import {
+  type ApprovalChoice,
+  resolveApprovalChoices,
+  resolveApprovalFooterButtons,
+} from './approvalChoices';
 import { type ApprovalMode } from './index';
 
 interface ApprovalActionsProps {
   apiName: string;
   approvalMode: ApprovalMode;
   assistantGroupId?: string;
-  /** Only a Confirm button: no reject or "don't ask again" choices. */
-  confirmOnly?: boolean;
+  /**
+   * Just Cancel + Confirm buttons, no reject-reason or "don't ask again" rows.
+   * Cancel rejects the call and stops the run instead of letting the agent go on.
+   */
+  confirmCancel?: boolean;
   identifier: string;
   messageId: string;
   /**
@@ -38,6 +45,7 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   `,
   footer: css`
     display: flex;
+    gap: 8px;
     justify-content: flex-end;
     margin-block-start: 8px;
   `,
@@ -134,7 +142,7 @@ const ApprovalActions = memo<ApprovalActionsProps>(
     approvalMode,
     apiName,
     assistantGroupId,
-    confirmOnly,
+    confirmCancel,
     identifier,
     messageId,
     onBeforeApprove,
@@ -152,14 +160,28 @@ const ApprovalActions = memo<ApprovalActionsProps>(
     const { canUseResource } = useConversationResourceAccess();
 
     const choices = useMemo<Choice[]>(
-      () => resolveApprovalChoices({ confirmOnly, isAllowListMode }),
-      [confirmOnly, isAllowListMode],
+      () => resolveApprovalChoices({ confirmCancel, isAllowListMode }),
+      [confirmCancel, isAllowListMode],
+    );
+    const footerButtons = useMemo(
+      () => resolveApprovalFooterButtons({ confirmCancel }),
+      [confirmCancel],
     );
 
-    const [approveToolCall, rejectAndContinueToolCall] = useConversationStore((s) => [
-      s.approveToolCall,
-      s.rejectAndContinueToolCall,
-    ]);
+    const [approveToolCall, rejectAndContinueToolCall, rejectToolCall] = useConversationStore(
+      (s) => [s.approveToolCall, s.rejectAndContinueToolCall, s.rejectToolCall],
+    );
+    const [cancelling, setCancelling] = useState(false);
+
+    const handleCancel = useCallback(async () => {
+      if (loading || cancelling || isMessageCreating || !canUseResource) return;
+      setCancelling(true);
+      try {
+        await rejectToolCall(messageId);
+      } finally {
+        setCancelling(false);
+      }
+    }, [canUseResource, cancelling, isMessageCreating, loading, messageId, rejectToolCall]);
     const addToolToAllowList = useUserStore((s) => s.addToolToAllowList);
 
     const handleSubmit = useCallback(async () => {
@@ -299,7 +321,7 @@ const ApprovalActions = memo<ApprovalActionsProps>(
 
     return (
       <Flexbox className={styles.container} ref={containerRef}>
-        {!confirmOnly && (
+        {!confirmCancel && (
           <div className={styles.optionList} role="radiogroup">
             {choices.map((c, index) => {
               if (c === 'reject') {
@@ -349,19 +371,35 @@ const ApprovalActions = memo<ApprovalActionsProps>(
         )}
 
         <div className={styles.footer}>
-          <Button
-            className={styles.submitButton}
-            disabled={isMessageCreating}
-            loading={loading}
-            size={'middle'}
-            type={'primary'}
-            onClick={handleSubmit}
-          >
-            {confirmOnly ? t('tool.intervention.confirm') : t('tool.intervention.submit')}
-            <span className={styles.shortcutHint}>
-              <CornerDownLeft size={12} />
-            </span>
-          </Button>
+          {footerButtons.map((button) =>
+            button === 'cancel' ? (
+              <Button
+                className={styles.submitButton}
+                disabled={isMessageCreating || loading}
+                key={button}
+                loading={cancelling}
+                size={'middle'}
+                onClick={handleCancel}
+              >
+                {t('tool.intervention.cancel')}
+              </Button>
+            ) : (
+              <Button
+                className={styles.submitButton}
+                disabled={isMessageCreating || cancelling}
+                key={button}
+                loading={loading}
+                size={'middle'}
+                type={'primary'}
+                onClick={handleSubmit}
+              >
+                {t(`tool.intervention.${button}`)}
+                <span className={styles.shortcutHint}>
+                  <CornerDownLeft size={12} />
+                </span>
+              </Button>
+            ),
+          )}
         </div>
       </Flexbox>
     );

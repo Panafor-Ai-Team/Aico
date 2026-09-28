@@ -169,7 +169,7 @@ import type {
 import { CodexInspectors, CodexRenders } from './codex';
 import { GithubIdentifier, GithubInspectors, GithubRenders } from './github';
 import { registerBuiltinInspectors } from './inspectors';
-import { registerBuiltinInterventions, registerConfirmOnlyInterventions } from './interventions';
+import { registerBuiltinInterventions, registerConfirmCancelInterventions } from './interventions';
 import { LinearIdentifier, LinearInspectors, LinearRenders } from './linear';
 import { NotebookIdentifier, NotebookRenders } from './notebook';
 import { registerBuiltinPlaceholders } from './placeholders';
@@ -352,7 +352,7 @@ export const registerBuiltinToolSurfaces = (): void => {
     >,
   });
 
-  registerConfirmOnlyInterventions({
+  registerConfirmCancelInterventions({
     [ImageGenerationManifest.identifier]: Object.keys(ImageGenerationInterventions),
     [VideoGenerationManifest.identifier]: Object.keys(VideoGenerationInterventions),
   });
