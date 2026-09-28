@@ -10,6 +10,19 @@ import type { VideoModelParamsSchema } from '../standard-parameters/video';
  * xAI's `reference_images` is not accepted: CheapVibeCode answers
  * `400 invalid_json` ("Invalid video generation request.") for it.
  */
+/**
+ * Aico video generation takes one input image. Keeps the model's own image
+ * key (start frame `imageUrl`, else a one-item `imageUrls`) so providers still
+ * receive the field they read, and drops the end frame.
+ */
+export const limitVideoParamsToSingleImage = (
+  schema: VideoModelParamsSchema,
+): VideoModelParamsSchema => {
+  const { endImageUrl: _endImageUrl, imageUrls, ...rest } = schema;
+  if (!imageUrls || rest.imageUrl) return rest;
+  return { ...rest, imageUrls: { ...imageUrls, maxCount: 1 } };
+};
+
 export const cheapVibeCodeGrokImagineVideoParameters: VideoModelParamsSchema = {
   aspectRatio: {
     default: '16:9',

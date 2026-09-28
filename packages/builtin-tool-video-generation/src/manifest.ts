@@ -67,21 +67,10 @@ export const VideoGenerationManifest: BuiltinToolManifest = {
             minimum: 1,
             type: 'number',
           },
-          endImageUrl: {
-            description:
-              'Accessible last-frame image URL for models that support start/end frames. Omit otherwise.',
-            type: ['string', 'null'],
-          },
           imageUrl: {
             description:
-              'Accessible start-frame image URL for image-to-video. Omit for text-to-video.',
+              'The one accessible image URL to animate (for example an image the user attached in this chat). Video generation takes a single image. Omit for text-to-video.',
             type: ['string', 'null'],
-          },
-          imageUrls: {
-            description:
-              'Accessible reference image URLs (for example images the user attached in this chat). The runtime fits them to what the model accepts.',
-            items: { type: 'string' },
-            type: 'array',
           },
           model: {
             description:

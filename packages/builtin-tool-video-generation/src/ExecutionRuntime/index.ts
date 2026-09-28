@@ -5,6 +5,7 @@ import {
 } from '@lobechat/types';
 import type { RuntimeVideoGenParams, VideoModelParamsSchema } from 'model-bank';
 import { extractVideoDefaultValues, resolveVideoModelParamsSchema } from 'model-bank';
+import { limitVideoParamsToSingleImage } from 'model-bank/videoParameters';
 
 import {
   DEFAULT_VIDEO_MODEL_PROVIDER,
@@ -180,9 +181,13 @@ const resolveReferenceParams = (
     }
   }
 
-  if (endImageUrl && schemaRecord.endImageUrl) params.endImageUrl = endImageUrl;
+  let ignoredEndImage = 0;
+  if (endImageUrl) {
+    if (schemaRecord.endImageUrl) params.endImageUrl = endImageUrl;
+    else ignoredEndImage = 1;
+  }
 
-  return { ignoredReferenceCount: references.length - accepted, params };
+  return { ignoredReferenceCount: references.length - accepted + ignoredEndImage, params };
 };
 
 const toDurationSeconds = (value: unknown) => {
@@ -338,7 +343,7 @@ const formatTaskLine = (task: GeneratedVideoTask) => {
 
 const ignoredReferenceNote = (count: number) =>
   count > 0
-    ? `Note: the selected model does not accept ${count} of the reference image(s); they were not sent.`
+    ? `Note: video generation takes only one image, so the first was used and ${count} other image(s) were not sent. Tell the user only one image is supported.`
     : undefined;
 
 const formatSettingsLine = ({ aspectRatio, duration, resolution }: GeneratedVideoSettings) => {
@@ -413,7 +418,9 @@ export class VideoGenerationExecutionRuntime {
         return errorOutput('VideoModelNotFound', `Video model not found: ${provider}/${model}`);
       }
 
-      const parameters = resolveVideoModelParamsSchema(modelItem.parameters);
+      const parameters = limitVideoParamsToSingleImage(
+        resolveVideoModelParamsSchema(modelItem.parameters),
+      );
       const state: GetVideoModelParametersState = {
         defaultValues: extractVideoDefaultValues(parameters),
         displayName: modelItem.displayName,
@@ -511,7 +518,9 @@ export class VideoGenerationExecutionRuntime {
     }
 
     const { model, provider } = selection;
-    const schema = resolveVideoModelParamsSchema(selection.parameters);
+    const schema = limitVideoParamsToSingleImage(
+      resolveVideoModelParamsSchema(selection.parameters),
+    );
     const { ignoredReferenceCount, params: referenceParams } = resolveReferenceParams(args, schema);
     const { notes: settingNotes, params: settingParams } = resolveOutputSettings(args, schema);
     const callerParams = Object.fromEntries(

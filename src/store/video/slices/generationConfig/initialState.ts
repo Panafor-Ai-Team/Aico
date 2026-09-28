@@ -7,11 +7,12 @@ import {
   type RuntimeVideoGenParams,
   type VideoModelParamsSchema,
 } from 'model-bank';
+import { limitVideoParamsToSingleImage } from 'model-bank/videoParameters';
 
 export const DEFAULT_AI_VIDEO_PROVIDER = ModelProvider.LobeHub;
 export const DEFAULT_AI_VIDEO_MODEL = 'dreamina-seedance-2-0-260128';
 
-const seedance20Params: VideoModelParamsSchema = {
+const seedance20Params: VideoModelParamsSchema = limitVideoParamsToSingleImage({
   aspectRatio: {
     default: 'adaptive',
     enum: ['adaptive', ...PRESET_VIDEO_ASPECT_RATIOS],
@@ -40,7 +41,7 @@ const seedance20Params: VideoModelParamsSchema = {
     enum: PRESET_VIDEO_RESOLUTIONS,
   },
   seed: { default: null },
-};
+});
 
 export interface VideoGenerationConfigState {
   parameters: RuntimeVideoGenParams;

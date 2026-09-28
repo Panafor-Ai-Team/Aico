@@ -6,6 +6,7 @@ import {
   type RuntimeVideoGenParamsValue,
   type VideoModelParamsSchema,
 } from 'model-bank';
+import { limitVideoParamsToSingleImage } from 'model-bank/videoParameters';
 
 import { aiProviderSelectors, getAiInfraStoreState } from '@/store/aiInfra';
 import { useGlobalStore } from '@/store/global';
@@ -38,7 +39,10 @@ export function getVideoModelAndDefaults(model: string, provider: string) {
     );
   }
 
-  const parametersSchema = activeModel.parameters as VideoModelParamsSchema;
+  const modelSchema = activeModel.parameters as VideoModelParamsSchema | undefined;
+  const parametersSchema = (
+    modelSchema ? limitVideoParamsToSingleImage(modelSchema) : modelSchema
+  ) as VideoModelParamsSchema;
   const defaultValues = extractVideoDefaultValues(parametersSchema);
 
   return { activeModel, defaultValues, parametersSchema };
@@ -56,7 +60,10 @@ function preserveVideoInputParams(
     'endImageUrl',
   ]);
 
-  return normalizeImageInputOnSchemaSwitch(previousParameters, nextSchema, result);
+  const normalized = normalizeImageInputOnSchemaSwitch(previousParameters, nextSchema, result);
+  return Array.isArray(normalized.imageUrls) && normalized.imageUrls.length > 1
+    ? { ...normalized, imageUrls: normalized.imageUrls.slice(0, 1) }
+    : normalized;
 }
 
 type Setter = StoreSetter<VideoStore>;

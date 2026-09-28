@@ -204,20 +204,21 @@ describe('VideoGenerationExecutionRuntime.generateVideo', () => {
     expect(vi.mocked(service.createVideo).mock.calls[0][0].params.duration).toBe(5);
   });
 
-  it('fits reference images to a model that takes a reference list', async () => {
+  it('sends only one image even when the model takes a reference list', async () => {
     const service = createService();
     const runtime = new VideoGenerationExecutionRuntime(service);
 
     const result = await runtime.generateVideo({
+      endImageUrl: 'https://end.png',
       imageUrls: ['https://a.png', 'https://b.png', 'https://c.png'],
       prompt: 'These two fighting',
     });
 
-    expect(vi.mocked(service.createVideo).mock.calls[0][0].params.imageUrls).toEqual([
-      'https://a.png',
-      'https://b.png',
-    ]);
-    expect(result.content).toContain('does not accept 1 of the reference image(s)');
+    const { params } = vi.mocked(service.createVideo).mock.calls[0][0];
+    expect(params.imageUrls).toEqual(['https://a.png']);
+    expect(params.endImageUrl).toBeUndefined();
+    expect(result.content).toContain('takes only one image');
+    expect(result.content).toContain('3 other image(s) were not sent');
   });
 
   it('sends the first reference as the start frame when the model only takes one', async () => {
