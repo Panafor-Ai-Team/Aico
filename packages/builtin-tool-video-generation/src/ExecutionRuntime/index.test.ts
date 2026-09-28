@@ -114,6 +114,55 @@ describe('VideoGenerationExecutionRuntime.generateVideo', () => {
     });
   });
 
+  it('sends the requested duration instead of the model default', async () => {
+    const service = createService();
+    const runtime = new VideoGenerationExecutionRuntime(service);
+
+    const result = await runtime.generateVideo({ duration: 2, prompt: 'A 2 second clip' });
+
+    expect(vi.mocked(service.createVideo).mock.calls[0][0].params.duration).toBe(2);
+    expect(result.content).not.toContain('closest supported length');
+  });
+
+  it('clamps a duration outside the model range and says so', async () => {
+    const service = createService();
+    const runtime = new VideoGenerationExecutionRuntime(service);
+
+    const result = await runtime.generateVideo({
+      model: 'veo-3.1',
+      parameters: { duration: 30 },
+      prompt: 'A long pan',
+    });
+
+    expect(vi.mocked(service.createVideo).mock.calls[0][0].params.duration).toBe(10);
+    expect(result.content).toContain('cannot make a 30s video');
+    expect(result.content).toContain('closest supported length, 10s');
+  });
+
+  it('picks the nearest allowed duration for models with fixed lengths', async () => {
+    const service = createService({
+      listVideoModels: vi.fn().mockResolvedValue({
+        providers: [
+          {
+            id: 'openrouter',
+            models: [
+              {
+                id: 'grok-imagine-video',
+                parameters: { duration: { default: 5, enum: [5, 10] }, prompt: { default: '' } },
+              },
+            ],
+          },
+        ],
+        totalModels: 1,
+      }),
+    });
+    const runtime = new VideoGenerationExecutionRuntime(service);
+
+    await runtime.generateVideo({ duration: 2, prompt: 'Short' });
+
+    expect(vi.mocked(service.createVideo).mock.calls[0][0].params.duration).toBe(5);
+  });
+
   it('fits reference images to a model that takes a reference list', async () => {
     const service = createService();
     const runtime = new VideoGenerationExecutionRuntime(service);

@@ -184,6 +184,48 @@ const resolveReferenceParams = (
   return { ignoredReferenceCount: references.length - accepted, params };
 };
 
+const toDurationSeconds = (value: unknown) => {
+  const seconds = typeof value === 'string' ? Number(value) : value;
+  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0
+    ? seconds
+    : undefined;
+};
+
+/** Closest length the model accepts: the nearest enum value, or the request clamped to min/max. */
+const fitDuration = (
+  requested: number,
+  schema: NonNullable<VideoModelParamsSchema['duration']>,
+) => {
+  if (schema.enum?.length) {
+    return schema.enum.reduce((best, value) =>
+      Math.abs(value - requested) < Math.abs(best - requested) ? value : best,
+    );
+  }
+
+  const step = schema.step && schema.step > 0 ? schema.step : 1;
+  let seconds = Math.round(requested / step) * step;
+  if (typeof schema.min === 'number') seconds = Math.max(schema.min, seconds);
+  if (typeof schema.max === 'number') seconds = Math.min(schema.max, seconds);
+  return seconds;
+};
+
+const resolveDurationParams = (
+  args: GenerateVideoParams,
+  schema: VideoModelParamsSchema,
+): { note?: string; params: { duration?: number } } => {
+  const requested = toDurationSeconds(args.duration ?? args.parameters?.duration);
+  if (!requested || !schema.duration) return { params: {} };
+
+  const duration = fitDuration(requested, schema.duration);
+  return {
+    note:
+      duration === requested
+        ? undefined
+        : `Note: the selected model cannot make a ${requested}s video; it was generated at the closest supported length, ${duration}s.`,
+    params: { duration },
+  };
+};
+
 const formatModelList = (state: ListVideoModelsState) => {
   if (state.totalModels === 0) {
     return 'No available video generation models were found.';
@@ -400,14 +442,18 @@ export class VideoGenerationExecutionRuntime {
     const { model, provider } = selection;
     const schema = resolveVideoModelParamsSchema(selection.parameters);
     const { ignoredReferenceCount, params: referenceParams } = resolveReferenceParams(args, schema);
+    const { note: durationNote, params: durationParams } = resolveDurationParams(args, schema);
     const callerParams = Object.fromEntries(
-      Object.entries(args.parameters ?? {}).filter(([key]) => !REFERENCE_PARAM_KEYS.has(key)),
+      Object.entries(args.parameters ?? {}).filter(
+        ([key]) => !REFERENCE_PARAM_KEYS.has(key) && key !== 'duration',
+      ),
     );
     const params = {
       // Schema defaults first (duration, resolution, aspect ratio) so the tool
       // sends what Create → Video would; explicit arguments still win.
       ...schemaDefaultParams(schema),
       ...callerParams,
+      ...durationParams,
       ...referenceParams,
       prompt,
     } as RuntimeVideoGenParams & Record<string, unknown>;
@@ -443,7 +489,7 @@ export class VideoGenerationExecutionRuntime {
         provider,
         waitUntilComplete,
       };
-      const note = ignoredReferenceNote(ignoredReferenceCount);
+      const note = joinLines([ignoredReferenceNote(ignoredReferenceCount), durationNote]);
 
       if (!waitUntilComplete) {
         return {

@@ -60,6 +60,10 @@ export interface GetVideoModelParametersState {
 
 export interface GenerateVideoParams {
   /**
+   * Requested length in seconds; fitted to the model's supported durations.
+   */
+  duration?: number;
+  /**
    * Last-frame image URL for models that support start/end frames.
    */
   endImageUrl?: null | string;

@@ -56,6 +56,12 @@ export const VideoGenerationManifest: BuiltinToolManifest = {
       parameters: {
         additionalProperties: false,
         properties: {
+          duration: {
+            description:
+              'Video length in seconds. Always pass it when the user asks for a specific length (for example "2 seconds" → 2); the runtime fits it to what the model supports. Omit to use the model default.',
+            minimum: 1,
+            type: 'number',
+          },
           endImageUrl: {
             description:
               'Accessible last-frame image URL for models that support start/end frames. Omit otherwise.',

@@ -62,7 +62,7 @@ describe('CheapVibeCode generation models', () => {
     expect(models['grok-imagine-video']).toMatchObject({ type: 'video' });
   });
 
-  it('lets GPT Image 2 and Grok Imagine Video take several reference images', async () => {
+  it('lets GPT Image 2 take several reference images and Grok Imagine Video one start frame', async () => {
     const { OpenRouterModelCatalogModel } = await import('../openrouterModelCatalog');
     await db.insert(openrouterModelCatalog).values([
       { enabled: true, id: 'openrouter/auto', payload: {}, syncedAt: new Date(), type: 'chat' },
@@ -80,11 +80,9 @@ describe('CheapVibeCode generation models', () => {
 
     expect(models['gpt-image-2'].parameters.imageUrls.maxCount).toBe(16);
     expect(models['gpt-image-2'].parameters.quality.default).toBe('medium');
-    expect(models['grok-imagine-video'].parameters.imageUrls).toMatchObject({
-      default: [],
-      maxCount: 7,
-    });
-    expect(models['grok-imagine-video'].parameters.imageUrl).toBeUndefined();
+    // CheapVibeCode rejects `reference_images`, so the video card must not offer several.
+    expect(models['grok-imagine-video'].parameters.imageUrl).toEqual({ default: null });
+    expect(models['grok-imagine-video'].parameters.imageUrls).toBeUndefined();
   });
 
   it('offers an image upload for Grok Imagine Video even from a row synced before it', async () => {
@@ -105,7 +103,7 @@ describe('CheapVibeCode generation models', () => {
       'grok-imagine-video'
     ] as any;
 
-    expect(video.parameters.imageUrls).toMatchObject({ default: [] });
+    expect(video.parameters.imageUrl).toEqual({ default: null });
     expect(video.enabled).toBe(true);
   });
 

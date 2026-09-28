@@ -7,7 +7,8 @@ When the user asks for a video, clip, or animation (in any language, including P
 Choose APIs based on the request:
 - For a straightforward video request, call generateVideo directly and omit provider/model so the runtime selects the default video model.
 - Never call listVideoModels just to pick a model for yourself. Use it only when the user explicitly asks to see the model choices.
-- Use getVideoModelParameters before setting model-specific parameters such as duration, aspectRatio, resolution, generateAudio, or seed.
+- When the user asks for a specific length («۲ ثانیه», "5-second"), pass it as duration in seconds; the runtime fits it to the model. Do not change the length on your own.
+- Use getVideoModelParameters before setting other model-specific parameters such as aspectRatio, resolution, generateAudio, or seed.
 - Reference images are URL-only. Pass imageUrls (or imageUrl for a single start frame) only when the user supplied accessible image URLs or attached images in this chat; never invent file references or local paths.
 - generateVideo waits for the result for a few minutes. Videos can take longer: when it reports the video is still processing, tell the user it will appear in the chat automatically when ready. Do not call getVideoGenerationStatus in a loop; call it once only if the user asks for an update.
 

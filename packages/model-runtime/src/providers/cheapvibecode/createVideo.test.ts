@@ -96,14 +96,14 @@ describe('createCheapVibeCodeVideo', () => {
     });
   });
 
-  it('sends several uploaded images as reference_images, never combined with image', async () => {
+  it('never sends reference_images, which CheapVibeCode rejects; the first image is the start frame', async () => {
     global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-5' }));
 
     await createCheapVibeCodeVideo(
       {
         model: 'grok-imagine-video',
         params: {
-          imageUrls: ['https://s3.example.com/a.png', '', 'https://s3.example.com/b.png'],
+          imageUrls: ['', 'https://s3.example.com/a.png', 'https://s3.example.com/b.png'],
           prompt: 'Both characters dance',
         },
       },
@@ -111,12 +111,9 @@ describe('createCheapVibeCodeVideo', () => {
     );
 
     expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).toEqual({
+      image: { url: 'https://s3.example.com/a.png' },
       model: 'grok-imagine-video',
       prompt: 'Both characters dance',
-      reference_images: [
-        { url: 'https://s3.example.com/a.png' },
-        { url: 'https://s3.example.com/b.png' },
-      ],
     });
   });
 

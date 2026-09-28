@@ -72,13 +72,12 @@ export const createCheapVibeCodeVideo = async (
   if (resolution) body.resolution = resolution;
   if (aspectRatio) body.aspect_ratio = aspectRatio;
 
-  // xAI's shapes, which CheapVibeCode's mirrored video API follows: one image is
-  // the start frame, several are references. The two cannot be combined.
-  const images = [imageUrl, ...(imageUrls ?? [])].filter(
+  // Only a single start frame: CheapVibeCode rejects xAI's `reference_images`
+  // with `400 invalid_json`, failing the whole request.
+  const startFrame = [imageUrl, ...(imageUrls ?? [])].find(
     (url): url is string => typeof url === 'string' && url.length > 0,
   );
-  if (images.length === 1) body.image = { url: images[0] };
-  else if (images.length > 1) body.reference_images = images.map((url) => ({ url }));
+  if (startFrame) body.image = { url: startFrame };
 
   log('Creating video - model: %s, body: %O', model, body);
 

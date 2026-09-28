@@ -1,10 +1,36 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  extractRequestedVideoDuration,
   findPendingUserMessage,
   isVideoGenerationUserIntent,
   resolveDirectVideoGenerationToolCall,
 } from './videoGenerationIntent';
+
+describe('extractRequestedVideoDuration', () => {
+  it.each([
+    ['یک ویدیو ۲ ثانیه‌ای از دریا بساز', 2],
+    ['ویدیو 2 ثانیه از دریا بساز', 2],
+    ['یه کلیپ دو ثانیه ای بساز', 2],
+    ['ویدیو یازده ثانیه ای بساز', 11],
+    ['یک ویدیو یک دقیقه ای بساز', 60],
+    ['Make a 2-second video of a cat', 2],
+    ['Generate a 5s clip of rain', 5],
+    ['make a video, 3 seconds long', 3],
+    ['Create a ten second video', 10],
+  ])('reads %s as %d seconds', (text, seconds) => {
+    expect(extractRequestedVideoDuration(text)).toBe(seconds);
+  });
+
+  it.each([
+    'یک ویدیو از غروب خورشید بساز',
+    'Make a second video of the dog',
+    'Make a video of the 1990s skyline',
+    'Make a video of 5 sheep',
+  ])('finds no length in %s', (text) => {
+    expect(extractRequestedVideoDuration(text)).toBeUndefined();
+  });
+});
 
 describe('isVideoGenerationUserIntent', () => {
   it('detects Persian video requests', () => {
@@ -103,6 +129,14 @@ describe('resolveDirectVideoGenerationToolCall', () => {
     });
 
     expect(JSON.parse(call!.arguments)).toEqual({ prompt: 'ویدیو یه اسب که تو برف میدوه بساز' });
+  });
+
+  it('forwards the length the user asked for', () => {
+    const call = resolveDirectVideoGenerationToolCall({
+      messages: [{ content: 'یک ویدیو ۲ ثانیه‌ای از یک گربه بساز', role: 'user' }],
+    });
+
+    expect(JSON.parse(call!.arguments)).toMatchObject({ duration: 2 });
   });
 
   it('does not fire again after the tool result', () => {

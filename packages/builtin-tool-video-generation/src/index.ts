@@ -29,6 +29,7 @@ export {
 } from './types';
 export {
   buildDirectGenerateVideoToolCall,
+  extractRequestedVideoDuration,
   findPendingUserMessage,
   isVideoGenerationUserIntent,
   resolveDirectVideoGenerationToolCall,

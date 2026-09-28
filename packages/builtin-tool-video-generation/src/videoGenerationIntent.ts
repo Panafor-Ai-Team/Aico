@@ -44,6 +44,79 @@ export const isVideoGenerationUserIntent = (text: string | null | undefined): bo
   );
 };
 
+const NUMBER_WORDS: Record<string, number> = {
+  بیست: 20,
+  پانزده: 15,
+  پنج: 5,
+  پونزده: 15,
+  چهار: 4,
+  چهارده: 14,
+  دو: 2,
+  دوازده: 12,
+  ده: 10,
+  eight: 8,
+  eleven: 11,
+  fifteen: 15,
+  five: 5,
+  four: 4,
+  fourteen: 14,
+  nine: 9,
+  one: 1,
+  سه: 3,
+  سی: 30,
+  سیزده: 13,
+  seven: 7,
+  شش: 6,
+  شیش: 6,
+  six: 6,
+  ten: 10,
+  thirteen: 13,
+  thirty: 30,
+  three: 3,
+  twelve: 12,
+  twenty: 20,
+  two: 2,
+  نه: 9,
+  هشت: 8,
+  هفت: 7,
+  یازده: 11,
+  یک: 1,
+  یه: 1,
+};
+
+// Longest first so «یازده» is not read as «ده».
+const NUMBER_WORD_PATTERN = Object.keys(NUMBER_WORDS)
+  .sort((a, b) => b.length - a.length)
+  .join('|');
+
+const DURATION_PATTERN = new RegExp(
+  String.raw`(?<![\p{L}\d.])(\d+(?:\.\d+)?|${NUMBER_WORD_PATTERN})[\s\u200C-]*(ثانیه|دقیقه|seconds?|secs?|minutes?|mins?|s(?![\p{L}]))`,
+  'iu',
+);
+
+const toLatinDigits = (text: string) =>
+  text
+    .replaceAll(/[\u06F0-\u06F9]/g, (digit) => String(digit.codePointAt(0)! - 0x06_f0))
+    .replaceAll(/[\u0660-\u0669]/g, (digit) => String(digit.codePointAt(0)! - 0x06_60));
+
+/**
+ * The video length the user asked for, in seconds («۲ ثانیه», «دو ثانیه»,
+ * "2-second", "5s", "1 minute"), or `undefined` when none is given.
+ */
+export const extractRequestedVideoDuration = (text: string | null | undefined) => {
+  if (!text) return undefined;
+
+  const match = toLatinDigits(text).match(DURATION_PATTERN);
+  if (!match) return undefined;
+
+  const amount = NUMBER_WORDS[match[1].toLowerCase()] ?? Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) return undefined;
+  // A bare `s` on a large number is a decade or plural ("1990s"), not a length.
+  if (match[2].toLowerCase() === 's' && amount > 60) return undefined;
+
+  return /^(?:دقیقه|min)/i.test(match[2]) ? amount * 60 : amount;
+};
+
 type MessageLike = { content?: unknown; role?: string };
 
 const textOfContent = (content: unknown): string => {
@@ -110,6 +183,7 @@ export interface DirectGenerateVideoToolCall {
 }
 
 export const buildDirectGenerateVideoToolCall = (params: {
+  duration?: number;
   executor?: 'client' | 'server';
   imageUrls?: string[];
   prompt: string;
@@ -124,6 +198,7 @@ export const buildDirectGenerateVideoToolCall = (params: {
     apiName: VideoGenerationApiName.generateVideo,
     arguments: JSON.stringify({
       prompt: params.prompt.trim(),
+      ...(params.duration ? { duration: params.duration } : {}),
       ...(params.imageUrls?.length ? { imageUrls: params.imageUrls } : {}),
     }),
     ...(params.executor ? { executor: params.executor } : {}),
@@ -149,6 +224,7 @@ export const resolveDirectVideoGenerationToolCall = (params: {
   if (!pending || !isVideoGenerationUserIntent(pending.text)) return undefined;
 
   return buildDirectGenerateVideoToolCall({
+    duration: extractRequestedVideoDuration(pending.text),
     executor: params.executorMap?.[VideoGenerationIdentifier],
     imageUrls: pending.imageUrls,
     prompt: pending.text,
