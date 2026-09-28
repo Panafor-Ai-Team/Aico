@@ -1321,6 +1321,7 @@
   "tokenTag.used": "Utilisé",
   "tool.intervention.approvalMode": "Mode d'approbation",
   "tool.intervention.approve": "Approuver",
+  "tool.intervention.confirm": "Confirmer",
   "tool.intervention.mode.allowList": "Liste autorisée",
   "tool.intervention.mode.allowListDesc": "Exécuter automatiquement uniquement les outils approuvés",
   "tool.intervention.mode.autoRun": "Approbation automatique",

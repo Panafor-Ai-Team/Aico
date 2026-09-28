@@ -2,6 +2,8 @@
   "config.aspectRatio.label": "نسبت تصویر",
   "config.cameraFixed.label": "دوربین ثابت",
   "config.duration.label": "مدت زمان",
+  "config.duration.labelWithUnit": "مدت زمان (ثانیه)",
+  "config.duration.value": "{{seconds}} ثانیه",
   "config.endImageUrl.label": "فریم پایانی",
   "config.generateAudio.label": "تولید صدا",
   "config.header.title": "ویدیو",

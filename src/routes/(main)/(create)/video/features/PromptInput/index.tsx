@@ -133,6 +133,7 @@ const ResolutionItem = memo(() => {
 });
 
 const DurationItem = memo(() => {
+  const { t } = useTranslation('video');
   const { allowed: canCreate } = usePermission('create_content');
   const { value, setValue, min, max, step, enumValues } = useVideoGenerationConfigParam('duration');
 
@@ -142,10 +143,10 @@ const DurationItem = memo(() => {
         ? enumValues.map((v) => ({
             disabled: !canCreate,
             key: String(v),
-            label: String(v),
+            label: t('config.duration.value', { seconds: v }),
           }))
         : [],
-    [enumValues, canCreate],
+    [enumValues, canCreate, t],
   );
 
   if (options.length > 0) {
@@ -597,6 +598,12 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
                       <Flexbox gap={6}>
                         <Text fontSize={12}>{t('config.size.label')}</Text>
                         <SizeItem />
+                      </Flexbox>
+                    )}
+                    {isSupportDuration && (
+                      <Flexbox gap={6}>
+                        <Text fontSize={12}>{t('config.duration.labelWithUnit')}</Text>
+                        <DurationItem />
                       </Flexbox>
                     )}
                     {isSupportSeed && (

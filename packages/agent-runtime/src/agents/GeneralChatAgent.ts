@@ -213,7 +213,10 @@ export class GeneralChatAgent implements Agent {
       // Phase 3: Per-tool dynamic resolver
       const config = this.getToolInterventionConfig(toolCalling, state);
       const isDynamicConfig = this.isDynamicInterventionConfig(config);
-      const dynamicPolicy = await this.resolveDynamicPolicy(config, toolArgs, state.metadata);
+      const dynamicPolicy = await this.resolveDynamicPolicy(config, toolArgs, {
+        ...state.metadata,
+        approvalMode,
+      });
       const staticConfig = isDynamicConfig
         ? undefined
         : (config as HumanInterventionConfig | undefined);

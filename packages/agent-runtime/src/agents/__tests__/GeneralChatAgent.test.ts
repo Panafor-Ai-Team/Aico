@@ -1,5 +1,5 @@
 import { type ChatToolPayload, type GlobalInterventionAuditConfig } from '@lobechat/types';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { type AgentRuntimeContext, type AgentState } from '../../types';
 import { GeneralChatAgent } from '../GeneralChatAgent';
@@ -2232,6 +2232,97 @@ describe('GeneralChatAgent', () => {
           },
         },
       ]);
+    });
+
+    describe('dynamic audits that depend on the approval mode', () => {
+      const toolCall: ChatToolPayload = {
+        id: 'call-1',
+        identifier: 'lobe-video-generation',
+        apiName: 'generateVideo',
+        arguments: '{"prompt":"a cat"}',
+        type: 'builtin',
+      };
+
+      const run = async (approvalMode: 'allow-list' | 'auto-run' | 'headless' | 'manual') => {
+        const audit = vi.fn(
+          async (_toolArgs: Record<string, any>, metadata?: Record<string, any>) =>
+            metadata?.approvalMode !== 'headless',
+        );
+        const agent = new GeneralChatAgent({
+          agentConfig: { maxSteps: 100 },
+          dynamicInterventionAudits: { settingsConfirmAudit: audit },
+          operationId: 'test-session',
+          modelRuntimeConfig: mockModelRuntimeConfig,
+        });
+
+        const state = createMockState({
+          metadata: { topicId: 'topic-1' },
+          toolManifestMap: {
+            'lobe-video-generation': {
+              identifier: 'lobe-video-generation',
+              api: [
+                {
+                  name: 'generateVideo',
+                  humanIntervention: {
+                    dynamic: { default: 'never', policy: 'always', type: 'settingsConfirmAudit' },
+                  },
+                },
+              ],
+            },
+          },
+          userInterventionConfig: {
+            approvalMode,
+            allowList: ['lobe-video-generation/generateVideo'],
+          },
+        });
+
+        const result = await agent.runner(
+          createMockContext('llm_result', {
+            hasToolsCalling: true,
+            toolsCalling: [toolCall],
+            parentMessageId: 'msg-1',
+          }),
+          state,
+        );
+
+        return { audit, result };
+      };
+
+      it('passes the approval mode to the audit alongside the run metadata', async () => {
+        const { audit } = await run('manual');
+
+        expect(audit).toHaveBeenCalledWith(
+          { prompt: 'a cat' },
+          expect.objectContaining({ approvalMode: 'manual', topicId: 'topic-1' }),
+        );
+      });
+
+      it.each(['manual', 'allow-list', 'auto-run'] as const)(
+        'asks for approval in %s mode, even when allow-listed',
+        async (approvalMode) => {
+          const { result } = await run(approvalMode);
+
+          expect(result).toEqual([
+            {
+              type: 'request_human_approve',
+              parentMessageId: 'msg-1',
+              pendingToolsCalling: [toolCall],
+              reason: 'human_intervention_required',
+            },
+          ]);
+        },
+      );
+
+      it('executes directly in headless mode, which has no approval UI', async () => {
+        const { result } = await run('headless');
+
+        expect(result).toEqual([
+          {
+            type: 'call_tool',
+            payload: { parentMessageId: 'msg-1', toolCalling: toolCall },
+          },
+        ]);
+      });
     });
 
     it('should execute tool when dynamic policy resolves to never', async () => {

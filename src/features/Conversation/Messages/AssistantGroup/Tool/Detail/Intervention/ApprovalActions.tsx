@@ -11,12 +11,15 @@ import { useUserStore } from '@/store/user';
 
 import { useConversationResourceAccess } from '../../../../../hooks/useConversationResourceAccess';
 import { useConversationStore } from '../../../../../store';
+import { type ApprovalChoice, resolveApprovalChoices } from './approvalChoices';
 import { type ApprovalMode } from './index';
 
 interface ApprovalActionsProps {
   apiName: string;
   approvalMode: ApprovalMode;
   assistantGroupId?: string;
+  /** Only a Confirm button: no reject or "don't ask again" choices. */
+  confirmOnly?: boolean;
   identifier: string;
   messageId: string;
   /**
@@ -27,7 +30,7 @@ interface ApprovalActionsProps {
   toolCallId: string;
 }
 
-type Choice = 'approve' | 'approve-remember' | 'reject';
+type Choice = ApprovalChoice;
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   container: css`
@@ -127,7 +130,15 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 }));
 
 const ApprovalActions = memo<ApprovalActionsProps>(
-  ({ approvalMode, apiName, assistantGroupId, identifier, messageId, onBeforeApprove }) => {
+  ({
+    approvalMode,
+    apiName,
+    assistantGroupId,
+    confirmOnly,
+    identifier,
+    messageId,
+    onBeforeApprove,
+  }) => {
     const { t } = useTranslation('chat');
     const [choice, setChoice] = useState<Choice>('approve');
     const [reason, setReason] = useState('');
@@ -140,12 +151,9 @@ const ApprovalActions = memo<ApprovalActionsProps>(
     // teammate's running conversation — they must not drive its tool approvals.
     const { canUseResource } = useConversationResourceAccess();
 
-    // Ordered choices drive both the numbered rows and the 1/2/3 shortcuts.
-    // "Approve & don't ask again" is a first-class option (allow-list only)
-    // rather than a checkbox nested under approve.
     const choices = useMemo<Choice[]>(
-      () => (isAllowListMode ? ['approve', 'approve-remember', 'reject'] : ['approve', 'reject']),
-      [isAllowListMode],
+      () => resolveApprovalChoices({ confirmOnly, isAllowListMode }),
+      [confirmOnly, isAllowListMode],
     );
 
     const [approveToolCall, rejectAndContinueToolCall] = useConversationStore((s) => [
@@ -291,52 +299,54 @@ const ApprovalActions = memo<ApprovalActionsProps>(
 
     return (
       <Flexbox className={styles.container} ref={containerRef}>
-        <div className={styles.optionList} role="radiogroup">
-          {choices.map((c, index) => {
-            if (c === 'reject') {
+        {!confirmOnly && (
+          <div className={styles.optionList} role="radiogroup">
+            {choices.map((c, index) => {
+              if (c === 'reject') {
+                return (
+                  <div
+                    aria-checked={choice === 'reject'}
+                    className={cx(styles.option, choice === 'reject' && styles.optionSelected)}
+                    key={c}
+                    role="radio"
+                    onClick={() => {
+                      setChoice('reject');
+                      rejectInputRef.current?.focus();
+                    }}
+                  >
+                    <span className={styles.number}>{rejectNumber}.</span>
+                    <input
+                      aria-label={t('tool.intervention.rejectReasonPlaceholder')}
+                      className={styles.rejectInput}
+                      disabled={loading || isMessageCreating}
+                      placeholder={t('tool.intervention.rejectReasonPlaceholder')}
+                      ref={rejectInputRef}
+                      type="text"
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      onFocus={() => setChoice('reject')}
+                      onKeyDown={handleRejectInputKeyDown}
+                    />
+                  </div>
+                );
+              }
+
               return (
                 <div
-                  aria-checked={choice === 'reject'}
-                  className={cx(styles.option, choice === 'reject' && styles.optionSelected)}
+                  aria-checked={choice === c}
+                  className={cx(styles.option, choice === c && styles.optionSelected)}
                   key={c}
                   role="radio"
-                  onClick={() => {
-                    setChoice('reject');
-                    rejectInputRef.current?.focus();
-                  }}
+                  onClick={() => setChoice(c)}
                 >
-                  <span className={styles.number}>{rejectNumber}.</span>
-                  <input
-                    aria-label={t('tool.intervention.rejectReasonPlaceholder')}
-                    className={styles.rejectInput}
-                    disabled={loading || isMessageCreating}
-                    placeholder={t('tool.intervention.rejectReasonPlaceholder')}
-                    ref={rejectInputRef}
-                    type="text"
-                    value={reason}
-                    onChange={(e) => setReason(e.target.value)}
-                    onClick={(e) => e.stopPropagation()}
-                    onFocus={() => setChoice('reject')}
-                    onKeyDown={handleRejectInputKeyDown}
-                  />
+                  <span className={styles.number}>{index + 1}.</span>
+                  <span className={styles.optionLabel}>{approveLabel[c]}</span>
                 </div>
               );
-            }
-
-            return (
-              <div
-                aria-checked={choice === c}
-                className={cx(styles.option, choice === c && styles.optionSelected)}
-                key={c}
-                role="radio"
-                onClick={() => setChoice(c)}
-              >
-                <span className={styles.number}>{index + 1}.</span>
-                <span className={styles.optionLabel}>{approveLabel[c]}</span>
-              </div>
-            );
-          })}
-        </div>
+            })}
+          </div>
+        )}
 
         <div className={styles.footer}>
           <Button
@@ -347,7 +357,7 @@ const ApprovalActions = memo<ApprovalActionsProps>(
             type={'primary'}
             onClick={handleSubmit}
           >
-            {t('tool.intervention.submit')}
+            {confirmOnly ? t('tool.intervention.confirm') : t('tool.intervention.submit')}
             <span className={styles.shortcutHint}>
               <CornerDownLeft size={12} />
             </span>

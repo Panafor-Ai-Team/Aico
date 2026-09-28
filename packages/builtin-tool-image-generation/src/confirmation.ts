@@ -9,9 +9,9 @@ export interface ImageGenerationModelChoice {
 }
 
 /**
- * Dynamic intervention resolver id registered by the client runtime.
- * Referenced from the manifest so `generateImage` asks for confirmation exactly
- * once per conversation instead of on every call.
+ * Dynamic intervention resolver id registered by the client and server runtimes.
+ * Referenced from the manifest so `generateImage` opens the settings / confirm
+ * card before every interactive generation.
  */
 export const IMAGE_GENERATION_CONFIRM_AUDIT = 'imageGenerationModelConfirmAudit';
 
@@ -87,8 +87,8 @@ export const getConfirmedImageModel = (
 };
 
 /**
- * Record the user's pick so the rest of the conversation generates images
- * without asking again.
+ * Record the user's pick so the next confirmation card in this conversation
+ * proposes the same model.
  */
 export const setConfirmedImageModel = (
   topicId: null | string | undefined,
@@ -106,13 +106,12 @@ export const clearConfirmedImageModels = (): void => {
 };
 
 /**
- * Intervene on `generateImage` only while the conversation has no confirmed
- * image model. The first call opens the confirmation card (which carries the
- * model picker); every later call in the same conversation runs straight
- * through, so a retry never re-prompts and never silently walks to another
- * paid model.
+ * Every interactive `generateImage` call waits for the confirm card, where the
+ * user picks the model, quality and size — whatever their approval mode.
+ * Headless runs (bots, scheduled tasks) have no card to answer, so they
+ * generate straight away.
  */
 export const imageGenerationModelConfirmAudit: DynamicInterventionResolver = async (
   _toolArgs,
   metadata,
-) => !getConfirmedImageModel(metadata?.topicId as string | undefined);
+) => metadata?.approvalMode !== 'headless';

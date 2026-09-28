@@ -1,4 +1,8 @@
 export {
+  VIDEO_GENERATION_CONFIRM_AUDIT,
+  videoGenerationSettingsConfirmAudit,
+} from './confirmation';
+export {
   DEFAULT_VIDEO_MODEL_IDS,
   DEFAULT_VIDEO_MODEL_PROVIDER,
   findVideoModelByRequestedId,

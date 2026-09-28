@@ -2,6 +2,8 @@
   "config.aspectRatio.label": "Format d'image",
   "config.cameraFixed.label": "Caméra fixe",
   "config.duration.label": "Durée",
+  "config.duration.labelWithUnit": "Durée (secondes)",
+  "config.duration.value": "{{seconds}} s",
   "config.endImageUrl.label": "Image de fin",
   "config.generateAudio.label": "Générer l'audio",
   "config.header.title": "Vidéo",

@@ -10,11 +10,17 @@ import { useTranslation } from 'react-i18next';
 import { useConversationStore } from '@/features/Conversation/store';
 import { dataSelectors } from '@/features/Conversation/store/slices/data/selectors';
 import { estimateImageGenerationCostUsd, GenerationCostEstimate } from '@/features/GenerationCost';
+import { GenerationSettingField } from '@/features/GenerationSettings';
 import { useEnabledImageModels } from '@/hooks/useEnabledImageModels';
 
-import { setConfirmedImageModel } from '../../confirmation';
+import { getConfirmedImageModel, setConfirmedImageModel } from '../../confirmation';
 import { imageSchemaDefaults, resolveImageNum } from '../../ExecutionRuntime';
 import type { GenerateImageParams } from '../../types';
+import {
+  applyImageSettings,
+  type ImageSettingKey,
+  resolveImageSettingFields,
+} from './imageSettings';
 import {
   type ImageModelOption,
   imageModelOptionKey,
@@ -78,12 +84,12 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 }));
 
 /**
- * One-time confirmation shown the first time a conversation generates an image.
+ * Confirmation shown before every interactive image generation.
  *
- * It names the model that will be charged and lets the user swap it for any
- * image model on their account (personal wallet or organization) before the
- * generation starts. The pick is remembered for the conversation, so the rest of
- * the chat generates without asking again.
+ * It names the model that will be charged, lets the user swap it for any image
+ * model on their account (personal wallet or organization) and pick the
+ * quality / size the model offers, and shows the estimated cost. The model pick
+ * becomes the proposal for the next image in this conversation.
  */
 const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImageParams>>(
   ({ args, messageId, onArgsChange, registerBeforeApprove }) => {
@@ -106,11 +112,13 @@ const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImagePar
       [list],
     );
 
-    const defaultOption = useMemo(
-      () =>
-        resolveDefaultImageModelOption(options, { model: args?.model, provider: args?.provider }),
-      [args?.model, args?.provider, options],
-    );
+    const defaultOption = useMemo(() => {
+      const previous = args?.model ? undefined : getConfirmedImageModel(topicId);
+      return resolveDefaultImageModelOption(options, {
+        model: args?.model ?? previous?.model,
+        provider: args?.model ? args?.provider : previous?.provider,
+      });
+    }, [args?.model, args?.provider, options, topicId]);
 
     const [selectedKey, setSelectedKey] = useState<string | undefined>();
 
@@ -127,24 +135,43 @@ const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImagePar
       [defaultOption, options, selectedKey],
     );
 
+    const selectedModelItem = useMemo(
+      () =>
+        selected
+          ? list
+              ?.find((provider) => provider.id === selected.provider)
+              ?.children.find((model) => model.id === selected.model)
+          : undefined,
+      [list, selected],
+    );
+
+    const [settingPicks, setSettingPicks] = useState<Partial<Record<ImageSettingKey, string>>>({});
+
+    const settingFields = useMemo(
+      () =>
+        resolveImageSettingFields(selectedModelItem?.parameters, args?.parameters, settingPicks),
+      [args?.parameters, selectedModelItem?.parameters, settingPicks],
+    );
+
+    const parameters = useMemo(
+      () => applyImageSettings(args?.parameters, settingFields),
+      [args?.parameters, settingFields],
+    );
+
     const costUsd = useMemo(() => {
-      if (!selected) return;
-      const modelItem = list
-        ?.find((provider) => provider.id === selected.provider)
-        ?.children.find((model) => model.id === selected.model);
-      if (!modelItem) return;
+      if (!selected || !selectedModelItem) return;
 
       return estimateImageGenerationCostUsd({
         imageNum: resolveImageNum(args?.imageNum),
-        model: modelItem,
-        params: { ...imageSchemaDefaults(modelItem.parameters), ...args?.parameters },
+        model: selectedModelItem,
+        params: { ...imageSchemaDefaults(selectedModelItem.parameters), ...parameters },
         provider: selected.provider,
       });
-    }, [args?.imageNum, args?.parameters, list, selected]);
+    }, [args?.imageNum, parameters, selected, selectedModelItem]);
 
-    // Write the choice into the tool call right before it is approved: the tool
-    // then runs on exactly the model shown here, and the conversation stops
-    // asking. Refuse approval while models are still loading or none are available.
+    // Write the choices into the tool call right before it is confirmed: the tool
+    // then runs on exactly the model and settings shown here. Refuse while models
+    // are still loading or none are available.
     useEffect(() => {
       if (!registerBeforeApprove) return;
 
@@ -158,11 +185,29 @@ const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImagePar
 
         setConfirmedImageModel(topicId, { model: selected.model, provider: selected.provider });
 
-        if (args?.model !== selected.model || args?.provider !== selected.provider) {
-          await onArgsChange?.({ ...args, model: selected.model, provider: selected.provider });
-        }
+        await onArgsChange?.({
+          ...args,
+          model: selected.model,
+          parameters,
+          provider: selected.provider,
+        });
       });
-    }, [args, isLoading, onArgsChange, registerBeforeApprove, selected, topicId]);
+    }, [args, isLoading, onArgsChange, parameters, registerBeforeApprove, selected, topicId]);
+
+    const settingLabel = useCallback(
+      (key: ImageSettingKey) => t(`builtins.lobe-image-generation.intervention.settings.${key}`),
+      [t],
+    );
+
+    const optionLabel = useCallback(
+      (value: string) => {
+        const known = ['auto', 'high', 'low', 'medium'];
+        return known.includes(value.toLowerCase())
+          ? t(`builtins.lobe-image-generation.intervention.option.${value.toLowerCase() as 'auto'}`)
+          : value;
+      },
+      [t],
+    );
 
     // Once the user overrides the proposal, the copy must stop calling it "the
     // default" — it is now their pick.
@@ -217,6 +262,22 @@ const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImagePar
                 variant={'filled'}
                 onChange={handleChange}
               />
+            </Flexbox>
+          )}
+
+          {settingFields.length > 0 && (
+            <Flexbox horizontal gap={8} wrap={'wrap'}>
+              {settingFields.map((field) => (
+                <GenerationSettingField
+                  key={field.key}
+                  label={settingLabel(field.key)}
+                  options={field.options.map((value) => ({ label: optionLabel(value), value }))}
+                  value={field.value}
+                  onChange={(value) =>
+                    setSettingPicks((picks) => ({ ...picks, [field.key]: value }))
+                  }
+                />
+              ))}
             </Flexbox>
           )}
 

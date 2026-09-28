@@ -1,5 +1,6 @@
 import type { BuiltinToolManifest } from '@lobechat/types';
 
+import { IMAGE_GENERATION_CONFIRM_AUDIT } from './confirmation';
 import { systemPrompt } from './systemRole';
 import { ImageGenerationApiName, ImageGenerationIdentifier } from './types';
 
@@ -54,10 +55,13 @@ export const ImageGenerationManifest: BuiltinToolManifest = {
       description:
         'Generate images and wait by default until final image URLs are available. Only use getImageGenerationStatus if this returns a still-processing result or if waitUntilComplete is false.',
       /**
-       * Same one-shot path as Create → Image (`/image`): no confirmation card.
-       * The runtime pins the product default model (gpt-image-2 / openai/gpt-image-2
-       * at medium quality) when the caller omits provider/model.
+       * Interactive chats confirm every generation on a card where the user picks
+       * the model, quality and size (see `imageGenerationModelConfirmAudit`);
+       * headless runs skip it. `always` so auto-run users still get the card.
        */
+      humanIntervention: {
+        dynamic: { default: 'never', policy: 'always', type: IMAGE_GENERATION_CONFIRM_AUDIT },
+      },
       name: ImageGenerationApiName.generateImage,
       parameters: {
         additionalProperties: false,

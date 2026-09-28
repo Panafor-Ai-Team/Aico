@@ -222,11 +222,19 @@ export default {
   'builtins.lobe-image-generation.intervention.descriptionChanged':
     'This image will be generated with {{model}}.',
   'builtins.lobe-image-generation.intervention.hint':
-    'Your choice is used for the rest of this conversation, so you will not be asked again.',
+    'Pick the model and settings, then confirm to start generating.',
   'builtins.lobe-image-generation.intervention.loading': 'Loading available image models…',
   'builtins.lobe-image-generation.intervention.modelLabel': 'Image model',
   'builtins.lobe-image-generation.intervention.noModels':
     'No image generation model is available on this account yet.',
+  'builtins.lobe-image-generation.intervention.option.auto': 'Auto',
+  'builtins.lobe-image-generation.intervention.option.high': 'High',
+  'builtins.lobe-image-generation.intervention.option.low': 'Low',
+  'builtins.lobe-image-generation.intervention.option.medium': 'Medium',
+  'builtins.lobe-image-generation.intervention.settings.aspectRatio': 'Aspect ratio',
+  'builtins.lobe-image-generation.intervention.settings.quality': 'Quality',
+  'builtins.lobe-image-generation.intervention.settings.resolution': 'Resolution',
+  'builtins.lobe-image-generation.intervention.settings.size': 'Size',
   'builtins.lobe-image-generation.intervention.title': 'Confirm image generation',
   'builtins.lobe-image-generation.render.generatedCount': '{{count}} images',
   'builtins.lobe-image-generation.render.generating': 'Generating image…',
@@ -259,13 +267,18 @@ export default {
   'builtins.lobe-video-generation.intervention.cost': 'Estimated cost',
   'builtins.lobe-video-generation.intervention.description':
     'This video will be generated with {{model}}.',
+  'builtins.lobe-video-generation.intervention.durationValue': '{{seconds}}s',
   'builtins.lobe-video-generation.intervention.hint':
     'The estimate is based on the selected length and quality; the final charge may differ slightly.',
   'builtins.lobe-video-generation.intervention.loading': 'Loading available video models…',
   'builtins.lobe-video-generation.intervention.noModels':
     'No video generation model is available on this account yet.',
-  'builtins.lobe-video-generation.intervention.settingsWithImage': '{{settings}} · from your image',
+  'builtins.lobe-video-generation.intervention.settings.aspectRatio': 'Aspect ratio',
+  'builtins.lobe-video-generation.intervention.settings.duration': 'Duration',
+  'builtins.lobe-video-generation.intervention.settings.resolution': 'Quality',
   'builtins.lobe-video-generation.intervention.title': 'Confirm video generation',
+  'builtins.lobe-video-generation.intervention.usesImage':
+    'Your uploaded image is used as the first frame.',
   'builtins.lobe-video-generation.render.generating': 'Generating video…',
   'builtins.lobe-video-generation.render.generationFailed': 'Video generation failed',
   'builtins.lobe-video-generation.render.retry': 'Retry',

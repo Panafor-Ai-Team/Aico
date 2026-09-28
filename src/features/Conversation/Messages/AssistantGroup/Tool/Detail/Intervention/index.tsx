@@ -1,4 +1,7 @@
-import { getBuiltinIntervention } from '@lobechat/builtin-tools/interventions';
+import {
+  getBuiltinIntervention,
+  isConfirmOnlyIntervention,
+} from '@lobechat/builtin-tools/interventions';
 import { safeParseJSON } from '@lobechat/utils';
 import { Flexbox } from '@lobehub/ui';
 import { memo, Suspense, useCallback, useMemo, useRef, useState } from 'react';
@@ -209,6 +212,7 @@ const Intervention = memo<InterventionProps>(
             apiName={apiName}
             approvalMode={approvalMode}
             assistantGroupId={assistantGroupId}
+            confirmOnly={isConfirmOnlyIntervention(identifier, apiName)}
             identifier={identifier}
             messageId={id}
             toolCallId={toolCallId}
