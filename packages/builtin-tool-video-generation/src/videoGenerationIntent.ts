@@ -117,6 +117,41 @@ export const extractRequestedVideoDuration = (text: string | null | undefined) =
   return /^(?:دقیقه|min)/i.test(match[2]) ? amount * 60 : amount;
 };
 
+const RESOLUTION_PATTERN = /(?<!\d)(360|480|540|720|1080|1440|2160)\s*p(?!\p{L})/iu;
+
+const QUALITY_WORD_RESOLUTION_PATTERN =
+  /(?:کیفیت|رزولوشن|quality|resolution)[\s:]*(?:of\s+)?(360|480|540|720|1080|1440|2160)(?!\d)/iu;
+
+/** The output quality the user asked for («کیفیت ۴۸۰», "720p"), as a `…p` resolution. */
+export const extractRequestedVideoResolution = (text: string | null | undefined) => {
+  if (!text) return undefined;
+
+  const normalized = toLatinDigits(text);
+  const match =
+    normalized.match(RESOLUTION_PATTERN) ?? normalized.match(QUALITY_WORD_RESOLUTION_PATTERN);
+  if (match) return `${match[1]}p`;
+  if (/(?<!\p{L})4k(?!\p{L})/iu.test(normalized)) return '2160p';
+  return undefined;
+};
+
+const ASPECT_RATIO_PATTERN = /(?<![\d.])(21|16|[91-4])\s*[:：]\s*([934]|16|21|[21])(?![\d.])/;
+
+// English words only count next to a format noun: "a portrait of a woman" is content.
+const ASPECT_RATIO_WORDS: Array<[RegExp, string]> = [
+  [/عمودی|\b(?:vertical|portrait)\s+(?:video|clip|format|mode)\b/i, '9:16'],
+  [/افقی|\b(?:horizontal|landscape)\s+(?:video|clip|format|mode)\b/i, '16:9'],
+  [/مربعی|\bsquare\s+(?:video|clip|format)\b/i, '1:1'],
+];
+
+/** The frame shape the user asked for ("9:16", «عمودی», "square"). */
+export const extractRequestedVideoAspectRatio = (text: string | null | undefined) => {
+  if (!text) return undefined;
+
+  const match = toLatinDigits(text).match(ASPECT_RATIO_PATTERN);
+  if (match) return `${match[1]}:${match[2]}`;
+  return ASPECT_RATIO_WORDS.find(([pattern]) => pattern.test(text))?.[1];
+};
+
 type MessageLike = { content?: unknown; role?: string };
 
 const textOfContent = (content: unknown): string => {
@@ -183,10 +218,12 @@ export interface DirectGenerateVideoToolCall {
 }
 
 export const buildDirectGenerateVideoToolCall = (params: {
+  aspectRatio?: string;
   duration?: number;
   executor?: 'client' | 'server';
   imageUrls?: string[];
   prompt: string;
+  resolution?: string;
   source?: DirectGenerateVideoToolCall['source'];
 }): DirectGenerateVideoToolCall => {
   const id =
@@ -198,8 +235,10 @@ export const buildDirectGenerateVideoToolCall = (params: {
     apiName: VideoGenerationApiName.generateVideo,
     arguments: JSON.stringify({
       prompt: params.prompt.trim(),
+      ...(params.aspectRatio ? { aspectRatio: params.aspectRatio } : {}),
       ...(params.duration ? { duration: params.duration } : {}),
       ...(params.imageUrls?.length ? { imageUrls: params.imageUrls } : {}),
+      ...(params.resolution ? { resolution: params.resolution } : {}),
     }),
     ...(params.executor ? { executor: params.executor } : {}),
     id,
@@ -224,7 +263,9 @@ export const resolveDirectVideoGenerationToolCall = (params: {
   if (!pending || !isVideoGenerationUserIntent(pending.text)) return undefined;
 
   return buildDirectGenerateVideoToolCall({
+    aspectRatio: extractRequestedVideoAspectRatio(pending.text),
     duration: extractRequestedVideoDuration(pending.text),
+    resolution: extractRequestedVideoResolution(pending.text),
     executor: params.executorMap?.[VideoGenerationIdentifier],
     imageUrls: pending.imageUrls,
     prompt: pending.text,

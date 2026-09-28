@@ -10,6 +10,7 @@ export type { VideoGenerationRuntimeService } from './ExecutionRuntime';
 export { VideoGenerationManifest } from './manifest';
 export { systemPrompt } from './systemRole';
 export {
+  type GeneratedVideoSettings,
   type GeneratedVideoTask,
   type GenerateVideoParams,
   type GenerateVideoState,
@@ -29,7 +30,9 @@ export {
 } from './types';
 export {
   buildDirectGenerateVideoToolCall,
+  extractRequestedVideoAspectRatio,
   extractRequestedVideoDuration,
+  extractRequestedVideoResolution,
   findPendingUserMessage,
   isVideoGenerationUserIntent,
   resolveDirectVideoGenerationToolCall,

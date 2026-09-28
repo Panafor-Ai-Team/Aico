@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  extractRequestedVideoAspectRatio,
   extractRequestedVideoDuration,
+  extractRequestedVideoResolution,
   findPendingUserMessage,
   isVideoGenerationUserIntent,
   resolveDirectVideoGenerationToolCall,
@@ -30,6 +32,39 @@ describe('extractRequestedVideoDuration', () => {
   ])('finds no length in %s', (text) => {
     expect(extractRequestedVideoDuration(text)).toBeUndefined();
   });
+});
+
+describe('extractRequestedVideoResolution', () => {
+  it.each([
+    ['یک ویدیو با کیفیت 480p بساز', '480p'],
+    ['ویدیو ۴۸۰p بساز', '480p'],
+    ['یه ویدیو با کیفیت ۴۸۰ بساز', '480p'],
+    ['Make a 720P video of a cat', '720p'],
+    ['Generate a video in 4K', '2160p'],
+  ])('reads %s as %s', (text, resolution) => {
+    expect(extractRequestedVideoResolution(text)).toBe(resolution);
+  });
+
+  it('finds no quality in a plain ask', () => {
+    expect(extractRequestedVideoResolution('Make a video of 480 birds')).toBeUndefined();
+  });
+});
+
+describe('extractRequestedVideoAspectRatio', () => {
+  it.each([
+    ['ویدیو عمودی از یک آبشار بساز', '9:16'],
+    ['Make a 9:16 video of a city', '9:16'],
+    ['Make a square video of a cake', '1:1'],
+  ])('reads %s as %s', (text, aspectRatio) => {
+    expect(extractRequestedVideoAspectRatio(text)).toBe(aspectRatio);
+  });
+
+  it.each(['Make a video of a portrait of a woman', 'Make a video of a town square at 5:30'])(
+    'finds no frame shape in %s',
+    (text) => {
+      expect(extractRequestedVideoAspectRatio(text)).toBeUndefined();
+    },
+  );
 });
 
 describe('isVideoGenerationUserIntent', () => {
@@ -137,6 +172,14 @@ describe('resolveDirectVideoGenerationToolCall', () => {
     });
 
     expect(JSON.parse(call!.arguments)).toMatchObject({ duration: 2 });
+  });
+
+  it('forwards length and quality asked for together', () => {
+    const call = resolveDirectVideoGenerationToolCall({
+      messages: [{ content: 'یه ویدیو ۲ ثانیه ای با کیفیت 480p از یک گربه بساز', role: 'user' }],
+    });
+
+    expect(JSON.parse(call!.arguments)).toMatchObject({ duration: 2, resolution: '480p' });
   });
 
   it('does not fire again after the tool result', () => {

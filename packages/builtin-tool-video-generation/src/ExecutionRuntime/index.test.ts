@@ -124,6 +124,47 @@ describe('VideoGenerationExecutionRuntime.generateVideo', () => {
     expect(result.content).not.toContain('closest supported length');
   });
 
+  it('sends the requested quality and frame shape and reports what was sent', async () => {
+    const service = createService();
+    const runtime = new VideoGenerationExecutionRuntime(service);
+
+    const result = await runtime.generateVideo({
+      aspectRatio: '9:16',
+      duration: 2,
+      prompt: 'A cat',
+      resolution: '480P',
+    });
+
+    expect(vi.mocked(service.createVideo).mock.calls[0][0].params).toMatchObject({
+      aspectRatio: '9:16',
+      duration: 2,
+      resolution: '480p',
+    });
+    expect(result.state).toMatchObject({
+      settings: { aspectRatio: '9:16', duration: 2, resolution: '480p' },
+    });
+    expect(result.content).toContain(
+      'Settings sent: duration=2s, resolution=480p, aspectRatio=9:16',
+    );
+  });
+
+  it('falls back to the closest offered quality and an offered frame shape', async () => {
+    const service = createService();
+    const runtime = new VideoGenerationExecutionRuntime(service);
+
+    const result = await runtime.generateVideo({
+      aspectRatio: '21:9',
+      prompt: 'A cat',
+      resolution: '1080p',
+    });
+
+    const { params } = vi.mocked(service.createVideo).mock.calls[0][0];
+    expect(params.resolution).toBe('720p');
+    expect(params.aspectRatio).toBe('16:9');
+    expect(result.content).toContain('closest supported quality, 720p');
+    expect(result.content).toContain('does not offer a 21:9 frame');
+  });
+
   it('clamps a duration outside the model range and says so', async () => {
     const service = createService();
     const runtime = new VideoGenerationExecutionRuntime(service);

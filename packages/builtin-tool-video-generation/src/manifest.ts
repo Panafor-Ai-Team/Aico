@@ -56,6 +56,11 @@ export const VideoGenerationManifest: BuiltinToolManifest = {
       parameters: {
         additionalProperties: false,
         properties: {
+          aspectRatio: {
+            description:
+              'Frame shape such as "16:9", "9:16" or "1:1". Pass it when the user asks for one (vertical → "9:16"). Omit to use the model default.',
+            type: 'string',
+          },
           duration: {
             description:
               'Video length in seconds. Always pass it when the user asks for a specific length (for example "2 seconds" → 2); the runtime fits it to what the model supports. Omit to use the model default.',
@@ -97,6 +102,11 @@ export const VideoGenerationManifest: BuiltinToolManifest = {
           provider: {
             description:
               'Video provider id. When omitted, the runtime resolves it from the requested model or the default selection.',
+            type: 'string',
+          },
+          resolution: {
+            description:
+              'Output quality such as "480p" or "720p". Always pass it when the user asks for a quality; the runtime fits it to what the model supports. Omit to use the model default.',
             type: 'string',
           },
           waitTimeoutMs: {
