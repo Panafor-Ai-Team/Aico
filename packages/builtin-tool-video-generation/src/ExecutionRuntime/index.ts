@@ -5,6 +5,7 @@ import {
 } from '@lobechat/types';
 import type { RuntimeVideoGenParams, VideoModelParamsSchema } from 'model-bank';
 import { extractVideoDefaultValues, resolveVideoModelParamsSchema } from 'model-bank';
+import { limitVideoParamsToSingleImage } from 'model-bank/videoParameters';
 
 import {
   DEFAULT_VIDEO_MODEL_PROVIDER,
@@ -12,6 +13,7 @@ import {
   pickDefaultVideoModel,
 } from '../defaultModel';
 import type {
+  GeneratedVideoSettings,
   GeneratedVideoTask,
   GenerateVideoParams,
   GenerateVideoState,
@@ -25,6 +27,11 @@ import type {
   VideoGenerationCreateVideoResult,
 } from '../types';
 import { getVideoAssetUrl } from '../videoAsset';
+import {
+  extractRequestedVideoAspectRatio,
+  extractRequestedVideoDuration,
+  extractRequestedVideoResolution,
+} from '../videoGenerationIntent';
 
 const DEFAULT_LIST_LIMIT = 20;
 const MAX_LIST_LIMIT = 50;
@@ -179,10 +186,125 @@ const resolveReferenceParams = (
     }
   }
 
-  if (endImageUrl && schemaRecord.endImageUrl) params.endImageUrl = endImageUrl;
+  let ignoredEndImage = 0;
+  if (endImageUrl) {
+    if (schemaRecord.endImageUrl) params.endImageUrl = endImageUrl;
+    else ignoredEndImage = 1;
+  }
 
-  return { ignoredReferenceCount: references.length - accepted, params };
+  return { ignoredReferenceCount: references.length - accepted + ignoredEndImage, params };
 };
+
+const toDurationSeconds = (value: unknown) => {
+  const seconds = typeof value === 'string' ? Number(value) : value;
+  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0
+    ? seconds
+    : undefined;
+};
+
+/** Closest length the model accepts: the nearest enum value, or the request clamped to min/max. */
+const fitDuration = (
+  requested: number,
+  schema: NonNullable<VideoModelParamsSchema['duration']>,
+) => {
+  if (schema.enum?.length) {
+    return schema.enum.reduce((best, value) =>
+      Math.abs(value - requested) < Math.abs(best - requested) ? value : best,
+    );
+  }
+
+  const step = schema.step && schema.step > 0 ? schema.step : 1;
+  let seconds = Math.round(requested / step) * step;
+  if (typeof schema.min === 'number') seconds = Math.max(schema.min, seconds);
+  if (typeof schema.max === 'number') seconds = Math.min(schema.max, seconds);
+  return seconds;
+};
+
+const toOption = (value: unknown) =>
+  typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : undefined;
+
+const resolutionHeight = (value: string) => Number.parseInt(value, 10);
+
+/** The requested resolution if offered, otherwise the offered one closest in height. */
+const fitResolution = (requested: string, options: string[]) => {
+  const exact = options.find((option) => option.toLowerCase() === requested);
+  if (exact) return exact;
+
+  const height = resolutionHeight(requested);
+  if (!Number.isFinite(height)) return;
+  return options
+    .filter((option) => Number.isFinite(resolutionHeight(option)))
+    .reduce<string | undefined>(
+      (best, option) =>
+        best === undefined ||
+        Math.abs(resolutionHeight(option) - height) < Math.abs(resolutionHeight(best) - height)
+          ? option
+          : best,
+      undefined,
+    );
+};
+
+/**
+ * Explicit length / quality / frame-shape requests, fitted to the model schema.
+ * Notes tell the chat model when a request could not be honoured exactly.
+ */
+const resolveOutputSettings = (
+  args: GenerateVideoParams,
+  schema: VideoModelParamsSchema,
+): { notes: string[]; params: GeneratedVideoSettings } => {
+  const notes: string[] = [];
+  const params: GeneratedVideoSettings = {};
+  // Chat models often write "a 2-second 480p video" into the prompt and leave the fields out.
+  const prompt = typeof args.prompt === 'string' ? args.prompt : '';
+
+  const duration = toDurationSeconds(
+    args.duration ?? args.parameters?.duration ?? extractRequestedVideoDuration(prompt),
+  );
+  if (duration && schema.duration) {
+    params.duration = fitDuration(duration, schema.duration);
+    if (params.duration !== duration) {
+      notes.push(
+        `Note: the selected model cannot make a ${duration}s video; it was generated at the closest supported length, ${params.duration}s.`,
+      );
+    }
+  }
+
+  const resolution = toOption(
+    args.resolution ?? args.parameters?.resolution ?? extractRequestedVideoResolution(prompt),
+  );
+  if (resolution) {
+    const fitted = schema.resolution?.enum?.length
+      ? fitResolution(resolution, schema.resolution.enum)
+      : undefined;
+    if (fitted) params.resolution = fitted;
+    if (fitted?.toLowerCase() !== resolution) {
+      notes.push(
+        fitted
+          ? `Note: the selected model does not offer ${resolution}; it was generated at the closest supported quality, ${fitted}.`
+          : `Note: the selected model does not let you choose ${resolution}; it used its default quality.`,
+      );
+    }
+  }
+
+  const aspectRatio = toOption(
+    args.aspectRatio ?? args.parameters?.aspectRatio ?? extractRequestedVideoAspectRatio(prompt),
+  );
+  if (aspectRatio) {
+    const offered = schema.aspectRatio?.enum?.find(
+      (option) => option.toLowerCase() === aspectRatio,
+    );
+    if (offered) params.aspectRatio = offered;
+    else {
+      notes.push(
+        `Note: the selected model does not offer a ${aspectRatio} frame; it used its default aspect ratio.`,
+      );
+    }
+  }
+
+  return { notes, params };
+};
+
+const OUTPUT_SETTING_KEYS = new Set(['aspectRatio', 'duration', 'resolution']);
 
 const formatModelList = (state: ListVideoModelsState) => {
   if (state.totalModels === 0) {
@@ -234,8 +356,17 @@ const formatTaskLine = (task: GeneratedVideoTask) => {
 
 const ignoredReferenceNote = (count: number) =>
   count > 0
-    ? `Note: the selected model does not accept ${count} of the reference image(s); they were not sent.`
+    ? `Note: video generation takes only one image, so the first was used and ${count} other image(s) were not sent. Tell the user only one image is supported.`
     : undefined;
+
+const formatSettingsLine = ({ aspectRatio, duration, resolution }: GeneratedVideoSettings) => {
+  const parts = [
+    duration ? `duration=${duration}s` : undefined,
+    resolution ? `resolution=${resolution}` : undefined,
+    aspectRatio ? `aspectRatio=${aspectRatio}` : undefined,
+  ].filter(Boolean);
+  return parts.length > 0 ? `Settings sent: ${parts.join(', ')}` : undefined;
+};
 
 const joinLines = (lines: Array<string | undefined>) =>
   lines.filter((line): line is string => Boolean(line)).join('\n');
@@ -300,7 +431,9 @@ export class VideoGenerationExecutionRuntime {
         return errorOutput('VideoModelNotFound', `Video model not found: ${provider}/${model}`);
       }
 
-      const parameters = resolveVideoModelParamsSchema(modelItem.parameters);
+      const parameters = limitVideoParamsToSingleImage(
+        resolveVideoModelParamsSchema(modelItem.parameters),
+      );
       const state: GetVideoModelParametersState = {
         defaultValues: extractVideoDefaultValues(parameters),
         displayName: modelItem.displayName,
@@ -398,19 +531,30 @@ export class VideoGenerationExecutionRuntime {
     }
 
     const { model, provider } = selection;
-    const schema = resolveVideoModelParamsSchema(selection.parameters);
+    const schema = limitVideoParamsToSingleImage(
+      resolveVideoModelParamsSchema(selection.parameters),
+    );
     const { ignoredReferenceCount, params: referenceParams } = resolveReferenceParams(args, schema);
+    const { notes: settingNotes, params: settingParams } = resolveOutputSettings(args, schema);
     const callerParams = Object.fromEntries(
-      Object.entries(args.parameters ?? {}).filter(([key]) => !REFERENCE_PARAM_KEYS.has(key)),
+      Object.entries(args.parameters ?? {}).filter(
+        ([key]) => !REFERENCE_PARAM_KEYS.has(key) && !OUTPUT_SETTING_KEYS.has(key),
+      ),
     );
     const params = {
       // Schema defaults first (duration, resolution, aspect ratio) so the tool
       // sends what Create → Video would; explicit arguments still win.
       ...schemaDefaultParams(schema),
       ...callerParams,
+      ...settingParams,
       ...referenceParams,
       prompt,
     } as RuntimeVideoGenParams & Record<string, unknown>;
+    const settings: GeneratedVideoSettings = {
+      aspectRatio: typeof params.aspectRatio === 'string' ? params.aspectRatio : undefined,
+      duration: typeof params.duration === 'number' ? params.duration : undefined,
+      resolution: typeof params.resolution === 'string' ? params.resolution : undefined,
+    };
     const waitUntilComplete = args.waitUntilComplete !== false;
 
     try {
@@ -441,9 +585,14 @@ export class VideoGenerationExecutionRuntime {
         model,
         prompt,
         provider,
+        settings,
         waitUntilComplete,
       };
-      const note = ignoredReferenceNote(ignoredReferenceCount);
+      const note = joinLines([
+        formatSettingsLine(settings),
+        ignoredReferenceNote(ignoredReferenceCount),
+        ...settingNotes,
+      ]);
 
       if (!waitUntilComplete) {
         return {

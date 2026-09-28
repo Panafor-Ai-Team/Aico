@@ -114,20 +114,139 @@ describe('VideoGenerationExecutionRuntime.generateVideo', () => {
     });
   });
 
-  it('fits reference images to a model that takes a reference list', async () => {
+  it('sends the requested duration instead of the model default', async () => {
+    const service = createService();
+    const runtime = new VideoGenerationExecutionRuntime(service);
+
+    const result = await runtime.generateVideo({ duration: 2, prompt: 'A 2 second clip' });
+
+    expect(vi.mocked(service.createVideo).mock.calls[0][0].params.duration).toBe(2);
+    expect(result.content).not.toContain('closest supported length');
+  });
+
+  it('reads length and quality from the prompt when the call leaves them out', async () => {
+    const service = createService();
+    const runtime = new VideoGenerationExecutionRuntime(service);
+
+    await runtime.generateVideo({ prompt: 'یک ویدیو ۲ ثانیه‌ای با کیفیت ۴۸۰ از یک گربه' });
+
+    expect(vi.mocked(service.createVideo).mock.calls[0][0].params).toMatchObject({
+      duration: 2,
+      resolution: '480p',
+    });
+  });
+
+  it('prefers explicit settings over numbers in the prompt', async () => {
+    const service = createService();
+    const runtime = new VideoGenerationExecutionRuntime(service);
+
+    await runtime.generateVideo({
+      duration: 4,
+      prompt: 'A 2-second 720p clip',
+      resolution: '480p',
+    });
+
+    expect(vi.mocked(service.createVideo).mock.calls[0][0].params).toMatchObject({
+      duration: 4,
+      resolution: '480p',
+    });
+  });
+
+  it('sends the requested quality and frame shape and reports what was sent', async () => {
     const service = createService();
     const runtime = new VideoGenerationExecutionRuntime(service);
 
     const result = await runtime.generateVideo({
+      aspectRatio: '9:16',
+      duration: 2,
+      prompt: 'A cat',
+      resolution: '480P',
+    });
+
+    expect(vi.mocked(service.createVideo).mock.calls[0][0].params).toMatchObject({
+      aspectRatio: '9:16',
+      duration: 2,
+      resolution: '480p',
+    });
+    expect(result.state).toMatchObject({
+      settings: { aspectRatio: '9:16', duration: 2, resolution: '480p' },
+    });
+    expect(result.content).toContain(
+      'Settings sent: duration=2s, resolution=480p, aspectRatio=9:16',
+    );
+  });
+
+  it('falls back to the closest offered quality and an offered frame shape', async () => {
+    const service = createService();
+    const runtime = new VideoGenerationExecutionRuntime(service);
+
+    const result = await runtime.generateVideo({
+      aspectRatio: '21:9',
+      prompt: 'A cat',
+      resolution: '1080p',
+    });
+
+    const { params } = vi.mocked(service.createVideo).mock.calls[0][0];
+    expect(params.resolution).toBe('720p');
+    expect(params.aspectRatio).toBe('16:9');
+    expect(result.content).toContain('closest supported quality, 720p');
+    expect(result.content).toContain('does not offer a 21:9 frame');
+  });
+
+  it('clamps a duration outside the model range and says so', async () => {
+    const service = createService();
+    const runtime = new VideoGenerationExecutionRuntime(service);
+
+    const result = await runtime.generateVideo({
+      model: 'veo-3.1',
+      parameters: { duration: 30 },
+      prompt: 'A long pan',
+    });
+
+    expect(vi.mocked(service.createVideo).mock.calls[0][0].params.duration).toBe(10);
+    expect(result.content).toContain('cannot make a 30s video');
+    expect(result.content).toContain('closest supported length, 10s');
+  });
+
+  it('picks the nearest allowed duration for models with fixed lengths', async () => {
+    const service = createService({
+      listVideoModels: vi.fn().mockResolvedValue({
+        providers: [
+          {
+            id: 'openrouter',
+            models: [
+              {
+                id: 'grok-imagine-video',
+                parameters: { duration: { default: 5, enum: [5, 10] }, prompt: { default: '' } },
+              },
+            ],
+          },
+        ],
+        totalModels: 1,
+      }),
+    });
+    const runtime = new VideoGenerationExecutionRuntime(service);
+
+    await runtime.generateVideo({ duration: 2, prompt: 'Short' });
+
+    expect(vi.mocked(service.createVideo).mock.calls[0][0].params.duration).toBe(5);
+  });
+
+  it('sends only one image even when the model takes a reference list', async () => {
+    const service = createService();
+    const runtime = new VideoGenerationExecutionRuntime(service);
+
+    const result = await runtime.generateVideo({
+      endImageUrl: 'https://end.png',
       imageUrls: ['https://a.png', 'https://b.png', 'https://c.png'],
       prompt: 'These two fighting',
     });
 
-    expect(vi.mocked(service.createVideo).mock.calls[0][0].params.imageUrls).toEqual([
-      'https://a.png',
-      'https://b.png',
-    ]);
-    expect(result.content).toContain('does not accept 1 of the reference image(s)');
+    const { params } = vi.mocked(service.createVideo).mock.calls[0][0];
+    expect(params.imageUrls).toEqual(['https://a.png']);
+    expect(params.endImageUrl).toBeUndefined();
+    expect(result.content).toContain('takes only one image');
+    expect(result.content).toContain('3 other image(s) were not sent');
   });
 
   it('sends the first reference as the start frame when the model only takes one', async () => {

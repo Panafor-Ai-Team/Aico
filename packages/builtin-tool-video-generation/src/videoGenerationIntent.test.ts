@@ -1,16 +1,107 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  extractRequestedVideoAspectRatio,
+  extractRequestedVideoDuration,
+  extractRequestedVideoResolution,
   findPendingUserMessage,
   isVideoGenerationUserIntent,
   resolveDirectVideoGenerationToolCall,
 } from './videoGenerationIntent';
+
+// Verbatim shapes produced by `filesPrompts` and `MessageContentProcessor` in the chat pipeline.
+const VISION_PLACEHOLDER =
+  '[image omitted: native vision is not supported. Do not infer or describe the image. If the request depends on it, use an available visual-analysis tool before answering; otherwise state that the image cannot be inspected.]';
+
+const filesContext = `<!-- SYSTEM CONTEXT (NOT PART OF USER QUERY) -->
+<context.instruction>following part contains context information injected by the system. Please follow these instructions:
+
+1. Always prioritize handling user-visible content.
+2. the context is only required when user's queries rely on it.
+</context.instruction>
+<files_info>
+<images>
+<images_docstring>here are user upload images you can refer to</images_docstring>
+<image ref="img_1" name="cat 1080p 16:9.png" url="https://cdn.example.com/files/download/cat.png"></image>
+</images>
+</files_info>
+<!-- END SYSTEM CONTEXT -->`;
+
+describe('extractRequestedVideoDuration', () => {
+  it.each([
+    ['یک ویدیو ۲ ثانیه‌ای از دریا بساز', 2],
+    ['ویدیو 2 ثانیه از دریا بساز', 2],
+    ['یه کلیپ دو ثانیه ای بساز', 2],
+    ['ویدیو یازده ثانیه ای بساز', 11],
+    ['یک ویدیو یک دقیقه ای بساز', 60],
+    ['Make a 2-second video of a cat', 2],
+    ['Generate a 5s clip of rain', 5],
+    ['make a video, 3 seconds long', 3],
+    ['Create a ten second video', 10],
+  ])('reads %s as %d seconds', (text, seconds) => {
+    expect(extractRequestedVideoDuration(text)).toBe(seconds);
+  });
+
+  it.each([
+    'یک ویدیو از غروب خورشید بساز',
+    'Make a second video of the dog',
+    'Make a video of the 1990s skyline',
+    'Make a video of 5 sheep',
+  ])('finds no length in %s', (text) => {
+    expect(extractRequestedVideoDuration(text)).toBeUndefined();
+  });
+});
+
+describe('extractRequestedVideoResolution', () => {
+  it.each([
+    ['یک ویدیو با کیفیت 480p بساز', '480p'],
+    ['ویدیو ۴۸۰p بساز', '480p'],
+    ['یه ویدیو با کیفیت ۴۸۰ بساز', '480p'],
+    ['یه ویدیو بساز کیفیتش 480 باشه', '480p'],
+    ['کیفیت ویدیو ۴۸۰ باشه', '480p'],
+    ['ویدیو ۴۸۰ پیکسل بساز', '480p'],
+    ['Make a 720P video of a cat', '720p'],
+    ['Generate a video in 4K', '2160p'],
+  ])('reads %s as %s', (text, resolution) => {
+    expect(extractRequestedVideoResolution(text)).toBe(resolution);
+  });
+
+  it('finds no quality in a plain ask', () => {
+    expect(extractRequestedVideoResolution('Make a video of 480 birds')).toBeUndefined();
+  });
+});
+
+describe('extractRequestedVideoAspectRatio', () => {
+  it.each([
+    ['ویدیو عمودی از یک آبشار بساز', '9:16'],
+    ['Make a 9:16 video of a city', '9:16'],
+    ['Make a square video of a cake', '1:1'],
+  ])('reads %s as %s', (text, aspectRatio) => {
+    expect(extractRequestedVideoAspectRatio(text)).toBe(aspectRatio);
+  });
+
+  it.each(['Make a video of a portrait of a woman', 'Make a video of a town square at 5:30'])(
+    'finds no frame shape in %s',
+    (text) => {
+      expect(extractRequestedVideoAspectRatio(text)).toBeUndefined();
+    },
+  );
+});
 
 describe('isVideoGenerationUserIntent', () => {
   it('detects Persian video requests', () => {
     expect(isVideoGenerationUserIntent('ویدیو مبارزه ی بین این دوتفر رو بساز')).toBe(true);
     expect(isVideoGenerationUserIntent('یه کلیپ از یه گربه که میرقصه درست کن')).toBe(true);
     expect(isVideoGenerationUserIntent('یک ویدئو کوتاه از غروب دریا تولید کن')).toBe(true);
+    expect(isVideoGenerationUserIntent('یک ویدیو از یک گربه ایجاد کن')).toBe(true);
+    expect(isVideoGenerationUserIntent('میشه یه ویدیو از یه گربه برام بسازی؟')).toBe(true);
+    expect(isVideoGenerationUserIntent('یه ویدیو از یه گربه میخوام')).toBe(true);
+  });
+
+  it('treats a video with an explicit length or quality as a request to make one', () => {
+    expect(isVideoGenerationUserIntent('یه ویدیو ۲ ثانیه‌ای با کیفیت ۴۸۰ از یه گربه')).toBe(true);
+    expect(isVideoGenerationUserIntent('ویدیو دو ثانیه ای از غروب دریا')).toBe(true);
+    expect(isVideoGenerationUserIntent('این ویدیو ۲ ثانیه‌ای رو توضیح بده')).toBe(false);
   });
 
   it('detects English video requests', () => {
@@ -58,6 +149,22 @@ describe('findPendingUserMessage', () => {
     });
   });
 
+  it('drops context the pipeline appended to the user text', () => {
+    expect(
+      findPendingUserMessage([
+        {
+          content: [
+            {
+              text: `ویدیو ۲ ثانیه بساز\n\n${VISION_PLACEHOLDER}\n\n${filesContext}`,
+              type: 'text',
+            },
+          ],
+          role: 'user',
+        },
+      ])?.text,
+    ).toBe('ویدیو ۲ ثانیه بساز');
+  });
+
   it('returns nothing once a tool already answered the latest user turn', () => {
     expect(
       findPendingUserMessage([
@@ -103,6 +210,44 @@ describe('resolveDirectVideoGenerationToolCall', () => {
     });
 
     expect(JSON.parse(call!.arguments)).toEqual({ prompt: 'ویدیو یه اسب که تو برف میدوه بساز' });
+  });
+
+  it('forwards the length the user asked for', () => {
+    const call = resolveDirectVideoGenerationToolCall({
+      messages: [{ content: 'یک ویدیو ۲ ثانیه‌ای از یک گربه بساز', role: 'user' }],
+    });
+
+    expect(JSON.parse(call!.arguments)).toMatchObject({ duration: 2 });
+  });
+
+  it('forwards length and quality asked for together', () => {
+    const call = resolveDirectVideoGenerationToolCall({
+      messages: [{ content: 'یه ویدیو ۲ ثانیه ای با کیفیت 480p از یک گربه بساز', role: 'user' }],
+    });
+
+    expect(JSON.parse(call!.arguments)).toMatchObject({ duration: 2, resolution: '480p' });
+  });
+
+  it('reads the ask, not the file context appended to a message with an image', () => {
+    const call = resolveDirectVideoGenerationToolCall({
+      messages: [
+        {
+          content: [
+            {
+              text: `یه ویدیو ۲ ثانیه‌ای با کیفیت 480p از این عکس بساز\n\n${VISION_PLACEHOLDER}\n\n${filesContext}`,
+              type: 'text',
+            },
+          ],
+          role: 'user',
+        },
+      ],
+    });
+
+    expect(JSON.parse(call!.arguments)).toEqual({
+      duration: 2,
+      prompt: 'یه ویدیو ۲ ثانیه‌ای با کیفیت 480p از این عکس بساز',
+      resolution: '480p',
+    });
   });
 
   it('does not fire again after the tool result', () => {

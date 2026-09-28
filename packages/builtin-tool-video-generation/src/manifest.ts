@@ -56,21 +56,21 @@ export const VideoGenerationManifest: BuiltinToolManifest = {
       parameters: {
         additionalProperties: false,
         properties: {
-          endImageUrl: {
+          aspectRatio: {
             description:
-              'Accessible last-frame image URL for models that support start/end frames. Omit otherwise.',
-            type: ['string', 'null'],
+              'Frame shape such as "16:9", "9:16" or "1:1". Pass it when the user asks for one (vertical → "9:16"). Omit to use the model default.',
+            type: 'string',
+          },
+          duration: {
+            description:
+              'Video length in seconds. Always pass it when the user asks for a specific length (for example "2 seconds" → 2); the runtime fits it to what the model supports. Omit to use the model default.',
+            minimum: 1,
+            type: 'number',
           },
           imageUrl: {
             description:
-              'Accessible start-frame image URL for image-to-video. Omit for text-to-video.',
+              'The one accessible image URL to animate (for example an image the user attached in this chat). Video generation takes a single image. Omit for text-to-video.',
             type: ['string', 'null'],
-          },
-          imageUrls: {
-            description:
-              'Accessible reference image URLs (for example images the user attached in this chat). The runtime fits them to what the model accepts.',
-            items: { type: 'string' },
-            type: 'array',
           },
           model: {
             description:
@@ -91,6 +91,11 @@ export const VideoGenerationManifest: BuiltinToolManifest = {
           provider: {
             description:
               'Video provider id. When omitted, the runtime resolves it from the requested model or the default selection.',
+            type: 'string',
+          },
+          resolution: {
+            description:
+              'Output quality such as "480p" or "720p". Always pass it when the user asks for a quality; the runtime fits it to what the model supports. Omit to use the model default.',
             type: 'string',
           },
           waitTimeoutMs: {

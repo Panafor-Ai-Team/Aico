@@ -5,6 +5,7 @@ import {
   type RuntimeVideoGenParams,
   type VideoModelParamsSchema,
 } from 'model-bank';
+import { limitVideoParamsToSingleImage } from 'model-bank/videoParameters';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useVideoStore } from '@/store/video';
@@ -23,6 +24,12 @@ const modelBSchema: VideoModelParamsSchema = {
   duration: { default: 3, min: 1, max: 10 },
 };
 
+const multiImageSchema: VideoModelParamsSchema = {
+  prompt: { default: '' },
+  imageUrls: { default: [], maxCount: 9 },
+  endImageUrl: { default: null },
+};
+
 const testVideoModels: AIVideoModelCard[] = [
   {
     id: 'video-model-a',
@@ -38,6 +45,13 @@ const testVideoModels: AIVideoModelCard[] = [
     parameters: modelBSchema,
     releasedAt: '2025-01-02',
   },
+  {
+    id: 'video-model-multi',
+    displayName: 'Multi Image Model',
+    type: 'video',
+    parameters: multiImageSchema,
+    releasedAt: '2025-01-03',
+  },
 ];
 
 const mockProviders = [
@@ -49,7 +63,7 @@ const mockProviders = [
   {
     id: 'provider-b',
     name: 'Provider B',
-    children: [testVideoModels[1]],
+    children: [testVideoModels[1], testVideoModels[2]],
   },
 ];
 
@@ -60,7 +74,7 @@ vi.mock('@/store/aiInfra', () => ({
   getAiInfraStoreState: vi.fn(() => ({})),
 }));
 
-const modelBDefaultValues = extractVideoDefaultValues(modelBSchema);
+const modelBDefaultValues = extractVideoDefaultValues(limitVideoParamsToSingleImage(modelBSchema));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -84,7 +98,7 @@ afterEach(() => {
 });
 
 describe('video generationConfig actions', () => {
-  it('should preserve prompt and frame images when switching model', () => {
+  it('should preserve prompt and the start frame when switching model, but not an end frame', () => {
     const { result } = renderHook(() => useVideoStore());
 
     act(() => {
@@ -102,9 +116,27 @@ describe('video generationConfig actions', () => {
       ...modelBDefaultValues,
       prompt: 'cinematic sunset',
       imageUrl: 'start-custom.png',
-      endImageUrl: 'end-custom.png',
     });
+    expect(result.current.parametersSchema.endImageUrl).toBeUndefined();
     expect(result.current.parameters?.duration).toBe(modelBDefaultValues.duration);
+  });
+
+  it('accepts only one image even for models that take a reference list', () => {
+    const { result } = renderHook(() => useVideoStore());
+
+    act(() => {
+      result.current.setModelAndProviderOnSelect('video-model-multi', 'provider-b');
+    });
+
+    expect(result.current.parametersSchema.imageUrls).toMatchObject({ maxCount: 1 });
+    expect(result.current.parametersSchema.endImageUrl).toBeUndefined();
+
+    act(() => {
+      result.current.setParamOnInput('imageUrls', ['a.png', 'b.png', 'c.png']);
+      result.current.setModelAndProviderOnSelect('video-model-multi', 'provider-b');
+    });
+
+    expect(result.current.parameters?.imageUrls).toEqual(['a.png']);
   });
 });
 

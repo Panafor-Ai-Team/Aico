@@ -242,13 +242,20 @@ export const GenerateVideoRender = memo<
 
   const model = pluginState?.model || args?.model;
   const prompt = pluginState?.prompt || args?.prompt;
+  const settings = pluginState?.settings;
+  const details = [
+    model,
+    settings?.duration ? `${settings.duration}s` : undefined,
+    settings?.resolution,
+    settings?.aspectRatio,
+  ].filter(Boolean);
 
   return (
     <Block variant={'outlined'} width={'100%'}>
       <div className={styles.header}>
         <div className={styles.meta}>
           <div className={styles.prompt}>{prompt}</div>
-          {model && <div className={styles.model}>{model}</div>}
+          {details.length > 0 && <div className={styles.model}>{details.join(' · ')}</div>}
         </div>
       </div>
       <VideoGenerationResult key={`${task.generationId}-${task.asyncTaskId}`} task={task} />

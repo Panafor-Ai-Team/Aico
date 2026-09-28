@@ -60,6 +60,14 @@ export interface GetVideoModelParametersState {
 
 export interface GenerateVideoParams {
   /**
+   * Requested frame shape such as `9:16`; used when the model supports it.
+   */
+  aspectRatio?: string;
+  /**
+   * Requested length in seconds; fitted to the model's supported durations.
+   */
+  duration?: number;
+  /**
    * Last-frame image URL for models that support start/end frames.
    */
   endImageUrl?: null | string;
@@ -75,6 +83,10 @@ export interface GenerateVideoParams {
   parameters?: Partial<RuntimeVideoGenParams> & Record<string, unknown>;
   prompt: string;
   provider?: string;
+  /**
+   * Requested output quality such as `480p`; fitted to the model's supported resolutions.
+   */
+  resolution?: string;
   /**
    * Maximum time to wait for the final video URL when waitUntilComplete is enabled.
    */
@@ -93,6 +105,12 @@ export interface GeneratedVideoTask {
   status?: AsyncTaskStatus;
 }
 
+export interface GeneratedVideoSettings {
+  aspectRatio?: string;
+  duration?: number;
+  resolution?: string;
+}
+
 export interface GenerateVideoState {
   batchId?: string;
   generation: GeneratedVideoTask;
@@ -100,6 +118,10 @@ export interface GenerateVideoState {
   model: string;
   prompt: string;
   provider: string;
+  /**
+   * Output settings actually sent to the provider.
+   */
+  settings?: GeneratedVideoSettings;
   waitError?: string;
   waitTimedOut?: boolean;
   waitUntilComplete?: boolean;
