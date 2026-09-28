@@ -136,6 +136,7 @@ import {
 } from '@lobechat/builtin-tool-user-interaction/client';
 import {
   VideoGenerationInspectors,
+  VideoGenerationInterventions,
   VideoGenerationManifest,
   VideoGenerationPlaceholders,
   VideoGenerationRenders,
@@ -338,6 +339,10 @@ export const registerBuiltinToolSurfaces = (): void => {
     [MemoryManifest.identifier]: MemoryInterventions as Record<string, BuiltinIntervention>,
     [MessageManifest.identifier]: MessageInterventions as Record<string, BuiltinIntervention>,
     [UserInteractionIdentifier]: UserInteractionInterventions as Record<
+      string,
+      BuiltinIntervention
+    >,
+    [VideoGenerationManifest.identifier]: VideoGenerationInterventions as Record<
       string,
       BuiltinIntervention
     >,

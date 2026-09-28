@@ -1,6 +1,7 @@
 export { VideoGenerationManifest } from '../manifest';
 export * from '../types';
 export { VideoGenerationInspector, VideoGenerationInspectors } from './Inspector';
+export { GenerateVideoIntervention, VideoGenerationInterventions } from './Intervention';
 export { GenerateVideoPlaceholder, VideoGenerationPlaceholders } from './Placeholder';
 export {
   GenerateVideoRender,

@@ -216,6 +216,7 @@ export default {
   'builtins.lobe-image-generation.apiName.getImageGenerationStatus': 'Check image status',
   'builtins.lobe-image-generation.apiName.getImageModelParameters': 'Inspect model parameters',
   'builtins.lobe-image-generation.apiName.listImageModels': 'List image models',
+  'builtins.lobe-image-generation.intervention.cost': 'Estimated cost',
   'builtins.lobe-image-generation.intervention.description':
     'This image will be generated with {{model}}, the default model. Pick another model below if you prefer.',
   'builtins.lobe-image-generation.intervention.descriptionChanged':
@@ -255,6 +256,16 @@ export default {
   'builtins.lobe-video-generation.apiName.getVideoGenerationStatus': 'Check video status',
   'builtins.lobe-video-generation.apiName.getVideoModelParameters': 'Inspect model parameters',
   'builtins.lobe-video-generation.apiName.listVideoModels': 'List video models',
+  'builtins.lobe-video-generation.intervention.cost': 'Estimated cost',
+  'builtins.lobe-video-generation.intervention.description':
+    'This video will be generated with {{model}}.',
+  'builtins.lobe-video-generation.intervention.hint':
+    'The estimate is based on the selected length and quality; the final charge may differ slightly.',
+  'builtins.lobe-video-generation.intervention.loading': 'Loading available video models…',
+  'builtins.lobe-video-generation.intervention.noModels':
+    'No video generation model is available on this account yet.',
+  'builtins.lobe-video-generation.intervention.settingsWithImage': '{{settings}} · from your image',
+  'builtins.lobe-video-generation.intervention.title': 'Confirm video generation',
   'builtins.lobe-video-generation.render.generating': 'Generating video…',
   'builtins.lobe-video-generation.render.generationFailed': 'Video generation failed',
   'builtins.lobe-video-generation.render.retry': 'Retry',

@@ -9,9 +9,11 @@ import { useTranslation } from 'react-i18next';
 
 import { useConversationStore } from '@/features/Conversation/store';
 import { dataSelectors } from '@/features/Conversation/store/slices/data/selectors';
+import { estimateImageGenerationCostUsd, GenerationCostEstimate } from '@/features/GenerationCost';
 import { useEnabledImageModels } from '@/hooks/useEnabledImageModels';
 
 import { setConfirmedImageModel } from '../../confirmation';
+import { imageSchemaDefaults, resolveImageNum } from '../../ExecutionRuntime';
 import type { GenerateImageParams } from '../../types';
 import {
   type ImageModelOption,
@@ -24,6 +26,16 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   body: css`
     padding-block: 12px;
     padding-inline: 12px;
+  `,
+  cost: css`
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+
+    font-size: 12px;
+    font-weight: 500;
+    color: ${cssVar.colorText};
   `,
   header: css`
     display: flex;
@@ -115,6 +127,21 @@ const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImagePar
       [defaultOption, options, selectedKey],
     );
 
+    const costUsd = useMemo(() => {
+      if (!selected) return;
+      const modelItem = list
+        ?.find((provider) => provider.id === selected.provider)
+        ?.children.find((model) => model.id === selected.model);
+      if (!modelItem) return;
+
+      return estimateImageGenerationCostUsd({
+        imageNum: resolveImageNum(args?.imageNum),
+        model: modelItem,
+        params: { ...imageSchemaDefaults(modelItem.parameters), ...args?.parameters },
+        provider: selected.provider,
+      });
+    }, [args?.imageNum, args?.parameters, list, selected]);
+
     // Write the choice into the tool call right before it is approved: the tool
     // then runs on exactly the model shown here, and the conversation stops
     // asking. Refuse approval while models are still loading or none are available.
@@ -191,6 +218,13 @@ const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImagePar
                 onChange={handleChange}
               />
             </Flexbox>
+          )}
+
+          {costUsd !== undefined && (
+            <div className={styles.cost}>
+              <span>{t('builtins.lobe-image-generation.intervention.cost')}</span>
+              <GenerationCostEstimate costUsd={costUsd} provider={selected?.provider} />
+            </div>
           )}
 
           <div className={styles.label}>
