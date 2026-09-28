@@ -69,6 +69,23 @@ export const findLatestUserMessageText = (
   return '';
 };
 
+/**
+ * The latest user turn's text, or `''` once a tool already answered it. The
+ * context builder runs again after every tool result; without this guard the
+ * same photo ask would trigger a fresh (billed) generation on each step.
+ */
+export const findPendingUserMessageText = (
+  messages: Array<{ content?: unknown; role?: string }> | null | undefined,
+): string => {
+  if (!messages?.length) return '';
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role === 'tool') return '';
+    if (message?.role === 'user') return extractPlainMessageText(message.content);
+  }
+  return '';
+};
+
 type ToolLike = { function?: { name?: string }; name?: string };
 
 /**
@@ -144,7 +161,7 @@ export const resolveDirectImageGenerationToolCall = (params: {
   /** @deprecated Ignored — kept so existing call sites keep compiling. */
   tools?: ToolLike[] | null | undefined;
 }): DirectGenerateImageToolCall | undefined => {
-  const prompt = findLatestUserMessageText(params.messages);
+  const prompt = findPendingUserMessageText(params.messages);
   if (!isImageGenerationUserIntent(prompt)) return undefined;
 
   return buildDirectGenerateImageToolCall({

@@ -4,11 +4,12 @@ import type {
   ContextBuildOutput,
 } from '@lobechat/agent-runtime';
 import {
-  findLatestUserMessageText,
+  findPendingUserMessageText,
   isImageGenerationUserIntent,
   resolveDirectImageGenerationToolCall,
   resolveForcedImageGenerationToolChoice,
 } from '@lobechat/builtin-tool-image-generation';
+import { resolveDirectVideoGenerationToolCall } from '@lobechat/builtin-tool-video-generation';
 
 import type { RuntimeExecutorContext } from '../context';
 import { buildServerCallLlmContext } from './serverCallLlmContextBuilder';
@@ -36,17 +37,23 @@ export class ServerContextBuilder implements ContextBuilder {
       ...result.resolvedExtendParams,
     } as Record<string, unknown>;
 
-    // Clear image asks must call generateImage — reasoning models otherwise
-    // invent a plaintext prompt and never invoke the tool. Prefer the Create →
-    // Image one-shot path (skip LLM) on clear intent even when the tool is
-    // missing from the offer set; otherwise keep forcing tool_choice.
-    const latestUserText = findLatestUserMessageText(result.processedMessages);
-    const directToolCall = resolveDirectImageGenerationToolCall({
-      executorMap: tooling.resolved.executorMap,
-      messages: result.processedMessages,
-      sourceMap: tooling.resolved.sourceMap,
-      tools: tooling.resolved.tools,
-    });
+    // Clear video / image asks must call the generator — reasoning models
+    // otherwise invent a plaintext prompt and never invoke the tool. Prefer the
+    // Create one-shot path (skip LLM) on clear intent even when the tool is
+    // missing from the offer set; otherwise keep forcing tool_choice. Video is
+    // checked first: "make a video from this photo" names a photo too.
+    const latestUserText = findPendingUserMessageText(result.processedMessages);
+    const directToolCall =
+      resolveDirectVideoGenerationToolCall({
+        executorMap: tooling.resolved.executorMap,
+        messages: result.processedMessages,
+        sourceMap: tooling.resolved.sourceMap,
+      }) ??
+      resolveDirectImageGenerationToolCall({
+        executorMap: tooling.resolved.executorMap,
+        messages: result.processedMessages,
+        sourceMap: tooling.resolved.sourceMap,
+      });
     if (!directToolCall && isImageGenerationUserIntent(latestUserText)) {
       const toolChoice = resolveForcedImageGenerationToolChoice(tooling.resolved.tools);
       if (toolChoice) {

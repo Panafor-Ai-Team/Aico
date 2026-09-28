@@ -12,6 +12,7 @@ import { lobeAgentExecutor } from '@lobechat/builtin-tool-lobe-agent/client/exec
 import { localSystemExecutor } from '@lobechat/builtin-tool-local-system/client/executor';
 import { memoryExecutor } from '@lobechat/builtin-tool-memory/executor';
 import { taskExecutor } from '@lobechat/builtin-tool-task/client/executor';
+import { videoGenerationExecutor } from '@lobechat/builtin-tool-video-generation/executor';
 
 import type { IBuiltinToolExecutor } from '../types';
 import { ampExecutor, claudeCodeExecutor, codexExecutor, openCodeExecutor } from './heteroCli';
@@ -43,6 +44,7 @@ export const builtinToolExecutors = [
   groupAgentBuilderExecutor,
   groupManagementExecutor,
   imageGenerationExecutor,
+  videoGenerationExecutor,
   knowledgeBaseExecutor,
   browserExecutor,
   localSystemExecutor,

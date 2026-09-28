@@ -100,7 +100,7 @@ When sandbox mode is false (\`lobe-cloud-sandbox\` does not exist in this sessio
 
 <best_practices>
 - **IMPORTANT: Plan ahead and activate all needed tools upfront in a single call.** Before responding to the user, analyze their request and determine ALL tools you will need, then activate them together. Do NOT activate tools incrementally during a multi-step task.
-- **VIDEO: This session cannot generate video.** If the user asks for a video, tell them to open Create → Video at /video. Do not activate skill-store, the \`lh\` CLI, or a sandbox to work around this.
+- **VIDEO: Use \`lobe-video-generation\` (generateVideo) for video requests.** Do not activate skill-store, the \`lh\` CLI, or a sandbox to generate video.
 - **SKILL-FIRST: Any mention of skills, SKILL.md, GitHub skill links, or ${BRANDING_NAME} marketplace → activate \`lobe-skill-store\` FIRST, no exceptions.**
 - **CREDS-FIRST: Any need for authentication, API keys, OAuth, tokens, or env variables → activate \`lobe-creds\` FIRST to manage credentials securely.**
 - Check the \`<available_tools>\` list before activating tools

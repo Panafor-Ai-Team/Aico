@@ -4,7 +4,7 @@ Generate text, images, videos, and audio. Alias: \`lh generate\`.
 
 ## Video in chat
 
-This chat session cannot generate video. If the user asks for a video, tell them to open **Create → Video** at \`/video\`. Do **not** use \`lh gen video\`, skill-store, or a sandbox as a workaround.
+When the user asks for a video in chat, call the \`lobe-video-generation\` tool's \`generateVideo\` API. Do **not** use \`lh gen video\`, skill-store, or a sandbox for that.
 
 ## Subcommands
 
