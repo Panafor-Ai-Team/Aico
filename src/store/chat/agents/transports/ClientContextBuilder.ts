@@ -5,11 +5,12 @@ import type {
   ContextBuildOutput,
 } from '@lobechat/agent-runtime';
 import {
-  findLatestUserMessageText,
+  findPendingUserMessageText,
   isImageGenerationUserIntent,
   resolveDirectImageGenerationToolCall,
   resolveForcedImageGenerationToolChoice,
 } from '@lobechat/builtin-tool-image-generation';
+import { resolveDirectVideoGenerationToolCall } from '@lobechat/builtin-tool-video-generation';
 import { ToolResolver, type ToolsEngine } from '@lobechat/context-engine';
 import type { MessageMetadata } from '@lobechat/types';
 import { TraceNameMap } from '@lobechat/types';
@@ -103,13 +104,19 @@ export class ClientContextBuilder implements ContextBuilder {
     );
     const { messages: preparedMessages = [], ...params } = prepared.params;
 
-    const latestUserText = findLatestUserMessageText(preparedMessages);
-    const directToolCall = resolveDirectImageGenerationToolCall({
-      executorMap: resolvedTools.executorMap,
-      messages: preparedMessages,
-      sourceMap: resolvedTools.sourceMap,
-      tools: resolvedTools.tools,
-    });
+    const latestUserText = findPendingUserMessageText(preparedMessages);
+    // Video first: "make a video from this photo" names a photo too.
+    const directToolCall =
+      resolveDirectVideoGenerationToolCall({
+        executorMap: resolvedTools.executorMap,
+        messages: preparedMessages,
+        sourceMap: resolvedTools.sourceMap,
+      }) ??
+      resolveDirectImageGenerationToolCall({
+        executorMap: resolvedTools.executorMap,
+        messages: preparedMessages,
+        sourceMap: resolvedTools.sourceMap,
+      });
     const toolChoice =
       !directToolCall && isImageGenerationUserIntent(latestUserText)
         ? resolveForcedImageGenerationToolChoice(resolvedTools.tools)

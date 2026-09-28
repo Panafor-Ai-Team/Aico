@@ -7,6 +7,7 @@ import { ImageGenerationManifest } from '@lobechat/builtin-tool-image-generation
 import { KnowledgeBaseManifest } from '@lobechat/builtin-tool-knowledge-base';
 import { LocalSystemManifest } from '@lobechat/builtin-tool-local-system';
 import { MemoryManifest } from '@lobechat/builtin-tool-memory';
+import { VideoGenerationManifest } from '@lobechat/builtin-tool-video-generation';
 import { WebBrowsingManifest } from '@lobechat/builtin-tool-web-browsing';
 import { alwaysOnToolIds, chatModeAllowedToolIds, defaultToolIds } from '@lobechat/builtin-tools';
 import { createEnableChecker, type PluginEnableChecker } from '@lobechat/context-engine';
@@ -244,12 +245,14 @@ export const createAgentToolsEngine = (
   // the chat model can call tools — including models with native `imageOutput`.
   // Gating those out left Auto / Gemini-image chat turns with an inbox prompt
   // that promised photo gen, then the model apologizing that the tool is missing.
+  // `lobe-video-generation` (Create → Video pipeline) rides the same gate.
   const imageGenerationEnabled = isCanUseFC(workingModel.model, workingModel.provider);
 
   const chatModeRules = {
     [ImageGenerationManifest.identifier]: imageGenerationEnabled,
     [KnowledgeBaseManifest.identifier]: kbEnabled,
     [MemoryManifest.identifier]: memoryEnabled,
+    [VideoGenerationManifest.identifier]: imageGenerationEnabled,
     [WebBrowsingManifest.identifier]: webBrowsingEnabled,
   };
 
@@ -280,6 +283,7 @@ export const createAgentToolsEngine = (
     [MemoryManifest.identifier]: memoryEnabled,
     [WebBrowsingManifest.identifier]: webBrowsingEnabled,
     [ImageGenerationManifest.identifier]: imageGenerationEnabled,
+    [VideoGenerationManifest.identifier]: imageGenerationEnabled,
   };
 
   return createToolsEngine({

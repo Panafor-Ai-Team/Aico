@@ -1,0 +1,149 @@
+import type { BuiltinToolManifest } from '@lobechat/types';
+
+import { systemPrompt } from './systemRole';
+import { VideoGenerationApiName, VideoGenerationIdentifier } from './types';
+
+export const VideoGenerationManifest: BuiltinToolManifest = {
+  api: [
+    {
+      description:
+        'List currently available video generation providers and models. Use only when the user asks for model choices or needs a specific capability, quality, speed, or price tradeoff.',
+      name: VideoGenerationApiName.listVideoModels,
+      parameters: {
+        additionalProperties: false,
+        properties: {
+          limit: {
+            description:
+              'Maximum models to return per provider. Defaults to a concise list; max is 50.',
+            maximum: 50,
+            minimum: 1,
+            type: 'number',
+          },
+          provider: {
+            description: 'Optional provider id to inspect.',
+            type: 'string',
+          },
+        },
+        required: [],
+        type: 'object',
+      },
+    },
+    {
+      description:
+        'Get the parameter schema and default values for a specific video model. Call this before passing model-specific parameters to generateVideo.',
+      name: VideoGenerationApiName.getVideoModelParameters,
+      parameters: {
+        additionalProperties: false,
+        properties: {
+          model: {
+            description: 'Video model id returned by listVideoModels.',
+            type: 'string',
+          },
+          provider: {
+            description: 'Provider id returned by listVideoModels.',
+            type: 'string',
+          },
+        },
+        required: ['provider', 'model'],
+        type: 'object',
+      },
+    },
+    {
+      defaultTimeoutMs: 180_000,
+      description:
+        'Generate a video with the same pipeline as Create → Video and wait for the result. Returns a still-processing result when rendering takes longer than the wait window; the video then appears in the chat automatically.',
+      name: VideoGenerationApiName.generateVideo,
+      parameters: {
+        additionalProperties: false,
+        properties: {
+          endImageUrl: {
+            description:
+              'Accessible last-frame image URL for models that support start/end frames. Omit otherwise.',
+            type: ['string', 'null'],
+          },
+          imageUrl: {
+            description:
+              'Accessible start-frame image URL for image-to-video. Omit for text-to-video.',
+            type: ['string', 'null'],
+          },
+          imageUrls: {
+            description:
+              'Accessible reference image URLs (for example images the user attached in this chat). The runtime fits them to what the model accepts.',
+            items: { type: 'string' },
+            type: 'array',
+          },
+          model: {
+            description:
+              'Video model id. When omitted, the runtime selects the default enabled video model.',
+            type: 'string',
+          },
+          parameters: {
+            additionalProperties: true,
+            description:
+              'Model-specific parameters. Call getVideoModelParameters first and only pass supported keys such as duration, aspectRatio, resolution, generateAudio, or seed.',
+            type: 'object',
+          },
+          prompt: {
+            description:
+              'The video prompt. Describe subjects, action, camera movement, style, and mood.',
+            type: 'string',
+          },
+          provider: {
+            description:
+              'Video provider id. When omitted, the runtime resolves it from the requested model or the default selection.',
+            type: 'string',
+          },
+          waitTimeoutMs: {
+            default: 170_000,
+            description:
+              'Maximum time in milliseconds to wait for the final video URL. Defaults to 170000; max is 175000.',
+            maximum: 175_000,
+            minimum: 1000,
+            type: 'number',
+          },
+          waitUntilComplete: {
+            default: true,
+            description:
+              'Whether to wait for the video before returning. Defaults to true. Set false only when explicitly starting a background task.',
+            type: 'boolean',
+          },
+        },
+        required: ['prompt'],
+        type: 'object',
+      },
+      renderDisplayControl: 'alwaysExpand',
+    },
+    {
+      description:
+        'Check a video generation returned by generateVideo. Use at most once, and only when the user asks for an update on a video that was still processing.',
+      name: VideoGenerationApiName.getVideoGenerationStatus,
+      parameters: {
+        additionalProperties: false,
+        properties: {
+          asyncTaskId: {
+            description: 'Async task id returned by generateVideo.',
+            type: 'string',
+          },
+          generationId: {
+            description: 'Generation id returned by generateVideo.',
+            type: 'string',
+          },
+        },
+        required: ['generationId', 'asyncTaskId'],
+        type: 'object',
+      },
+      renderDisplayControl: 'expand',
+    },
+  ],
+  executors: ['client', 'server'],
+  humanIntervention: 'never',
+  identifier: VideoGenerationIdentifier,
+  meta: {
+    avatar: '🎬',
+    description:
+      'Generate videos from chat through the built-in Create → Video pipeline, with optional reference images.',
+    title: 'Video Generation Assistant',
+  },
+  systemRole: systemPrompt,
+  type: 'builtin',
+};

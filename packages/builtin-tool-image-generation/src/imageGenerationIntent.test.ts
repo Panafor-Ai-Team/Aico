@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   findLatestUserMessageText,
+  findPendingUserMessageText,
   IMAGE_GENERATION_TOOL_FUNCTION_NAME,
   isImageGenerationUserIntent,
   resolveDirectImageGenerationToolCall,
@@ -100,6 +101,40 @@ describe('resolveDirectImageGenerationToolCall', () => {
         tools: [{ function: { name: IMAGE_GENERATION_TOOL_FUNCTION_NAME } }],
       }),
     ).toBeUndefined();
+  });
+
+  it('does not fire again once generateImage already answered the ask', () => {
+    expect(
+      resolveDirectImageGenerationToolCall({
+        messages: [
+          { content: 'Generate an image of a cat', role: 'user' },
+          { content: '', role: 'assistant' },
+          { content: 'Image generation completed with gpt-image-2.', role: 'tool' },
+        ],
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe('findPendingUserMessageText', () => {
+  it('returns the latest user text while no tool has answered it', () => {
+    expect(
+      findPendingUserMessageText([
+        { content: 'old', role: 'user' },
+        { content: 'reply', role: 'assistant' },
+        { content: 'عکس یک سگ', role: 'user' },
+      ]),
+    ).toBe('عکس یک سگ');
+  });
+
+  it('returns empty once a tool result follows the latest user turn', () => {
+    expect(
+      findPendingUserMessageText([
+        { content: 'عکس یک سگ', role: 'user' },
+        { content: '', role: 'assistant' },
+        { content: 'done', role: 'tool' },
+      ]),
+    ).toBe('');
   });
 });
 

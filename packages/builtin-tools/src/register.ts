@@ -135,6 +135,12 @@ import {
   UserInteractionRenders,
 } from '@lobechat/builtin-tool-user-interaction/client';
 import {
+  VideoGenerationInspectors,
+  VideoGenerationManifest,
+  VideoGenerationPlaceholders,
+  VideoGenerationRenders,
+} from '@lobechat/builtin-tool-video-generation/client';
+import {
   WebBrowsingInspectors,
   WebBrowsingManifest,
   WebBrowsingPlaceholders,
@@ -205,6 +211,7 @@ export const registerBuiltinToolSurfaces = (): void => {
     [SkillsManifest.identifier]: SkillsRenders as Record<string, BuiltinRender>,
     [TaskManifest.identifier]: TaskRenders as Record<string, BuiltinRender>,
     [UserInteractionIdentifier]: UserInteractionRenders as Record<string, BuiltinRender>,
+    [VideoGenerationManifest.identifier]: VideoGenerationRenders as Record<string, BuiltinRender>,
     [LobeActivatorManifest.identifier]: LobeActivatorRenders as Record<string, BuiltinRender>,
     [WebBrowsingManifest.identifier]: WebBrowsingRenders as Record<string, BuiltinRender>,
     [WebOnboardingManifest.identifier]: WebOnboardingRenders as Record<string, BuiltinRender>,
@@ -260,6 +267,10 @@ export const registerBuiltinToolSurfaces = (): void => {
     [SkillsManifest.identifier]: SkillsInspectors as Record<string, BuiltinInspector>,
     [TaskManifest.identifier]: TaskInspectors as Record<string, BuiltinInspector>,
     [UserInteractionIdentifier]: UserInteractionInspectors as Record<string, BuiltinInspector>,
+    [VideoGenerationManifest.identifier]: VideoGenerationInspectors as Record<
+      string,
+      BuiltinInspector
+    >,
     [WebBrowsingManifest.identifier]: WebBrowsingInspectors as Record<string, BuiltinInspector>,
     [WebOnboardingManifest.identifier]: WebOnboardingInspectors as Record<string, BuiltinInspector>,
     codex: CodexInspectors,
@@ -298,6 +309,10 @@ export const registerBuiltinToolSurfaces = (): void => {
     [MemoryManifest.identifier]: MemoryStreamings as Record<string, BuiltinStreaming>,
     [MessageManifest.identifier]: MessageStreamings as Record<string, BuiltinStreaming>,
     [PageAgentManifest.identifier]: PageAgentStreamings as Record<string, BuiltinStreaming>,
+    [VideoGenerationManifest.identifier]: VideoGenerationPlaceholders as Record<
+      string,
+      BuiltinStreaming
+    >,
   });
 
   registerBuiltinInterventions({
@@ -344,6 +359,10 @@ export const registerBuiltinToolSurfaces = (): void => {
       listLocalFiles: LocalSystemListFilesPlaceholder as BuiltinPlaceholder,
       searchLocalFiles: LocalSystemSearchFilesPlaceholder as BuiltinPlaceholder,
     },
+    [VideoGenerationManifest.identifier]: VideoGenerationPlaceholders as Record<
+      string,
+      BuiltinPlaceholder
+    >,
     [WebBrowsingManifest.identifier]: WebBrowsingPlaceholders as Record<string, BuiltinPlaceholder>,
   });
 

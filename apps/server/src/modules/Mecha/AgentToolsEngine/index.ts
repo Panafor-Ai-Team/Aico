@@ -17,6 +17,7 @@ import { LocalSystemManifest } from '@lobechat/builtin-tool-local-system';
 import { MemoryManifest } from '@lobechat/builtin-tool-memory';
 import { MessageManifest } from '@lobechat/builtin-tool-message';
 import { RemoteDeviceManifest } from '@lobechat/builtin-tool-remote-device';
+import { VideoGenerationManifest } from '@lobechat/builtin-tool-video-generation';
 import { WebBrowsingManifest } from '@lobechat/builtin-tool-web-browsing';
 import {
   alwaysOnToolIds,
@@ -259,6 +260,7 @@ export const createServerAgentToolsEngine = (
   // the chat model can call tools — including models with native `imageOutput`.
   // Gating those out left Auto / Gemini-image chat turns with an inbox prompt
   // that promised photo gen, then the model apologizing that the tool is missing.
+  // `lobe-video-generation` (Create → Video pipeline) rides the same gate.
   const imageGenerationEnabled = context.isModelSupportToolUse(model, provider);
   // Tool mode: explicit `toolMode` wins; otherwise derive from `enableAgentMode`
   // (undefined = agent). `custom` = toolset is exactly the agent's plugins.
@@ -288,6 +290,7 @@ export const createServerAgentToolsEngine = (
     [ImageGenerationManifest.identifier]: imageGenerationEnabled,
     [KnowledgeBaseManifest.identifier]: hasEnabledKnowledgeBases,
     [MemoryManifest.identifier]: globalMemoryEnabled,
+    [VideoGenerationManifest.identifier]: imageGenerationEnabled,
     [WebBrowsingManifest.identifier]: isSearchEnabled,
   };
 
@@ -348,6 +351,7 @@ export const createServerAgentToolsEngine = (
     [RemoteDeviceManifest.identifier]: deviceCapable && hasDeviceProxy && !deviceLocked,
     [WebBrowsingManifest.identifier]: isSearchEnabled,
     [ImageGenerationManifest.identifier]: imageGenerationEnabled,
+    [VideoGenerationManifest.identifier]: imageGenerationEnabled,
   };
 
   const excludedIdentifiers = new Set(disabledPluginIds);

@@ -11,6 +11,7 @@ export {
   buildDirectGenerateImageToolCall,
   extractPlainMessageText,
   findLatestUserMessageText,
+  findPendingUserMessageText,
   IMAGE_GENERATION_TOOL_FUNCTION_NAME,
   isImageGenerationUserIntent,
   resolveDirectImageGenerationToolCall,
