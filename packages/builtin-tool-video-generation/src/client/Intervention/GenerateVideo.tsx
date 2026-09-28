@@ -8,7 +8,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { estimateVideoGenerationCostUsd, GenerationCostEstimate } from '@/features/GenerationCost';
-import { GenerationSettingField } from '@/features/GenerationSettings';
+import { GenerationDurationField, GenerationSettingField } from '@/features/GenerationSettings';
 import { useEnabledVideoModels } from '@/hooks/useEnabledVideoModels';
 
 import { isVideoGenerationProvider } from '../../defaultModel';
@@ -179,20 +179,35 @@ const GenerateVideoIntervention = memo<BuiltinInterventionProps<GenerateVideoPar
 
           {request && request.fields.length > 0 && (
             <Flexbox horizontal gap={8} wrap={'wrap'}>
-              {request.fields.map((field) => (
-                <GenerationSettingField
-                  key={field.key}
-                  label={t(`builtins.lobe-video-generation.intervention.settings.${field.key}`)}
-                  value={field.value}
-                  options={field.options.map((value) => ({
-                    label: optionLabel(field.key, value),
-                    value,
-                  }))}
-                  onChange={(value) =>
-                    setSettingPicks((picks) => ({ ...picks, [field.key]: value }))
-                  }
-                />
-              ))}
+              {request.fields.map((field) => {
+                const label = t(
+                  `builtins.lobe-video-generation.intervention.settings.${field.key}`,
+                );
+                const onChange = (value: string) =>
+                  setSettingPicks((picks) => ({ ...picks, [field.key]: value }));
+
+                return field.key === 'duration' ? (
+                  <GenerationDurationField
+                    formatValue={(value) => optionLabel('duration', value)}
+                    key={field.key}
+                    label={label}
+                    options={field.options}
+                    value={field.value}
+                    onChange={onChange}
+                  />
+                ) : (
+                  <GenerationSettingField
+                    key={field.key}
+                    label={label}
+                    value={field.value}
+                    options={field.options.map((value) => ({
+                      label: optionLabel(field.key, value),
+                      value,
+                    }))}
+                    onChange={onChange}
+                  />
+                );
+              })}
             </Flexbox>
           )}
 
