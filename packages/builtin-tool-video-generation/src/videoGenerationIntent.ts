@@ -203,6 +203,17 @@ const imageUrlsOfContent = (content: unknown): string[] => {
     .filter((url): url is string => Boolean(url));
 };
 
+const FILE_CONTEXT_IMAGE_URL = /<image\s[^>]*?\burl="(https?:\/\/[^"]+)"/g;
+
+/**
+ * Attached images as listed in the pipeline's `<files_info>` block — the only
+ * place they appear when the chat model has no vision and gets no image parts.
+ */
+const imageUrlsOfInjectedContext = (text: string): string[] =>
+  (text.match(INJECTED_CONTEXT_BLOCK) ?? []).flatMap((block) =>
+    [...block.matchAll(FILE_CONTEXT_IMAGE_URL)].map((match) => match[1]),
+  );
+
 /**
  * The latest user turn, or `undefined` once a tool already answered it. The
  * context builder runs again after every tool result; without this guard the
@@ -218,9 +229,14 @@ export const findPendingUserMessage = (
     if (message?.role === 'tool') return undefined;
     if (message?.role !== 'user') continue;
 
-    const text = stripInjectedUserContext(textOfContent(message.content));
+    const rawText = textOfContent(message.content);
+    const text = stripInjectedUserContext(rawText);
     if (!text) return undefined;
-    return { imageUrls: imageUrlsOfContent(message.content), text };
+
+    const imageUrls = [
+      ...new Set([...imageUrlsOfContent(message.content), ...imageUrlsOfInjectedContext(rawText)]),
+    ];
+    return { imageUrls, text };
   }
 
   return undefined;

@@ -46,6 +46,7 @@ import { after } from '@/server/utils/scheduleAfterResponse';
 import { AsyncTaskStatus, AsyncTaskType } from '@/types/asyncTask';
 
 import { createVideoTaskSubmitError } from './error';
+import { acceptsInlineVideoImages, inlineOwnedImage } from './inlineImage';
 
 const log = debug('lobe-video:lambda');
 
@@ -184,6 +185,29 @@ export const videoRouter = router({
 
         if (Object.keys(updates).length > 0) {
           generationParams = { ...params, ...updates };
+        }
+      }
+
+      if (acceptsInlineVideoImages(provider)) {
+        const inlineContext = { db: serverDB, fileService, userId, workspaceId: wsId };
+        const inlined: Record<string, unknown> = {};
+        for (const field of ['imageUrl', 'endImageUrl'] as const) {
+          const url = params[field];
+          if (typeof url !== 'string' || !url) continue;
+          const dataUrl = await inlineOwnedImage(url, inlineContext);
+          if (dataUrl) inlined[field] = dataUrl;
+        }
+        if (Array.isArray(params.imageUrls)) {
+          inlined.imageUrls = await Promise.all(
+            params.imageUrls.map(async (url: unknown) =>
+              typeof url === 'string' && url
+                ? ((await inlineOwnedImage(url, inlineContext)) ?? url)
+                : url,
+            ),
+          );
+        }
+        if (Object.keys(inlined).length > 0) {
+          generationParams = { ...generationParams, ...inlined };
         }
       }
 

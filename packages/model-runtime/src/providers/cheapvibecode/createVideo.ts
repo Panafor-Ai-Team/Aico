@@ -79,7 +79,10 @@ export const createCheapVibeCodeVideo = async (
   );
   if (startFrame) body.image = { url: startFrame };
 
-  log('Creating video - model: %s, body: %O', model, body);
+  log('Creating video - model: %s, body: %O', model, {
+    ...body,
+    ...(startFrame && { image: { url: startFrame.slice(0, 80) } }),
+  });
 
   const response = await fetch(`${resolveCheapVibeCodeVideoBaseURL()}/videos/generations`, {
     body: JSON.stringify(body),
