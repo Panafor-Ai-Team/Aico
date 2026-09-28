@@ -124,6 +124,34 @@ describe('VideoGenerationExecutionRuntime.generateVideo', () => {
     expect(result.content).not.toContain('closest supported length');
   });
 
+  it('reads length and quality from the prompt when the call leaves them out', async () => {
+    const service = createService();
+    const runtime = new VideoGenerationExecutionRuntime(service);
+
+    await runtime.generateVideo({ prompt: 'یک ویدیو ۲ ثانیه‌ای با کیفیت ۴۸۰ از یک گربه' });
+
+    expect(vi.mocked(service.createVideo).mock.calls[0][0].params).toMatchObject({
+      duration: 2,
+      resolution: '480p',
+    });
+  });
+
+  it('prefers explicit settings over numbers in the prompt', async () => {
+    const service = createService();
+    const runtime = new VideoGenerationExecutionRuntime(service);
+
+    await runtime.generateVideo({
+      duration: 4,
+      prompt: 'A 2-second 720p clip',
+      resolution: '480p',
+    });
+
+    expect(vi.mocked(service.createVideo).mock.calls[0][0].params).toMatchObject({
+      duration: 4,
+      resolution: '480p',
+    });
+  });
+
   it('sends the requested quality and frame shape and reports what was sent', async () => {
     const service = createService();
     const runtime = new VideoGenerationExecutionRuntime(service);

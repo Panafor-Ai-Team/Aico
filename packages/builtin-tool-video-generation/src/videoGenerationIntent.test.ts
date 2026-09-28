@@ -9,6 +9,24 @@ import {
   resolveDirectVideoGenerationToolCall,
 } from './videoGenerationIntent';
 
+// Verbatim shapes produced by `filesPrompts` and `MessageContentProcessor` in the chat pipeline.
+const VISION_PLACEHOLDER =
+  '[image omitted: native vision is not supported. Do not infer or describe the image. If the request depends on it, use an available visual-analysis tool before answering; otherwise state that the image cannot be inspected.]';
+
+const filesContext = `<!-- SYSTEM CONTEXT (NOT PART OF USER QUERY) -->
+<context.instruction>following part contains context information injected by the system. Please follow these instructions:
+
+1. Always prioritize handling user-visible content.
+2. the context is only required when user's queries rely on it.
+</context.instruction>
+<files_info>
+<images>
+<images_docstring>here are user upload images you can refer to</images_docstring>
+<image ref="img_1" name="cat 1080p 16:9.png" url="https://cdn.example.com/files/download/cat.png"></image>
+</images>
+</files_info>
+<!-- END SYSTEM CONTEXT -->`;
+
 describe('extractRequestedVideoDuration', () => {
   it.each([
     ['یک ویدیو ۲ ثانیه‌ای از دریا بساز', 2],
@@ -39,6 +57,9 @@ describe('extractRequestedVideoResolution', () => {
     ['یک ویدیو با کیفیت 480p بساز', '480p'],
     ['ویدیو ۴۸۰p بساز', '480p'],
     ['یه ویدیو با کیفیت ۴۸۰ بساز', '480p'],
+    ['یه ویدیو بساز کیفیتش 480 باشه', '480p'],
+    ['کیفیت ویدیو ۴۸۰ باشه', '480p'],
+    ['ویدیو ۴۸۰ پیکسل بساز', '480p'],
     ['Make a 720P video of a cat', '720p'],
     ['Generate a video in 4K', '2160p'],
   ])('reads %s as %s', (text, resolution) => {
@@ -72,6 +93,15 @@ describe('isVideoGenerationUserIntent', () => {
     expect(isVideoGenerationUserIntent('ویدیو مبارزه ی بین این دوتفر رو بساز')).toBe(true);
     expect(isVideoGenerationUserIntent('یه کلیپ از یه گربه که میرقصه درست کن')).toBe(true);
     expect(isVideoGenerationUserIntent('یک ویدئو کوتاه از غروب دریا تولید کن')).toBe(true);
+    expect(isVideoGenerationUserIntent('یک ویدیو از یک گربه ایجاد کن')).toBe(true);
+    expect(isVideoGenerationUserIntent('میشه یه ویدیو از یه گربه برام بسازی؟')).toBe(true);
+    expect(isVideoGenerationUserIntent('یه ویدیو از یه گربه میخوام')).toBe(true);
+  });
+
+  it('treats a video with an explicit length or quality as a request to make one', () => {
+    expect(isVideoGenerationUserIntent('یه ویدیو ۲ ثانیه‌ای با کیفیت ۴۸۰ از یه گربه')).toBe(true);
+    expect(isVideoGenerationUserIntent('ویدیو دو ثانیه ای از غروب دریا')).toBe(true);
+    expect(isVideoGenerationUserIntent('این ویدیو ۲ ثانیه‌ای رو توضیح بده')).toBe(false);
   });
 
   it('detects English video requests', () => {
@@ -117,6 +147,22 @@ describe('findPendingUserMessage', () => {
       imageUrls: ['https://cdn.example.com/a.png', 'https://cdn.example.com/b.png'],
       text: 'ویدیو مبارزه بین این دو نفر رو بساز',
     });
+  });
+
+  it('drops context the pipeline appended to the user text', () => {
+    expect(
+      findPendingUserMessage([
+        {
+          content: [
+            {
+              text: `ویدیو ۲ ثانیه بساز\n\n${VISION_PLACEHOLDER}\n\n${filesContext}`,
+              type: 'text',
+            },
+          ],
+          role: 'user',
+        },
+      ])?.text,
+    ).toBe('ویدیو ۲ ثانیه بساز');
   });
 
   it('returns nothing once a tool already answered the latest user turn', () => {
@@ -180,6 +226,28 @@ describe('resolveDirectVideoGenerationToolCall', () => {
     });
 
     expect(JSON.parse(call!.arguments)).toMatchObject({ duration: 2, resolution: '480p' });
+  });
+
+  it('reads the ask, not the file context appended to a message with an image', () => {
+    const call = resolveDirectVideoGenerationToolCall({
+      messages: [
+        {
+          content: [
+            {
+              text: `یه ویدیو ۲ ثانیه‌ای با کیفیت 480p از این عکس بساز\n\n${VISION_PLACEHOLDER}\n\n${filesContext}`,
+              type: 'text',
+            },
+          ],
+          role: 'user',
+        },
+      ],
+    });
+
+    expect(JSON.parse(call!.arguments)).toEqual({
+      duration: 2,
+      prompt: 'یه ویدیو ۲ ثانیه‌ای با کیفیت 480p از این عکس بساز',
+      resolution: '480p',
+    });
   });
 
   it('does not fire again after the tool result', () => {

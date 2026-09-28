@@ -12,11 +12,12 @@ const META_QUESTION =
 
 /** Asks about an existing video (summarize / translate / transcribe) rather than making one. */
 const EXISTING_VIDEO_TASK =
-  /خلاصه|ترجمه|زیرنویس|تحلیل|summar|transcri|translat|subtitle|analy[sz]|download/i;
+  /خلاصه|ترجمه|زیرنویس|تحلیل|توضیح|ببین|نگاه|summar|transcri|translat|subtitle|analy[sz]|download|explain|describe|watch/i;
 
 const PERSIAN_VIDEO_NOUN = /ویدیو|ویدئو|فیلم|کلیپ|انیمیشن/;
 
-const PERSIAN_GENERATE_VERB = /بساز|درست\s*کن|تولید\s*کن|متحرک\s*کن/;
+const PERSIAN_GENERATE_VERB =
+  /بساز|(?:می|ب)[\s\u200C]?سازی|ساخت|درست\s*کن|تولید|ایجاد|متحرک\s*کن|(?:می|ب)[\s\u200C]?خوا[مه]/;
 
 const ENGLISH_VIDEO_COMMAND =
   /\b(?:generate|create|make|render|produce|animate)\s+(?:me\s+)?(?:an?\s+|the\s+|this\s+|one\s+)?(?:short\s+|quick\s+|\d+[\s-]*(?:s|sec|second)s?\s+)?(?:video|clip|animation)\b/i;
@@ -24,25 +25,6 @@ const ENGLISH_VIDEO_COMMAND =
 const ENGLISH_VIDEO_LEAD = /^(?:an?\s+)?(?:short\s+)?(?:video|clip|animation)\s+of\b/i;
 
 const ENGLISH_ANIMATE_IMAGE = /\banimate\s+(?:this|the|my|these)\s+(?:image|photo|picture)s?\b/i;
-
-/**
- * True when the text is a clear request to produce a video — not a question
- * about prompting and not a task on an existing video.
- */
-export const isVideoGenerationUserIntent = (text: string | null | undefined): boolean => {
-  if (!text) return false;
-  const trimmed = text.trim();
-  if (!trimmed || trimmed.length > 4000) return false;
-  if (META_QUESTION.test(trimmed) || EXISTING_VIDEO_TASK.test(trimmed)) return false;
-
-  if (PERSIAN_VIDEO_NOUN.test(trimmed) && PERSIAN_GENERATE_VERB.test(trimmed)) return true;
-
-  return (
-    ENGLISH_VIDEO_COMMAND.test(trimmed) ||
-    ENGLISH_VIDEO_LEAD.test(trimmed) ||
-    ENGLISH_ANIMATE_IMAGE.test(trimmed)
-  );
-};
 
 const NUMBER_WORDS: Record<string, number> = {
   بیست: 20,
@@ -117,10 +99,12 @@ export const extractRequestedVideoDuration = (text: string | null | undefined) =
   return /^(?:دقیقه|min)/i.test(match[2]) ? amount * 60 : amount;
 };
 
-const RESOLUTION_PATTERN = /(?<!\d)(360|480|540|720|1080|1440|2160)\s*p(?!\p{L})/iu;
+const RESOLUTION_PATTERN =
+  /(?<!\d)(360|480|540|720|1080|1440|2160)[\s\u200C]*(?:p|پی(?:کسل)?)(?!\p{L})/iu;
 
+// «کیفیتش 480 باشه», «کیفیت ویدیو ۴۸۰», "quality of 480" — a few words may sit in between.
 const QUALITY_WORD_RESOLUTION_PATTERN =
-  /(?:کیفیت|رزولوشن|quality|resolution)[\s:]*(?:of\s+)?(360|480|540|720|1080|1440|2160)(?!\d)/iu;
+  /(?:کیفیت|رزولوشن|quality|resolution)[^\d\n]{0,16}(360|480|540|720|1080|1440|2160)(?!\d)/iu;
 
 /** The output quality the user asked for («کیفیت ۴۸۰», "720p"), as a `…p` resolution. */
 export const extractRequestedVideoResolution = (text: string | null | undefined) => {
@@ -152,6 +136,31 @@ export const extractRequestedVideoAspectRatio = (text: string | null | undefined
   return ASPECT_RATIO_WORDS.find(([pattern]) => pattern.test(text))?.[1];
 };
 
+/**
+ * True when the text is a clear request to produce a video — not a question
+ * about prompting and not a task on an existing video.
+ */
+export const isVideoGenerationUserIntent = (text: string | null | undefined): boolean => {
+  if (!text) return false;
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length > 4000) return false;
+  if (META_QUESTION.test(trimmed) || EXISTING_VIDEO_TASK.test(trimmed)) return false;
+
+  if (PERSIAN_VIDEO_NOUN.test(trimmed)) {
+    if (PERSIAN_GENERATE_VERB.test(trimmed)) return true;
+    // «یه ویدیو ۲ ثانیه‌ای با کیفیت ۴۸۰ از …» names the output without a verb.
+    if (extractRequestedVideoDuration(trimmed) || extractRequestedVideoResolution(trimmed)) {
+      return true;
+    }
+  }
+
+  return (
+    ENGLISH_VIDEO_COMMAND.test(trimmed) ||
+    ENGLISH_VIDEO_LEAD.test(trimmed) ||
+    ENGLISH_ANIMATE_IMAGE.test(trimmed)
+  );
+};
+
 type MessageLike = { content?: unknown; role?: string };
 
 const textOfContent = (content: unknown): string => {
@@ -169,6 +178,16 @@ const textOfContent = (content: unknown): string => {
     .filter(Boolean)
     .join('\n');
 };
+
+// Must match the context-engine `SYSTEM_CONTEXT_START` / `SYSTEM_CONTEXT_END` markers and
+// the vision-downgrade placeholder, which the chat pipeline appends to the user's own text.
+const INJECTED_CONTEXT_BLOCK =
+  /<!-- SYSTEM CONTEXT \(NOT PART OF USER QUERY\) -->[\s\S]*?(?:<!-- END SYSTEM CONTEXT -->|$)/g;
+const VISION_DOWNGRADE_PLACEHOLDER = /\[image omitted: native vision is not supported\.[^\]]*\]/g;
+
+/** What the user typed, without file lists, selections or other context the pipeline appended. */
+export const stripInjectedUserContext = (text: string) =>
+  text.replaceAll(INJECTED_CONTEXT_BLOCK, '').replaceAll(VISION_DOWNGRADE_PLACEHOLDER, '').trim();
 
 /** Only fetchable URLs — data URIs are too large to forward as generation params. */
 const imageUrlsOfContent = (content: unknown): string[] => {
@@ -199,8 +218,8 @@ export const findPendingUserMessage = (
     if (message?.role === 'tool') return undefined;
     if (message?.role !== 'user') continue;
 
-    const text = textOfContent(message.content);
-    if (!text.trim()) return undefined;
+    const text = stripInjectedUserContext(textOfContent(message.content));
+    if (!text) return undefined;
     return { imageUrls: imageUrlsOfContent(message.content), text };
   }
 

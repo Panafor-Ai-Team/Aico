@@ -27,6 +27,11 @@ import type {
   VideoGenerationCreateVideoResult,
 } from '../types';
 import { getVideoAssetUrl } from '../videoAsset';
+import {
+  extractRequestedVideoAspectRatio,
+  extractRequestedVideoDuration,
+  extractRequestedVideoResolution,
+} from '../videoGenerationIntent';
 
 const DEFAULT_LIST_LIMIT = 20;
 const MAX_LIST_LIMIT = 50;
@@ -249,8 +254,12 @@ const resolveOutputSettings = (
 ): { notes: string[]; params: GeneratedVideoSettings } => {
   const notes: string[] = [];
   const params: GeneratedVideoSettings = {};
+  // Chat models often write "a 2-second 480p video" into the prompt and leave the fields out.
+  const prompt = typeof args.prompt === 'string' ? args.prompt : '';
 
-  const duration = toDurationSeconds(args.duration ?? args.parameters?.duration);
+  const duration = toDurationSeconds(
+    args.duration ?? args.parameters?.duration ?? extractRequestedVideoDuration(prompt),
+  );
   if (duration && schema.duration) {
     params.duration = fitDuration(duration, schema.duration);
     if (params.duration !== duration) {
@@ -260,7 +269,9 @@ const resolveOutputSettings = (
     }
   }
 
-  const resolution = toOption(args.resolution ?? args.parameters?.resolution);
+  const resolution = toOption(
+    args.resolution ?? args.parameters?.resolution ?? extractRequestedVideoResolution(prompt),
+  );
   if (resolution) {
     const fitted = schema.resolution?.enum?.length
       ? fitResolution(resolution, schema.resolution.enum)
@@ -275,7 +286,9 @@ const resolveOutputSettings = (
     }
   }
 
-  const aspectRatio = toOption(args.aspectRatio ?? args.parameters?.aspectRatio);
+  const aspectRatio = toOption(
+    args.aspectRatio ?? args.parameters?.aspectRatio ?? extractRequestedVideoAspectRatio(prompt),
+  );
   if (aspectRatio) {
     const offered = schema.aspectRatio?.enum?.find(
       (option) => option.toLowerCase() === aspectRatio,
