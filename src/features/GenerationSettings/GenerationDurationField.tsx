@@ -80,7 +80,11 @@ const GenerationDurationField = memo<GenerationDurationFieldProps>(
         )}
 
         {control === 'slider' && (
-          <Flexbox horizontal align={'center'} gap={10}>
+          // Base UI Slider pointer math defaults to LTR (no DirectionProvider), but
+          // under document dir=rtl the thumb uses inset-inline-start so CSS mirrors
+          // it — drag left/right then moves the value the wrong way. Keep the whole
+          // row LTR: min on the left, max on the right, drag matches motion.
+          <Flexbox horizontal align={'center'} dir={'ltr'} gap={10}>
             <span className={styles.bound}>{formatValue(options[0])}</span>
             <Slider
               className={styles.slider}
