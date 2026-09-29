@@ -1125,9 +1125,9 @@ const createMainAreaChildrenDefinition = (options: MainAreaRouteOptions = {}): R
     },
     index: true,
   },
-  // Catch-all route
+  // Catch-all — light 404 instead of redirecting to the heavy home shell
   {
-    element: redirectElement('/'),
+    element: dynamicElement(() => import('@/routes/not-found'), 'Not Found'),
     path: '*',
   },
 ];
