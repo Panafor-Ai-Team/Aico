@@ -610,9 +610,9 @@ export const mobileRoutes: RouteObject[] = [
         path: ':workspaceSlug',
       },
 
-      // Catch-all — light 404 instead of redirecting to the heavy home shell
+      // Catch-all route
       {
-        element: dynamicElement(() => import('@/routes/not-found'), 'Mobile > Not Found'),
+        element: redirectElement('/'),
         path: '*',
       },
     ],

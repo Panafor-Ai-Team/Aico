@@ -23,9 +23,9 @@ export default {
     "You don't have permission to view this page. Please contact a workspace owner if you need access.",
   'forbidden.title': 'Access denied',
   'notFound.backHome': 'Back to Home',
-  'notFound.check': 'Check the URL, or go back home to continue.',
-  'notFound.desc': "This page doesn't exist or may have been moved.",
-  'notFound.title': 'Page not found',
+  'notFound.check': 'Please check if your URL is correct.',
+  'notFound.desc': "We couldn't find the page you were looking for.",
+  'notFound.title': 'Entered Unknown Territory?',
   'pluginSettings.desc': 'Complete the following configuration to start using this skill',
   'pluginSettings.title': '{{name}} Skill Settings',
   'response.400':
