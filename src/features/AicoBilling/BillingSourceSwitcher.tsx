@@ -21,6 +21,10 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   `,
   chevron: css`
     color: ${cssVar.colorTextQuaternary};
+    transition: transform 150ms ${cssVar.motionEaseOut};
+  `,
+  chevronOpen: css`
+    transform: rotate(180deg);
   `,
   label: css`
     overflow: hidden;
@@ -76,6 +80,7 @@ const sourceToContext = (source: AicoBillingSource): AicoBillingContext =>
 const BillingSourceSwitcher = memo(() => {
   const { t } = useTranslation('aico');
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   const { activeSource, canSwitch, data, isLoading, isSelected, selectSource } =
     useAicoBillingSources();
 
@@ -144,14 +149,23 @@ const BillingSourceSwitcher = memo(() => {
       <WalletIcon size={12} style={{ opacity: 0.65 }} />
       <span className={styles.label}>{label}</span>
       <PiAmount className={styles.remaining} iconSize={12} value={activeSource.remainingPi} />
-      {canSwitch ? <ChevronDownIcon className={styles.chevron} size={12} /> : null}
+      {canSwitch ? (
+        <ChevronDownIcon className={cx(styles.chevron, open && styles.chevronOpen)} size={12} />
+      ) : null}
     </Center>
   );
 
   if (!canSwitch) return trigger;
 
   return (
-    <ActionDropdown menu={{ items: menuItems }} minWidth={240} placement="top" trigger="click">
+    <ActionDropdown
+      menu={{ items: menuItems }}
+      minWidth={240}
+      open={open}
+      placement="top"
+      trigger="click"
+      onOpenChange={setOpen}
+    >
       {trigger}
     </ActionDropdown>
   );

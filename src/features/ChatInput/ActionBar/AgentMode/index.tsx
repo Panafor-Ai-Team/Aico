@@ -123,6 +123,12 @@ const styles = createStaticStyles(({ css }) => ({
       border-radius: ${cssVar.borderRadiusLG};
     }
   `,
+  chevron: css`
+    transition: transform 150ms ${cssVar.motionEaseOut};
+  `,
+  chevronOpen: css`
+    transform: rotate(180deg);
+  `,
 }));
 
 const AGENT_CAPS = [
@@ -245,7 +251,11 @@ const AgentMode = memo(() => {
     <div className={cx(styles.button, disabled && styles.buttonDisabled)}>
       <Icon icon={CurrentIcon} size={14} />
       <span>{t(`chatMode.${currentMode}`)}</span>
-      <Icon icon={ChevronDownIcon} size={12} />
+      <Icon
+        className={cx(styles.chevron, open && styles.chevronOpen)}
+        icon={ChevronDownIcon}
+        size={12}
+      />
     </div>
   );
 

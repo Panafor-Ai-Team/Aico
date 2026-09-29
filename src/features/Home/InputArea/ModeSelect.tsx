@@ -92,6 +92,12 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
       border-radius: ${cssVar.borderRadiusLG};
     }
   `,
+  chevron: css`
+    transition: transform 150ms ${cssVar.motionEaseOut};
+  `,
+  chevronOpen: css`
+    transform: rotate(180deg);
+  `,
 }));
 
 const MODES = [
@@ -184,7 +190,11 @@ const ModeSelect = memo<ModeSelectProps>(({ onChange, value }) => {
       <Button aria-expanded={open} aria-haspopup={'menu'} className={styles.button} type={'text'}>
         <Icon icon={current.icon} size={14} />
         <span>{t(`dashboard.mode.${value}`)}</span>
-        <Icon icon={ChevronDownIcon} size={12} />
+        <Icon
+          className={cx(styles.chevron, open && styles.chevronOpen)}
+          icon={ChevronDownIcon}
+          size={12}
+        />
       </Button>
     </Popover>
   );

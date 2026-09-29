@@ -1,13 +1,13 @@
 import { Center, Flexbox, Tooltip } from '@lobehub/ui';
 import { createStaticStyles, cx } from 'antd-style';
 import { ChevronDownIcon } from 'lucide-react';
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useState } from 'react';
 
-import ModelSwitchPanel from '@/features/ModelSwitchPanel';
 import {
   formatBrandedModelId,
   isBrandedOpenRouterModelId,
 } from '@/components/Branding/brandedModelId';
+import ModelSwitchPanel from '@/features/ModelSwitchPanel';
 import { aiModelSelectors, useAiInfraStore } from '@/store/aiInfra';
 import { useChatStore } from '@/store/chat';
 import { topicSelectors } from '@/store/chat/slices/topic/selectors';
@@ -20,6 +20,10 @@ import { useActionBarContext } from '../context';
 const styles = createStaticStyles(({ css, cssVar }) => ({
   chevron: css`
     color: ${cssVar.colorTextQuaternary};
+    transition: transform 150ms ${cssVar.motionEaseOut};
+  `,
+  chevronOpen: css`
+    transform: rotate(180deg);
   `,
   name: css`
     overflow: hidden;
@@ -50,6 +54,7 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 
 const ModelLabel = memo(() => {
   const { dropdownPlacement } = useActionBarContext();
+  const [open, setOpen] = useState(false);
   const agentId = useAgentId();
   const {
     canDisplayModel,
@@ -95,7 +100,9 @@ const ModelLabel = memo(() => {
     >
       <Flexbox horizontal align={'center'} gap={2}>
         <span className={styles.name}>{displayName}</span>
-        {canSelectModel ? <ChevronDownIcon className={styles.chevron} size={12} /> : null}
+        {canSelectModel ? (
+          <ChevronDownIcon className={cx(styles.chevron, open && styles.chevronOpen)} size={12} />
+        ) : null}
       </Flexbox>
     </Center>
   );
@@ -109,10 +116,12 @@ const ModelLabel = memo(() => {
   return (
     <ModelSwitchPanel
       model={model}
+      open={open}
       openOnHover={false}
       placement={dropdownPlacement}
       provider={provider}
       onModelChange={handleModelChange}
+      onOpenChange={setOpen}
     >
       {trigger}
     </ModelSwitchPanel>
