@@ -8,6 +8,7 @@ import ModelLabel from './ModelLabel';
 import Params from './Params';
 import Plus from './Plus';
 import PromptTransform from './PromptTransform';
+import ReasoningEffort from './ReasoningEffort';
 import Search from './Search';
 import ContextWindow from './Token';
 import Tools from './Tools';
@@ -27,6 +28,7 @@ export const actionMap = {
   modelLabel: ModelLabel,
   params: Params,
   promptTransform: PromptTransform,
+  reasoningEffort: ReasoningEffort,
   search: Search,
   temperature: Params,
   tools: Tools,
