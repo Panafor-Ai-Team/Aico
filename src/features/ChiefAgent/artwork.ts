@@ -16,9 +16,9 @@ const asset = (hash: string) => `${OPS_ASSETS_BASE_URL}/${hash}.webp`;
 export const CHIEF_AGENT_ARTWORKS: ChiefAgentArtwork[] = [
   {
     avatar: asset('887f1fa54f3896e91d8a0f5633f241bdc1bbddfe0877b806fe332be6194beed9'),
-    hero: '/ops-assets/92bb02c9e796e555248650a84e774e9190620addc80c0baef125d3872612a178.webp',
+    hero: asset('aecf77a7df115e25f612dcdbfa250a87f1aaff4604c4cab932bcacd0aa04da2b'),
     id: 'lobe',
-    tint: '#e67a3a',
+    tint: '#c98d81',
   },
   {
     avatar: asset('9f544d279dba487afe9134872bedc713add740fe8ecf7537b3ffe3dcadf828bd'),
