@@ -112,7 +112,6 @@ const mapOrgDeleteError = (error: unknown): never => {
   }
   if (
     message === 'ORG_NAME_MISMATCH' ||
-    message === 'ORG_WALLET_NOT_EMPTY' ||
     message === 'ORG_HAS_PENDING_RENEWAL' ||
     message === 'ORG_ALREADY_DELETED'
   ) {
@@ -1064,8 +1063,9 @@ export const organizationRouter = router({
     }),
 
   /**
-   * Soft-delete organization (owner only). Requires typing the exact org name
-   * and a zero wallet balance. Preserves financial history; disables keys.
+   * Soft-delete organization (owner only). Requires typing the exact org name.
+   * Any remaining wallet balance is forfeited. Preserves financial history;
+   * disables keys.
    */
   deleteOrganization: orgProcedure
     .input(
@@ -1081,6 +1081,7 @@ export const organizationRouter = router({
       try {
         result = await ctx.organizationModel.softDeleteOrganization({
           confirmName: input.confirmName,
+          createdByUserId: ctx.userId,
           orgId: input.orgId,
         });
       } catch (error) {

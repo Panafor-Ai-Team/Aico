@@ -1158,6 +1158,15 @@ export const OrgAdminMembers = () => {
           <Flexbox className={styles.dangerCard} gap={12}>
             <Text strong>{t('org.danger.title')}</Text>
             <Text type="secondary">{t('org.danger.warning')}</Text>
+            {Number(wallet?.balanceMicroUsd ?? 0) !== 0 && (
+              <Text>
+                {t('org.danger.balanceLost')}{' '}
+                <PiAmount
+                  style={{ fontWeight: 600 }}
+                  value={wallet?.balancePi ?? dashboard?.balancePi}
+                />
+              </Text>
+            )}
             <Text type="secondary">{t('org.danger.confirmLabel')}</Text>
             <Input
               disabled={readOnly}
