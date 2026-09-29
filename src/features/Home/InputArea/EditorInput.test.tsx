@@ -26,8 +26,13 @@ vi.mock('@/features/ChatInput/ActionBar', () => ({
   default: () => <div data-testid="action-bar" />,
 }));
 
+const chatInputProviderProps = vi.fn();
+
 vi.mock('@/features/ChatInput', () => ({
-  ChatInputProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  ChatInputProvider: ({ children, ...props }: { children: React.ReactNode }) => {
+    chatInputProviderProps(props);
+    return <>{children}</>;
+  },
   DesktopChatInput: ({ sendAreaPrefix }: { sendAreaPrefix?: React.ReactNode }) => (
     <div data-testid="desktop-chat-input">{sendAreaPrefix}</div>
   ),
@@ -79,5 +84,33 @@ describe('HomeEditorInput billing switcher', () => {
 
     expect(useBusinessChatInputAlerts).toHaveBeenCalled();
     expect(screen.getByTestId('aico-funds-blocked-alert')).toBeInTheDocument();
+  });
+});
+
+describe('HomeEditorInput thinking level', () => {
+  beforeEach(() => {
+    chatInputProviderProps.mockClear();
+  });
+
+  it('exposes the thinking level beside the model label before the first message', () => {
+    render(
+      <HomeEditorInput
+        agentId="agt_inbox"
+        initialValue=""
+        isAgentConfigLoading={false}
+        loading={false}
+        mode="chat"
+        send={async () => {}}
+        onModeChange={() => {}}
+        onValueChange={() => {}}
+      />,
+    );
+
+    expect(chatInputProviderProps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'agt_inbox',
+        rightActions: ['modelLabel', 'reasoningEffort'],
+      }),
+    );
   });
 });
