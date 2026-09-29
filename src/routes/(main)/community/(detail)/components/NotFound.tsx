@@ -1,17 +1,12 @@
 'use client';
 
-import { Flexbox } from '@lobehub/ui';
 import { memo } from 'react';
-import { useTranslation } from 'react-i18next';
 
-const NotFound = memo(() => {
-  const { t } = useTranslation('error');
+import NotFound from '@/components/404';
 
-  return (
-    <Flexbox align="center" height="100%" justify="center" style={{ minHeight: 400 }} width="100%">
-      <h2>{t('notFound.title')}</h2>
-    </Flexbox>
-  );
-});
+/** Community detail miss — same 404 surface as unknown routes. */
+const CommunityNotFound = memo(() => <NotFound />);
 
-export default NotFound;
+CommunityNotFound.displayName = 'CommunityNotFound';
+
+export default CommunityNotFound;
