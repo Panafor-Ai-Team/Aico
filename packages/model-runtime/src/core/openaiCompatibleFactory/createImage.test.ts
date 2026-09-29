@@ -852,6 +852,34 @@ describe('createOpenAICompatibleImage', () => {
       );
     });
 
+    it('should map aspectRatio to aspect_ratio and keep resolution on the wire', async () => {
+      const mockImageResponse = {
+        data: [{ b64_json: 'nanoBananaResult' }],
+      };
+
+      vi.mocked(mockClient.images.generate).mockResolvedValue(mockImageResponse as any);
+
+      const payload: CreateImagePayload = {
+        model: 'nano-banana-2',
+        params: {
+          aspectRatio: '16:9',
+          prompt: 'A landscape',
+          resolution: '2K',
+        } as any,
+      };
+
+      await createOpenAICompatibleImage(mockClient, payload, 'cheapvibecode');
+
+      const body = vi.mocked(mockClient.images.generate).mock.calls[0][0] as any;
+      expect(body).toMatchObject({
+        aspect_ratio: '16:9',
+        model: 'nano-banana-2',
+        prompt: 'A landscape',
+        resolution: '2K',
+      });
+      expect(body).not.toHaveProperty('aspectRatio');
+    });
+
     it('should map single imageUrl string parameter to image array', async () => {
       const mockImageResponse = {
         data: [
