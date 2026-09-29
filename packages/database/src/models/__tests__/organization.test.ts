@@ -439,26 +439,35 @@ describe('AicoBillingModel', () => {
       orgModel.softDeleteOrganization({ confirmName: 'Wrong Name', orgId: org.id }),
     ).rejects.toThrow('ORG_NAME_MISMATCH');
 
-    // Non-zero wallet blocks delete
+    // A remaining balance is forfeited, not a reason to refuse deletion.
     await serverDB
       .update(organizations)
-      .set({ walletBalanceMicroUsd: 1_000_000 })
-      .where(eq(organizations.id, org.id));
-    await expect(
-      orgModel.softDeleteOrganization({ confirmName: 'Doomed Co', orgId: org.id }),
-    ).rejects.toThrow('ORG_WALLET_NOT_EMPTY');
-
-    await serverDB
-      .update(organizations)
-      .set({ walletBalanceMicroUsd: 0 })
+      .set({ walletBalanceMicroUsd: 1_000_000, walletBalanceToman: 25_000 })
       .where(eq(organizations.id, org.id));
 
     const result = await orgModel.softDeleteOrganization({
       confirmName: 'Doomed Co',
+      createdByUserId: ownerId,
       orgId: org.id,
     });
     expect(result.organization.status).toBe('deleted');
     expect(result.organization.slug).toContain('-deleted-');
+    expect(Number(result.organization.walletBalanceMicroUsd)).toBe(0);
+    expect(Number(result.organization.walletBalanceToman)).toBe(0);
+
+    const forfeiture = await serverDB.query.walletTransactions.findFirst({
+      where: eq(walletTransactions.orgId, org.id),
+    });
+    expect(forfeiture).toMatchObject({
+      amountMicroUsd: -1_000_000,
+      amountToman: -25_000,
+      balanceAfterMicroUsd: 0,
+      balanceAfterToman: 0,
+      balanceBeforeMicroUsd: 1_000_000,
+      balanceBeforeToman: 25_000,
+      createdByUserId: ownerId,
+      type: 'adjustment',
+    });
 
     const members = await orgModel.listMembers(org.id);
     expect(members.every((m) => m.status === 'left')).toBe(true);
@@ -566,6 +575,36 @@ describe('OrganizationModel.reclaimMemberRemainingCredit', () => {
     expect(Number(transaction!.amountMicroUsd)).toBe(10_000_000);
     // $20 funded, $10 allocated, $10 reclaimed, $10 allocated again → $10 left.
     expect(Number(organization.walletBalanceMicroUsd)).toBe(10_000_000);
+  });
+
+  it('does not restore member credit onto an organization deleted with a balance', async () => {
+    const { member, org } = await setupFundedOrgWithMember();
+    await orgModel.allocateMemberCredit({
+      createdByUserId: ownerId,
+      orgId: org.id,
+      orgMemberId: member.id,
+      period: 'daily',
+      periodAmountMicroUsd: 10_000_000,
+    });
+
+    const deleted = await orgModel.softDeleteOrganization({
+      confirmName: 'Reclaim Co',
+      orgId: org.id,
+    });
+    expect(Number(deleted.organization.walletBalanceMicroUsd)).toBe(0);
+
+    const reclaimed = await orgModel.reclaimMemberRemainingCredit({
+      orgId: org.id,
+      orgMemberId: member.id,
+      remainingMicroUsd: 10_000_000,
+    });
+
+    expect(Number(reclaimed.organization.walletBalanceMicroUsd)).toBe(0);
+    expect(reclaimed.transaction?.type).toBe('adjustment');
+    expect(reclaimed.transaction?.metadata).toMatchObject({
+      forfeitedMicroUsd: 10_000_000,
+      reason: 'org_deleted',
+    });
   });
 
   it('is a no-op on a second reclaim and never credits the wallet twice', async () => {

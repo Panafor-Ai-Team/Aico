@@ -381,15 +381,20 @@ export class OrganizationModel {
    * Soft-deletes an organization (tombstone). Does **not** hard-delete the row —
    * wallet_transactions / usage history must be retained.
    *
-   * Preconditions: confirmName matches, wallet balance is 0, no pending renewal
-   * batch, no member budget stuck in `renewal_pending`.
+   * Preconditions: confirmName matches, no pending renewal batch, no member
+   * budget stuck in `renewal_pending`. A remaining wallet balance does not
+   * block deletion — it is forfeited in this transaction and written to the
+   * ledger as an `adjustment`.
    *
    * Side effects inside the transaction: revoke pending invites, mark all
-   * active/revocation_pending members as `left`, suffix the slug, set
-   * `status: 'deleted'`. Caller should disable OpenRouter keys / enqueue reclaim.
+   * active/revocation_pending members as `left`, zero the wallet, suffix the
+   * slug, set `status: 'deleted'`. Caller should disable OpenRouter keys /
+   * enqueue reclaim.
    */
   softDeleteOrganization = async (params: {
     confirmName: string;
+    /** Owner who confirmed the delete, recorded on the forfeiture ledger row. */
+    createdByUserId?: string | null;
     orgId: string;
   }): Promise<{
     membersToReclaim: Array<{
@@ -406,7 +411,6 @@ export class OrganizationModel {
       if (!org) throw new Error('ORG_NOT_FOUND');
       if (org.status === 'deleted') throw new Error('ORG_ALREADY_DELETED');
       if (org.name !== params.confirmName) throw new Error('ORG_NAME_MISMATCH');
-      if (Number(org.walletBalanceMicroUsd) !== 0) throw new Error('ORG_WALLET_NOT_EMPTY');
 
       const pendingBatch = await tx.query.aicoRenewalBatches.findFirst({
         where: and(
@@ -451,10 +455,33 @@ export class OrganizationModel {
           .where(inArray(organizationMembers.id, memberIds));
       }
 
+      const balanceMicroUsd = Number(org.walletBalanceMicroUsd ?? 0);
+      const balanceToman = Number(org.walletBalanceToman ?? 0);
+      if (balanceMicroUsd !== 0 || balanceToman !== 0) {
+        await tx.insert(walletTransactions).values({
+          // Negative so `balance_after − balance_before == amount` holds.
+          amountMicroUsd: -balanceMicroUsd,
+          amountToman: -balanceToman,
+          balanceAfterMicroUsd: 0,
+          balanceAfterToman: 0,
+          balanceBeforeMicroUsd: balanceMicroUsd,
+          balanceBeforeToman: balanceToman,
+          createdByUserId: params.createdByUserId ?? null,
+          description: 'Balance forfeited on organization deletion',
+          orgId: params.orgId,
+          type: 'adjustment',
+        });
+      }
+
       const freedSlug = `${org.slug}-deleted-${org.id.slice(-8)}`;
       const [organization] = await tx
         .update(organizations)
-        .set({ slug: freedSlug, status: 'deleted' })
+        .set({
+          slug: freedSlug,
+          status: 'deleted',
+          walletBalanceMicroUsd: 0,
+          walletBalanceToman: 0,
+        })
         .where(eq(organizations.id, params.orgId))
         .returning();
       if (!organization) throw new Error('ORG_NOT_FOUND');
@@ -1543,7 +1570,8 @@ export class OrganizationModel {
    * is returned — the caller (key service) computes it and passes it in.
    *
    * Idempotent (FIN-002): a second reclaim on an already-settled budget is a
-   * no-op and must not credit the org wallet again.
+   * no-op and must not credit the org wallet again. A deleted organization
+   * keeps the remainder forfeited — the wallet is not credited.
    *
    * The period cap is zeroed alongside the reservation. Leaving a stale
    * `periodAmountMicroUsd` behind would make a later `allocateMemberCredit` for
@@ -1636,13 +1664,43 @@ export class OrganizationModel {
         budget = casBudget;
       }
 
-      const balanceBeforeMicroUsd = Number(
-        (
-          await tx.query.organizations.findFirst({
-            where: eq(organizations.id, params.orgId),
-          })
-        )?.walletBalanceMicroUsd ?? 0,
-      );
+      const orgBefore = await tx.query.organizations.findFirst({
+        where: eq(organizations.id, params.orgId),
+      });
+      if (!orgBefore) throw new Error('ORG_NOT_FOUND');
+
+      const balanceBeforeMicroUsd = Number(orgBefore.walletBalanceMicroUsd ?? 0);
+      const balanceBeforeToman = Number(orgBefore.walletBalanceToman ?? 0);
+
+      // Deletion already forfeited the wallet. Returning this member's remainder
+      // would recreate a balance on a tombstone the owner was told is gone.
+      if (orgBefore.status === 'deleted') {
+        let transaction = null;
+        if (remaining > 0) {
+          const [row] = await tx
+            .insert(walletTransactions)
+            .values({
+              amountMicroUsd: 0,
+              amountToman: 0,
+              balanceAfterMicroUsd: balanceBeforeMicroUsd,
+              balanceAfterToman: balanceBeforeToman,
+              balanceBeforeMicroUsd,
+              balanceBeforeToman,
+              createdByUserId: params.createdByUserId ?? null,
+              description:
+                params.description ??
+                'Forfeited remaining member credit because the organization was deleted',
+              metadata: { forfeitedMicroUsd: remaining, reason: 'org_deleted' },
+              orgId: params.orgId,
+              orgMemberId: params.orgMemberId,
+              type: 'adjustment',
+              userId: member.userId,
+            })
+            .returning();
+          transaction = row;
+        }
+        return { budget, organization: orgBefore, transaction };
+      }
 
       const [organization] = await tx
         .update(organizations)

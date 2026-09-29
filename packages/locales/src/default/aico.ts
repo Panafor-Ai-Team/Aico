@@ -52,7 +52,7 @@ export default {
   'errors.ORG_NOT_FOUND': 'Organization not found.',
   'errors.ORG_WALLET_EMPTY': 'Organization wallet balance is insufficient.',
   'errors.ORG_WALLET_NOT_EMPTY':
-    'Drain the organization wallet to zero before deleting the organization.',
+    'Any remaining organization wallet balance is lost when the organization is deleted.',
   'errors.PERSONAL_FUNDS_UNAVAILABLE':
     'Your personal wallet has no remaining credit. Top up or start a free trial.',
   'errors.PERSONAL_WALLET_INACTIVE': 'Your personal wallet is inactive.',
@@ -124,6 +124,7 @@ export default {
   'org.companyName': 'Company name',
   'org.companyNamePlaceholder': 'Acme AI',
   'org.delete': 'Delete',
+  'org.danger.balanceLost': 'Balance that will be lost:',
   'org.danger.confirmLabel': 'Type the organization name to confirm',
   'org.danger.confirmPlaceholder': '{{name}}',
   'org.danger.delete': 'Delete this organization',
@@ -131,7 +132,7 @@ export default {
   'org.danger.failed': 'Could not delete organization',
   'org.danger.title': 'Danger zone',
   'org.danger.warning':
-    'Deleting an organization is permanent. All members lose access. Drain the wallet to $0 first. Financial history is retained for audit.',
+    'Deleting an organization is permanent. All members lose access. Any remaining wallet balance is lost and cannot be recovered. Financial history is retained for audit.',
   'org.emptyDesc': 'Create a company account to invite members and allocate credits.',
   'org.emptyTitle': 'No organization yet',
   'org.invite.copyLink': 'Copy link',

@@ -109,7 +109,7 @@ export const AICO_ERROR_MESSAGES_FA: Record<AicoErrorCode, string> = {
   ORG_NOT_FOUND: 'سازمان یافت نشد.',
   OPERATOR_EMAIL_EXISTS: 'اپراتوری با این ایمیل از قبل وجود دارد.',
   ORG_WALLET_EMPTY: 'موجودی کیف پول سازمان کافی نیست.',
-  ORG_WALLET_NOT_EMPTY: 'برای حذف سازمان، ابتدا موجودی کیف پول را به صفر برسانید.',
+  ORG_WALLET_NOT_EMPTY: 'با حذف سازمان، موجودی باقی‌مانده کیف پول از بین می‌رود.',
   PASSWORD_TOO_WEAK: 'رمز عبور باید حداقل ۸ نویسه باشد و شامل حرف و رقم باشد.',
   PERSONAL_FUNDS_UNAVAILABLE:
     'موجودی کیف پول شخصی کافی نیست. لطفاً شارژ کنید یا دوره آزمایشی را فعال کنید.',
