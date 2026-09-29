@@ -17,6 +17,25 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     line-height: 1.6;
     color: ${cssVar.colorTextTertiary};
   `,
+  slider: css`
+    cursor: pointer;
+    flex: 1;
+
+    /* Track + thumb: grab/pointer, never the text I-beam. */
+    * {
+      cursor: pointer;
+    }
+
+    [data-slot='thumb'],
+    [role='slider'] {
+      cursor: grab;
+    }
+
+    &:active [data-slot='thumb'],
+    &:active [role='slider'] {
+      cursor: grabbing;
+    }
+  `,
   value: css`
     font-size: 12px;
     font-weight: 600;
@@ -64,11 +83,11 @@ const GenerationDurationField = memo<GenerationDurationFieldProps>(
           <Flexbox horizontal align={'center'} gap={10}>
             <span className={styles.bound}>{formatValue(options[0])}</span>
             <Slider
+              className={styles.slider}
               disabled={disabled}
               max={options.length - 1}
               min={0}
               step={1}
-              style={{ flex: 1 }}
               value={index}
               onChange={(next) => {
                 const seconds = options[next];

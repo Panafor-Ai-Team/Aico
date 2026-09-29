@@ -13,7 +13,10 @@ import {
   cheapVibeCodeGptImage2Parameters,
   cheapVibeCodePromptOnlyImageParameters,
 } from 'model-bank/imageParameters';
-import { cheapVibeCodeGrokImagineVideoParameters } from 'model-bank/videoParameters';
+import {
+  cheapVibeCodeGrokImagineVideoParameters,
+  cheapVibeCodeGrokImagineVideoPricing,
+} from 'model-bank/videoParameters';
 
 import {
   type NewOpenrouterModelCatalog,
@@ -120,6 +123,7 @@ const CHEAPVIBECODE_GENERATION_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
     displayName: 'Grok Imagine Video',
     id: 'grok-imagine-video',
     parameters: cheapVibeCodeGrokImagineVideoParameters,
+    pricing: cheapVibeCodeGrokImagineVideoPricing,
     type: 'video',
   },
 ];
@@ -129,19 +133,25 @@ const managedGenerationCatalogCards = (): OpenRouterCatalogModelInput[] =>
 
 /**
  * The generator cards are defined here, not by the upstream, so their parameter
- * schema in code is authoritative. Rows persisted by an earlier sync would
- * otherwise keep serving a stale schema (e.g. no start-frame upload) until the
- * next cron run.
+ * schema and pricing in code are authoritative. Rows persisted by an earlier
+ * sync would otherwise keep serving a stale schema (e.g. no start-frame upload)
+ * or a missing price table until the next cron run.
  */
-const withManagedGenerationParameters = (
+const withManagedGenerationCards = (
   models: AiProviderModelListItem[],
 ): AiProviderModelListItem[] => {
   const cards = new Map(managedGenerationCatalogCards().map((card) => [card.id, card]));
   if (cards.size === 0) return models;
 
   return models.map((model) => {
-    const parameters = cards.get(model.id)?.parameters;
-    return parameters ? ({ ...model, parameters } as AiProviderModelListItem) : model;
+    const card = cards.get(model.id);
+    if (!card) return model;
+
+    return {
+      ...model,
+      ...(card.parameters ? { parameters: card.parameters } : {}),
+      ...(card.pricing ? { pricing: card.pricing } : {}),
+    } as AiProviderModelListItem;
   });
 };
 
@@ -152,6 +162,7 @@ const toProviderCard = (card: OpenRouterCatalogModelInput): AiProviderModelListI
     enabled: true,
     id: card.id,
     parameters: card.parameters,
+    pricing: card.pricing,
     source: AiModelSourceEnum.Remote,
     type: normalizeAiModelType(card.type),
   }) as AiProviderModelListItem;
@@ -344,7 +355,7 @@ export class OpenRouterModelCatalogModel {
         type: normalizeAiModelType(row.type),
       } as AiProviderModelListItem;
     });
-    const mapped = withManagedGenerationParameters(rowModels);
+    const mapped = withManagedGenerationCards(rowModels);
 
     if (mapped.some((m) => m.id === OPENROUTER_AUTO_MODEL_ID)) {
       // Serve path must be self-healing: a catalog synced before the embedding

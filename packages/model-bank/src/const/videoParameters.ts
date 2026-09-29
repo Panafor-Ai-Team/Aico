@@ -1,4 +1,5 @@
 import type { VideoModelParamsSchema } from '../standard-parameters/video';
+import type { Pricing } from '../types/aiModel';
 
 /**
  * Aico video generation takes one input image. Keeps the model's own image
@@ -35,4 +36,52 @@ export const cheapVibeCodeGrokImagineVideoParameters: VideoModelParamsSchema = {
     default: '720p',
     enum: ['480p', '720p'],
   },
+};
+
+/**
+ * Default CVC tokens bought by one USD — same figure as
+ * `DEFAULT_CVC_TOKENS_PER_USD` in the CheapVibeCode runtime. Generation cards
+ * store USD rates derived at this rate; a live `AICO_CVC_TOKENS_PER_USD`
+ * override re-denominates chat multipliers, not these baked rates.
+ */
+export const CHEAPVIBECODE_TOKENS_PER_USD = 25_000_000;
+
+/** USD for a CheapVibeCode token charge at {@link CHEAPVIBECODE_TOKENS_PER_USD}. */
+export const cheapVibeCodeTokensToUsd = (tokens: number): number =>
+  tokens / CHEAPVIBECODE_TOKENS_PER_USD;
+
+/**
+ * CheapVibeCode Grok Imagine Video output pricing (per second) plus the flat
+ * image-to-video input fee:
+ *
+ * - text → video: 480p 250K/sec · 720p 350K/sec
+ * - image → video: 480p 400K/sec · 720p 700K/sec
+ * - image-to-video input: +50K
+ *
+ * `source` is `text` or `image` (see `estimateVideoGenerationCostUsd`).
+ */
+export const cheapVibeCodeGrokImagineVideoPricing: Pricing = {
+  units: [
+    {
+      lookup: {
+        prices: {
+          '480p_image': cheapVibeCodeTokensToUsd(400_000),
+          '480p_text': cheapVibeCodeTokensToUsd(250_000),
+          '720p_image': cheapVibeCodeTokensToUsd(700_000),
+          '720p_text': cheapVibeCodeTokensToUsd(350_000),
+        },
+        pricingParams: ['resolution', 'source'],
+      },
+      name: 'videoGeneration',
+      strategy: 'lookup',
+      unit: 'second',
+    },
+    {
+      // Flat fee when `source` is image; estimate adds it only for image-to-video.
+      name: 'imageInput',
+      rate: cheapVibeCodeTokensToUsd(50_000),
+      strategy: 'fixed',
+      unit: 'image',
+    },
+  ],
 };

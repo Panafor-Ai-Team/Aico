@@ -1,9 +1,14 @@
 import type { Pricing } from 'model-bank';
+import {
+  cheapVibeCodeGrokImagineVideoPricing,
+  cheapVibeCodeTokensToUsd,
+} from 'model-bank/videoParameters';
 import { describe, expect, it } from 'vitest';
 
 import {
   estimateImageGenerationCostUsd,
   estimateVideoGenerationCostUsd,
+  resolveVideoCostSource,
 } from './estimateGenerationCost';
 
 describe('estimateImageGenerationCostUsd', () => {
@@ -45,6 +50,16 @@ describe('estimateImageGenerationCostUsd', () => {
   });
 });
 
+describe('resolveVideoCostSource', () => {
+  it('treats a start-frame image as image-to-video', () => {
+    expect(resolveVideoCostSource({ imageUrl: 'https://example.com/a.png' })).toBe('image');
+  });
+
+  it('treats a prompt-only request as text-to-video', () => {
+    expect(resolveVideoCostSource({ prompt: 'a cat' })).toBe('text');
+  });
+});
+
 describe('estimateVideoGenerationCostUsd', () => {
   it('prices per-second models by the requested duration', () => {
     const pricing: Pricing = {
@@ -81,6 +96,27 @@ describe('estimateVideoGenerationCostUsd', () => {
 
     expect(cost('480p')).toBeCloseTo(0.2);
     expect(cost('720p')).toBeCloseTo(0.4);
+  });
+
+  it('prices CheapVibeCode Grok Imagine Video by resolution and source', () => {
+    const cost = (resolution: string, imageUrl?: string) =>
+      estimateVideoGenerationCostUsd({
+        model: { id: 'grok-imagine-video', pricing: cheapVibeCodeGrokImagineVideoPricing },
+        params: { duration: 6, resolution, ...(imageUrl ? { imageUrl } : {}) },
+        provider: 'cheapvibecode',
+      });
+
+    // text → video: 250K/sec @ 480p, 350K/sec @ 720p
+    expect(cost('480p')).toBeCloseTo(cheapVibeCodeTokensToUsd(250_000) * 6);
+    expect(cost('720p')).toBeCloseTo(cheapVibeCodeTokensToUsd(350_000) * 6);
+
+    // image → video: 400K/sec @ 480p + 50K input; 700K/sec @ 720p + 50K
+    expect(cost('480p', 'https://example.com/frame.png')).toBeCloseTo(
+      cheapVibeCodeTokensToUsd(400_000) * 6 + cheapVibeCodeTokensToUsd(50_000),
+    );
+    expect(cost('720p', 'https://example.com/frame.png')).toBeCloseTo(
+      cheapVibeCodeTokensToUsd(700_000) * 6 + cheapVibeCodeTokensToUsd(50_000),
+    );
   });
 
   it('falls back to the catalog per-video estimate', () => {
