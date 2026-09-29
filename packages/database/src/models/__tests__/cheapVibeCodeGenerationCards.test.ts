@@ -44,6 +44,21 @@ describe('CheapVibeCode generation models', () => {
     expect(models['grok-imagine-video']).toMatchObject({ enabled: true, type: 'video' });
     // GPT Image 2 defaults to medium quality.
     expect((models['gpt-image-2'] as any).parameters.quality.default).toBe('medium');
+    // Resolution × source lookup so the chat confirm card price moves with quality.
+    expect(models['grok-imagine-video'].pricing?.units?.[0]).toMatchObject({
+      name: 'videoGeneration',
+      strategy: 'lookup',
+      unit: 'second',
+    });
+    expect(
+      (models['grok-imagine-video'].pricing?.units?.[0] as { lookup?: { prices?: object } }).lookup
+        ?.prices,
+    ).toMatchObject({
+      '480p_text': expect.any(Number),
+      '720p_text': expect.any(Number),
+      '480p_image': expect.any(Number),
+      '720p_image': expect.any(Number),
+    });
   });
 
   it('backfills them on the serve path for a catalog synced before they existed', async () => {
@@ -105,6 +120,30 @@ describe('CheapVibeCode generation models', () => {
 
     expect(video.parameters.imageUrl).toEqual({ default: null });
     expect(video.enabled).toBe(true);
+  });
+
+  it('overlays Grok Imagine Video pricing on a row synced without a price table', async () => {
+    const { OpenRouterModelCatalogModel } = await import('../openrouterModelCatalog');
+    await db.insert(openrouterModelCatalog).values([
+      { enabled: true, id: 'openrouter/auto', payload: {}, syncedAt: new Date(), type: 'chat' },
+      {
+        enabled: true,
+        id: 'grok-imagine-video',
+        payload: { parameters: { duration: { default: 6 }, prompt: { default: '' } } },
+        pricing: null,
+        syncedAt: new Date(),
+        type: 'video',
+      },
+    ]);
+
+    const video = byId(await new OpenRouterModelCatalogModel(db).listAsProviderModels())[
+      'grok-imagine-video'
+    ];
+
+    expect(video.pricing?.units?.[0]).toMatchObject({
+      name: 'videoGeneration',
+      strategy: 'lookup',
+    });
   });
 
   it('keeps an admin switching a generator off across the next sync', async () => {
