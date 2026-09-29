@@ -44,6 +44,13 @@ describe('CheapVibeCode generation models', () => {
     expect(models['grok-imagine-video']).toMatchObject({ enabled: true, type: 'video' });
     // GPT Image 2 defaults to medium quality.
     expect((models['gpt-image-2'] as any).parameters.quality.default).toBe('medium');
+    // Nano Banana 2 exposes thinking level (reasoning_effort on the wire).
+    expect((models['nano-banana-2'] as any).parameters.reasoningEffort).toEqual({
+      default: 'medium',
+      enum: ['low', 'medium', 'high'],
+    });
+    // Grok Imagine Image stays prompt-only — no undocumented fields.
+    expect((models['grok-imagine-image'] as any).parameters.reasoningEffort).toBeUndefined();
     // Resolution × source lookup so the chat confirm card price moves with quality.
     expect(models['grok-imagine-video'].pricing?.units?.[0]).toMatchObject({
       name: 'videoGeneration',
@@ -161,5 +168,22 @@ describe('CheapVibeCode generation models', () => {
     });
 
     expect(byId(await catalog.listAsProviderModels())['grok-imagine-video'].enabled).toBe(false);
+  });
+
+  it('backfills reasoningEffort on reasoning chat models missing the extendParam', async () => {
+    const { OpenRouterModelCatalogModel } = await import('../openrouterModelCatalog');
+    await db.insert(openrouterModelCatalog).values({
+      abilities: { reasoning: true },
+      enabled: true,
+      id: 'gpt-5.6-terra',
+      payload: {},
+      settings: {},
+      syncedAt: new Date(),
+      type: 'chat',
+    });
+
+    const models = byId(await new OpenRouterModelCatalogModel(db).listAsProviderModels());
+
+    expect(models['gpt-5.6-terra'].settings?.extendParams).toContain('reasoningEffort');
   });
 });

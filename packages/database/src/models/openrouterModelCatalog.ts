@@ -11,6 +11,7 @@ import type { AiProviderModelListItem, ModelAbilities, Pricing } from 'model-ban
 import { AiModelSourceEnum, normalizeAiModelType } from 'model-bank';
 import {
   cheapVibeCodeGptImage2Parameters,
+  cheapVibeCodeNanoBanana2Parameters,
   cheapVibeCodePromptOnlyImageParameters,
 } from 'model-bank/imageParameters';
 import {
@@ -110,7 +111,7 @@ const CHEAPVIBECODE_GENERATION_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
   {
     displayName: 'Nano Banana 2',
     id: 'nano-banana-2',
-    parameters: cheapVibeCodePromptOnlyImageParameters,
+    parameters: cheapVibeCodeNanoBanana2Parameters,
     type: 'image',
   },
   {
@@ -152,6 +153,34 @@ const withManagedGenerationCards = (
       ...(card.parameters ? { parameters: card.parameters } : {}),
       ...(card.pricing ? { pricing: card.pricing } : {}),
     } as AiProviderModelListItem;
+  });
+};
+
+/**
+ * CheapVibeCode reasoning models expose thinking level as `reasoning_effort`.
+ * Catalogs synced before that tagging lack `settings.extendParams`, so Params
+ * would hide the control until the next cron. Inject on the serve path when the
+ * live gateway is CVC and the row already claims reasoning ability.
+ */
+const withCheapVibeCodeReasoningEffort = (
+  models: AiProviderModelListItem[],
+): AiProviderModelListItem[] => {
+  if (MANAGED_PROVIDER_ID !== 'cheapvibecode') return models;
+
+  return models.map((model) => {
+    if (model.type && model.type !== 'chat') return model;
+    if (!model.abilities?.reasoning) return model;
+
+    const extendParams = model.settings?.extendParams ?? [];
+    if (extendParams.includes('reasoningEffort')) return model;
+
+    return {
+      ...model,
+      settings: {
+        ...model.settings,
+        extendParams: [...extendParams, 'reasoningEffort'],
+      },
+    };
   });
 };
 
@@ -355,7 +384,7 @@ export class OpenRouterModelCatalogModel {
         type: normalizeAiModelType(row.type),
       } as AiProviderModelListItem;
     });
-    const mapped = withManagedGenerationCards(rowModels);
+    const mapped = withCheapVibeCodeReasoningEffort(withManagedGenerationCards(rowModels));
 
     if (mapped.some((m) => m.id === OPENROUTER_AUTO_MODEL_ID)) {
       // Serve path must be self-healing: a catalog synced before the embedding

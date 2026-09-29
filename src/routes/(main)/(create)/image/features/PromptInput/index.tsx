@@ -32,6 +32,7 @@ import {
   DimensionControlGroup,
   ImageNum,
   QualitySelect,
+  ReasoningEffortSelect,
   ResolutionSelect,
   SeedNumberInput,
   SizeSelect,
@@ -168,6 +169,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
   const currentProvider = useImageStore(imageGenerationConfigSelectors.provider);
   const isInit = useImageStore((s) => s.isInit);
   const isSupportQuality = useImageStore(isSupportedParamSelector('quality'));
+  const isSupportReasoningEffort = useImageStore(isSupportedParamSelector('reasoningEffort'));
   const isSupportResolution = useImageStore(isSupportedParamSelector('resolution'));
   const isSupportSize = useImageStore(isSupportedParamSelector('size'));
   const isSupportSeed = useImageStore(isSupportedParamSelector('seed'));
@@ -342,6 +344,12 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
                     <Flexbox gap={6}>
                       <Text fontSize={12}>{t('config.quality.label')}</Text>
                       <QualitySelect />
+                    </Flexbox>
+                  )}
+                  {isSupportReasoningEffort && (
+                    <Flexbox gap={6}>
+                      <Text fontSize={12}>{t('config.reasoningEffort.label')}</Text>
+                      <ReasoningEffortSelect />
                     </Flexbox>
                   )}
                   {isSupportResolution && (

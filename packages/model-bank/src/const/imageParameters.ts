@@ -138,6 +138,18 @@ export const cheapVibeCodePromptOnlyImageParameters: ModelParamsSchema = {
 };
 
 /**
+ * Nano Banana 2 behind CheapVibeCode. Same prompt-only base as other CVC image
+ * models, plus OpenAI-shaped thinking level (`reasoning_effort` on the wire).
+ */
+export const cheapVibeCodeNanoBanana2Parameters: ModelParamsSchema = {
+  prompt: { default: '' },
+  reasoningEffort: {
+    default: 'medium',
+    enum: ['low', 'medium', 'high'],
+  },
+};
+
+/**
  * GPT Image 2 behind CheapVibeCode. Same options as {@link gptImage2Schema}, but
  * reference images are capped at OpenAI's `/images/edits` limit of 16 rather
  * than one.

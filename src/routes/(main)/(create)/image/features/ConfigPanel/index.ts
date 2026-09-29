@@ -5,6 +5,7 @@ export { default as ImageNum } from '@/routes/(main)/(create)/image/features/Con
 export { default as ImageUpload } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/ImageUpload';
 export { default as ImageModelItem } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/ModelSelect/ImageModelItem';
 export { default as QualitySelect } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/QualitySelect';
+export { default as ReasoningEffortSelect } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/ReasoningEffortSelect';
 export { default as ResolutionSelect } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/ResolutionSelect';
 export { default as SeedNumberInput } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/SeedNumberInput';
 export { default as SizeSelect } from '@/routes/(main)/(create)/image/features/ConfigPanel/components/SizeSelect';
