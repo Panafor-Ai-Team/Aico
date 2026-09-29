@@ -823,6 +823,35 @@ describe('createOpenAICompatibleImage', () => {
   });
 
   describe('image mode - parameter mapping', () => {
+    it('should map reasoningEffort to reasoning_effort on the wire', async () => {
+      const mockImageResponse = {
+        data: [{ b64_json: 'nanoBananaResult' }],
+      };
+
+      vi.mocked(mockClient.images.generate).mockResolvedValue(mockImageResponse as any);
+
+      const payload: CreateImagePayload = {
+        model: 'nano-banana-2',
+        params: {
+          prompt: 'A cat',
+          reasoningEffort: 'high',
+        } as any,
+      };
+
+      await createOpenAICompatibleImage(mockClient, payload, 'cheapvibecode');
+
+      expect(mockClient.images.generate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'nano-banana-2',
+          prompt: 'A cat',
+          reasoning_effort: 'high',
+        }),
+      );
+      expect(vi.mocked(mockClient.images.generate).mock.calls[0][0]).not.toHaveProperty(
+        'reasoningEffort',
+      );
+    });
+
     it('should map single imageUrl string parameter to image array', async () => {
       const mockImageResponse = {
         data: [

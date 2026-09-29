@@ -47,13 +47,11 @@ export const params = {
         ...rest
       } = payload as any;
 
-      // Reasoning is a property of the model here, not a per-request switch:
-      // `/v1/models` publishes `supports_reasoning` and there is no documented
-      // request field to turn it on or off. Dropping these rather than forwarding
-      // them keeps us from sending parameters the gateway may reject outright.
+      // Drop Google-shaped thinking fields — CVC is OpenAI-compatible and uses
+      // `reasoning_effort` (low/medium/high) as the per-request switch. Forward
+      // that field when present so Params / Auto routing actually reach upstream.
       void thinking;
       void thinkingLevel;
-      void reasoning_effort;
 
       return {
         ...rest,
@@ -61,6 +59,7 @@ export const params = {
         // to a concrete model here — see ./autoRouting. Any other id passes
         // through untouched.
         model: resolveAutoModel(payload),
+        ...(reasoning_effort ? { reasoning_effort } : {}),
         stream: payload.stream ?? true,
       } as any;
     },

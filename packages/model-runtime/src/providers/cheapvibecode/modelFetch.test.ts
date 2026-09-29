@@ -70,8 +70,15 @@ describe('mapCheapVibeCodeModelCard', () => {
       displayName: 'GPT-5.6 Luna',
       id: 'gpt-5.6-luna',
       maxOutput: 128_000,
+      settings: { extendParams: ['reasoningEffort'] },
       type: 'chat',
     });
+  });
+
+  it('omits reasoningEffort settings when the model does not support reasoning', () => {
+    expect(
+      mapCheapVibeCodeModelCard({ id: 'qwen3.8-flash', supports_reasoning: false }),
+    ).not.toHaveProperty('settings');
   });
 
   it('treats max_output_tokens: 0 as unpublished, not as a zero-length cap', () => {

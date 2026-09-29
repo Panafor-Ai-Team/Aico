@@ -54,6 +54,8 @@ async function generateByImageMode(
   const paramsMap = new Map<RuntimeImageGenParamsValue, string>([
     ['imageUrls', 'image'],
     ['imageUrl', 'image'],
+    // OpenAI / CheapVibeCode wire name for thinking level
+    ['reasoningEffort', 'reasoning_effort'],
   ]);
   const userInput: Record<string, any> = Object.fromEntries(
     Object.entries(params).map(([key, value]) => [

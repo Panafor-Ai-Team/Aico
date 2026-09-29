@@ -35,6 +35,11 @@ const cvcPricing = (coefficient: number) => ({
   ],
 });
 
+/** CVC uses a single OpenAI-shaped `reasoning_effort` field for thinking level. */
+const reasoningEffortSettings = {
+  extendParams: ['reasoningEffort' as const],
+};
+
 const cheapvibecodeChatModels: AIChatModelCard[] = [
   {
     abilities: { reasoning: true, vision: true },
@@ -45,6 +50,7 @@ const cheapvibecodeChatModels: AIChatModelCard[] = [
     enabled: true,
     id: 'gpt-5.6-luna',
     pricing: cvcPricing(0.33),
+    settings: reasoningEffortSettings,
     type: 'chat',
   },
   {
@@ -56,6 +62,7 @@ const cheapvibecodeChatModels: AIChatModelCard[] = [
     enabled: true,
     id: 'glm-5.3-flash',
     pricing: cvcPricing(0.3),
+    settings: reasoningEffortSettings,
     type: 'chat',
   },
   {
@@ -66,6 +73,7 @@ const cheapvibecodeChatModels: AIChatModelCard[] = [
     displayName: 'DeepSeek V4.1 Flash',
     id: 'deepseek-v4.1-flash',
     pricing: cvcPricing(0.3),
+    settings: reasoningEffortSettings,
     type: 'chat',
   },
   {
@@ -77,6 +85,7 @@ const cheapvibecodeChatModels: AIChatModelCard[] = [
     enabled: true,
     id: 'grok-4.6',
     pricing: cvcPricing(0.5),
+    settings: reasoningEffortSettings,
     type: 'chat',
   },
   {
@@ -93,6 +102,7 @@ const cheapvibecodeChatModels: AIChatModelCard[] = [
     displayName: 'GPT-5.6 Terra',
     id: 'gpt-5.6-terra',
     pricing: cvcPricing(1.5),
+    settings: reasoningEffortSettings,
     type: 'chat',
   },
   {
@@ -110,6 +120,7 @@ const cheapvibecodeChatModels: AIChatModelCard[] = [
     displayName: 'Gemini 3.8 Flash',
     id: 'gemini-3.8-flash',
     pricing: cvcPricing(2),
+    settings: reasoningEffortSettings,
     type: 'chat',
   },
   {
@@ -120,6 +131,7 @@ const cheapvibecodeChatModels: AIChatModelCard[] = [
     displayName: 'Claude Opus 5',
     id: 'claude-opus-5',
     pricing: cvcPricing(4),
+    settings: reasoningEffortSettings,
     type: 'chat',
   },
   {
@@ -129,6 +141,7 @@ const cheapvibecodeChatModels: AIChatModelCard[] = [
     displayName: 'Claude Fable 5.1',
     id: 'claude-fable-5-1',
     pricing: cvcPricing(8),
+    settings: reasoningEffortSettings,
     type: 'chat',
   },
   {
@@ -138,6 +151,7 @@ const cheapvibecodeChatModels: AIChatModelCard[] = [
     displayName: 'MiMo V2.5',
     id: 'mimo-v2.5',
     pricing: cvcPricing(0.05),
+    settings: reasoningEffortSettings,
     type: 'chat',
   },
 ];

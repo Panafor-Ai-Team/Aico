@@ -45,6 +45,7 @@ export const cvcMultiplierToPricing = (
 export const mapCheapVibeCodeModelCard = (model: CheapVibeCodeModelCard) => {
   const contextWindowTokens = Number(model.context_window);
   const maxOutput = Number(model.max_output_tokens);
+  const supportsReasoning = model.supports_reasoning === true;
 
   return {
     abilities: {
@@ -61,6 +62,9 @@ export const mapCheapVibeCodeModelCard = (model: CheapVibeCodeModelCard) => {
     // is treated as "not published" rather than as a limit.
     maxOutput: Number.isFinite(maxOutput) && maxOutput > 0 ? maxOutput : undefined,
     pricing: cvcMultiplierToPricing(model.multiplier),
+    // CVC exposes thinking level as OpenAI-shaped `reasoning_effort`; tag the
+    // card so ControlsForm shows ReasoningEffortSlider for reasoning models.
+    ...(supportsReasoning ? { settings: { extendParams: ['reasoningEffort' as const] } } : {}),
     type: 'chat' as const,
   };
 };
