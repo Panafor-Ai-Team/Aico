@@ -129,24 +129,34 @@ export const grokImagineImageParameters: ModelParamsSchema = {
 
 /**
  * Prompt-only schema for image models behind CheapVibeCode's OpenAI-shaped
- * `/v1/images/generations`. Its accepted fields beyond `model` and `prompt` are
- * undocumented for these models, so size and aspect-ratio options are withheld
- * rather than guessed — an unknown field would fail the request.
+ * `/v1/images/generations` when no size / aspect / quality surface is known.
  */
 export const cheapVibeCodePromptOnlyImageParameters: ModelParamsSchema = {
   prompt: { default: '' },
 };
 
 /**
- * Nano Banana 2 behind CheapVibeCode. Same prompt-only base as other CVC image
- * models, plus OpenAI-shaped thinking level (`reasoning_effort` on the wire).
+ * Nano Banana 2 behind CheapVibeCode. Same aspect / resolution surface as
+ * {@link nanoBanana2Parameters}, plus OpenAI-shaped thinking level
+ * (`reasoning_effort` on the wire). Aspect and resolution use the same
+ * `aspect_ratio` / `resolution` field names CheapVibeCode already accepts on
+ * video (and xAI uses for Grok Imagine Image).
  */
 export const cheapVibeCodeNanoBanana2Parameters: ModelParamsSchema = {
-  prompt: { default: '' },
+  ...nanoBanana2Parameters,
   reasoningEffort: {
     default: 'medium',
     enum: ['low', 'medium', 'high'],
   },
+};
+
+/**
+ * Grok Imagine Image behind CheapVibeCode. Same options as
+ * {@link grokImagineImageParameters}; wire fields match xAI / CVC video
+ * (`aspect_ratio`, `resolution`).
+ */
+export const cheapVibeCodeGrokImagineImageParameters: ModelParamsSchema = {
+  ...grokImagineImageParameters,
 };
 
 /**

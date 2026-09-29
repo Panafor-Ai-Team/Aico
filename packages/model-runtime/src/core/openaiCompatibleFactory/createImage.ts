@@ -1,7 +1,6 @@
 import { imageUrlToBase64 } from '@lobechat/utils';
 import { cleanObject } from '@lobechat/utils/object';
 import createDebug from 'debug';
-import type { RuntimeImageGenParamsValue } from 'model-bank';
 import type OpenAI from 'openai';
 
 import type {
@@ -51,17 +50,16 @@ async function generateByImageMode(
   log('Creating image with model: %s and params: %O', requestModel, params);
 
   // Map parameter names, mapping imageUrls to image
-  const paramsMap = new Map<RuntimeImageGenParamsValue, string>([
+  const paramsMap = new Map<string, string>([
     ['imageUrls', 'image'],
     ['imageUrl', 'image'],
     // OpenAI / CheapVibeCode wire name for thinking level
     ['reasoningEffort', 'reasoning_effort'],
+    // CheapVibeCode (and xAI) image/video wire names
+    ['aspectRatio', 'aspect_ratio'],
   ]);
   const userInput: Record<string, any> = Object.fromEntries(
-    Object.entries(params).map(([key, value]) => [
-      paramsMap.get(key as RuntimeImageGenParamsValue) ?? key,
-      value,
-    ]),
+    Object.entries(params).map(([key, value]) => [paramsMap.get(key) ?? key, value]),
   );
   // unify image input to array
   if (typeof userInput.image === 'string' && userInput.image.trim() !== '') {

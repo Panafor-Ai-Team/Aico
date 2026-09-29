@@ -44,12 +44,22 @@ describe('CheapVibeCode generation models', () => {
     expect(models['grok-imagine-video']).toMatchObject({ enabled: true, type: 'video' });
     // GPT Image 2 defaults to medium quality.
     expect((models['gpt-image-2'] as any).parameters.quality.default).toBe('medium');
-    // Nano Banana 2 exposes thinking level (reasoning_effort on the wire).
+    // Nano Banana 2: aspect + resolution (Gemini surface) plus thinking level.
     expect((models['nano-banana-2'] as any).parameters.reasoningEffort).toEqual({
       default: 'medium',
       enum: ['low', 'medium', 'high'],
     });
-    // Grok Imagine Image stays prompt-only — no undocumented fields.
+    expect((models['nano-banana-2'] as any).parameters.aspectRatio.default).toBe('auto');
+    expect((models['nano-banana-2'] as any).parameters.resolution).toEqual({
+      default: '1K',
+      enum: ['512', '1K', '2K', '4K'],
+    });
+    // Grok Imagine Image keeps aspect + resolution (xAI / CVC video field names).
+    expect((models['grok-imagine-image'] as any).parameters.aspectRatio.default).toBe('auto');
+    expect((models['grok-imagine-image'] as any).parameters.resolution).toEqual({
+      default: '1k',
+      enum: ['1k', '2k'],
+    });
     expect((models['grok-imagine-image'] as any).parameters.reasoningEffort).toBeUndefined();
     // Resolution × source lookup so the chat confirm card price moves with quality.
     expect(models['grok-imagine-video'].pricing?.units?.[0]).toMatchObject({

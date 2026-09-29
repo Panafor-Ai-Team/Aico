@@ -11,8 +11,8 @@ import type { AiProviderModelListItem, ModelAbilities, Pricing } from 'model-ban
 import { AiModelSourceEnum, normalizeAiModelType } from 'model-bank';
 import {
   cheapVibeCodeGptImage2Parameters,
+  cheapVibeCodeGrokImagineImageParameters,
   cheapVibeCodeNanoBanana2Parameters,
-  cheapVibeCodePromptOnlyImageParameters,
 } from 'model-bank/imageParameters';
 import {
   cheapVibeCodeGrokImagineVideoParameters,
@@ -117,7 +117,7 @@ const CHEAPVIBECODE_GENERATION_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
   {
     displayName: 'Grok Imagine Image',
     id: 'grok-imagine-image',
-    parameters: cheapVibeCodePromptOnlyImageParameters,
+    parameters: cheapVibeCodeGrokImagineImageParameters,
     type: 'image',
   },
   {
