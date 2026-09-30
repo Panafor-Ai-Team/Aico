@@ -7,6 +7,7 @@ import { type ImageStore } from '../../store';
 import { generationBatchSelectors } from '../generationBatch/selectors';
 import { imageGenerationConfigSelectors } from '../generationConfig/selectors';
 import { generationTopicSelectors } from '../generationTopic';
+import { resolveCreateImageParamsWithPriorReference } from './resolvePriorReference';
 
 type Setter = StoreSetter<ImageStore>;
 export const createCreateImageSlice = (set: Setter, get: () => ImageStore, _api?: unknown) =>
@@ -72,13 +73,24 @@ export class CreateImageActionImpl {
         );
       }
 
+      // Edit follow-ups with empty reference slots reuse the latest successful
+      // output from this topic (chat already does this via history mining).
+      const params = resolveCreateImageParamsWithPriorReference({
+        parameters,
+        priorUrls: generationBatchSelectors.latestGeneratedImageUrls(this.#get()),
+        supportsImageUrl: imageGenerationConfigSelectors.isSupportedParam('imageUrl')(this.#get()),
+        supportsImageUrls: imageGenerationConfigSelectors.isSupportedParam('imageUrls')(
+          this.#get(),
+        ),
+      });
+
       // 5. Create image via service
       await imageService.createImage({
         generationTopicId: finalTopicId!,
         provider,
         model,
         imageNum,
-        params: parameters as any,
+        params: params as any,
       });
 
       // 6. Only refresh generation batches if it's not a new topic

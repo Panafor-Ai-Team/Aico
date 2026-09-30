@@ -304,4 +304,65 @@ describe('generationBatchSelectors', () => {
       expect(isLoaded).toBe(false);
     });
   });
+
+  describe('latestGeneratedImageUrls', () => {
+    it('returns https asset urls from the newest successful batch', () => {
+      const newest: GenerationBatch = {
+        ...mockGenerationBatches[1],
+        createdAt: new Date('2024-01-03'),
+        generations: [
+          {
+            ...mockGenerations[2],
+            asset: {
+              height: 1024,
+              type: 'image',
+              url: 'https://cdn.example.com/newest.png',
+              width: 1024,
+            },
+            task: { id: 'task-3', status: AsyncTaskStatus.Success },
+          },
+        ],
+        id: 'batch-newest',
+      };
+      const older: GenerationBatch = {
+        ...mockGenerationBatches[0],
+        generations: [
+          {
+            ...mockGenerations[0],
+            asset: {
+              height: 1024,
+              type: 'image',
+              url: 'https://cdn.example.com/older.png',
+              width: 1024,
+            },
+            task: { id: 'task-1', status: AsyncTaskStatus.Success },
+          },
+        ],
+      };
+
+      const state = merge(initialStore, {
+        activeGenerationTopicId: 'topic-1',
+        // Newest first, matching findByTopicId order / addBatch unshift.
+        generationBatchesMap: {
+          'topic-1': [newest, older],
+        },
+      });
+
+      expect(generationBatchSelectors.latestGeneratedImageUrls(state)).toEqual([
+        'https://cdn.example.com/newest.png',
+      ]);
+    });
+
+    it('skips batches with no successful https assets', () => {
+      const state = merge(initialStore, {
+        activeGenerationTopicId: 'topic-1',
+        generationBatchesMap: {
+          'topic-1': [mockGenerationBatches[0]],
+        },
+      });
+
+      // Mock assets use relative filenames — not forwarded as generation refs.
+      expect(generationBatchSelectors.latestGeneratedImageUrls(state)).toEqual([]);
+    });
+  });
 });

@@ -281,6 +281,63 @@ describe('CreateImageAction', () => {
       expect(result.current.parameters?.width).toBe(1024);
       expect(result.current.parameters?.height).toBe(1024);
     });
+
+    it('forwards the prior generated image on an edit prompt with empty refs', async () => {
+      const mockRefreshGenerationBatches = vi.fn().mockResolvedValue(undefined);
+      const priorUrl = 'https://cdn.example.com/prior.png';
+      const { result } = renderHook(() => useImageStore());
+
+      act(() => {
+        useImageStore.setState({
+          parameters: { prompt: 'add a bird to the previous image', width: 1024, height: 1024 },
+          parametersSchema: {
+            height: { default: 1024 },
+            imageUrls: { default: [] },
+            prompt: { default: '' },
+            width: { default: 1024 },
+          },
+          refreshGenerationBatches: mockRefreshGenerationBatches,
+          generationBatchesMap: {
+            'active-topic-id': [
+              {
+                config: { prompt: 'a cat' },
+                createdAt: new Date(),
+                generations: [
+                  {
+                    asset: { height: 1024, type: 'image', url: priorUrl, width: 1024 },
+                    asyncTaskId: null,
+                    createdAt: new Date(),
+                    id: 'gen-1',
+                    task: { id: 'task-1', status: 'success' },
+                  },
+                ],
+                id: 'batch-prior',
+                model: 'test-model',
+                prompt: 'a cat',
+                provider: 'test-provider',
+              } as any,
+            ],
+          },
+        });
+      });
+
+      await act(async () => {
+        await result.current.createImage();
+      });
+
+      expect(mockImageService.createImage).toHaveBeenCalledWith({
+        generationTopicId: 'active-topic-id',
+        imageNum: 4,
+        model: 'test-model',
+        params: {
+          height: 1024,
+          imageUrls: [priorUrl],
+          prompt: 'add a bird to the previous image',
+          width: 1024,
+        },
+        provider: 'test-provider',
+      });
+    });
   });
 
   describe('recreateImage', () => {
