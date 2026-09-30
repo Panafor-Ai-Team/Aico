@@ -10,6 +10,7 @@ import {
 import { memo, useCallback, useState } from 'react';
 
 import { PanelContent } from './components/PanelContent';
+import { MODEL_SWITCH_PANEL_DEFAULTS } from './defaults';
 import { styles } from './styles';
 import { type ModelSwitchPanelProps } from './types';
 
@@ -22,10 +23,10 @@ const ModelSwitchPanel = memo<ModelSwitchPanelProps>(
     onModelChange,
     onOpenChange,
     open,
-    placement = 'topLeft',
+    placement = MODEL_SWITCH_PANEL_DEFAULTS.placement,
     pricingMode,
     provider: providerProp,
-    openOnHover = true,
+    openOnHover = MODEL_SWITCH_PANEL_DEFAULTS.openOnHover,
   }) => {
     const [internalOpen, setInternalOpen] = useState(false);
     const isOpen = open ?? internalOpen;

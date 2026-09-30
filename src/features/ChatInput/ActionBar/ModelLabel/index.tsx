@@ -8,6 +8,7 @@ import {
   isBrandedOpenRouterModelId,
 } from '@/components/Branding/brandedModelId';
 import ModelSwitchPanel from '@/features/ModelSwitchPanel';
+import { MODEL_SWITCH_PANEL_DEFAULTS } from '@/features/ModelSwitchPanel/defaults';
 import { aiModelSelectors, useAiInfraStore } from '@/store/aiInfra';
 import { useChatStore } from '@/store/chat';
 import { topicSelectors } from '@/store/chat/slices/topic/selectors';
@@ -118,7 +119,7 @@ const ModelLabel = memo(() => {
       model={model}
       open={open}
       openOnHover={false}
-      placement={dropdownPlacement}
+      placement={dropdownPlacement ?? MODEL_SWITCH_PANEL_DEFAULTS.placement}
       provider={provider}
       onModelChange={handleModelChange}
       onOpenChange={setOpen}
