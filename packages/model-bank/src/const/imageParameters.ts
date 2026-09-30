@@ -1,4 +1,6 @@
 import type { ModelParamsSchema } from '../standard-parameters';
+import type { Pricing } from '../types/aiModel';
+import { cheapVibeCodeTokensToUsd } from './videoParameters';
 
 const NANO_BANANA_ASPECT_RATIOS = [
   'auto',
@@ -167,4 +169,41 @@ export const cheapVibeCodeGrokImagineImageParameters: ModelParamsSchema = {
 export const cheapVibeCodeGptImage2Parameters: ModelParamsSchema = {
   ...gptImage2Schema,
   imageUrls: { default: [], maxCount: 16, maxFileSize: 5 * 1024 * 1024 },
+};
+
+/**
+ * GPT Image 2.5 Sunburst / Flare on CheapVibeCode's `/v1/images/generations`
+ * and `/v1/images/edits`. Documented surface is quality + square size; edits
+ * take the same OpenAI-shaped multipart `image` field as GPT Image 2.
+ */
+export const cheapVibeCodeGptImage25Parameters: ModelParamsSchema = {
+  imageUrls: { default: [], maxCount: 16, maxFileSize: 5 * 1024 * 1024 },
+  prompt: { default: '' },
+  quality: { default: 'medium', enum: ['low', 'medium', 'high'] },
+  size: {
+    default: '1024x1024',
+    enum: ['1024x1024'],
+  },
+};
+
+/**
+ * Fixed per-image CheapVibeCode token charge for GPT Image 2.5 Sunburst / Flare:
+ * low 50K · medium 100K · high 150K. Converted at {@link cheapVibeCodeTokensToUsd}.
+ */
+export const cheapVibeCodeGptImage25Pricing: Pricing = {
+  units: [
+    {
+      lookup: {
+        prices: {
+          high: cheapVibeCodeTokensToUsd(150_000),
+          low: cheapVibeCodeTokensToUsd(50_000),
+          medium: cheapVibeCodeTokensToUsd(100_000),
+        },
+        pricingParams: ['quality'],
+      },
+      name: 'imageGeneration',
+      strategy: 'lookup',
+      unit: 'image',
+    },
+  ],
 };
