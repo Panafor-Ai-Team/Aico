@@ -5,6 +5,7 @@ import type {
   ContextBuildOutput,
 } from '@lobechat/agent-runtime';
 import {
+  didPreviousTurnGenerateImage,
   findPendingUserMessageText,
   hasPreviousImageGeneration,
   isImageGenerationUserIntent,
@@ -125,6 +126,7 @@ export class ClientContextBuilder implements ContextBuilder {
       !directToolCall &&
       isImageGenerationUserIntent(latestUserText, {
         hasPreviousGenerated: hasPreviousImageGeneration(messages),
+        previousTurnGeneratedImage: didPreviousTurnGenerateImage(messages),
       })
         ? resolveForcedImageGenerationToolChoice(resolvedTools.tools)
         : undefined;
