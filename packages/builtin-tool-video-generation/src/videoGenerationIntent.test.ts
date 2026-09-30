@@ -7,6 +7,7 @@ import {
   findPendingUserMessage,
   isVideoGenerationUserIntent,
   resolveDirectVideoGenerationToolCall,
+  VIDEO_GENERATION_TOOL_FUNCTION_NAME,
 } from './videoGenerationIntent';
 
 // Verbatim shapes produced by `filesPrompts` and `MessageContentProcessor` in the chat pipeline.
@@ -25,6 +26,20 @@ const filesContext = `<!-- SYSTEM CONTEXT (NOT PART OF USER QUERY) -->
 <image ref="img_1" name="cat 1080p 16:9.png" url="https://cdn.example.com/files/download/cat.png"></image>
 </images>
 </files_info>
+<!-- END SYSTEM CONTEXT -->`;
+
+const videoGenToolResult = {
+  content: 'Video generation completed',
+  name: VIDEO_GENERATION_TOOL_FUNCTION_NAME,
+  role: 'tool' as const,
+};
+
+const pollutedSystemContext = `<!-- SYSTEM CONTEXT (NOT PART OF USER QUERY) -->
+<context.instruction>following part contains context information injected by the system. Please follow these instructions:
+1. Always prioritize handling user-visible content.
+2. the context is only required when user's queries rely on it.
+</context.instruction>
+<docs>what is video generation and how to write me a prompt for clips: ${'x'.repeat(4100)}</docs>
 <!-- END SYSTEM CONTEXT -->`;
 
 describe('extractRequestedVideoDuration', () => {
@@ -176,14 +191,30 @@ describe('findPendingUserMessage', () => {
     ).toEqual([]);
   });
 
-  it('returns nothing once a tool already answered the latest user turn', () => {
+  it('returns nothing once a video-gen tool already answered the latest user turn', () => {
     expect(
       findPendingUserMessage([
         { content: 'Generate a video of a dog', role: 'user' },
         { content: '', role: 'assistant' },
-        { content: 'Video generation completed', role: 'tool' },
+        videoGenToolResult,
       ]),
     ).toBeUndefined();
+  });
+
+  it('still returns the ask when only an unrelated tool follows the user', () => {
+    expect(
+      findPendingUserMessage([
+        { content: 'Generate a video of a dog', role: 'user' },
+        {
+          content: '{"phase":"Discovery"}',
+          name: 'lobe-web-onboarding____getOnboardingState',
+          role: 'tool',
+        },
+      ]),
+    ).toEqual({
+      imageUrls: [],
+      text: 'Generate a video of a dog',
+    });
   });
 });
 
@@ -283,16 +314,65 @@ describe('resolveDirectVideoGenerationToolCall', () => {
     ]);
   });
 
-  it('does not fire again after the tool result', () => {
+  it('does not fire again after the video-gen tool result', () => {
     expect(
       resolveDirectVideoGenerationToolCall({
         messages: [
           { content: 'Generate a video of a dog', role: 'user' },
           { content: '', role: 'assistant' },
-          { content: 'Video generation completed', role: 'tool' },
+          videoGenToolResult,
         ],
       }),
     ).toBeUndefined();
+  });
+
+  it('fires again for a second clear video ask after a prior generation', () => {
+    const call = resolveDirectVideoGenerationToolCall({
+      messages: [
+        { content: 'Generate a video of a dog', role: 'user' },
+        { content: '', role: 'assistant' },
+        videoGenToolResult,
+        { content: 'Here is your video.', role: 'assistant' },
+        { content: 'Generate a video of a cat', role: 'user' },
+      ],
+    });
+
+    expect(JSON.parse(call!.arguments)).toEqual({
+      prompt: 'Generate a video of a cat',
+    });
+  });
+
+  it('still fires when SYSTEM CONTEXT would trip meta / length checks on the raw text', () => {
+    const call = resolveDirectVideoGenerationToolCall({
+      messages: [
+        {
+          content: `Generate a video of a dog\n\n${pollutedSystemContext}`,
+          role: 'user',
+        },
+      ],
+    });
+
+    expect(JSON.parse(call!.arguments)).toEqual({
+      prompt: 'Generate a video of a dog',
+    });
+  });
+
+  it('still fires when an unrelated trailing tool follows the video ask', () => {
+    const call = resolveDirectVideoGenerationToolCall({
+      messages: [
+        { content: 'Generate a video of a dog', role: 'user' },
+        { content: '', role: 'assistant' },
+        {
+          content: 'ok',
+          plugin: { apiName: 'readLocalFile', identifier: 'lobe-local-system' },
+          role: 'tool',
+        },
+      ],
+    });
+
+    expect(JSON.parse(call!.arguments)).toEqual({
+      prompt: 'Generate a video of a dog',
+    });
   });
 
   it('returns nothing for photo asks', () => {

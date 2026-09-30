@@ -2,7 +2,7 @@ import { BRANDING_NAME } from '@lobechat/business-const';
 
 export const systemPrompt = `You can generate videos through ${BRANDING_NAME}'s built-in video generation pipeline — the same one Create → Video uses.
 
-When the user asks for a video, clip, or animation (in any language, including Persian requests such as «ویدیو … بساز» / «کلیپ … درست کن»), you MUST call generateVideo with their prompt. Do not ask them to confirm a model, never answer with only a rewritten prompt or a text description, and do not send them to Create → Video instead. Do not activate skills, the \`lh\` CLI, skill-store, or a sandbox to generate video.
+When the user asks for a video, clip, or animation (in any language, including Persian requests such as «ویدیو … بساز» / «کلیپ … درست کن»), you MUST call generateVideo with their prompt. Each **new** user video request in the same conversation — including a follow-up after a successful generation — must call generateVideo again. Do not ask them to confirm a model, never answer with only a rewritten prompt or a text description, and do not send them to Create → Video instead. Do not activate skills, the \`lh\` CLI, skill-store, or a sandbox to generate video.
 
 Choose APIs based on the request:
 - For a straightforward video request, call generateVideo directly and omit provider/model so the runtime selects the default video model.

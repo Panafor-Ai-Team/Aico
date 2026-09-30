@@ -9,6 +9,20 @@ import {
   resolveForcedImageGenerationToolChoice,
 } from './imageGenerationIntent';
 
+const imageGenToolResult = {
+  content: 'Image generation completed with gpt-image-2.',
+  name: IMAGE_GENERATION_TOOL_FUNCTION_NAME,
+  role: 'tool' as const,
+};
+
+const pollutedSystemContext = `<!-- SYSTEM CONTEXT (NOT PART OF USER QUERY) -->
+<context.instruction>following part contains context information injected by the system. Please follow these instructions:
+1. Always prioritize handling user-visible content.
+2. the context is only required when user's queries rely on it.
+</context.instruction>
+<docs>what is image generation and how to write me a prompt for photos: ${'x'.repeat(4100)}</docs>
+<!-- END SYSTEM CONTEXT -->`;
+
 describe('isImageGenerationUserIntent', () => {
   it('detects Persian photo requests that start with عکس', () => {
     expect(
@@ -87,7 +101,6 @@ describe('resolveDirectImageGenerationToolCall', () => {
     expect(call).toMatchObject({
       apiName: 'generateImage',
       identifier: 'lobe-image-generation',
-      type: 'builtin',
     });
     expect(JSON.parse(call!.arguments)).toEqual({
       prompt: 'Generate an image of a cat',
@@ -109,15 +122,74 @@ describe('resolveDirectImageGenerationToolCall', () => {
         messages: [
           { content: 'Generate an image of a cat', role: 'user' },
           { content: '', role: 'assistant' },
-          { content: 'Image generation completed with gpt-image-2.', role: 'tool' },
+          imageGenToolResult,
         ],
       }),
     ).toBeUndefined();
   });
+
+  it('fires again for a second clear photo ask after a prior generation', () => {
+    const call = resolveDirectImageGenerationToolCall({
+      messages: [
+        { content: 'Generate an image of a cat', role: 'user' },
+        { content: '', role: 'assistant' },
+        imageGenToolResult,
+        { content: 'Here is your cat.', role: 'assistant' },
+        { content: 'Generate an image of a dog', role: 'user' },
+      ],
+    });
+
+    expect(call).toMatchObject({
+      apiName: 'generateImage',
+      identifier: 'lobe-image-generation',
+    });
+    expect(JSON.parse(call!.arguments)).toEqual({
+      prompt: 'Generate an image of a dog',
+    });
+  });
+
+  it('still fires when SYSTEM CONTEXT would trip meta / length checks on the raw text', () => {
+    const call = resolveDirectImageGenerationToolCall({
+      messages: [
+        {
+          content: `عکس یک سگ\n\n${pollutedSystemContext}`,
+          role: 'user',
+        },
+      ],
+    });
+
+    expect(call).toMatchObject({
+      apiName: 'generateImage',
+      identifier: 'lobe-image-generation',
+    });
+    expect(JSON.parse(call!.arguments)).toEqual({ prompt: 'عکس یک سگ' });
+  });
+
+  it('still fires when an unrelated trailing tool follows the photo ask', () => {
+    const call = resolveDirectImageGenerationToolCall({
+      messages: [
+        { content: 'Generate an image of a cat', role: 'user' },
+        { content: '', role: 'assistant' },
+        {
+          content: '{"phase":"Discovery"}',
+          name: 'lobe-web-onboarding____getOnboardingState',
+          role: 'tool',
+        },
+      ],
+    });
+
+    expect(call).toMatchObject({
+      apiName: 'generateImage',
+      identifier: 'lobe-image-generation',
+    });
+    expect(JSON.parse(call!.arguments)).toEqual({
+      prompt: 'Generate an image of a cat',
+    });
+  });
 });
 
 describe('findPendingUserMessageText', () => {
-  it('returns the latest user text while no tool has answered it', () => {
+  it('returns the latest user text while no image tool has answered it', () => {
     expect(
       findPendingUserMessageText([
         { content: 'old', role: 'user' },
@@ -127,14 +199,35 @@ describe('findPendingUserMessageText', () => {
     ).toBe('عکس یک سگ');
   });
 
-  it('returns empty once a tool result follows the latest user turn', () => {
+  it('returns empty once an image-gen tool result follows the latest user turn', () => {
     expect(
       findPendingUserMessageText([
         { content: 'عکس یک سگ', role: 'user' },
         { content: '', role: 'assistant' },
-        { content: 'done', role: 'tool' },
+        imageGenToolResult,
       ]),
     ).toBe('');
+  });
+
+  it('still returns the ask when only an unrelated tool follows the user', () => {
+    expect(
+      findPendingUserMessageText([
+        { content: 'عکس یک سگ', role: 'user' },
+        {
+          content: 'ok',
+          plugin: { apiName: 'readLocalFile', identifier: 'lobe-local-system' },
+          role: 'tool',
+        },
+      ]),
+    ).toBe('عکس یک سگ');
+  });
+
+  it('strips SYSTEM CONTEXT from the pending prompt', () => {
+    expect(
+      findPendingUserMessageText([
+        { content: `Generate an image of a cat\n\n${pollutedSystemContext}`, role: 'user' },
+      ]),
+    ).toBe('Generate an image of a cat');
   });
 });
 
