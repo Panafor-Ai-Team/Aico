@@ -6,6 +6,7 @@ import type {
 } from '@lobechat/agent-runtime';
 import {
   findPendingUserMessageText,
+  hasPreviousImageGeneration,
   isImageGenerationUserIntent,
   resolveDirectImageGenerationToolCall,
   resolveForcedImageGenerationToolChoice,
@@ -106,6 +107,8 @@ export class ClientContextBuilder implements ContextBuilder {
 
     const latestUserText = findPendingUserMessageText(preparedMessages);
     // Video first: "make a video from this photo" names a photo too.
+    // Prefer raw display messages for image intent so assistantGroup nesting and
+    // pipeline injectors on prepared rows cannot hide a second clear photo ask.
     const directToolCall =
       resolveDirectVideoGenerationToolCall({
         executorMap: resolvedTools.executorMap,
@@ -114,11 +117,15 @@ export class ClientContextBuilder implements ContextBuilder {
       }) ??
       resolveDirectImageGenerationToolCall({
         executorMap: resolvedTools.executorMap,
+        historyMessages: messages,
         messages: preparedMessages,
         sourceMap: resolvedTools.sourceMap,
       });
     const toolChoice =
-      !directToolCall && isImageGenerationUserIntent(latestUserText)
+      !directToolCall &&
+      isImageGenerationUserIntent(latestUserText, {
+        hasPreviousGenerated: hasPreviousImageGeneration(messages),
+      })
         ? resolveForcedImageGenerationToolChoice(resolvedTools.tools)
         : undefined;
 

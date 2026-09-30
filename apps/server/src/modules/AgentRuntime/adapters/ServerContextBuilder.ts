@@ -5,6 +5,7 @@ import type {
 } from '@lobechat/agent-runtime';
 import {
   findPendingUserMessageText,
+  hasPreviousImageGeneration,
   isImageGenerationUserIntent,
   resolveDirectImageGenerationToolCall,
   resolveForcedImageGenerationToolChoice,
@@ -42,6 +43,8 @@ export class ServerContextBuilder implements ContextBuilder {
     // Create one-shot path (skip LLM) on clear intent even when the tool is
     // missing from the offer set; otherwise keep forcing tool_choice. Video is
     // checked first: "make a video from this photo" names a photo too.
+    // Prefer raw payload messages for image intent (assistantGroup / no injectors).
+    const rawMessages = input.payload.messages;
     const latestUserText = findPendingUserMessageText(result.processedMessages);
     const directToolCall =
       resolveDirectVideoGenerationToolCall({
@@ -51,10 +54,16 @@ export class ServerContextBuilder implements ContextBuilder {
       }) ??
       resolveDirectImageGenerationToolCall({
         executorMap: tooling.resolved.executorMap,
+        historyMessages: rawMessages,
         messages: result.processedMessages,
         sourceMap: tooling.resolved.sourceMap,
       });
-    if (!directToolCall && isImageGenerationUserIntent(latestUserText)) {
+    if (
+      !directToolCall &&
+      isImageGenerationUserIntent(latestUserText, {
+        hasPreviousGenerated: hasPreviousImageGeneration(rawMessages),
+      })
+    ) {
       const toolChoice = resolveForcedImageGenerationToolChoice(tooling.resolved.tools);
       if (toolChoice) {
         modelParameters.tool_choice = toolChoice;
