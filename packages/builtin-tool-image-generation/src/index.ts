@@ -16,6 +16,7 @@ export {
   isImageGenerationUserIntent,
   resolveDirectImageGenerationToolCall,
   resolveForcedImageGenerationToolChoice,
+  stripInjectedUserContext,
 } from './imageGenerationIntent';
 export { ImageGenerationManifest } from './manifest';
 export { systemPrompt } from './systemRole';

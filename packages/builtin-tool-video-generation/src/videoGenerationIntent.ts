@@ -161,7 +161,12 @@ export const isVideoGenerationUserIntent = (text: string | null | undefined): bo
   );
 };
 
-type MessageLike = { content?: unknown; role?: string };
+type MessageLike = {
+  content?: unknown;
+  name?: string;
+  plugin?: { apiName?: string; identifier?: string };
+  role?: string;
+};
 
 const textOfContent = (content: unknown): string => {
   if (typeof content === 'string') return content;
@@ -215,9 +220,43 @@ const imageUrlsOfInjectedContext = (text: string): string[] =>
   );
 
 /**
- * The latest user turn, or `undefined` once a tool already answered it. The
- * context builder runs again after every tool result; without this guard the
- * same ask would trigger a fresh (billed) generation on each step.
+ * True when a tool message is a `generateVideo` result (OpenAI `name` after
+ * ToolCallProcessor, or DB-shape `plugin` before cleanup).
+ */
+const isVideoGenerationToolResult = (message: MessageLike): boolean => {
+  if (message.role !== 'tool') return false;
+
+  const name = typeof message.name === 'string' ? message.name : '';
+  if (name === VIDEO_GENERATION_TOOL_FUNCTION_NAME) return true;
+  if (
+    name.includes(VideoGenerationIdentifier) &&
+    name.includes(VideoGenerationApiName.generateVideo)
+  ) {
+    return true;
+  }
+
+  return (
+    message.plugin?.identifier === VideoGenerationIdentifier &&
+    message.plugin?.apiName === VideoGenerationApiName.generateVideo
+  );
+};
+
+const hasVideoGenerationToolResultAfter = (messages: MessageLike[], userIndex: number): boolean => {
+  for (let i = userIndex + 1; i < messages.length; i += 1) {
+    if (isVideoGenerationToolResult(messages[i]!)) return true;
+  }
+  return false;
+};
+
+/**
+ * The latest user turn, or `undefined` once `generateVideo` already answered
+ * that turn. The context builder runs again after every tool result; without
+ * this guard the same ask would trigger a fresh (billed) generation on each
+ * step.
+ *
+ * Only a video-generation tool result after the latest user counts as
+ * "answered". Unrelated trailing tools (onboarding synthetic state,
+ * local-system snapshots) must not block a clear video ask.
  */
 export const findPendingUserMessage = (
   messages: MessageLike[] | null | undefined,
@@ -226,8 +265,9 @@ export const findPendingUserMessage = (
 
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
-    if (message?.role === 'tool') return undefined;
     if (message?.role !== 'user') continue;
+
+    if (hasVideoGenerationToolResultAfter(messages, i)) return undefined;
 
     const rawText = textOfContent(message.content);
     const text = stripInjectedUserContext(rawText);
