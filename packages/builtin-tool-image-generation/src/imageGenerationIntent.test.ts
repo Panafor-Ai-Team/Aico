@@ -4,7 +4,9 @@ import {
   findLatestGeneratedImageUrls,
   findLatestUserMessageText,
   findPendingUserMessageText,
+  hasPreviousImageGeneration,
   IMAGE_GENERATION_TOOL_FUNCTION_NAME,
+  isAnotherImageAskIntent,
   isImageEditContinuationIntent,
   isImageGenerationUserIntent,
   resolveDirectImageGenerationToolCall,
@@ -22,6 +24,33 @@ const imageGenToolResult = {
   ].join('\n'),
   name: IMAGE_GENERATION_TOOL_FUNCTION_NAME,
   role: 'tool' as const,
+};
+
+const assistantGroupWithImageGen = {
+  children: [
+    {
+      content: '',
+      id: 'block-1',
+      tools: [
+        {
+          apiName: 'generateImage',
+          arguments: '{"prompt":"a cat"}',
+          id: 'call_1',
+          identifier: 'lobe-image-generation',
+          result: {
+            content: imageGenToolResult.content,
+            id: 'tool-1',
+            state: {
+              generations: [{ asset: { url: PREVIOUS_IMAGE_URL } }],
+            },
+          },
+          type: 'builtin',
+        },
+      ],
+    },
+  ],
+  content: '',
+  role: 'assistantGroup' as const,
 };
 
 const pollutedSystemContext = `<!-- SYSTEM CONTEXT (NOT PART OF USER QUERY) -->
@@ -51,6 +80,17 @@ describe('isImageGenerationUserIntent', () => {
     expect(isImageGenerationUserIntent('به عکس قبلی یه پرنده اضافه کن')).toBe(true);
     expect(isImageEditContinuationIntent('add a bird to the previous image')).toBe(true);
     expect(isImageEditContinuationIntent('Generate an image of a dog')).toBe(false);
+  });
+
+  it('detects soft follow-up asks only after a prior generation', () => {
+    expect(isImageGenerationUserIntent('another one')).toBe(false);
+    expect(isImageGenerationUserIntent('یکی دیگه بساز')).toBe(false);
+    expect(isImageGenerationUserIntent('another one', { hasPreviousGenerated: true })).toBe(true);
+    expect(isImageGenerationUserIntent('make another image', { hasPreviousGenerated: true })).toBe(
+      true,
+    );
+    expect(isImageGenerationUserIntent('یکی دیگه بساز', { hasPreviousGenerated: true })).toBe(true);
+    expect(isAnotherImageAskIntent('بازم بساز')).toBe(true);
   });
 
   it('rejects meta / prompt-engineering questions', () => {
@@ -145,6 +185,17 @@ describe('resolveDirectImageGenerationToolCall', () => {
     ).toBeUndefined();
   });
 
+  it('does not re-fire when the prior result is nested in assistantGroup', () => {
+    expect(
+      resolveDirectImageGenerationToolCall({
+        messages: [
+          { content: 'Generate an image of a cat', role: 'user' },
+          assistantGroupWithImageGen,
+        ],
+      }),
+    ).toBeUndefined();
+  });
+
   it('fires again for a second clear photo ask after a prior generation', () => {
     const call = resolveDirectImageGenerationToolCall({
       messages: [
@@ -165,6 +216,58 @@ describe('resolveDirectImageGenerationToolCall', () => {
     });
   });
 
+  it('fires again for a second ask when history is the raw assistantGroup transcript', () => {
+    const historyMessages = [
+      { content: 'Generate an image of a cat', role: 'user' as const },
+      assistantGroupWithImageGen,
+      { content: 'Here is your cat.', role: 'assistant' as const },
+      { content: 'Generate an image of a dog', role: 'user' as const },
+    ];
+
+    const call = resolveDirectImageGenerationToolCall({
+      historyMessages,
+      // Prepared OpenAI rows (flat tool + trailing onboarding injector).
+      messages: [
+        { content: 'Generate an image of a cat', role: 'user' },
+        { content: '', role: 'assistant' },
+        imageGenToolResult,
+        { content: 'Here is your cat.', role: 'assistant' },
+        { content: 'Generate an image of a dog', role: 'user' },
+        {
+          content: '{"phase":"Discovery"}',
+          name: 'lobe-web-onboarding____getOnboardingState',
+          role: 'tool',
+        },
+      ],
+    });
+
+    expect(call).toMatchObject({
+      apiName: 'generateImage',
+      identifier: 'lobe-image-generation',
+    });
+    expect(JSON.parse(call!.arguments)).toEqual({
+      prompt: 'Generate an image of a dog',
+    });
+  });
+
+  it('fires soft follow-ups like "another one" after a prior generation', () => {
+    const call = resolveDirectImageGenerationToolCall({
+      messages: [
+        { content: 'Generate an image of a cat', role: 'user' },
+        { content: '', role: 'assistant' },
+        imageGenToolResult,
+        { content: 'Here is your cat.', role: 'assistant' },
+        { content: 'another one', role: 'user' },
+      ],
+    });
+
+    expect(call).toMatchObject({
+      apiName: 'generateImage',
+      identifier: 'lobe-image-generation',
+    });
+    expect(JSON.parse(call!.arguments)).toEqual({ prompt: 'another one' });
+  });
+
   it('reuses the previous generateImage URL when the user asks to edit that image', () => {
     const call = resolveDirectImageGenerationToolCall({
       messages: [
@@ -180,6 +283,26 @@ describe('resolveDirectImageGenerationToolCall', () => {
       apiName: 'generateImage',
       identifier: 'lobe-image-generation',
     });
+    expect(JSON.parse(call!.arguments)).toEqual({
+      imageUrls: [PREVIOUS_IMAGE_URL],
+      prompt: 'add a bird to the previous image',
+    });
+  });
+
+  it('mines prior URLs from nested assistantGroup pluginState via historyMessages', () => {
+    const call = resolveDirectImageGenerationToolCall({
+      historyMessages: [
+        { content: 'Generate an image of a cat', role: 'user' },
+        assistantGroupWithImageGen,
+        { content: 'add a bird to the previous image', role: 'user' },
+      ],
+      messages: [
+        { content: 'Generate an image of a cat', role: 'user' },
+        { content: 'done', name: IMAGE_GENERATION_TOOL_FUNCTION_NAME, role: 'tool' },
+        { content: 'add a bird to the previous image', role: 'user' },
+      ],
+    });
+
     expect(JSON.parse(call!.arguments)).toEqual({
       imageUrls: [PREVIOUS_IMAGE_URL],
       prompt: 'add a bird to the previous image',
@@ -271,6 +394,15 @@ describe('findPendingUserMessageText', () => {
     ).toBe('');
   });
 
+  it('returns empty when a nested assistantGroup generateImage answered the ask', () => {
+    expect(
+      findPendingUserMessageText([
+        { content: 'عکس یک سگ', role: 'user' },
+        assistantGroupWithImageGen,
+      ]),
+    ).toBe('');
+  });
+
   it('still returns the ask when only an unrelated tool follows the user', () => {
     expect(
       findPendingUserMessageText([
@@ -331,5 +463,12 @@ describe('findLatestGeneratedImageUrls', () => {
         },
       ]),
     ).toEqual([stateUrl]);
+  });
+
+  it('mines nested assistantGroup tool results', () => {
+    expect(findLatestGeneratedImageUrls([assistantGroupWithImageGen])).toEqual([
+      PREVIOUS_IMAGE_URL,
+    ]);
+    expect(hasPreviousImageGeneration([assistantGroupWithImageGen])).toBe(true);
   });
 });

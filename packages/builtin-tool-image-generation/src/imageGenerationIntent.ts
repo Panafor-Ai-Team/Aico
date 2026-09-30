@@ -16,6 +16,14 @@ const ENGLISH_IMAGE_COMMAND =
   /^(?:generate|create|draw|make|paint|render)\s+(?:an?\s+)?(?:image|picture|photo)\b/i;
 
 /**
+ * Follow-up photo asks after a prior generation in the same chat. These often
+ * omit an explicit image noun ("another one", «یکی دیگه بساز») so the plain
+ * detector misses them and the LLM answers with a text promise instead.
+ */
+const ANOTHER_IMAGE_ASK =
+  /\b(?:another|one more)\s+(?:image|picture|photo|one)\b|\b(?:image|picture|photo)\s+again\b|\banother one\b|\b(?:make|create|generate|draw)\s+(?:me\s+)?(?:another|one more)\b|یکی\s*دیگه|یه\s*دونه\s*دیگه|بازم(?:\s*(?:بساز|بکش|بده|عکس|تصویر))?|دوباره\s*(?:عکس|تصویر|بساز|بکش)/i;
+
+/**
  * Edit / continuation asks that depend on a prior image (user-attached or
  * previously generated in this chat). Without this, phrases like "add a bird
  * to the previous image" never match the photo-ask detector and the direct
@@ -34,16 +42,29 @@ const MARKDOWN_IMAGE_URL = /!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g;
 const IMAGE_URL_LINE = /(?:^|\n)(?:Image URL|imageUrl)\s*[:=]\s*(https?:\/\/\S+)/gi;
 const FILE_CONTEXT_IMAGE_URL = /<image\s[^>]*?\burl="(https?:\/\/[^"]+)"/g;
 
+type PluginStateLike = {
+  generations?: Array<{
+    asset?: { originalUrl?: string; thumbnailUrl?: string; url?: string } | null;
+  }>;
+};
+
+type NestedToolLike = {
+  apiName?: string;
+  identifier?: string;
+  result?: {
+    content?: unknown;
+    state?: PluginStateLike;
+  } | null;
+};
+
 type MessageLike = {
+  children?: Array<{ tools?: NestedToolLike[] | null } | null> | null;
   content?: unknown;
   name?: string;
   plugin?: { apiName?: string; identifier?: string };
-  pluginState?: {
-    generations?: Array<{
-      asset?: { originalUrl?: string; thumbnailUrl?: string; url?: string } | null;
-    }>;
-  };
+  pluginState?: PluginStateLike;
   role?: string;
+  tools?: NestedToolLike[] | null;
 };
 
 const stripPersianIndefinite = (text: string) =>
@@ -63,14 +84,26 @@ export const isImageEditContinuationIntent = (text: string | null | undefined): 
   return IMAGE_EDIT_CONTINUATION.test(text.trim());
 };
 
+/** True when the ask is a follow-up "another photo" after a prior generation. */
+export const isAnotherImageAskIntent = (text: string | null | undefined): boolean => {
+  if (!text) return false;
+  return ANOTHER_IMAGE_ASK.test(text.trim());
+};
+
 /**
  * True when the latest user turn is a clear request to produce a photo/image,
  * not a meta question about prompting or how image gen works.
  *
  * Used to force `tool_choice` onto `generateImage` so reasoning models cannot
  * answer by inventing a Stable-Diffusion-style plaintext prompt instead.
+ *
+ * Pass `hasPreviousGenerated` so soft follow-ups ("another one", «یکی دیگه»)
+ * after a successful generation still take the direct path.
  */
-export const isImageGenerationUserIntent = (text: string | null | undefined): boolean => {
+export const isImageGenerationUserIntent = (
+  text: string | null | undefined,
+  options?: { hasPreviousGenerated?: boolean },
+): boolean => {
   if (!text) return false;
   const trimmed = text.trim();
   if (!trimmed || trimmed.length > 4000) return false;
@@ -82,6 +115,7 @@ export const isImageGenerationUserIntent = (text: string | null | undefined): bo
 
   if (ENGLISH_IMAGE_COMMAND.test(trimmed)) return true;
   if (isImageEditContinuationIntent(trimmed)) return true;
+  if (options?.hasPreviousGenerated && isAnotherImageAskIntent(trimmed)) return true;
 
   return IMAGE_NOUN.test(trimmed) && GENERATE_VERB.test(trimmed);
 };
@@ -115,14 +149,12 @@ export const findLatestUserMessageText = (
   return '';
 };
 
-/**
- * True when a tool message is a `generateImage` result (OpenAI `name` after
- * ToolCallProcessor, or DB-shape `plugin` before cleanup).
- */
-const isImageGenerationToolResult = (message: MessageLike): boolean => {
-  if (message.role !== 'tool') return false;
-
-  const name = typeof message.name === 'string' ? message.name : '';
+const isGenerateImageToolRef = (tool: {
+  apiName?: string;
+  identifier?: string;
+  name?: string;
+}): boolean => {
+  const name = typeof tool.name === 'string' ? tool.name : '';
   if (name === IMAGE_GENERATION_TOOL_FUNCTION_NAME) return true;
   if (
     name.includes(ImageGenerationIdentifier) &&
@@ -132,16 +164,68 @@ const isImageGenerationToolResult = (message: MessageLike): boolean => {
   }
 
   return (
-    message.plugin?.identifier === ImageGenerationIdentifier &&
-    message.plugin?.apiName === ImageGenerationApiName.generateImage
+    tool.identifier === ImageGenerationIdentifier &&
+    tool.apiName === ImageGenerationApiName.generateImage
   );
 };
 
+/**
+ * True when a tool message is a `generateImage` result (OpenAI `name` after
+ * ToolCallProcessor, or DB-shape `plugin` before cleanup).
+ */
+const isImageGenerationToolResult = (message: MessageLike): boolean => {
+  if (message.role !== 'tool') return false;
+
+  return isGenerateImageToolRef({
+    apiName: message.plugin?.apiName,
+    identifier: message.plugin?.identifier,
+    name: typeof message.name === 'string' ? message.name : undefined,
+  });
+};
+
+/**
+ * Display transcripts nest completed tools under `assistantGroup.children[].tools`
+ * (with `result`). The pending-ask guard must see those too — otherwise resolving
+ * against raw display messages re-fires the first ask, and callers that only pass
+ * prepared flat rows miss the opposite failure mode when flatten/cleanup drops identity.
+ */
+const nestedImageGenerationResults = (message: MessageLike): NestedToolLike[] => {
+  const tools: NestedToolLike[] = [];
+
+  if (Array.isArray(message.tools)) {
+    for (const tool of message.tools) {
+      if (tool) tools.push(tool);
+    }
+  }
+
+  if (Array.isArray(message.children)) {
+    for (const child of message.children) {
+      if (!Array.isArray(child?.tools)) continue;
+      for (const tool of child.tools) {
+        if (tool) tools.push(tool);
+      }
+    }
+  }
+
+  return tools.filter(
+    (tool) => isGenerateImageToolRef(tool) && tool.result != null && tool.result !== undefined,
+  );
+};
+
+const messageHasImageGenerationResult = (message: MessageLike): boolean =>
+  isImageGenerationToolResult(message) || nestedImageGenerationResults(message).length > 0;
+
 const hasImageGenerationToolResultAfter = (messages: MessageLike[], userIndex: number): boolean => {
   for (let i = userIndex + 1; i < messages.length; i += 1) {
-    if (isImageGenerationToolResult(messages[i]!)) return true;
+    if (messageHasImageGenerationResult(messages[i]!)) return true;
   }
   return false;
+};
+
+/** True when this conversation already completed at least one generateImage call. */
+export const hasPreviousImageGeneration = (messages: MessageLike[] | null | undefined): boolean => {
+  if (!messages?.length) return false;
+  return messages.some((message) => messageHasImageGenerationResult(message));
 };
 
 /** Only fetchable URLs — data URIs are too large to forward as generation params. */
@@ -178,8 +262,8 @@ const imageUrlsFromText = (text: string): string[] => {
   return urls;
 };
 
-const imageUrlsFromPluginState = (message: MessageLike): string[] => {
-  const generations = message.pluginState?.generations;
+const imageUrlsFromPluginStateLike = (state: PluginStateLike | null | undefined): string[] => {
+  const generations = state?.generations;
   if (!Array.isArray(generations)) return [];
 
   return generations
@@ -187,9 +271,18 @@ const imageUrlsFromPluginState = (message: MessageLike): string[] => {
     .filter((url): url is string => typeof url === 'string' && /^https?:\/\//i.test(url));
 };
 
+const imageUrlsFromPluginState = (message: MessageLike): string[] =>
+  imageUrlsFromPluginStateLike(message.pluginState);
+
+const imageUrlsFromNestedTool = (tool: NestedToolLike): string[] => [
+  ...imageUrlsFromPluginStateLike(tool.result?.state),
+  ...imageUrlsFromText(extractPlainMessageText(tool.result?.content)),
+];
+
 /**
  * Latest completed `generateImage` result URLs in this conversation, newest
  * batch first. Used so edit follow-ups can pass the prior image as a reference.
+ * Understands both flat OpenAI tool rows and nested `assistantGroup` tools.
  */
 export const findLatestGeneratedImageUrls = (
   messages: MessageLike[] | null | undefined,
@@ -198,15 +291,24 @@ export const findLatestGeneratedImageUrls = (
 
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
-    if (!message || !isImageGenerationToolResult(message)) continue;
+    if (!message) continue;
 
-    const urls = [
-      ...new Set([
-        ...imageUrlsFromPluginState(message),
-        ...imageUrlsFromText(extractPlainMessageText(message.content)),
-      ]),
-    ];
-    if (urls.length > 0) return urls;
+    if (isImageGenerationToolResult(message)) {
+      const urls = [
+        ...new Set([
+          ...imageUrlsFromPluginState(message),
+          ...imageUrlsFromText(extractPlainMessageText(message.content)),
+        ]),
+      ];
+      if (urls.length > 0) return urls;
+      continue;
+    }
+
+    const nested = nestedImageGenerationResults(message);
+    for (let j = nested.length - 1; j >= 0; j -= 1) {
+      const urls = [...new Set(imageUrlsFromNestedTool(nested[j]!))];
+      if (urls.length > 0) return urls;
+    }
   }
 
   return [];
@@ -333,15 +435,33 @@ export const buildDirectGenerateImageToolCall = (params: {
  */
 export const resolveDirectImageGenerationToolCall = (params: {
   executorMap?: Record<string, 'client' | 'server' | undefined>;
+  /**
+   * Optional raw display transcript (assistantGroup / pluginState). When set,
+   * pending-ask detection prefers it so pipeline injectors on prepared rows
+   * cannot hide a second clear photo ask, and prior URLs can be mined from
+   * nested tool results MessageCleanup would strip.
+   */
+  historyMessages?: MessageLike[] | null;
   messages: MessageLike[] | null | undefined;
   sourceMap?: Record<string, DirectGenerateImageToolCall['source'] | undefined>;
   /** @deprecated Ignored — kept so existing call sites keep compiling. */
   tools?: ToolLike[] | null | undefined;
 }): DirectGenerateImageToolCall | undefined => {
-  const pending = findPendingUserMessage(params.messages);
-  if (!pending || !isImageGenerationUserIntent(pending.text)) return undefined;
+  // Prefer the raw display transcript for "is there an unanswered photo ask?":
+  // prepared OpenAI rows may carry onboarding/local-system tools after the user
+  // and SYSTEM CONTEXT on the text. Nested assistantGroup results still clear
+  // the prior ask so we do not double-bill after the first generation.
+  const pending =
+    findPendingUserMessage(params.historyMessages) ?? findPendingUserMessage(params.messages);
+  if (!pending) return undefined;
 
-  const previousGeneratedUrls = findLatestGeneratedImageUrls(params.messages);
+  const historyForPrior = params.historyMessages?.length ? params.historyMessages : params.messages;
+  const previousGeneratedUrls = findLatestGeneratedImageUrls(historyForPrior);
+  const hasPreviousGenerated =
+    previousGeneratedUrls.length > 0 || hasPreviousImageGeneration(historyForPrior);
+
+  if (!isImageGenerationUserIntent(pending.text, { hasPreviousGenerated })) return undefined;
+
   const imageUrls =
     pending.imageUrls.length > 0
       ? pending.imageUrls
