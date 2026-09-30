@@ -319,7 +319,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
               enabledList={enabledImageModelList}
               model={currentModel ?? undefined}
               openOnHover={false}
-              placement="topLeft"
+              placement="bottomLeft"
               pricingMode="image"
               provider={currentProvider ?? undefined}
               onModelChange={async ({ model, provider }) => {

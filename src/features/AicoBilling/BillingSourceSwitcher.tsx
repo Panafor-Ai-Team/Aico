@@ -10,6 +10,7 @@ import { toastAicoError } from '@/business/client/resolveAicoErrorMessage';
 import ActionDropdown from '@/features/ChatInput/ActionBar/components/ActionDropdown';
 import { type LooseTFunction } from '@/types/looseTranslation';
 
+import { BILLING_SOURCE_SWITCHER_PLACEMENT } from './billingSourceSwitcherPlacement';
 import { formatRemainingPi } from './piToken';
 import { PiAmount } from './PiTokenIcon';
 import { type AicoBillingContext, type AicoBillingSource } from './types';
@@ -162,7 +163,7 @@ const BillingSourceSwitcher = memo(() => {
       menu={{ items: menuItems }}
       minWidth={240}
       open={open}
-      placement="top"
+      placement={BILLING_SOURCE_SWITCHER_PLACEMENT}
       trigger="click"
       onOpenChange={setOpen}
     >

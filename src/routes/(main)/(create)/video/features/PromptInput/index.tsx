@@ -561,7 +561,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
                 enabledList={enabledVideoModelList}
                 model={currentModel ?? undefined}
                 openOnHover={false}
-                placement="topLeft"
+                placement="bottomLeft"
                 pricingMode="video"
                 provider={currentProvider ?? undefined}
                 onModelChange={async ({ model, provider }) => {
