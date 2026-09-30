@@ -26,8 +26,9 @@ const ProviderDetail = memo<ProviderDetailProps>(({ showConfig = true, ...card }
     lambdaClient.aicoBilling.getManagedProviderStatus.query(),
   );
   const aicoManaged = managedStatus?.managed ?? true;
-  // Managed Aico: branded panel only — never surface BYOK secrets or OpenRouter chrome.
-  const isManagedAico = aicoManaged && (card.id === 'openrouter' || card.id === 'aico');
+  // Managed Aico: branded panel only — never surface BYOK secrets or upstream chrome.
+  const isManagedAico =
+    aicoManaged && (card.id === 'openrouter' || card.id === 'aico' || card.id === 'cheapvibecode');
 
   const managedSettings = useMemo(() => {
     if (!isManagedAico) return card.settings;

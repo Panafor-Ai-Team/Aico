@@ -1,3 +1,4 @@
+import { BRANDING_NAME, MANAGED_PROVIDER_IDS } from '@lobechat/business-const';
 import type {
   BuiltinServerRuntimeOutput,
   BuiltinToolContext,
@@ -29,6 +30,17 @@ import type {
 } from '../../types';
 import { ImageGenerationApiName } from '../../types';
 
+const brandProviderName = (id: string, name?: string) => {
+  const normalized = id.trim().toLowerCase();
+  if (
+    normalized === 'aico' ||
+    normalized === 'lobehub' ||
+    (MANAGED_PROVIDER_IDS as readonly string[]).includes(normalized)
+  ) {
+    return BRANDING_NAME;
+  }
+  return name || id;
+};
 const normalizeStoreModel = (model: AiModelForSelect): ImageGenerationModelSummary => ({
   approximatePricePerImage: model.approximatePricePerImage,
   description: model.description,
@@ -80,7 +92,7 @@ const createClientImageGenerationRuntime = (topicVisibility?: 'private' | 'publi
         .map((item) => ({
           id: item.id,
           models: item.children.map(normalizeStoreModel),
-          name: item.name,
+          name: brandProviderName(item.id, item.name),
         }))
         .filter((item) => item.models.length > 0);
 
@@ -130,7 +142,7 @@ const createClientImageGenerationRuntime = (topicVisibility?: 'private' | 'publi
           return {
             id: item.id,
             models: limitedModels.map(normalizeRawModel),
-            name: item.name || item.id,
+            name: brandProviderName(item.id, item.name),
           };
         }),
       );

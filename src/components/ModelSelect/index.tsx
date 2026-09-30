@@ -24,9 +24,9 @@ import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
 import {
   formatBrandedModelId,
   isBrandedOpenRouterModelId,
+  isBrandedOpenRouterProvider,
 } from '@/components/Branding/brandedModelId';
 import { ProductLogo } from '@/components/Branding/ProductLogo';
-import { isCustomBranding } from '@/const/version';
 import { type AiProviderSourceType } from '@/types/aiProvider';
 import { formatTokenNumber } from '@/utils/format';
 
@@ -352,9 +352,7 @@ interface ProviderItemRenderProps {
 export const ProviderItemRender = memo<ProviderItemRenderProps>(
   ({ provider, name, source, logo, type = 'mono', size = 16 }) => {
     const isMono = type === 'mono';
-    const useBrandLogo =
-      isCustomBranding &&
-      (provider === 'openrouter' || provider === 'aico' || provider === 'lobehub');
+    const useBrandLogo = isBrandedOpenRouterProvider(provider);
     const displayName = useBrandLogo ? BRANDING_NAME : name;
     return (
       <Flexbox

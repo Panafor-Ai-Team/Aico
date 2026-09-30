@@ -64,6 +64,7 @@ describe('useEnabledChatModels', () => {
     const { result } = renderHook(() => useEnabledChatModels());
 
     expect(result.current.map((p) => p.id)).toEqual(['openrouter']);
+    expect(result.current[0]?.name).toBe('Panachat');
   });
 
   it('keeps BYOK providers when managed mode is off', async () => {

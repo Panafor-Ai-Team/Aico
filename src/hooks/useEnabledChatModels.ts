@@ -8,6 +8,10 @@ import { type AiModelForSelect, type AiProviderModelListItem } from 'model-bank'
 import { useMemo } from 'react';
 
 import {
+  formatBrandedProviderId,
+  isBrandedOpenRouterProvider,
+} from '@/components/Branding/brandedModelId';
+import {
   filterAicoManagedProviders,
   isAicoManagedRuntimeProvider,
 } from '@/features/AicoBilling/isManagedRuntimeProvider';
@@ -31,6 +35,11 @@ const catalogModelToSelect = (model: AiProviderModelListItem): AiModelForSelect 
   pricing: model.pricing,
   releasedAt: model.releasedAt,
 });
+
+const withBrandedProviderName = <T extends { id: string; name: string }>(provider: T): T =>
+  isBrandedOpenRouterProvider(provider.id)
+    ? { ...provider, name: formatBrandedProviderId(provider.id) }
+    : provider;
 
 interface EnabledChatModelsState {
   /**
@@ -80,7 +89,9 @@ export const useEnabledChatModelsState = (): EnabledChatModelsState => {
 
   const list = useMemo(() => {
     const list = enabledChatModelList || [];
-    const scoped = aicoManaged ? filterAicoManagedProviders(list) : list;
+    const scoped = (aicoManaged ? filterAicoManagedProviders(list) : list).map(
+      withBrandedProviderName,
+    );
 
     if (!orgId) return scoped;
 

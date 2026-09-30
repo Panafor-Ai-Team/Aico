@@ -5,12 +5,8 @@ import { DEFAULT_MODEL_PROVIDER_LIST } from 'model-bank/modelProviders';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { isBrandedOpenRouterProvider } from '@/components/Branding/brandedModelId';
 import { BrandedProviderIcon } from '@/components/Branding/BrandedProviderIcon';
-import { isCustomBranding } from '@/const/version';
-
-const isBrandedCategoryProvider = (id: string) =>
-  isCustomBranding &&
-  (id === 'openrouter' || id === 'aico' || id.trim().toLowerCase() === 'lobehub');
 
 export const useCategory = () => {
   const { t } = useTranslation('discover');
@@ -21,7 +17,7 @@ export const useCategory = () => {
         return {
           icon: <BrandedProviderIcon provider={item.id} size={18} type={'mono'} />,
           key: item.id,
-          label: isBrandedCategoryProvider(item.id) ? BRANDING_NAME : item.name,
+          label: isBrandedOpenRouterProvider(item.id) ? BRANDING_NAME : item.name,
         };
       }),
     [],

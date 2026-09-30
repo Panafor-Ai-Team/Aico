@@ -1,5 +1,6 @@
 'use client';
 
+import { BRANDING_NAME, MANAGED_PROVIDER_IDS } from '@lobechat/business-const';
 import type { BuiltinRenderProps } from '@lobechat/types';
 import { Alert, Block, Flexbox, Text } from '@lobehub/ui';
 import { Button } from '@lobehub/ui/base-ui';
@@ -15,6 +16,18 @@ import type {
 } from '../../types';
 
 const COLLAPSED_MODEL_COUNT = 6;
+
+const isBrandedManagedProvider = (id: string) => {
+  const normalized = id.trim().toLowerCase();
+  return (
+    normalized === 'aico' ||
+    normalized === 'lobehub' ||
+    (MANAGED_PROVIDER_IDS as readonly string[]).includes(normalized)
+  );
+};
+
+const brandProviderName = (id: string, name?: string) =>
+  isBrandedManagedProvider(id) ? BRANDING_NAME : name || id;
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   actions: css`
@@ -110,7 +123,9 @@ const ProviderSection = memo<{ provider: ImageGenerationProviderModels }>(({ pro
   const visibleModels = expanded
     ? provider.models
     : provider.models.slice(0, COLLAPSED_MODEL_COUNT);
-  const showProviderId = provider.name && provider.name !== provider.id;
+  const displayName = brandProviderName(provider.id, provider.name);
+  const showProviderId =
+    Boolean(provider.name) && displayName !== provider.id && !isBrandedManagedProvider(provider.id);
 
   return (
     <Block variant={'outlined'} width={'100%'}>
@@ -122,7 +137,7 @@ const ProviderSection = memo<{ provider: ImageGenerationProviderModels }>(({ pro
         justify={'space-between'}
       >
         <Flexbox flex={1} gap={1}>
-          <span className={styles.providerName}>{provider.name || provider.id}</span>
+          <span className={styles.providerName}>{displayName}</span>
           {showProviderId && <span className={styles.providerId}>{provider.id}</span>}
         </Flexbox>
         <span className={styles.count}>

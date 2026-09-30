@@ -250,10 +250,11 @@ describe('imageGenerationRuntime', () => {
     expect(result).toMatchObject({
       state: {
         providers: [
-          { id: 'openrouter', models: [{ id: 'openrouter-image' }] },
-          { id: 'aico', models: [{ id: 'aico-image' }] },
+          { id: 'cheapvibecode', models: [{ id: 'cheapvibecode-image' }], name: 'Panachat' },
+          { id: 'openrouter', models: [{ id: 'openrouter-image' }], name: 'Panachat' },
+          { id: 'aico', models: [{ id: 'aico-image' }], name: 'Panachat' },
         ],
-        totalModels: 2,
+        totalModels: 3,
       },
       success: true,
     });

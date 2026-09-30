@@ -4,10 +4,10 @@ import { Badge } from 'antd';
 import { memo, useMemo } from 'react';
 import { useLocation } from 'react-router';
 
+import { isBrandedOpenRouterProvider } from '@/components/Branding/brandedModelId';
 import { BrandedProviderIcon } from '@/components/Branding/BrandedProviderIcon';
 import { isBrandedProviderRouteSegment } from '@/components/Branding/brandedProviderRoute';
 import { ProductLogo } from '@/components/Branding/ProductLogo';
-import { isCustomBranding } from '@/const/version';
 import NavItem from '@/features/NavPanel/components/NavItem';
 import { type AiProviderListItem } from '@/types/aiProvider';
 import { AiProviderSourceEnum } from '@/types/aiProvider';
@@ -15,9 +15,6 @@ import { AiProviderSourceEnum } from '@/types/aiProvider';
 interface ProviderItemProps extends AiProviderListItem {
   onClick: (id: string) => void;
 }
-
-const isBrandedRuntimeProvider = (id: string) =>
-  id === BRANDING_PROVIDER || id === 'openrouter' || id === 'aico' || id === 'lobehub';
 
 const ProviderItem = memo<ProviderItemProps>(
   ({ id, name, source, enabled, logo, onClick = () => {} }) => {
@@ -34,7 +31,7 @@ const ProviderItem = memo<ProviderItemProps>(
     }, [location.pathname]);
 
     const isCustom = source === AiProviderSourceEnum.Custom;
-    const useBrandLogo = isCustomBranding && isBrandedRuntimeProvider(id);
+    const useBrandLogo = isBrandedOpenRouterProvider(id) || id === BRANDING_PROVIDER;
     const providerIcon =
       isCustom && logo ? (
         <Avatar

@@ -43,6 +43,17 @@ describe('brandedModelId', () => {
     expect(isBrandedOpenRouterProvider('openrouter-proxy')).toBe(false);
   });
 
+  it('brands aico and lobehub provider labels too', async () => {
+    vi.doMock('@/const/version', () => ({ isCustomBranding: true }));
+    const { formatBrandedProviderId, isBrandedOpenRouterProvider } =
+      await import('./brandedModelId');
+
+    expect(isBrandedOpenRouterProvider('aico')).toBe(true);
+    expect(isBrandedOpenRouterProvider('lobehub')).toBe(true);
+    expect(formatBrandedProviderId('aico')).toBe(BRANDING_NAME);
+    expect(formatBrandedProviderId('lobehub')).toBe(BRANDING_NAME);
+  });
+
   it('leaves ids unchanged when not custom branding', async () => {
     vi.doMock('@/const/version', () => ({ isCustomBranding: false }));
     const { formatBrandedModelId, isBrandedOpenRouterModelId } = await import('./brandedModelId');
