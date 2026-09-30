@@ -24,6 +24,14 @@ const ANOTHER_IMAGE_ASK =
   /\b(?:another|one more)\s+(?:image|picture|photo|one)\b|\b(?:image|picture|photo)\s+again\b|\banother one\b|\b(?:make|create|generate|draw)\s+(?:me\s+)?(?:another|one more)\b|یکی\s*دیگه|یه\s*دونه\s*دیگه|بازم(?:\s*(?:بساز|بکش|بده|عکس|تصویر))?|دوباره\s*(?:عکس|تصویر|بساز|بکش)/i;
 
 /**
+ * Pronoun-only edit asks ("change it", «همونو عوضش کن») that name no image.
+ * Only trusted right after a turn that generated an image — otherwise "fix it"
+ * on a code answer would start a billed generation.
+ */
+const ANAPHORIC_IMAGE_EDIT =
+  /عوضش\s*کن|عوض\s*کن|تغییرش\s*بده|تغییر\s*بده|درستش\s*کن|بهترش\s*کن|ویرایشش\s*کن|همونو|همینو|همین\s*رو|اینو\s*(?:عوض|تغییر|درست|ویرایش)|یه\s*جور\s*دیگه|یه\s*مدل\s*دیگه|سبک\s*دیگه|متفاوت\s*(?:بساز|کن)|\b(?:change|edit|modify|redo|regenerate|tweak)\s+(?:it|that|this)\b|\btry\s+again\b|\bdifferent\s+(?:style|version|look)\b/i;
+
+/**
  * Edit / continuation asks that depend on a prior image (user-attached or
  * previously generated in this chat). Without this, phrases like "add a bird
  * to the previous image" never match the photo-ask detector and the direct
@@ -84,6 +92,12 @@ export const isImageEditContinuationIntent = (text: string | null | undefined): 
   return IMAGE_EDIT_CONTINUATION.test(text.trim());
 };
 
+/** True for pronoun-only edit asks ("change it", «همونو عوضش کن»). */
+export const isAnaphoricImageEditIntent = (text: string | null | undefined): boolean => {
+  if (!text) return false;
+  return ANAPHORIC_IMAGE_EDIT.test(text.trim());
+};
+
 /** True when the ask is a follow-up "another photo" after a prior generation. */
 export const isAnotherImageAskIntent = (text: string | null | undefined): boolean => {
   if (!text) return false;
@@ -102,7 +116,7 @@ export const isAnotherImageAskIntent = (text: string | null | undefined): boolea
  */
 export const isImageGenerationUserIntent = (
   text: string | null | undefined,
-  options?: { hasPreviousGenerated?: boolean },
+  options?: { hasPreviousGenerated?: boolean; previousTurnGeneratedImage?: boolean },
 ): boolean => {
   if (!text) return false;
   const trimmed = text.trim();
@@ -116,6 +130,7 @@ export const isImageGenerationUserIntent = (
   if (ENGLISH_IMAGE_COMMAND.test(trimmed)) return true;
   if (isImageEditContinuationIntent(trimmed)) return true;
   if (options?.hasPreviousGenerated && isAnotherImageAskIntent(trimmed)) return true;
+  if (options?.previousTurnGeneratedImage && isAnaphoricImageEditIntent(trimmed)) return true;
 
   return IMAGE_NOUN.test(trimmed) && GENERATE_VERB.test(trimmed);
 };
@@ -218,6 +233,26 @@ const messageHasImageGenerationResult = (message: MessageLike): boolean =>
 const hasImageGenerationToolResultAfter = (messages: MessageLike[], userIndex: number): boolean => {
   for (let i = userIndex + 1; i < messages.length; i += 1) {
     if (messageHasImageGenerationResult(messages[i]!)) return true;
+  }
+  return false;
+};
+
+/**
+ * True when the turn right before the latest user message produced an image
+ * (between the previous user message and the latest one).
+ */
+export const didPreviousTurnGenerateImage = (
+  messages: MessageLike[] | null | undefined,
+): boolean => {
+  if (!messages?.length) return false;
+
+  const lastUser = messages.findLastIndex((message) => message?.role === 'user');
+  if (lastUser <= 0) return false;
+
+  for (let i = lastUser - 1; i >= 0; i -= 1) {
+    const message = messages[i]!;
+    if (message.role === 'user') return false;
+    if (messageHasImageGenerationResult(message)) return true;
   }
   return false;
 };
@@ -449,25 +484,30 @@ export const resolveDirectImageGenerationToolCall = (params: {
 }): DirectGenerateImageToolCall | undefined => {
   // Prefer the raw display transcript for "is there an unanswered photo ask?":
   // prepared OpenAI rows may carry onboarding/local-system tools after the user
-  // and SYSTEM CONTEXT on the text. Nested assistantGroup results still clear
-  // the prior ask so we do not double-bill after the first generation.
-  const pending =
-    findPendingUserMessage(params.historyMessages) ?? findPendingUserMessage(params.messages);
+  // and SYSTEM CONTEXT on the text. When the raw transcript has a user turn it
+  // is authoritative — falling back to prepared rows after it says "answered"
+  // could re-fire (and re-bill) the same ask.
+  const historyHasUser = params.historyMessages?.some((message) => message?.role === 'user');
+  const history = historyHasUser ? params.historyMessages! : params.messages;
+  const pending = findPendingUserMessage(history);
   if (!pending) return undefined;
 
-  const historyForPrior = params.historyMessages?.length ? params.historyMessages : params.messages;
-  const previousGeneratedUrls = findLatestGeneratedImageUrls(historyForPrior);
+  const previousGeneratedUrls = findLatestGeneratedImageUrls(history);
   const hasPreviousGenerated =
-    previousGeneratedUrls.length > 0 || hasPreviousImageGeneration(historyForPrior);
+    previousGeneratedUrls.length > 0 || hasPreviousImageGeneration(history);
+  const previousTurnGeneratedImage = didPreviousTurnGenerateImage(history);
 
-  if (!isImageGenerationUserIntent(pending.text, { hasPreviousGenerated })) return undefined;
+  if (
+    !isImageGenerationUserIntent(pending.text, { hasPreviousGenerated, previousTurnGeneratedImage })
+  ) {
+    return undefined;
+  }
 
+  const isEdit =
+    isImageEditContinuationIntent(pending.text) ||
+    (previousTurnGeneratedImage && isAnaphoricImageEditIntent(pending.text));
   const imageUrls =
-    pending.imageUrls.length > 0
-      ? pending.imageUrls
-      : isImageEditContinuationIntent(pending.text)
-        ? previousGeneratedUrls
-        : [];
+    pending.imageUrls.length > 0 ? pending.imageUrls : isEdit ? previousGeneratedUrls : [];
 
   return buildDirectGenerateImageToolCall({
     executor: params.executorMap?.[ImageGenerationIdentifier],

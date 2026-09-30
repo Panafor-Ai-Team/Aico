@@ -93,6 +93,18 @@ describe('isImageGenerationUserIntent', () => {
     expect(isAnotherImageAskIntent('بازم بساز')).toBe(true);
   });
 
+  it('detects pronoun-only edit asks only right after an image turn', () => {
+    expect(isImageGenerationUserIntent('این که همونو عوضش کن')).toBe(false);
+    expect(
+      isImageGenerationUserIntent('این که همونو عوضش کن', { previousTurnGeneratedImage: true }),
+    ).toBe(true);
+    expect(isImageGenerationUserIntent('change it', { previousTurnGeneratedImage: true })).toBe(
+      true,
+    );
+    // A prior image elsewhere in the chat is not enough for "change it".
+    expect(isImageGenerationUserIntent('change it', { hasPreviousGenerated: true })).toBe(false);
+  });
+
   it('rejects meta / prompt-engineering questions', () => {
     expect(isImageGenerationUserIntent('چطور عکس بسازم؟')).toBe(false);
     expect(isImageGenerationUserIntent('write me a prompt for a zebra photo')).toBe(false);
@@ -248,6 +260,53 @@ describe('resolveDirectImageGenerationToolCall', () => {
     expect(JSON.parse(call!.arguments)).toEqual({
       prompt: 'Generate an image of a dog',
     });
+  });
+
+  it('fires «همونو عوضش کن» right after an image turn and passes the prior image', () => {
+    const call = resolveDirectImageGenerationToolCall({
+      historyMessages: [
+        { content: 'یک عکس بساز از لندینگ یک سایت بازی', role: 'user' },
+        assistantGroupWithImageGen,
+        { content: 'این که همونو عوضش کن', role: 'user' },
+      ],
+      messages: [],
+    });
+
+    expect(JSON.parse(call!.arguments)).toEqual({
+      imageUrls: [PREVIOUS_IMAGE_URL],
+      prompt: 'این که همونو عوضش کن',
+    });
+  });
+
+  it('does not treat "change it" as an image ask when the last turn was text', () => {
+    expect(
+      resolveDirectImageGenerationToolCall({
+        historyMessages: [
+          { content: 'Generate an image of a cat', role: 'user' },
+          assistantGroupWithImageGen,
+          { content: 'write a poem', role: 'user' },
+          { content: 'Roses are red…', role: 'assistant' },
+          { content: 'change it', role: 'user' },
+        ],
+        messages: [],
+      }),
+    ).toBeUndefined();
+  });
+
+  it('does not fall back to prepared rows once raw history says the ask was answered', () => {
+    expect(
+      resolveDirectImageGenerationToolCall({
+        historyMessages: [
+          { content: 'Generate an image of a cat', role: 'user' },
+          assistantGroupWithImageGen,
+        ],
+        // Prepared rows that lost the tool identity must not re-fire the ask.
+        messages: [
+          { content: 'Generate an image of a cat', role: 'user' },
+          { content: 'done', role: 'tool' },
+        ],
+      }),
+    ).toBeUndefined();
   });
 
   it('fires soft follow-ups like "another one" after a prior generation', () => {

@@ -9,6 +9,7 @@ export {
 export type { ImageGenerationRuntimeService } from './ExecutionRuntime';
 export {
   buildDirectGenerateImageToolCall,
+  didPreviousTurnGenerateImage,
   extractPlainMessageText,
   findLatestGeneratedImageUrls,
   findLatestUserMessageText,
@@ -16,6 +17,7 @@ export {
   findPendingUserMessageText,
   hasPreviousImageGeneration,
   IMAGE_GENERATION_TOOL_FUNCTION_NAME,
+  isAnaphoricImageEditIntent,
   isAnotherImageAskIntent,
   isImageEditContinuationIntent,
   isImageGenerationUserIntent,
