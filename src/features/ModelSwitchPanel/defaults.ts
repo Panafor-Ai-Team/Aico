@@ -1,4 +1,4 @@
-import type { DropdownPlacement } from '@lobehub/ui';
+import type { DropdownMenuPlacement } from '@lobehub/ui';
 
 /**
  * Composer-facing defaults for ModelSwitchPanel.
@@ -9,5 +9,5 @@ import type { DropdownPlacement } from '@lobehub/ui';
  */
 export const MODEL_SWITCH_PANEL_DEFAULTS = {
   openOnHover: false,
-  placement: 'bottomLeft' as DropdownPlacement,
+  placement: 'bottomLeft' as DropdownMenuPlacement,
 } as const;
