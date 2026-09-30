@@ -172,29 +172,27 @@ export const cheapVibeCodeGptImage2Parameters: ModelParamsSchema = {
 };
 
 /**
- * GPT Image 2.5 Sunburst / Flare on CheapVibeCode's `/v1/images/generations`
- * and `/v1/images/edits`. Documented surface is quality + square size; edits
- * take the same OpenAI-shaped multipart `image` field as GPT Image 2.
+ * GPT Image 2.5 Sunburst / Flare behind CheapVibeCode. Same Images API surface
+ * as {@link cheapVibeCodeGptImage2Parameters} (quality, size through 4K, up to
+ * 16 reference images on `/v1/images/edits`). CVC charges a fixed token fee by
+ * quality tier, independent of size.
  */
 export const cheapVibeCodeGptImage25Parameters: ModelParamsSchema = {
-  imageUrls: { default: [], maxCount: 16, maxFileSize: 5 * 1024 * 1024 },
-  prompt: { default: '' },
-  quality: { default: 'medium', enum: ['low', 'medium', 'high'] },
-  size: {
-    default: '1024x1024',
-    enum: ['1024x1024'],
-  },
+  ...cheapVibeCodeGptImage2Parameters,
 };
 
 /**
  * Fixed per-image CheapVibeCode token charge for GPT Image 2.5 Sunburst / Flare:
- * low 50K · medium 100K · high 150K. Converted at {@link cheapVibeCodeTokensToUsd}.
+ * low 50K · medium 100K · high 150K. `auto` quality is billed as medium until
+ * CVC documents otherwise. Converted at {@link cheapVibeCodeTokensToUsd}.
  */
 export const cheapVibeCodeGptImage25Pricing: Pricing = {
+  approximatePricePerImage: cheapVibeCodeTokensToUsd(100_000),
   units: [
     {
       lookup: {
         prices: {
+          auto: cheapVibeCodeTokensToUsd(100_000),
           high: cheapVibeCodeTokensToUsd(150_000),
           low: cheapVibeCodeTokensToUsd(50_000),
           medium: cheapVibeCodeTokensToUsd(100_000),

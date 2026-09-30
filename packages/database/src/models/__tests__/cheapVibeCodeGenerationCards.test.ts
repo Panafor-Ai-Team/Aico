@@ -50,16 +50,27 @@ describe('CheapVibeCode generation models', () => {
     expect(models['grok-imagine-video']).toMatchObject({ enabled: true, type: 'video' });
     // GPT Image 2 defaults to medium quality.
     expect((models['gpt-image-2'] as any).parameters.quality.default).toBe('medium');
-    // GPT Image 2.5 Sunburst / Flare: quality-tiered fixed charge, square size only.
+    // GPT Image 2.5 Sunburst / Flare: same Images surface as GPT Image 2, plus
+    // quality-tiered fixed CVC token pricing.
     for (const id of ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare']) {
       expect((models[id] as any).parameters.quality).toEqual({
         default: 'medium',
-        enum: ['low', 'medium', 'high'],
+        enum: ['low', 'medium', 'high', 'auto'],
       });
-      expect((models[id] as any).parameters.size).toEqual({
-        default: '1024x1024',
-        enum: ['1024x1024'],
-      });
+      expect((models[id] as any).parameters.size.enum).toEqual(
+        expect.arrayContaining([
+          'auto',
+          '1024x1024',
+          '1536x1024',
+          '1024x1536',
+          '2048x2048',
+          '2048x1152',
+          '3840x2160',
+          '2160x3840',
+        ]),
+      );
+      expect((models[id] as any).parameters.imageUrls.maxCount).toBe(16);
+      expect(models[id].pricing?.approximatePricePerImage).toEqual(expect.any(Number));
       expect(models[id].pricing?.units?.[0]).toMatchObject({
         name: 'imageGeneration',
         strategy: 'lookup',
@@ -68,6 +79,7 @@ describe('CheapVibeCode generation models', () => {
       expect(
         (models[id].pricing?.units?.[0] as { lookup?: { prices?: object } }).lookup?.prices,
       ).toMatchObject({
+        auto: expect.any(Number),
         high: expect.any(Number),
         low: expect.any(Number),
         medium: expect.any(Number),
@@ -145,6 +157,10 @@ describe('CheapVibeCode generation models', () => {
 
     expect(model.parameters.quality.default).toBe('medium');
     expect(model.parameters.imageUrls.maxCount).toBe(16);
+    expect(model.parameters.size.enum).toEqual(
+      expect.arrayContaining(['auto', '1024x1024', '3840x2160', '2160x3840']),
+    );
+    expect(model.description).toMatch(/Sunburst/);
     expect(model.pricing?.units?.[0]).toMatchObject({
       name: 'imageGeneration',
       strategy: 'lookup',

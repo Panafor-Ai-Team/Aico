@@ -700,6 +700,8 @@
   "gpt-image-1-mini.description": "Une variante économique de GPT Image 1 avec entrées texte et image natives et sortie image.",
   "gpt-image-1.5.description": "Une version améliorée de GPT Image 1 avec une génération 4× plus rapide, une édition plus précise et un meilleur rendu du texte.",
   "gpt-image-1.description": "Modèle natif de génération d’images multimodales de ChatGPT.",
+  "gpt-image-2.5-flare.description": "GPT Image 2.5 Flare via CheapVibeCode — génération et édition d’images compatibles OpenAI, avec niveaux de qualité et tailles jusqu’à 4K.",
+  "gpt-image-2.5-sunburst.description": "GPT Image 2.5 Sunburst via CheapVibeCode — génération et édition d’images compatibles OpenAI, avec niveaux de qualité et tailles jusqu’à 4K.",
   "gpt-image-2.description": "Modèle d'image multimodal de nouvelle génération d'OpenAI avec raisonnement natif, résolution jusqu'à 4K, rendu de texte quasi-parfait et prise en charge multilingue de haute fidélité.",
   "gpt-oss-120b.description": "L’accès nécessite une demande. GPT-OSS-120B est un grand modèle de langage open source d’OpenAI avec de fortes capacités de génération de texte.",
   "gpt-oss-20b.description": "L’accès nécessite une demande. GPT-OSS-20B est un modèle de langage open source de taille moyenne d’OpenAI, efficace pour la génération de texte.",

@@ -5,6 +5,10 @@ export const modelDescriptionOverrides = {
     'Seedance 2.0 Fast by ByteDance offers the same capabilities as Seedance 2.0 with faster generation speeds at a more competitive price.',
   'fal-ai/bytedance/seedream/v4.5.description':
     'Seedream 4.5, built by ByteDance Seed team, supports multi-image editing and composition. Features enhanced subject consistency, precise instruction following, spatial logic understanding, aesthetic expression, poster layout and logo design with high-precision text-image rendering.',
+  'gpt-image-2.5-flare.description':
+    'CheapVibeCode GPT Image 2.5 Flare — OpenAI-compatible image generation and editing with quality tiers and sizes through 4K.',
+  'gpt-image-2.5-sunburst.description':
+    'CheapVibeCode GPT Image 2.5 Sunburst — OpenAI-compatible image generation and editing with quality tiers and sizes through 4K.',
   'grok-4.20-beta-0309-non-reasoning.description': 'A non-reasoning variant for simple use cases',
   'grok-4.20-beta-0309-reasoning.description':
     'Intelligent, blazing-fast model that reasons before responding',
