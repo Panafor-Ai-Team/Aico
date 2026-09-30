@@ -291,10 +291,10 @@ describe('CreateImageAction', () => {
         useImageStore.setState({
           parameters: { prompt: 'add a bird to the previous image', width: 1024, height: 1024 },
           parametersSchema: {
-            height: { default: 1024 },
+            height: { default: 1024, max: 2048, min: 256 },
             imageUrls: { default: [] },
             prompt: { default: '' },
-            width: { default: 1024 },
+            width: { default: 1024, max: 2048, min: 256 },
           },
           refreshGenerationBatches: mockRefreshGenerationBatches,
           generationBatchesMap: {
