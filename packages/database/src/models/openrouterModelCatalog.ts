@@ -111,6 +111,8 @@ const CHEAPVIBECODE_GENERATION_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
     type: 'image',
   },
   {
+    description:
+      'CheapVibeCode GPT Image 2.5 Sunburst — OpenAI-compatible image generation and editing with quality tiers and sizes through 4K.',
     displayName: 'GPT Image 2.5 Sunburst',
     id: 'gpt-image-2.5-sunburst',
     parameters: cheapVibeCodeGptImage25Parameters,
@@ -118,6 +120,8 @@ const CHEAPVIBECODE_GENERATION_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
     type: 'image',
   },
   {
+    description:
+      'CheapVibeCode GPT Image 2.5 Flare — OpenAI-compatible image generation and editing with quality tiers and sizes through 4K.',
     displayName: 'GPT Image 2.5 Flare',
     id: 'gpt-image-2.5-flare',
     parameters: cheapVibeCodeGptImage25Parameters,
@@ -166,6 +170,7 @@ const withManagedGenerationCards = (
 
     return {
       ...model,
+      ...(card.description ? { description: card.description } : {}),
       ...(card.parameters ? { parameters: card.parameters } : {}),
       ...(card.pricing ? { pricing: card.pricing } : {}),
     } as AiProviderModelListItem;
@@ -203,6 +208,7 @@ const withCheapVibeCodeReasoningEffort = (
 const toProviderCard = (card: OpenRouterCatalogModelInput): AiProviderModelListItem =>
   ({
     abilities: {},
+    description: card.description,
     displayName: card.displayName,
     enabled: true,
     id: card.id,

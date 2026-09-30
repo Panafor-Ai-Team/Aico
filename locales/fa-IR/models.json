@@ -700,6 +700,8 @@
   "gpt-image-1-mini.description": "نسخه کم‌هزینه‌تر GPT Image 1 با ورودی بومی متن و تصویر و خروجی تصویری.",
   "gpt-image-1.5.description": "مدل بهبودیافته GPT Image 1 با تولید ۴ برابر سریع‌تر، ویرایش دقیق‌تر و رندر بهتر متن.",
   "gpt-image-1.description": "مدل تولید تصویر چندوجهی بومی ChatGPT.",
+  "gpt-image-2.5-flare.description": "GPT Image 2.5 Flare در CheapVibeCode — تولید و ویرایش تصویر سازگار با OpenAI با سطوح کیفیت و اندازه‌ها تا 4K.",
+  "gpt-image-2.5-sunburst.description": "GPT Image 2.5 Sunburst در CheapVibeCode — تولید و ویرایش تصویر سازگار با OpenAI با سطوح کیفیت و اندازه‌ها تا 4K.",
   "gpt-image-2.description": "مدل چندوجهی نسل جدید OpenAI برای تولید تصویر با استدلال بومی، وضوح تا 4K، رندر تقریباً بی‌عیب متن و پشتیبانی چندزبانه دقیق.",
   "gpt-oss-120b.description": "دسترسی نیاز به درخواست دارد. GPT-OSS-120B یک مدل زبان بزرگ متن‌باز از OpenAI با توانایی قوی در تولید متن است.",
   "gpt-oss-20b.description": "دسترسی نیاز به درخواست دارد. GPT-OSS-20B یک مدل زبان میان‌رده متن‌باز از OpenAI با تولید متن کارآمد است.",
