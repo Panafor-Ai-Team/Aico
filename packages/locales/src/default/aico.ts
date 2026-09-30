@@ -351,8 +351,8 @@ export default {
   'platform.multiplierCard': 'Top-up yield',
   'platform.multiplierPreview': '$1 credits {{pi}} π.',
   'platform.multiplierActive': 'Active',
-  'platform.provider.openrouter': 'OpenRouter',
-  'platform.provider.cheapvibecode': 'CheapVibeCode',
+  'platform.provider.openrouter': 'USD gateway',
+  'platform.provider.cheapvibecode': 'Token gateway',
   'platform.modelMultiplierTitle': 'Per-model coefficients',
   'platform.modelMultiplierHint':
     'The cost multiplier each model publishes, refreshed from the provider every 6 hours. Prices shown and charged are this multiplier times the platform markup; it cannot be edited here.',
@@ -462,7 +462,7 @@ export default {
   'platform.reconciliation.checks.key_drift': 'Keys match balances',
   'platform.reconciliation.checks.key_hygiene': 'Key and renewal health',
   'platform.reconciliation.checks.usage_coverage': 'Every request has a priced log',
-  'platform.reconciliation.checks.openrouter_orphans': 'No unused OpenRouter keys',
+  'platform.reconciliation.checks.openrouter_orphans': 'No unused managed keys',
 
   'provider.managed.desc':
     'Models are provided by {{brandName}}. Usage is billed from your wallet or organization credit — no API key setup is required.',

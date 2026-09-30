@@ -13,9 +13,12 @@ export const getBrandingModelSlug = (): string => BRANDING_NAME.trim().toLowerCa
  * stored ids outlive a switch. Branding on the union means a model saved before
  * a cutover still shows as ours afterwards, and a rollback does not unbrand it.
  */
+/** Gateway ids plus product aliases that must never render as vendor names. */
+const BRANDED_PROVIDER_IDS = [...MANAGED_PROVIDER_IDS, 'aico', 'lobehub'] as const;
+
 const MANAGED_ID_PREFIX = new RegExp(`^(?:${MANAGED_PROVIDER_IDS.join('|')})\\b`, 'i');
 const MANAGED_ID_LEADER = new RegExp(`^(?:${MANAGED_PROVIDER_IDS.join('|')})/?`, 'i');
-const MANAGED_PROVIDER_EXACT = new RegExp(`^(?:${MANAGED_PROVIDER_IDS.join('|')})$`, 'i');
+const BRANDED_PROVIDER_EXACT = new RegExp(`^(?:${BRANDED_PROVIDER_IDS.join('|')})$`, 'i');
 
 /**
  * True when this model id is a managed-gateway-namespace id that should show as
@@ -32,9 +35,13 @@ export const formatBrandedModelId = (modelId: string): string => {
   return rest ? `${getBrandingModelSlug()}/${rest}` : getBrandingModelSlug();
 };
 
-/** True when this runtime provider id should show as product brand in the UI. */
+/**
+ * True when this runtime provider id should show as product brand in the UI.
+ * Covers every managed gateway (`openrouter`, `cheapvibecode`), plus `aico` /
+ * legacy `lobehub` aliases — never surface upstream vendor names to users.
+ */
 export const isBrandedOpenRouterProvider = (provider?: string): boolean =>
-  Boolean(isCustomBranding && provider && MANAGED_PROVIDER_EXACT.test(provider.trim()));
+  Boolean(isCustomBranding && provider && BRANDED_PROVIDER_EXACT.test(provider.trim()));
 
 /** Display-only provider label; runtime/API ids keep their stored gateway id. */
 export const formatBrandedProviderId = (provider: string): string => {

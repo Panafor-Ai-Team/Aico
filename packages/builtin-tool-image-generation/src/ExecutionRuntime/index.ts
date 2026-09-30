@@ -104,7 +104,7 @@ const formatModelList = (state: ListImageModelsState) => {
   for (const provider of state.providers) {
     if (provider.models.length === 0) continue;
 
-    lines.push(`\n${provider.name || provider.id} (${provider.id})`);
+    lines.push(`\n${provider.name || provider.id}`);
     for (const model of provider.models) {
       const displayName =
         model.displayName && model.displayName !== model.id ? ` — ${model.displayName}` : '';

@@ -4,7 +4,7 @@ const CheapVibeCode: ModelProviderCard = {
   chatModels: [],
   checkModel: 'gpt-5.6-luna',
   description:
-    'CheapVibeCode is an OpenAI-compatible gateway offering frontier models from OpenAI, Anthropic, Google, xAI and others, priced as a coefficient on a shared token unit rather than per-model USD rates.',
+    'An OpenAI-compatible gateway offering frontier models from OpenAI, Anthropic, Google, xAI and others, priced as a coefficient on a shared token unit rather than per-model USD rates.',
   id: 'cheapvibecode',
   modelList: { showModelFetcher: true },
   modelsUrl: 'https://cheapvibecode.ru',

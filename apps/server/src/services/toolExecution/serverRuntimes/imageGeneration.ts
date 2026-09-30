@@ -1,6 +1,7 @@
 import type { ImageGenerationModelSummary } from '@lobechat/builtin-tool-image-generation';
 import { ImageGenerationIdentifier } from '@lobechat/builtin-tool-image-generation';
 import { ImageGenerationExecutionRuntime } from '@lobechat/builtin-tool-image-generation/executionRuntime';
+import { BRANDING_NAME, MANAGED_PROVIDER_IDS } from '@lobechat/business-const';
 import type { AiProviderModelListItem } from 'model-bank';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
@@ -16,11 +17,13 @@ import { type ServerRuntimeRegistration } from './types';
 
 /**
  * Same provider surface as Create → Image (`filterAicoManagedProviders`):
- * wallet-backed `aico` / `openrouter` only. CheapVibeCode stays behind the
- * `openrouter` managed slot in production catalogs.
+ * wallet-backed managed providers only.
  */
 const isCreatePageImageProvider = (providerId: string) =>
-  providerId === 'aico' || providerId === 'openrouter';
+  providerId === 'aico' || (MANAGED_PROVIDER_IDS as readonly string[]).includes(providerId);
+
+const brandProviderName = (id: string, name?: string) =>
+  isCreatePageImageProvider(id) ? BRANDING_NAME : name || id;
 
 const normalizeModel = (model: AiProviderModelListItem): ImageGenerationModelSummary => ({
   description: model.description,
@@ -108,7 +111,7 @@ export const imageGenerationRuntime: ServerRuntimeRegistration = {
             return {
               id: item.id,
               models: limitedModels.map(normalizeModel),
-              name: item.name || item.id,
+              name: brandProviderName(item.id, item.name),
             };
           }),
         );

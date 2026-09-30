@@ -7,8 +7,8 @@ import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { BrandingProviderCard } from '@/business/client/features/BrandingProviderCard';
+import { isBrandedOpenRouterProvider } from '@/components/Branding/brandedModelId';
 import { ProductLogo } from '@/components/Branding/ProductLogo';
-import { isCustomBranding } from '@/const/version';
 import { useIsDark } from '@/hooks/useIsDark';
 import { type AiProviderListItem } from '@/types/aiProvider';
 
@@ -60,7 +60,7 @@ const ProviderCard = memo<ProviderCardProps>(
           >
             <Flexbox gap={12} width={'100%'}>
               <Flexbox horizontal align={'center'} justify={'space-between'}>
-                {isCustomBranding && (id === 'openrouter' || id === 'aico' || id === 'lobehub') ? (
+                {isBrandedOpenRouterProvider(id) ? (
                   <Flexbox horizontal align={'center'} gap={8}>
                     <ProductLogo size={24} type={'flat'} />
                     <Text style={{ fontSize: 16, fontWeight: 'bold' }}>{BRANDING_NAME}</Text>

@@ -3,6 +3,10 @@ import isEqual from 'fast-deep-equal';
 import { useMemo } from 'react';
 
 import {
+  formatBrandedProviderId,
+  isBrandedOpenRouterProvider,
+} from '@/components/Branding/brandedModelId';
+import {
   filterAicoManagedProviders,
   isAicoManagedRuntimeProvider,
 } from '@/features/AicoBilling/isManagedRuntimeProvider';
@@ -15,13 +19,18 @@ import { aiModelService } from '@/services/aiModel';
 import { aiProviderSelectors, useAiInfraStore } from '@/store/aiInfra';
 import { type EnabledProviderWithModels } from '@/types/aiProvider';
 
+const withBrandedProviderName = <T extends { id: string; name: string }>(provider: T): T =>
+  isBrandedOpenRouterProvider(provider.id)
+    ? { ...provider, name: formatBrandedProviderId(provider.id) }
+    : provider;
+
 /**
  * Enabled image models for the Image Create picker and the chat image-generation
  * confirmation card.
  *
  * - Personal wallet: the user's enabled managed models. In Aico managed mode only
- *   wallet-backed OpenRouter/`aico` providers are shown (same product rule as
- *   chat — never BYOK Google/OpenAI keys).
+ *   wallet-backed managed providers are shown (same product rule as chat — never
+ *   BYOK Google/OpenAI keys).
  * - Org wallet: the team allow-list only, built from the managed catalog, so the
  *   picker can never offer a model the server will reject with
  *   `MODEL_NOT_ALLOWED`. The product's default image generator is always present,
@@ -55,9 +64,9 @@ export const useEnabledImageModels = (): {
     // While status loads, expose an empty list so config init waits (avoids
     // locking onto Google defaults before we know Aico is managed-only).
     if (managedStatus === undefined && isLoading) return [];
-    const scoped = isAicoManagedProviderMode(managedStatus?.managed)
-      ? filterAicoManagedProviders(raw)
-      : raw;
+    const scoped = (
+      isAicoManagedProviderMode(managedStatus?.managed) ? filterAicoManagedProviders(raw) : raw
+    ).map(withBrandedProviderName);
 
     if (!orgId) return scoped;
 

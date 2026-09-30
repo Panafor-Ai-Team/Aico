@@ -26,10 +26,10 @@ import { Trans, useTranslation } from 'react-i18next';
 import urlJoin from 'url-join';
 import { z } from 'zod';
 
+import { isBrandedOpenRouterProvider } from '@/components/Branding/brandedModelId';
 import { ProductLogo } from '@/components/Branding/ProductLogo';
 import { FormInput, FormPassword } from '@/components/FormInput';
 import { SkeletonInput, SkeletonSwitch } from '@/components/Skeleton';
-import { isCustomBranding } from '@/const/version';
 import { usePermission } from '@/hooks/usePermission';
 import { lambdaQuery } from '@/libs/trpc/client';
 import { aiProviderSelectors, useAiInfraStore } from '@/store/aiInfra';
@@ -480,7 +480,7 @@ const ProviderConfig = memo<ProviderConfigProps>(
             )}
             {name}
           </Flexbox>
-        ) : isCustomBranding && (id === 'openrouter' || id === 'aico' || id === 'lobehub') ? (
+        ) : isBrandedOpenRouterProvider(id) ? (
           <Flexbox horizontal align={'center'} gap={8}>
             <ProductLogo size={24} type={'flat'} />
             <Text style={{ fontSize: 16, fontWeight: 'bold' }}>{BRANDING_NAME}</Text>
