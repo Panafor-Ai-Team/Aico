@@ -186,6 +186,47 @@ describe('resolveDirectImageGenerationToolCall', () => {
     });
   });
 
+  it('mines prior URLs from historyMessages when prepared messages lost pluginState', () => {
+    const stateUrl = 'https://cdn.example.com/from-history.png';
+    const call = resolveDirectImageGenerationToolCall({
+      historyMessages: [
+        {
+          children: [
+            {
+              tools: [
+                {
+                  apiName: 'generateImage',
+                  identifier: 'lobe-image-generation',
+                  result: {
+                    content: 'ok',
+                    state: { generations: [{ asset: { url: stateUrl } }] },
+                  },
+                },
+              ],
+            },
+          ],
+          content: '',
+          role: 'assistantGroup',
+        },
+        { content: 'edit the last picture to add a hat', role: 'user' },
+      ],
+      messages: [
+        // Cleaned OpenAI-shaped history: tool content has no URL, pluginState gone.
+        {
+          content: 'Image generation completed.',
+          name: IMAGE_GENERATION_TOOL_FUNCTION_NAME,
+          role: 'tool',
+        },
+        { content: 'edit the last picture to add a hat', role: 'user' },
+      ],
+    });
+
+    expect(JSON.parse(call!.arguments)).toEqual({
+      imageUrls: [stateUrl],
+      prompt: 'edit the last picture to add a hat',
+    });
+  });
+
   it('prefers images attached on the current turn over a previous generation', () => {
     const attached = 'https://cdn.example.com/upload.png';
     const call = resolveDirectImageGenerationToolCall({
@@ -331,5 +372,43 @@ describe('findLatestGeneratedImageUrls', () => {
         },
       ]),
     ).toEqual([stateUrl]);
+  });
+
+  it('reads nested assistantGroup tool results (display transcript shape)', () => {
+    const stateUrl = 'https://cdn.example.com/from-group.png';
+    expect(
+      findLatestGeneratedImageUrls([
+        {
+          children: [
+            {
+              tools: [
+                {
+                  apiName: 'generateImage',
+                  identifier: 'lobe-image-generation',
+                  result: {
+                    content: 'ok',
+                    state: { generations: [{ asset: { url: stateUrl } }] },
+                  },
+                },
+              ],
+            },
+          ],
+          content: '',
+          role: 'assistantGroup',
+        },
+        { content: 'add a bird to the previous image', role: 'user' },
+      ]),
+    ).toEqual([stateUrl]);
+  });
+
+  it('falls back to markdown images on assistant replies', () => {
+    expect(
+      findLatestGeneratedImageUrls([
+        {
+          content: `Here you go:\n\n![Generated image 1](${PREVIOUS_IMAGE_URL})`,
+          role: 'assistant',
+        },
+      ]),
+    ).toEqual([PREVIOUS_IMAGE_URL]);
   });
 });

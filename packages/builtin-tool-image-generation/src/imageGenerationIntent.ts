@@ -22,7 +22,11 @@ const ENGLISH_IMAGE_COMMAND =
  * path cannot forward a reference URL.
  */
 const IMAGE_EDIT_CONTINUATION =
-  /\b(?:previous|last|above|that|same|earlier)\s+(?:image|picture|photo|one)\b|\b(?:add|remove|replace|change|edit|modify|update|keep)\b.{1,80}\b(?:image|picture|photo|drawing|illustration)\b|(?:تصویر|عکس)\s*قبلی|همون\s*(?:عکس|تصویر)|بهش\s*اضافه|ویرایش\s*کن|تغییر\s*بده/i;
+  /\b(?:previous|last|above|that|same|earlier)\s+(?:image|picture|photo|one)\b|\b(?:add|remove|replace|change|edit|modify|update|keep)\b.{1,80}\b(?:image|picture|photo|drawing|illustration)\b|\b(?:image|picture|photo|drawing|illustration)\b.{1,80}\b(?:add|remove|replace|change|edit|modify|with|without)\b|(?:تصویر|عکس)\s*قبلی|همون\s*(?:عکس|تصویر)|بهش\s*اضافه|ویرایش\s*کن|تغییر\s*بده|(?:عکس|تصویر).{0,40}(?:اضافه|کم\s*کن|حذف|تغییر)/i;
+
+/** Short anaphoric edits that only make sense when a prior image exists. */
+const ANAPHORIC_IMAGE_EDIT =
+  /^(?:make it\b|change it\b|same (?:but|except|with)\b|again but\b|add \S.{0,60}? to it\b|همین ولی\b|دوباره ولی\b)/i;
 
 // Must match the context-engine `SYSTEM_CONTEXT_START` / `SYSTEM_CONTEXT_END` markers and
 // the vision-downgrade placeholder, which the chat pipeline appends to the user's own text.
@@ -34,14 +38,26 @@ const MARKDOWN_IMAGE_URL = /!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g;
 const IMAGE_URL_LINE = /(?:^|\n)(?:Image URL|imageUrl)\s*[:=]\s*(https?:\/\/\S+)/gi;
 const FILE_CONTEXT_IMAGE_URL = /<image\s[^>]*?\burl="(https?:\/\/[^"]+)"/g;
 
+type GenerationAssetLike = {
+  asset?: { originalUrl?: string; thumbnailUrl?: string; url?: string } | null;
+};
+
 type MessageLike = {
+  children?: Array<{
+    tools?: Array<{
+      apiName?: string;
+      identifier?: string;
+      result?: {
+        content?: unknown;
+        state?: { generations?: GenerationAssetLike[] };
+      };
+    }>;
+  }>;
   content?: unknown;
   name?: string;
   plugin?: { apiName?: string; identifier?: string };
   pluginState?: {
-    generations?: Array<{
-      asset?: { originalUrl?: string; thumbnailUrl?: string; url?: string } | null;
-    }>;
+    generations?: GenerationAssetLike[];
   };
   role?: string;
 };
@@ -58,9 +74,14 @@ export const stripInjectedUserContext = (text: string) =>
   text.replaceAll(INJECTED_CONTEXT_BLOCK, '').replaceAll(VISION_DOWNGRADE_PLACEHOLDER, '').trim();
 
 /** True when the ask clearly edits / continues from a prior image. */
-export const isImageEditContinuationIntent = (text: string | null | undefined): boolean => {
+export const isImageEditContinuationIntent = (
+  text: string | null | undefined,
+  options?: { hasPreviousGenerated?: boolean },
+): boolean => {
   if (!text) return false;
-  return IMAGE_EDIT_CONTINUATION.test(text.trim());
+  const trimmed = text.trim();
+  if (IMAGE_EDIT_CONTINUATION.test(trimmed)) return true;
+  return Boolean(options?.hasPreviousGenerated && ANAPHORIC_IMAGE_EDIT.test(trimmed));
 };
 
 /**
@@ -178,8 +199,10 @@ const imageUrlsFromText = (text: string): string[] => {
   return urls;
 };
 
-const imageUrlsFromPluginState = (message: MessageLike): string[] => {
-  const generations = message.pluginState?.generations;
+const imageUrlsFromPluginState = (
+  state: MessageLike['pluginState'] | { generations?: GenerationAssetLike[] } | undefined,
+): string[] => {
+  const generations = state?.generations;
   if (!Array.isArray(generations)) return [];
 
   return generations
@@ -187,25 +210,90 @@ const imageUrlsFromPluginState = (message: MessageLike): string[] => {
     .filter((url): url is string => typeof url === 'string' && /^https?:\/\//i.test(url));
 };
 
+const urlsFromToolLike = (params: {
+  content?: unknown;
+  name?: string;
+  plugin?: { apiName?: string; identifier?: string };
+  pluginState?: MessageLike['pluginState'];
+  role?: string;
+}): string[] => {
+  if (!isImageGenerationToolResult(params)) return [];
+
+  return [
+    ...new Set([
+      ...imageUrlsFromPluginState(params.pluginState),
+      ...imageUrlsFromText(extractPlainMessageText(params.content)),
+    ]),
+  ];
+};
+
+/**
+ * Flatten display `assistantGroup` nests and flat tool rows into newest-first
+ * generateImage result candidates. Prepared OpenAI messages lose `pluginState`;
+ * raw display messages keep it on nested `tools[].result.state`.
+ */
+const collectImageGenerationResults = (messages: MessageLike[]): MessageLike[] => {
+  const results: MessageLike[] = [];
+
+  for (const message of messages) {
+    if (!message) continue;
+
+    if (isImageGenerationToolResult(message)) {
+      results.push(message);
+      continue;
+    }
+
+    if (message.role !== 'assistantGroup' || !Array.isArray(message.children)) continue;
+
+    for (const child of message.children) {
+      for (const tool of child.tools ?? []) {
+        if (
+          tool.identifier !== ImageGenerationIdentifier ||
+          tool.apiName !== ImageGenerationApiName.generateImage
+        ) {
+          continue;
+        }
+
+        results.push({
+          content: tool.result?.content,
+          name: IMAGE_GENERATION_TOOL_FUNCTION_NAME,
+          plugin: {
+            apiName: ImageGenerationApiName.generateImage,
+            identifier: ImageGenerationIdentifier,
+          },
+          pluginState: tool.result?.state,
+          role: 'tool',
+        });
+      }
+    }
+  }
+
+  return results;
+};
+
 /**
  * Latest completed `generateImage` result URLs in this conversation, newest
  * batch first. Used so edit follow-ups can pass the prior image as a reference.
+ *
+ * Accepts both prepared OpenAI tool rows and raw display `assistantGroup`
+ * messages (where asset URLs live on `pluginState` / nested tool results).
  */
 export const findLatestGeneratedImageUrls = (
   messages: MessageLike[] | null | undefined,
 ): string[] => {
   if (!messages?.length) return [];
 
+  const results = collectImageGenerationResults(messages);
+  for (let i = results.length - 1; i >= 0; i -= 1) {
+    const urls = urlsFromToolLike(results[i]!);
+    if (urls.length > 0) return urls;
+  }
+
+  // Fallback: assistant replies copy the markdown image tags from generateImage.
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
-    if (!message || !isImageGenerationToolResult(message)) continue;
-
-    const urls = [
-      ...new Set([
-        ...imageUrlsFromPluginState(message),
-        ...imageUrlsFromText(extractPlainMessageText(message.content)),
-      ]),
-    ];
+    if (message?.role !== 'assistant' && message?.role !== 'assistantGroup') continue;
+    const urls = imageUrlsFromText(extractPlainMessageText(message.content));
     if (urls.length > 0) return urls;
   }
 
@@ -330,9 +418,19 @@ export const buildDirectGenerateImageToolCall = (params: {
  * follow-ups that refer to a previous image reuse the latest generateImage
  * result URL so "add a bird to the previous image" is image-to-image, not a
  * blind text-to-image regen.
+ *
+ * `historyMessages` should be the raw display transcript (with
+ * `assistantGroup` / `pluginState`) when `messages` is the cleaned OpenAI
+ * payload — MessageCleanup strips `pluginState`, which is where asset URLs
+ * often live after render-time status polling.
  */
 export const resolveDirectImageGenerationToolCall = (params: {
   executorMap?: Record<string, 'client' | 'server' | undefined>;
+  /**
+   * Raw display transcript used to recover prior generation URLs. Defaults to
+   * `messages` when omitted.
+   */
+  historyMessages?: MessageLike[] | null;
   messages: MessageLike[] | null | undefined;
   sourceMap?: Record<string, DirectGenerateImageToolCall['source'] | undefined>;
   /** @deprecated Ignored — kept so existing call sites keep compiling. */
@@ -341,11 +439,14 @@ export const resolveDirectImageGenerationToolCall = (params: {
   const pending = findPendingUserMessage(params.messages);
   if (!pending || !isImageGenerationUserIntent(pending.text)) return undefined;
 
-  const previousGeneratedUrls = findLatestGeneratedImageUrls(params.messages);
+  const history = params.historyMessages ?? params.messages;
+  const previousGeneratedUrls = findLatestGeneratedImageUrls(history);
   const imageUrls =
     pending.imageUrls.length > 0
       ? pending.imageUrls
-      : isImageEditContinuationIntent(pending.text)
+      : isImageEditContinuationIntent(pending.text, {
+            hasPreviousGenerated: previousGeneratedUrls.length > 0,
+          })
         ? previousGeneratedUrls
         : [];
 

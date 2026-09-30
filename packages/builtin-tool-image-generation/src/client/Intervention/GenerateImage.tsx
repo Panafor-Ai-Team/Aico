@@ -69,6 +69,21 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 
     background: ${cssVar.colorFillQuaternary};
   `,
+  referenceGrid: css`
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  `,
+  referenceThumb: css`
+    display: block;
+
+    width: 56px;
+    height: 56px;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: ${cssVar.borderRadiusSM};
+
+    object-fit: cover;
+  `,
   select: css`
     width: 100%;
   `,
@@ -222,6 +237,18 @@ const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImagePar
 
     const selectOptions = useMemo(() => toImageModelSelectOptions(options), [options]);
 
+    const referenceUrls = useMemo(() => {
+      const urls = [
+        ...(typeof args?.imageUrl === 'string' && args.imageUrl.trim()
+          ? [args.imageUrl.trim()]
+          : []),
+        ...(Array.isArray(args?.imageUrls) ? args.imageUrls : []),
+      ];
+      return [
+        ...new Set(urls.filter((url) => /^https?:\/\//i.test(url) || url.startsWith('data:'))),
+      ];
+    }, [args?.imageUrl, args?.imageUrls]);
+
     const statusLabel = isLoading
       ? t('builtins.lobe-image-generation.intervention.loading')
       : selected
@@ -247,6 +274,19 @@ const GenerateImageIntervention = memo<BuiltinInterventionProps<GenerateImagePar
             <div className={styles.prompt} dir={'auto'}>
               {args.prompt}
             </div>
+          )}
+
+          {referenceUrls.length > 0 && (
+            <Flexbox gap={6}>
+              <div className={styles.label}>
+                {t('builtins.lobe-image-generation.intervention.referenceLabel')}
+              </div>
+              <div className={styles.referenceGrid}>
+                {referenceUrls.map((url) => (
+                  <img alt="" className={styles.referenceThumb} key={url} src={url} />
+                ))}
+              </div>
+            </Flexbox>
           )}
 
           {options.length > 0 && (

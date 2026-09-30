@@ -231,6 +231,7 @@ export default {
   'builtins.lobe-image-generation.intervention.option.high': 'High',
   'builtins.lobe-image-generation.intervention.option.low': 'Low',
   'builtins.lobe-image-generation.intervention.option.medium': 'Medium',
+  'builtins.lobe-image-generation.intervention.referenceLabel': 'Reference image',
   'builtins.lobe-image-generation.intervention.settings.aspectRatio': 'Aspect ratio',
   'builtins.lobe-image-generation.intervention.settings.quality': 'Quality',
   'builtins.lobe-image-generation.intervention.settings.resolution': 'Resolution',

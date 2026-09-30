@@ -282,6 +282,7 @@
   "builtins.lobe-image-generation.intervention.option.high": "بالا",
   "builtins.lobe-image-generation.intervention.option.low": "پایین",
   "builtins.lobe-image-generation.intervention.option.medium": "متوسط",
+  "builtins.lobe-image-generation.intervention.referenceLabel": "تصویر مرجع",
   "builtins.lobe-image-generation.intervention.settings.aspectRatio": "نسبت ابعاد",
   "builtins.lobe-image-generation.intervention.settings.quality": "کیفیت",
   "builtins.lobe-image-generation.intervention.settings.resolution": "وضوح",

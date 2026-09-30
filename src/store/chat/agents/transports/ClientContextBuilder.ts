@@ -114,6 +114,9 @@ export class ClientContextBuilder implements ContextBuilder {
       }) ??
       resolveDirectImageGenerationToolCall({
         executorMap: resolvedTools.executorMap,
+        // Raw display transcript keeps assistantGroup + pluginState asset URLs
+        // that MessageCleanup strips from preparedMessages.
+        historyMessages: messages,
         messages: preparedMessages,
         sourceMap: resolvedTools.sourceMap,
       });

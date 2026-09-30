@@ -51,6 +51,7 @@ export class ServerContextBuilder implements ContextBuilder {
       }) ??
       resolveDirectImageGenerationToolCall({
         executorMap: tooling.resolved.executorMap,
+        historyMessages: input.payload.messages,
         messages: result.processedMessages,
         sourceMap: tooling.resolved.sourceMap,
       });

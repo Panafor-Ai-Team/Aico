@@ -282,6 +282,7 @@
   "builtins.lobe-image-generation.intervention.option.high": "Élevée",
   "builtins.lobe-image-generation.intervention.option.low": "Basse",
   "builtins.lobe-image-generation.intervention.option.medium": "Moyenne",
+  "builtins.lobe-image-generation.intervention.referenceLabel": "Image de référence",
   "builtins.lobe-image-generation.intervention.settings.aspectRatio": "Format",
   "builtins.lobe-image-generation.intervention.settings.quality": "Qualité",
   "builtins.lobe-image-generation.intervention.settings.resolution": "Résolution",
