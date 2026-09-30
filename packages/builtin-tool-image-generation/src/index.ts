@@ -10,9 +10,12 @@ export type { ImageGenerationRuntimeService } from './ExecutionRuntime';
 export {
   buildDirectGenerateImageToolCall,
   extractPlainMessageText,
+  findLatestGeneratedImageUrls,
   findLatestUserMessageText,
+  findPendingUserMessage,
   findPendingUserMessageText,
   IMAGE_GENERATION_TOOL_FUNCTION_NAME,
+  isImageEditContinuationIntent,
   isImageGenerationUserIntent,
   resolveDirectImageGenerationToolCall,
   resolveForcedImageGenerationToolChoice,

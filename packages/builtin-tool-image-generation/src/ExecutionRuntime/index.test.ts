@@ -304,6 +304,9 @@ describe('ImageGenerationExecutionRuntime', () => {
     expect(result.content).not.toContain('imageUrl=https://cdn.example.com/image.png');
     expect(result.content).toContain('Copy them exactly');
     expect(result.content).toContain('![Generated image 1](https://cdn.example.com/image.png)');
+    expect(result.content).toContain(
+      'Reusable reference URLs for follow-up edits (pass as imageUrl or imageUrls):',
+    );
   });
 
   it('selects the first enabled model from an explicitly requested provider', async () => {

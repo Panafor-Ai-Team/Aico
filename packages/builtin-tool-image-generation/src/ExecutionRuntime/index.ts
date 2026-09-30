@@ -245,6 +245,15 @@ const formatStartedContent = (state: GenerateImageState) =>
     .filter((line): line is string => Boolean(line))
     .join('\n');
 
+const formatReusableReferenceLines = (generations: GeneratedImageTask[]) => {
+  const urls = generations
+    .map((item) => getTaskAssetUrl(item))
+    .filter((url): url is string => Boolean(url));
+  if (urls.length === 0) return [];
+
+  return ['Reusable reference URLs for follow-up edits (pass as imageUrl or imageUrls):', ...urls];
+};
+
 const formatCompletedContent = (state: GenerateImageState) =>
   [
     `Image generation completed with ${state.model}.`,
@@ -253,6 +262,7 @@ const formatCompletedContent = (state: GenerateImageState) =>
     ...formatGenerationLines(state.generations, { includeImageUrl: false }),
     'Markdown image tags for the final response. Copy them exactly; do not rewrite the URLs:',
     ...formatMarkdownImageLines(state.generations),
+    ...formatReusableReferenceLines(state.generations),
   ]
     .filter((line): line is string => Boolean(line))
     .join('\n');

@@ -1,16 +1,25 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  findLatestGeneratedImageUrls,
   findLatestUserMessageText,
   findPendingUserMessageText,
   IMAGE_GENERATION_TOOL_FUNCTION_NAME,
+  isImageEditContinuationIntent,
   isImageGenerationUserIntent,
   resolveDirectImageGenerationToolCall,
   resolveForcedImageGenerationToolChoice,
 } from './imageGenerationIntent';
 
+const PREVIOUS_IMAGE_URL = 'https://cdn.example.com/previous.png';
+
 const imageGenToolResult = {
-  content: 'Image generation completed with gpt-image-2.',
+  content: [
+    'Image generation completed with gpt-image-2.',
+    `![Generated image 1](${PREVIOUS_IMAGE_URL})`,
+    'Reusable reference URLs for follow-up edits (pass as imageUrl or imageUrls):',
+    PREVIOUS_IMAGE_URL,
+  ].join('\n'),
   name: IMAGE_GENERATION_TOOL_FUNCTION_NAME,
   role: 'tool' as const,
 };
@@ -34,6 +43,14 @@ describe('isImageGenerationUserIntent', () => {
   it('detects English generate-image phrasings', () => {
     expect(isImageGenerationUserIntent('Generate an image of a red apple')).toBe(true);
     expect(isImageGenerationUserIntent('draw a picture of a cat')).toBe(true);
+  });
+
+  it('detects edit / continuation asks that refer to a previous image', () => {
+    expect(isImageGenerationUserIntent('add a bird to the previous image')).toBe(true);
+    expect(isImageGenerationUserIntent('edit the last picture to make the sky blue')).toBe(true);
+    expect(isImageGenerationUserIntent('به عکس قبلی یه پرنده اضافه کن')).toBe(true);
+    expect(isImageEditContinuationIntent('add a bird to the previous image')).toBe(true);
+    expect(isImageEditContinuationIntent('Generate an image of a dog')).toBe(false);
   });
 
   it('rejects meta / prompt-engineering questions', () => {
@@ -148,6 +165,51 @@ describe('resolveDirectImageGenerationToolCall', () => {
     });
   });
 
+  it('reuses the previous generateImage URL when the user asks to edit that image', () => {
+    const call = resolveDirectImageGenerationToolCall({
+      messages: [
+        { content: 'Generate an image of a cat', role: 'user' },
+        { content: '', role: 'assistant' },
+        imageGenToolResult,
+        { content: 'Here is your cat.', role: 'assistant' },
+        { content: 'add a bird to the previous image', role: 'user' },
+      ],
+    });
+
+    expect(call).toMatchObject({
+      apiName: 'generateImage',
+      identifier: 'lobe-image-generation',
+    });
+    expect(JSON.parse(call!.arguments)).toEqual({
+      imageUrls: [PREVIOUS_IMAGE_URL],
+      prompt: 'add a bird to the previous image',
+    });
+  });
+
+  it('prefers images attached on the current turn over a previous generation', () => {
+    const attached = 'https://cdn.example.com/upload.png';
+    const call = resolveDirectImageGenerationToolCall({
+      messages: [
+        { content: 'Generate an image of a cat', role: 'user' },
+        { content: '', role: 'assistant' },
+        imageGenToolResult,
+        { content: 'Here is your cat.', role: 'assistant' },
+        {
+          content: [
+            { text: 'edit this picture to add a hat', type: 'text' },
+            { image_url: { url: attached }, type: 'image_url' },
+          ],
+          role: 'user',
+        },
+      ],
+    });
+
+    expect(JSON.parse(call!.arguments)).toEqual({
+      imageUrls: [attached],
+      prompt: 'edit this picture to add a hat',
+    });
+  });
+
   it('still fires when SYSTEM CONTEXT would trip meta / length checks on the raw text', () => {
     const call = resolveDirectImageGenerationToolCall({
       messages: [
@@ -240,5 +302,34 @@ describe('findLatestUserMessageText', () => {
         { content: [{ text: 'عکس یک سگ', type: 'text' }], role: 'user' },
       ]),
     ).toBe('عکس یک سگ');
+  });
+});
+
+describe('findLatestGeneratedImageUrls', () => {
+  it('reads markdown and reusable URL lines from the latest generateImage tool result', () => {
+    expect(
+      findLatestGeneratedImageUrls([
+        { content: 'Generate an image of a cat', role: 'user' },
+        { content: '', role: 'assistant' },
+        imageGenToolResult,
+        { content: 'Here is your cat.', role: 'assistant' },
+      ]),
+    ).toEqual([PREVIOUS_IMAGE_URL]);
+  });
+
+  it('prefers pluginState asset URLs when present', () => {
+    const stateUrl = 'https://cdn.example.com/from-state.png';
+    expect(
+      findLatestGeneratedImageUrls([
+        {
+          content: 'done',
+          name: IMAGE_GENERATION_TOOL_FUNCTION_NAME,
+          pluginState: {
+            generations: [{ asset: { url: stateUrl } }],
+          },
+          role: 'tool',
+        },
+      ]),
+    ).toEqual([stateUrl]);
   });
 });

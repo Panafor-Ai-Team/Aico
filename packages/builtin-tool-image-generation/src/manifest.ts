@@ -74,12 +74,12 @@ export const ImageGenerationManifest: BuiltinToolManifest = {
           },
           imageUrl: {
             description:
-              'Single accessible reference image URL for image-to-image models. Omit for text-to-image.',
+              'Single accessible reference image URL for image-to-image. Use a user-attached URL, a user-supplied URL, or a URL from a previous generateImage result when editing that image. Omit for fresh text-to-image.',
             type: ['string', 'null'],
           },
           imageUrls: {
             description:
-              'Multiple accessible reference image URLs for models that support multiple references.',
+              'Multiple accessible reference image URLs for models that support multiple references. Same sources as imageUrl (attachments, user URLs, or prior generateImage results for edits).',
             items: { type: 'string' },
             type: 'array',
           },
