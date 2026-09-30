@@ -38,12 +38,41 @@ describe('CheapVibeCode generation models', () => {
 
     const models = byId(await catalog.listAsProviderModels());
 
-    for (const id of ['gpt-image-2', 'nano-banana-2', 'grok-imagine-image']) {
+    for (const id of [
+      'gpt-image-2',
+      'gpt-image-2.5-sunburst',
+      'gpt-image-2.5-flare',
+      'nano-banana-2',
+      'grok-imagine-image',
+    ]) {
       expect(models[id]).toMatchObject({ enabled: true, type: 'image' });
     }
     expect(models['grok-imagine-video']).toMatchObject({ enabled: true, type: 'video' });
     // GPT Image 2 defaults to medium quality.
     expect((models['gpt-image-2'] as any).parameters.quality.default).toBe('medium');
+    // GPT Image 2.5 Sunburst / Flare: quality-tiered fixed charge, square size only.
+    for (const id of ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare']) {
+      expect((models[id] as any).parameters.quality).toEqual({
+        default: 'medium',
+        enum: ['low', 'medium', 'high'],
+      });
+      expect((models[id] as any).parameters.size).toEqual({
+        default: '1024x1024',
+        enum: ['1024x1024'],
+      });
+      expect(models[id].pricing?.units?.[0]).toMatchObject({
+        name: 'imageGeneration',
+        strategy: 'lookup',
+        unit: 'image',
+      });
+      expect(
+        (models[id].pricing?.units?.[0] as { lookup?: { prices?: object } }).lookup?.prices,
+      ).toMatchObject({
+        high: expect.any(Number),
+        low: expect.any(Number),
+        medium: expect.any(Number),
+      });
+    }
     // Nano Banana 2: aspect + resolution (Gemini surface) plus thinking level.
     expect((models['nano-banana-2'] as any).parameters.reasoningEffort).toEqual({
       default: 'medium',
@@ -91,7 +120,35 @@ describe('CheapVibeCode generation models', () => {
     const models = byId(await new OpenRouterModelCatalogModel(db).listAsProviderModels());
 
     expect(models['gpt-image-2']).toMatchObject({ type: 'image' });
+    expect(models['gpt-image-2.5-sunburst']).toMatchObject({ type: 'image' });
+    expect(models['gpt-image-2.5-flare']).toMatchObject({ type: 'image' });
     expect(models['grok-imagine-video']).toMatchObject({ type: 'video' });
+  });
+
+  it('overlays GPT Image 2.5 pricing and quality schema on a row synced without them', async () => {
+    const { OpenRouterModelCatalogModel } = await import('../openrouterModelCatalog');
+    await db.insert(openrouterModelCatalog).values([
+      { enabled: true, id: 'openrouter/auto', payload: {}, syncedAt: new Date(), type: 'chat' },
+      {
+        enabled: true,
+        id: 'gpt-image-2.5-sunburst',
+        payload: { parameters: { prompt: { default: '' } } },
+        pricing: null,
+        syncedAt: new Date(),
+        type: 'image',
+      },
+    ]);
+
+    const model = byId(await new OpenRouterModelCatalogModel(db).listAsProviderModels())[
+      'gpt-image-2.5-sunburst'
+    ] as any;
+
+    expect(model.parameters.quality.default).toBe('medium');
+    expect(model.parameters.imageUrls.maxCount).toBe(16);
+    expect(model.pricing?.units?.[0]).toMatchObject({
+      name: 'imageGeneration',
+      strategy: 'lookup',
+    });
   });
 
   it('lets GPT Image 2 take several reference images and Grok Imagine Video one start frame', async () => {

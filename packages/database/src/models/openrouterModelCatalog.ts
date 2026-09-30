@@ -11,6 +11,8 @@ import type { AiProviderModelListItem, ModelAbilities, Pricing } from 'model-ban
 import { AiModelSourceEnum, normalizeAiModelType } from 'model-bank';
 import {
   cheapVibeCodeGptImage2Parameters,
+  cheapVibeCodeGptImage25Parameters,
+  cheapVibeCodeGptImage25Pricing,
   cheapVibeCodeGrokImagineImageParameters,
   cheapVibeCodeNanoBanana2Parameters,
 } from 'model-bank/imageParameters';
@@ -106,6 +108,20 @@ const CHEAPVIBECODE_GENERATION_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
     displayName: 'GPT Image 2',
     id: 'gpt-image-2',
     parameters: cheapVibeCodeGptImage2Parameters,
+    type: 'image',
+  },
+  {
+    displayName: 'GPT Image 2.5 Sunburst',
+    id: 'gpt-image-2.5-sunburst',
+    parameters: cheapVibeCodeGptImage25Parameters,
+    pricing: cheapVibeCodeGptImage25Pricing,
+    type: 'image',
+  },
+  {
+    displayName: 'GPT Image 2.5 Flare',
+    id: 'gpt-image-2.5-flare',
+    parameters: cheapVibeCodeGptImage25Parameters,
+    pricing: cheapVibeCodeGptImage25Pricing,
     type: 'image',
   },
   {
