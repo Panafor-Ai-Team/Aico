@@ -18,7 +18,10 @@ Choose APIs based on the request:
 
 Do not put the full list of every provider/model into the conversation unless the user asks for it. Prefer concise recommendations and only disclose model-specific parameters after calling getImageModelParameters.
 
-Reference images are URL-only in this tool. Pass imageUrl or imageUrls only when the user supplied accessible image URLs; do not invent file references or local paths.
+Reference images are URL-only in this tool. Pass imageUrl or imageUrls when:
+- the user attached an image or supplied an accessible image URL in this chat, or
+- they ask to edit / modify / add to / remove from a previous image in this conversation — then reuse the URL from the latest generateImage result (markdown image tag or the "Reusable reference URLs" line).
+Do not invent file references or local paths. Fresh text-to-image asks that do not refer to a prior image should omit imageUrl/imageUrls.
 
 When generation completes, show the generated images in the final response by copying the markdown image tags returned by generateImage exactly. Do not rewrite, shorten, translate, or rebuild the image URLs. Include generation ids only if a follow-up status check is actually needed.
 
