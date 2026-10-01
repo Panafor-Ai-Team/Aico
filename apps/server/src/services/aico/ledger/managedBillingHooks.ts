@@ -1,4 +1,5 @@
 import type { ChatStreamPayload, ModelRuntimeHooks, OnFinishData } from '@lobechat/model-runtime';
+import { recordChatTtftPhase } from '@lobechat/observability-otel/modules/agent-runtime';
 import { AgentRuntimeErrorType, ChatErrorType } from '@lobechat/types';
 
 import {
@@ -430,36 +431,43 @@ export const createManagedBillingHooks = (params: {
 
   return {
     beforeChat: async (payload: ChatStreamPayload, options) => {
-      const priced = await deps.rates.chat(db, payload).catch((error) => {
-        if (enforce) throw policyError('PLATFORM_CAPACITY_EXHAUSTED:ledger_error');
-        console.warn('[aico-ledger] pricing lookup failed', (error as Error)?.message);
-        return null;
-      });
-      const rates = priced?.rates ?? null;
-
-      let maxOutput = 0;
-      const uncapped = isUncapped(rates);
-      if (rates) {
-        const sentMax = resolveMaxOutputTokens({
-          defaultMax: cfg.defaultMaxOutputTokens,
-          modelMax: rates.maxOutputTokens,
-          requested: payload.max_tokens,
+      const startedAt = Date.now();
+      try {
+        const priced = await deps.rates.chat(db, payload).catch((error) => {
+          if (enforce) throw policyError('PLATFORM_CAPACITY_EXHAUSTED:ledger_error');
+          console.warn('[aico-ledger] pricing lookup failed', (error as Error)?.message);
+          return null;
         });
-        payload.max_tokens = sentMax;
-        maxOutput = holdOutputFor(rates, sentMax);
-      }
+        const rates = priced?.rates ?? null;
 
-      const handle = await begin({
-        estInput: estimateChatInputTokens(payload, rates?.contextWindowTokens ?? null),
-        maxOutput,
-        modelId: payload.model,
-        operation: 'chat',
-        payload,
-        rates,
-        // Shrinking a cap the model ignores would make the hold a false bound.
-        shrinkable: uncapped ? undefined : payload,
-      });
-      if (handle) registerAbort(handle, options?.signal);
+        let maxOutput = 0;
+        const uncapped = isUncapped(rates);
+        if (rates) {
+          const sentMax = resolveMaxOutputTokens({
+            defaultMax: cfg.defaultMaxOutputTokens,
+            modelMax: rates.maxOutputTokens,
+            requested: payload.max_tokens,
+          });
+          payload.max_tokens = sentMax;
+          maxOutput = holdOutputFor(rates, sentMax);
+        }
+
+        const handle = await begin({
+          estInput: estimateChatInputTokens(payload, rates?.contextWindowTokens ?? null),
+          maxOutput,
+          modelId: payload.model,
+          operation: 'chat',
+          payload,
+          rates,
+          // Shrinking a cap the model ignores would make the hold a false bound.
+          shrinkable: uncapped ? undefined : payload,
+        });
+        if (handle) registerAbort(handle, options?.signal);
+      } finally {
+        recordChatTtftPhase('before_chat_hold', Date.now() - startedAt, {
+          model: payload.model,
+        });
+      }
     },
 
     beforeCreateImage: async (payload) => notMetered('image', payload.model),

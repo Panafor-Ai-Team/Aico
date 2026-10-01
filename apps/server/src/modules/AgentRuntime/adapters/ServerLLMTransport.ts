@@ -29,6 +29,7 @@ import {
   buildChatRequestAttributes,
   buildChatResponseAttributes,
   chatSpanName,
+  recordChatTtftPhase,
   tracer as agentRuntimeTracer,
 } from '@lobechat/observability-otel/modules/agent-runtime';
 
@@ -138,6 +139,7 @@ class ServerLLMTrace implements LLMTrace {
   onFirstChunk() {
     if (this.firstChunkAt === undefined) {
       this.firstChunkAt = Date.now() - this.llmStartTime;
+      recordChatTtftPhase('provider_ttft', this.firstChunkAt);
     }
   }
 

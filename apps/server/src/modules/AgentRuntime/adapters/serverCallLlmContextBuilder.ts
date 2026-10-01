@@ -24,6 +24,7 @@ import { SpanStatusCode } from '@lobechat/observability-otel/api';
 import {
   buildContextEngineeringAttributes,
   CONTEXT_ENGINEERING_SPAN_NAME,
+  recordChatTtftPhase,
   tracer as agentRuntimeTracer,
 } from '@lobechat/observability-otel/modules/agent-runtime';
 import { getActivePluginIds, getDisabledPluginIds } from '@lobechat/types';
@@ -68,6 +69,32 @@ export interface ServerCallLlmContextBuildResult {
 }
 
 export const buildServerCallLlmContext = async ({
+  ctx,
+  llmPayload,
+  model,
+  provider,
+  state,
+  tooling,
+}: BuildServerCallLlmContextInput): Promise<ServerCallLlmContextBuildResult> => {
+  const contextBuildStartedAt = Date.now();
+  try {
+    return await buildServerCallLlmContextInner({
+      ctx,
+      llmPayload,
+      model,
+      provider,
+      state,
+      tooling,
+    });
+  } finally {
+    recordChatTtftPhase('context_build', Date.now() - contextBuildStartedAt, {
+      model,
+      provider,
+    });
+  }
+};
+
+const buildServerCallLlmContextInner = async ({
   ctx,
   llmPayload,
   model,
