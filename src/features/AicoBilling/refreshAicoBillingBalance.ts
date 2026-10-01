@@ -1,5 +1,6 @@
 import { mutate } from '@/libs/swr';
 
+import { seedBillingSourcesAllowGateCache } from './billingSourcesAllowGateCache';
 import { AICO_BILLING_SOURCES_SWR_KEY, AICO_MY_WALLET_SWR_KEY } from './cacheKeys';
 import { DEFAULT_PI_PER_USD } from './piToken';
 import type { AicoBillingContext, AicoBillingSourcesResponse } from './types';
@@ -67,8 +68,11 @@ export const refreshAicoBillingBalance = async (
   if (billingContext && Number.isSafeInteger(costMicroUsd) && costMicroUsd > 0) {
     await mutate(
       AICO_BILLING_SOURCES_SWR_KEY,
-      (data: AicoBillingSourcesResponse | undefined) =>
-        applyOptimisticDebit(data, billingContext, costMicroUsd),
+      (data: AicoBillingSourcesResponse | undefined) => {
+        const next = applyOptimisticDebit(data, billingContext, costMicroUsd);
+        if (next) seedBillingSourcesAllowGateCache(next);
+        return next;
+      },
       { revalidate: false },
     );
 

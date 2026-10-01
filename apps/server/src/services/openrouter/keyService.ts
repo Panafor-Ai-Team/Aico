@@ -1883,7 +1883,7 @@ export class AicoOpenRouterKeyService {
    */
   getUserRemaining = async (
     userId: string,
-    options?: { persist?: boolean },
+    options?: { live?: boolean; persist?: boolean },
   ): Promise<{
     remainingMicroUsd: number;
     /** Last known billed usage. `null` only when nothing has ever been metered. */
@@ -1951,6 +1951,17 @@ export class AicoOpenRouterKeyService {
           .syncUserWalletUsage({ syncError: STALE_MANAGED_KEY, syncStatus: 'degraded', userId })
           .catch(() => null);
       }
+      return {
+        remainingMicroUsd: Math.max(0, balanceMicroUsd - lastSettledMicroUsd),
+        usageKnown: false,
+        usageMicroUsd: lastSettledMicroUsd,
+      };
+    }
+
+    // Chat allow-gate / other latency-sensitive callers: skip the management-API
+    // round trip and hold the last settled wallet reading. Server placeHold remains
+    // the authoritative funds check.
+    if (options?.live === false) {
       return {
         remainingMicroUsd: Math.max(0, balanceMicroUsd - lastSettledMicroUsd),
         usageKnown: false,

@@ -98,6 +98,34 @@ describe('aicoBilling router under the shared inference key', () => {
     expect(h.syncMemberCycleUsage).not.toHaveBeenCalled();
   });
 
+  it('skips live remaining sync when syncLive is false', async () => {
+    h.shared = false;
+    const orgModel = new OrganizationModel(testDB);
+    const org = await orgModel.createOrganization({ name: 'No Sync Org', ownerUserId: userId });
+    const me = (await orgModel.listMembers(org.id)).find((m) => m.userId === userId)!;
+    await testDB.insert(memberBudgets).values({
+      openrouterKeyId: 'or-key-member',
+      orgId: org.id,
+      orgMemberId: me.id,
+      periodAmountMicroUsd: usd(5),
+      settledUsageMicroUsd: usd(1),
+    });
+    await testDB.insert(userWallets).values({
+      balanceMicroUsd: usd(3),
+      openrouterKeyId: 'or-key-user',
+      settledUsageMicroUsd: usd(1),
+      userId,
+    });
+
+    const caller = aicoBillingRouter.createCaller(createTestContext(userId));
+    const sources = await caller.getMyBillingSources({ syncLive: false });
+
+    expect(h.getUserRemaining).toHaveBeenCalledWith(userId, { live: false, persist: false });
+    expect(h.syncMemberCycleUsage).not.toHaveBeenCalled();
+    expect(h.ensureMemberKey).not.toHaveBeenCalled();
+    expect(sources.sources.find((s) => s.source === 'personal')?.usageKnown).toBeDefined();
+  });
+
   it('derives personal credit from ledger remaining for a keyless wallet', async () => {
     h.shared = true;
     await testDB.insert(userWallets).values({ balanceMicroUsd: usd(2), userId });

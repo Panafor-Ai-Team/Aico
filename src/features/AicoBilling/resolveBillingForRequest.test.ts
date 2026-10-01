@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { resetBillingSourcesAllowGateCacheForTests } from './billingSourcesAllowGateCache';
 import {
   assertAicoBillingAllowsChat,
   resolveAicoBillingForRequest,
@@ -49,6 +50,7 @@ const fundedSources = {
 describe('resolveAicoBillingForRequest', () => {
   beforeEach(() => {
     useAicoBillingStore.setState({ context: null, hydrated: false });
+    resetBillingSourcesAllowGateCacheForTests();
     getMyBillingSources.mockReset();
   });
 
@@ -66,13 +68,14 @@ describe('resolveAicoBillingForRequest', () => {
     expect(getMyBillingSources).not.toHaveBeenCalled();
   });
 
-  it('loads preference when cache is empty', async () => {
+  it('loads preference when cache is empty via syncLive:false', async () => {
     getMyBillingSources.mockResolvedValue(fundedSources);
 
     await expect(resolveAicoBillingForRequest('aico')).resolves.toEqual({
       organizationId: 'org-9',
       source: 'organization',
     });
+    expect(getMyBillingSources).toHaveBeenCalledWith({ syncLive: false });
     expect(useAicoBillingStore.getState().context).toEqual({
       organizationId: 'org-9',
       source: 'organization',
@@ -83,7 +86,13 @@ describe('resolveAicoBillingForRequest', () => {
 describe('assertAicoBillingAllowsChat', () => {
   beforeEach(() => {
     useAicoBillingStore.setState({ context: null, hydrated: false });
+    resetBillingSourcesAllowGateCacheForTests();
     getMyBillingSources.mockReset();
+    vi.useRealTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('skips non-managed providers', async () => {
@@ -91,7 +100,7 @@ describe('assertAicoBillingAllowsChat', () => {
     expect(getMyBillingSources).not.toHaveBeenCalled();
   });
 
-  it('allows funded selected org source', async () => {
+  it('allows funded selected org source without live upstream sync', async () => {
     setAicoBillingContext({ organizationId: 'org-9', source: 'organization' });
     getMyBillingSources.mockResolvedValue(fundedSources);
 
@@ -99,6 +108,29 @@ describe('assertAicoBillingAllowsChat', () => {
       organizationId: 'org-9',
       source: 'organization',
     });
+    expect(getMyBillingSources).toHaveBeenCalledWith({ syncLive: false });
+  });
+
+  it('reuses allow-gate cache within TTL so consecutive sends skip RPC', async () => {
+    setAicoBillingContext({ organizationId: 'org-9', source: 'organization' });
+    getMyBillingSources.mockResolvedValue(fundedSources);
+
+    await assertAicoBillingAllowsChat('aico');
+    await assertAicoBillingAllowsChat('aico');
+
+    expect(getMyBillingSources).toHaveBeenCalledTimes(1);
+  });
+
+  it('refetches after the allow-gate TTL expires', async () => {
+    vi.useFakeTimers();
+    setAicoBillingContext({ organizationId: 'org-9', source: 'organization' });
+    getMyBillingSources.mockResolvedValue(fundedSources);
+
+    await assertAicoBillingAllowsChat('aico');
+    await vi.advanceTimersByTimeAsync(30_000);
+    await assertAicoBillingAllowsChat('aico');
+
+    expect(getMyBillingSources).toHaveBeenCalledTimes(2);
   });
 
   it('throws PERSONAL_FUNDS_UNAVAILABLE for empty personal without trial', async () => {
