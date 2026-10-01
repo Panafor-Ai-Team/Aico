@@ -24,6 +24,11 @@ vi.mock('../config', () => ({
 
 vi.mock('../floatGuard', () => ({ assertPlatformCapacity: vi.fn() }));
 
+const recordChatTtftPhase = vi.fn();
+vi.mock('@lobechat/observability-otel/modules/agent-runtime', () => ({
+  recordChatTtftPhase: (...args: unknown[]) => recordChatTtftPhase(...args),
+}));
+
 const baseConfig = (): LedgerConfig => ({
   cappedOutputModels: new Set(['glm-5.3-flash']),
   defaultMaxOutputTokens: 32_000,
@@ -119,6 +124,7 @@ const codeOf = async (promise: Promise<unknown> | undefined) =>
 beforeEach(() => {
   Object.assign(cfg, baseConfig());
   deps = makeDeps();
+  recordChatTtftPhase.mockClear();
 });
 
 afterEach(() => {
@@ -155,6 +161,11 @@ describe('createManagedBillingHooks', () => {
       expect(
         (deps.ledger.placeHold.mock.calls[0][0] as { holdRawMicroUsd: number }).holdRawMicroUsd,
       ).toBeGreaterThan(0);
+      expect(recordChatTtftPhase).toHaveBeenCalledWith(
+        'before_chat_hold',
+        expect.any(Number),
+        expect.objectContaining({ model: 'glm-5.3-flash' }),
+      );
     });
 
     it('uses the model maximum or the requested cap when lower', async () => {

@@ -19,9 +19,34 @@ vi.mock('@lobechat/utils/client/fetchEventSource/index', () => ({
 // 在每次测试后清理所有模拟
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe('fetchSSE', () => {
+  it('reports first visible text buffer delay for buffered animation', async () => {
+    const onFirstVisibleText = vi.fn();
+    const onMessageHandle = vi.fn();
+
+    (fetchEventSource as any).mockImplementationOnce(
+      (url: string, options: FetchEventSourceInit) => {
+        options.onopen!({ clone: () => ({ ok: true, headers: new Headers() }) } as any);
+        options.onmessage!({ event: 'text', data: JSON.stringify('Hi') } as any);
+      },
+    );
+
+    await fetchSSE('/', {
+      onFirstVisibleText,
+      onMessageHandle,
+      responseAnimation: 'fadeIn',
+    });
+
+    expect(onFirstVisibleText).toHaveBeenCalledWith({
+      animation: 'buffer',
+      bufferDelayMs: expect.any(Number),
+    });
+    expect(onFirstVisibleText.mock.calls[0][0].bufferDelayMs).toBeGreaterThanOrEqual(0);
+  });
+
   it('should handle text event correctly', async () => {
     const mockOnMessageHandle = vi.fn();
     const mockOnFinish = vi.fn();

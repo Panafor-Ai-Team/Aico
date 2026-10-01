@@ -12,6 +12,7 @@ import { fetchSSE, standardizeAnimationStyle } from '@lobechat/fetch-sse';
 import type { ChatCompletionErrorPayload } from '@lobechat/model-runtime';
 import { isResponsesAPIModel } from '@lobechat/model-runtime/providers/openai/modelId';
 import { AgentRuntimeError } from '@lobechat/model-runtime/utils/createError';
+import { recordChatTtftPhase } from '@lobechat/observability-otel/modules/agent-runtime';
 import {
   ChatErrorType,
   getDisabledPluginIds,
@@ -502,7 +503,12 @@ class ChatService {
     // server can pick the personal vs org key (credits are never pooled).
     const { assertAicoBillingAllowsChat, refreshAicoBillingBalance } =
       await import('@/features/AicoBilling');
+    const billingGateStartedAt = Date.now();
     const aicoBilling = await assertAicoBillingAllowsChat(provider);
+    recordChatTtftPhase('client_pre_http', Date.now() - billingGateStartedAt, {
+      managed: Boolean(aicoBilling),
+      provider,
+    });
     const requestBody = aicoBilling ? { ...payload, aicoBilling } : payload;
 
     const onFinish: FetchSSEOptions['onFinish'] | undefined = aicoBilling
@@ -527,6 +533,9 @@ class ChatService {
       onAbort: options?.onAbort,
       onErrorHandle: options?.onErrorHandle,
       onFinish,
+      onFirstVisibleText: ({ animation, bufferDelayMs }) => {
+        recordChatTtftPhase('ui_buffer', bufferDelayMs, { animation, provider });
+      },
       onMessageHandle: options?.onMessageHandle,
       requestContext: {
         apiMode,

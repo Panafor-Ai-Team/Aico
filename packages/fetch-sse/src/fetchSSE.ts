@@ -108,6 +108,15 @@ export interface FetchSSEOptions {
   onAbort?: (text: string) => Promise<void>;
   onErrorHandle?: (error: ChatMessageError) => void;
   onFinish?: OnFinishHandler;
+  /**
+   * Fired once when the first text/reasoning chunk is delivered to
+   * `onMessageHandle`. `bufferDelayMs` is time since the first raw SSE text
+   * arrived (animation/buffer delay before paint).
+   */
+  onFirstVisibleText?: (info: {
+    animation: 'none' | 'smooth' | 'buffer';
+    bufferDelayMs: number;
+  }) => void;
   onMessageHandle?: (
     chunk:
       | MessageTextChunk
@@ -270,16 +279,33 @@ export const fetchSSE = async (url: string, options: RequestInit & FetchSSEOptio
   );
   const shouldSkipTextProcessing = text === 'none';
   const textSmoothing = text === 'smooth';
+  const animationMode = shouldSkipTextProcessing ? 'none' : textSmoothing ? 'smooth' : 'buffer';
 
   // Add text buffer and timer related variables
   let textBuffer = '';
   let bufferTimer: ReturnType<typeof setTimeout> | null = null;
   const BUFFER_INTERVAL = 300; // 300ms
+  let firstRawTextAt: number | undefined;
+  let firstVisibleTextReported = false;
+
+  const markRawText = () => {
+    if (firstRawTextAt === undefined) firstRawTextAt = Date.now();
+  };
+
+  const reportFirstVisibleText = () => {
+    if (firstVisibleTextReported || firstRawTextAt === undefined) return;
+    firstVisibleTextReported = true;
+    options.onFirstVisibleText?.({
+      animation: animationMode,
+      bufferDelayMs: Date.now() - firstRawTextAt,
+    });
+  };
 
   const flushTextBuffer = () => {
     if (textBuffer) {
       options.onMessageHandle?.({ text: textBuffer, type: 'text' });
       textBuffer = '';
+      reportFirstVisibleText();
     }
   };
 
@@ -288,6 +314,7 @@ export const fetchSSE = async (url: string, options: RequestInit & FetchSSEOptio
     onTextUpdate: (delta, text) => {
       output = text;
       options.onMessageHandle?.({ text: delta, type: 'text' });
+      reportFirstVisibleText();
     },
     startSpeed: smoothingSpeed,
   });
@@ -402,9 +429,12 @@ export const fetchSSE = async (url: string, options: RequestInit & FetchSSEOptio
           // skip empty text
           if (!data) break;
 
+          markRawText();
+
           if (shouldSkipTextProcessing) {
             output += data;
             options.onMessageHandle?.({ text: data, type: 'text' });
+            reportFirstVisibleText();
           } else if (textSmoothing) {
             textController.pushToQueue(data);
 
