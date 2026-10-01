@@ -5,6 +5,7 @@ import { useCallback, useEffect } from 'react';
 import { useClientDataSWR } from '@/libs/swr';
 import { lambdaClient } from '@/libs/trpc/client';
 
+import { seedBillingSourcesAllowGateCache } from './billingSourcesAllowGateCache';
 import { AICO_BILLING_SOURCES_SWR_KEY } from './cacheKeys';
 import { useAicoBillingStore } from './store';
 import {
@@ -27,6 +28,8 @@ export const useAicoBillingSources = () => {
 
   useEffect(() => {
     if (!data) return;
+    // Wallet / SWR live reads warm the chat allow-gate so the next send skips RPC.
+    seedBillingSourcesAllowGateCache(data);
     const preferred = preferenceToBillingContext(data);
     const current = useAicoBillingStore.getState().context;
     if (!current || !findBillingSource(data.sources, current)) {

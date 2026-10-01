@@ -2,6 +2,10 @@ import { MANAGED_PROVIDER_IDS, type ManagedProviderId } from '@lobechat/business
 
 import { lambdaClient } from '@/libs/trpc/client';
 
+import {
+  getBillingSourcesAllowGateCache,
+  seedBillingSourcesAllowGateCache,
+} from './billingSourcesAllowGateCache';
 import { getAicoBillingContext, setAicoBillingContext } from './store';
 import {
   type AicoBillingContext,
@@ -17,6 +21,18 @@ import {
 const isManagedProvider = (provider: string): boolean =>
   provider === 'aico' || MANAGED_PROVIDER_IDS.includes(provider as ManagedProviderId);
 
+const fetchBillingSourcesForAllowGate = async (): Promise<AicoBillingSourcesResponse> => {
+  const cached = getBillingSourcesAllowGateCache();
+  if (cached) return cached;
+
+  // Skip upstream remaining/sync — placeHold is the authoritative funds check.
+  const data = (await lambdaClient.aicoBilling.getMyBillingSources.query({
+    syncLive: false,
+  })) as AicoBillingSourcesResponse;
+  seedBillingSourcesAllowGateCache(data);
+  return data;
+};
+
 export const resolveAicoBillingForRequest = async (
   provider: string,
 ): Promise<AicoBillingContext | undefined> => {
@@ -25,8 +41,7 @@ export const resolveAicoBillingForRequest = async (
   const cached = getAicoBillingContext();
   if (cached) return cached;
 
-  const data =
-    (await lambdaClient.aicoBilling.getMyBillingSources.query()) as AicoBillingSourcesResponse;
+  const data = await fetchBillingSourcesForAllowGate();
   const context = preferenceToBillingContext(data);
   setAicoBillingContext(context);
   return context;
@@ -37,8 +52,7 @@ export const assertAicoBillingAllowsChat = async (
 ): Promise<AicoBillingContext | undefined> => {
   if (!isManagedProvider(provider)) return undefined;
 
-  const data =
-    (await lambdaClient.aicoBilling.getMyBillingSources.query()) as AicoBillingSourcesResponse;
+  const data = await fetchBillingSourcesForAllowGate();
 
   const cached = getAicoBillingContext();
   const context =

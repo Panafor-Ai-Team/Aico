@@ -116,154 +116,165 @@ export const aicoBillingRouter = router({
    * Credits never pool — each source has its own remaining balance and managed key.
    * Personal remaining prefers OpenRouter `limit_remaining`; org remaining syncs
    * settled usage from OpenRouter when a managed key exists.
+   *
+   * Pass `syncLive: false` for latency-sensitive allow-gates (chat send): skip
+   * upstream remaining/sync and key repair. Wallet UI keeps the default live path.
+   * Server `placeHold` / managed policy remain the authoritative funds check.
    */
-  getMyBillingSources: billingProcedure.query(async ({ ctx }) => {
-    const [wallet, orgs, trialConfig, trialRow, trialActiveRaw, multiplierBp] = await Promise.all([
-      ctx.billingModel.getOrCreateUserWallet(ctx.userId),
-      ctx.organizationModel.listForUser(ctx.userId),
-      ctx.billingModel.getTrialConfig(),
-      ctx.billingModel.getUserTrial(ctx.userId),
-      ctx.billingModel.isTrialActive(ctx.userId),
-      ctx.billingModel.getUsageMultiplierBp(),
-    ]);
+  getMyBillingSources: billingProcedure
+    .input(z.object({ syncLive: z.boolean().optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const syncLive = input?.syncLive ?? true;
+      const [wallet, orgs, trialConfig, trialRow, trialActiveRaw, multiplierBp] = await Promise.all(
+        [
+          ctx.billingModel.getOrCreateUserWallet(ctx.userId),
+          ctx.organizationModel.listForUser(ctx.userId),
+          ctx.billingModel.getTrialConfig(),
+          ctx.billingModel.getUserTrial(ctx.userId),
+          ctx.billingModel.isTrialActive(ctx.userId),
+          ctx.billingModel.getUsageMultiplierBp(),
+        ],
+      );
 
-    // Same gate as getMyTrial / managed policy — never advertise a trial chat cannot use.
-    const trialEnabled = !isProduction() && aicoEnv.AICO_ALLOW_TRIAL && trialConfig.enabled;
-    const trialActive = trialEnabled && trialActiveRaw;
-    const trialAvailable = trialEnabled && !trialRow;
+      // Same gate as getMyTrial / managed policy — never advertise a trial chat cannot use.
+      const trialEnabled = !isProduction() && aicoEnv.AICO_ALLOW_TRIAL && trialConfig.enabled;
+      const trialActive = trialEnabled && trialActiveRaw;
+      const trialAvailable = trialEnabled && !trialRow;
 
-    const keyService = ctx.keyService;
-    // FIN-018: `getUserRemaining` already degrades honestly and holds the last
-    // settled usage. This catch is only for a failure in that path itself —
-    // which must still be logged and reported as unknown, never as an unspent
-    // wallet.
-    const personalReading = await keyService
-      .getUserRemaining(ctx.userId, { persist: true })
-      .catch((error) => {
-        console.warn('[aicoBilling] personal remaining lookup failed', {
-          error,
-          userId: ctx.userId,
-        });
-        const settled = Math.max(0, Number(wallet.settledUsageMicroUsd ?? 0));
-        return {
-          remainingMicroUsd: Math.max(0, Number(wallet.balanceMicroUsd ?? 0) - settled),
-          usageKnown: false,
-        };
-      });
-    const personalRemaining = personalReading.remainingMicroUsd;
-    const personalRemainingPi = piFromBilledMicro({
-      balanceMicroUsd: wallet.balanceMicroUsd,
-      billedMicroUsd: personalRemaining,
-      fallbackBp: multiplierBp,
-      rawCapacityMicroUsd: wallet.rawCapacityMicroUsd,
-    });
-
-    const personal = {
-      hasManagedKey: isSharedInferenceKey() || hasValidManagedKeyId(wallet.openrouterKeyId),
-      isActive: Boolean(wallet.isActive),
-      remainingMicroUsd: String(personalRemaining),
-      remainingPi: String(personalRemainingPi),
-      // FIN-016: the toman card had no `remaining` counterpart at any layer, so
-      // the primary currency for the fa-IR user base could never move.
-      remainingToman: String(
-        remainingTomanFromBalance({
-          balanceMicroUsd: wallet.balanceMicroUsd,
-          balanceToman: wallet.balanceToman,
-          remainingMicroUsd: personalRemaining,
-        }),
-      ),
-      remainingUsd: microUsdToDecimalString(personalRemaining),
-      source: 'personal' as const,
-      /** False when `remaining*` is a held fallback rather than a live reading. */
-      usageKnown: personalReading.usageKnown,
-    };
-
-    const organizationSources = (
-      await Promise.all(
-        orgs.map(async (org) => {
-          const members = await ctx.organizationModel.listMembers(org.id);
-          const me = members.find((m) => m.userId === ctx.userId && m.status === 'active');
-          if (!me) return null;
-
-          let budget = await ctx.organizationModel.getMemberBudget(me.id);
-          const sharedKey = isSharedInferenceKey();
-          // Open ledger holds are committed to in-flight calls; always 0 with the ledger off.
-          const orgRemaining = () =>
-            Math.max(
-              0,
-              cycleRemainingMicroUsd(budget ?? {}) - Math.max(0, Number(budget?.heldMicroUsd ?? 0)),
-            );
-
-          if (!sharedKey && budget && hasValidManagedKeyId(budget.openrouterKeyId)) {
-            await keyService.syncMemberCycleUsage(me.id).catch(() => null);
-            budget = await ctx.organizationModel.getMemberBudget(me.id);
-          }
-
-          const renewalStatus = budget?.renewalStatus ?? null;
-          const renewalBlocked =
-            renewalStatus === 'renewal_pending' || renewalStatus === 'renewal_failed';
-
-          let remainingMicroUsd = orgRemaining();
-
-          if (
-            !sharedKey &&
-            budget?.isActive &&
-            !renewalBlocked &&
-            remainingMicroUsd > 0 &&
-            !hasValidManagedKeyId(budget.openrouterKeyId)
-          ) {
-            await keyService.ensureMemberKey(me.id).catch((error) => {
-              console.warn('[aicoBilling] lazy member key repair failed', {
-                orgId: org.id,
-                orgMemberId: me.id,
-                error,
-              });
-              return null;
-            });
-            budget = await ctx.organizationModel.getMemberBudget(me.id);
-            remainingMicroUsd = orgRemaining();
-          }
-
-          const checkpointBp = Number(budget?.checkpointMultiplierBp ?? multiplierBp);
-
+      const keyService = ctx.keyService;
+      // FIN-018: `getUserRemaining` already degrades honestly and holds the last
+      // settled usage. This catch is only for a failure in that path itself —
+      // which must still be logged and reported as unknown, never as an unspent
+      // wallet.
+      const personalReading = await keyService
+        .getUserRemaining(ctx.userId, { live: syncLive, persist: syncLive })
+        .catch((error) => {
+          console.warn('[aicoBilling] personal remaining lookup failed', {
+            error,
+            userId: ctx.userId,
+          });
+          const settled = Math.max(0, Number(wallet.settledUsageMicroUsd ?? 0));
           return {
-            hasManagedKey: sharedKey || hasValidManagedKeyId(budget?.openrouterKeyId),
-            isActive: Boolean(budget?.isActive),
-            organizationId: org.id,
-            organizationName: org.name,
-            remainingMicroUsd: String(remainingMicroUsd),
-            remainingPi: String(
-              piFromBilledMicro({
-                billedMicroUsd: remainingMicroUsd,
-                multiplierBp: checkpointBp,
-              }),
-            ),
-            remainingUsd: microUsdToDecimalString(remainingMicroUsd),
-            renewalBlocked,
-            source: 'organization' as const,
+            remainingMicroUsd: Math.max(0, Number(wallet.balanceMicroUsd ?? 0) - settled),
+            usageKnown: false,
           };
-        }),
-      )
-    ).filter(Boolean) as Array<{
-      hasManagedKey: boolean;
-      isActive: boolean;
-      organizationId: string;
-      organizationName: string;
-      remainingMicroUsd: string;
-      remainingPi: string;
-      remainingUsd: string;
-      renewalBlocked: boolean;
-      source: 'organization';
-    }>;
+        });
+      const personalRemaining = personalReading.remainingMicroUsd;
+      const personalRemainingPi = piFromBilledMicro({
+        balanceMicroUsd: wallet.balanceMicroUsd,
+        billedMicroUsd: personalRemaining,
+        fallbackBp: multiplierBp,
+        rawCapacityMicroUsd: wallet.rawCapacityMicroUsd,
+      });
 
-    return {
-      preferredBillingSource: wallet.preferredBillingSource as 'personal' | 'organization',
-      preferredOrganizationId: wallet.preferredOrganizationId,
-      sources: [personal, ...organizationSources],
-      trialActive,
-      trialAvailable,
-    };
-  }),
+      const personal = {
+        hasManagedKey: isSharedInferenceKey() || hasValidManagedKeyId(wallet.openrouterKeyId),
+        isActive: Boolean(wallet.isActive),
+        remainingMicroUsd: String(personalRemaining),
+        remainingPi: String(personalRemainingPi),
+        // FIN-016: the toman card had no `remaining` counterpart at any layer, so
+        // the primary currency for the fa-IR user base could never move.
+        remainingToman: String(
+          remainingTomanFromBalance({
+            balanceMicroUsd: wallet.balanceMicroUsd,
+            balanceToman: wallet.balanceToman,
+            remainingMicroUsd: personalRemaining,
+          }),
+        ),
+        remainingUsd: microUsdToDecimalString(personalRemaining),
+        source: 'personal' as const,
+        /** False when `remaining*` is a held fallback rather than a live reading. */
+        usageKnown: personalReading.usageKnown,
+      };
+
+      const organizationSources = (
+        await Promise.all(
+          orgs.map(async (org) => {
+            const members = await ctx.organizationModel.listMembers(org.id);
+            const me = members.find((m) => m.userId === ctx.userId && m.status === 'active');
+            if (!me) return null;
+
+            let budget = await ctx.organizationModel.getMemberBudget(me.id);
+            const sharedKey = isSharedInferenceKey();
+            // Open ledger holds are committed to in-flight calls; always 0 with the ledger off.
+            const orgRemaining = () =>
+              Math.max(
+                0,
+                cycleRemainingMicroUsd(budget ?? {}) -
+                  Math.max(0, Number(budget?.heldMicroUsd ?? 0)),
+              );
+
+            if (syncLive && !sharedKey && budget && hasValidManagedKeyId(budget.openrouterKeyId)) {
+              await keyService.syncMemberCycleUsage(me.id).catch(() => null);
+              budget = await ctx.organizationModel.getMemberBudget(me.id);
+            }
+
+            const renewalStatus = budget?.renewalStatus ?? null;
+            const renewalBlocked =
+              renewalStatus === 'renewal_pending' || renewalStatus === 'renewal_failed';
+
+            let remainingMicroUsd = orgRemaining();
+
+            if (
+              syncLive &&
+              !sharedKey &&
+              budget?.isActive &&
+              !renewalBlocked &&
+              remainingMicroUsd > 0 &&
+              !hasValidManagedKeyId(budget.openrouterKeyId)
+            ) {
+              await keyService.ensureMemberKey(me.id).catch((error) => {
+                console.warn('[aicoBilling] lazy member key repair failed', {
+                  orgId: org.id,
+                  orgMemberId: me.id,
+                  error,
+                });
+                return null;
+              });
+              budget = await ctx.organizationModel.getMemberBudget(me.id);
+              remainingMicroUsd = orgRemaining();
+            }
+
+            const checkpointBp = Number(budget?.checkpointMultiplierBp ?? multiplierBp);
+
+            return {
+              hasManagedKey: sharedKey || hasValidManagedKeyId(budget?.openrouterKeyId),
+              isActive: Boolean(budget?.isActive),
+              organizationId: org.id,
+              organizationName: org.name,
+              remainingMicroUsd: String(remainingMicroUsd),
+              remainingPi: String(
+                piFromBilledMicro({
+                  billedMicroUsd: remainingMicroUsd,
+                  multiplierBp: checkpointBp,
+                }),
+              ),
+              remainingUsd: microUsdToDecimalString(remainingMicroUsd),
+              renewalBlocked,
+              source: 'organization' as const,
+            };
+          }),
+        )
+      ).filter(Boolean) as Array<{
+        hasManagedKey: boolean;
+        isActive: boolean;
+        organizationId: string;
+        organizationName: string;
+        remainingMicroUsd: string;
+        remainingPi: string;
+        remainingUsd: string;
+        renewalBlocked: boolean;
+        source: 'organization';
+      }>;
+
+      return {
+        preferredBillingSource: wallet.preferredBillingSource as 'personal' | 'organization',
+        preferredOrganizationId: wallet.preferredOrganizationId,
+        sources: [personal, ...organizationSources],
+        trialActive,
+        trialAvailable,
+      };
+    }),
 
   getMyPublicCode: billingProcedure.query(async ({ ctx }) => {
     return { publicCode: await ctx.organizationModel.ensureUserPublicCode(ctx.userId) };
