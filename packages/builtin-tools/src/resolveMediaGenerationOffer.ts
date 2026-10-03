@@ -19,7 +19,8 @@ export type MediaGenerationOffer = {
 
 type MessageLike = {
   content?: unknown;
-  role?: string | null;
+  /** Match image-intent `MessageLike` — no `null` (structural assignability). */
+  role?: string;
 };
 
 /**
