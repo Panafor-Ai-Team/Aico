@@ -117,7 +117,7 @@ describe('org wallet: Auto model is not gated by the team allow-list', () => {
     // never MODEL_NOT_ALLOWED, which is what a missing allow-list row used to throw.
     await expect(
       policy.authorize({ billing, modelId: OPENROUTER_AUTO_MODEL_ID, userId: ownerId }),
-    ).rejects.toMatchObject({ code: 'MEMBER_BUDGET_INACTIVE' });
+    ).rejects.toMatchObject({ code: 'MEMBER_BUDGET_NOT_ALLOCATED' });
 
     // A model that genuinely isn't granted is still rejected.
     await expect(
@@ -141,7 +141,7 @@ describe('org wallet: Auto model is not gated by the team allow-list', () => {
     // than MODEL_NOT_ALLOWED, which is what blocked org image generation.
     await expect(
       policy.authorize({ billing, modelId: DEFAULT_AUTO_IMAGE_MODEL_ID, userId: ownerId }),
-    ).rejects.toMatchObject({ code: 'MEMBER_BUDGET_INACTIVE' });
+    ).rejects.toMatchObject({ code: 'MEMBER_BUDGET_NOT_ALLOCATED' });
 
     // Other image models still need an explicit grant.
     await expect(
@@ -159,6 +159,6 @@ describe('org wallet: Auto model is not gated by the team allow-list', () => {
 
     await expect(
       policy.authorize({ billing, modelId: OPENROUTER_AUTO_MODEL_ID, userId: ownerId }),
-    ).rejects.toMatchObject({ code: 'MEMBER_BUDGET_INACTIVE' });
+    ).rejects.toMatchObject({ code: 'MEMBER_BUDGET_NOT_ALLOCATED' });
   });
 });

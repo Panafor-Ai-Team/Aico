@@ -238,6 +238,7 @@ export const aicoBillingRouter = router({
             const checkpointBp = Number(budget?.checkpointMultiplierBp ?? multiplierBp);
 
             return {
+              budgetAllocated: Boolean(budget),
               hasManagedKey: sharedKey || hasValidManagedKeyId(budget?.openrouterKeyId),
               isActive: Boolean(budget?.isActive),
               organizationId: org.id,
@@ -256,6 +257,7 @@ export const aicoBillingRouter = router({
           }),
         )
       ).filter(Boolean) as Array<{
+        budgetAllocated: boolean;
         hasManagedKey: boolean;
         isActive: boolean;
         organizationId: string;

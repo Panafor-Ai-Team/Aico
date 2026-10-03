@@ -20,6 +20,11 @@ export type AicoPersonalBillingSource = {
 };
 
 export type AicoOrganizationBillingSource = {
+  /**
+   * False when the member has never received an org allocation (distinct from
+   * an allocated budget that was later deactivated / reclaimed).
+   */
+  budgetAllocated: boolean;
   hasManagedKey: boolean;
   isActive: boolean;
   organizationId: string;
@@ -53,7 +58,8 @@ export type AicoBillingChatBlockReason =
   | 'MEMBER_BUDGET_UNFUNDED'
   | 'PERSONAL_FUNDS_UNAVAILABLE'
   | 'PERSONAL_WALLET_INACTIVE'
-  | 'MEMBER_BUDGET_INACTIVE';
+  | 'MEMBER_BUDGET_INACTIVE'
+  | 'MEMBER_BUDGET_NOT_ALLOCATED';
 
 /**
  * Selected source with $0 (or no key) cannot chat, unless personal + active trial.
@@ -64,6 +70,10 @@ export const getBillingChatBlockReason = (
   options: { trialActive: boolean },
 ): AicoBillingChatBlockReason | null => {
   if (!source) return 'PERSONAL_FUNDS_UNAVAILABLE';
+
+  if (source.source === 'organization' && !source.budgetAllocated) {
+    return 'MEMBER_BUDGET_NOT_ALLOCATED';
+  }
 
   if (!source.isActive) {
     return source.source === 'personal' ? 'PERSONAL_WALLET_INACTIVE' : 'MEMBER_BUDGET_INACTIVE';

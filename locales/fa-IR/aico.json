@@ -27,6 +27,7 @@
   "errors.MANAGED_KEY_UNAVAILABLE": "کلید مدیریت‌شده در دسترس نیست. لطفاً بعداً تلاش کنید.",
   "errors.MANAGED_OPERATION_NOT_METERED": "این قابلیت موقتاً در دسترس نیست.",
   "errors.MEMBER_BUDGET_INACTIVE": "سهمیه عضویت شما غیرفعال است.",
+  "errors.MEMBER_BUDGET_NOT_ALLOCATED": "هنوز سهمیه‌ای از کیف پول سازمان برای شما تخصیص داده نشده است. از مدیر سازمان بخواهید در بخش مدیریت سازمان برایتان سهمیه تعیین کند.",
   "errors.MEMBER_BUDGET_RENEWAL_BLOCKED": "تمدید سهمیه عضویت در حال انجام یا ناموفق است؛ فعلاً نمی‌توانید چت کنید.",
   "errors.MEMBER_BUDGET_UNFUNDED": "سهمیه سازمانی انتخاب‌شده موجودی ندارد.",
   "errors.MEMBER_NOT_FOUND": "عضو یافت نشد.",

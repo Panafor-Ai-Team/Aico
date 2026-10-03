@@ -27,6 +27,7 @@
   "errors.MANAGED_KEY_UNAVAILABLE": "托管密钥暂不可用，请稍后重试。",
   "errors.MANAGED_OPERATION_NOT_METERED": "此功能暂时不可用。",
   "errors.MEMBER_BUDGET_INACTIVE": "你的组织成员额度已停用。",
+  "errors.MEMBER_BUDGET_NOT_ALLOCATED": "尚未为你分配组织额度。请让组织管理员从组织钱包为你分配额度。",
   "errors.MEMBER_BUDGET_RENEWAL_BLOCKED": "组织额度续期进行中或失败，完成前无法对话。",
   "errors.MEMBER_BUDGET_UNFUNDED": "所选组织额度已无剩余。",
   "errors.MEMBER_NOT_FOUND": "未找到成员。",

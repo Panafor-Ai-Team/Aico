@@ -27,6 +27,7 @@
   "errors.MANAGED_KEY_UNAVAILABLE": "La clé gérée est indisponible. Réessayez plus tard.",
   "errors.MANAGED_OPERATION_NOT_METERED": "Cette fonctionnalité est temporairement indisponible.",
   "errors.MEMBER_BUDGET_INACTIVE": "Votre budget de membre d'organisation est inactif.",
+  "errors.MEMBER_BUDGET_NOT_ALLOCATED": "Aucun quota d'organisation ne vous a encore été attribué. Demandez à un administrateur d'allouer du crédit depuis le portefeuille de l'organisation.",
   "errors.MEMBER_BUDGET_RENEWAL_BLOCKED": "Le renouvellement du budget d'organisation est en cours ou a échoué — le chat est bloqué jusqu'à son achèvement.",
   "errors.MEMBER_BUDGET_UNFUNDED": "Le budget d'organisation sélectionné n'a plus de crédit.",
   "errors.MEMBER_NOT_FOUND": "Membre introuvable.",

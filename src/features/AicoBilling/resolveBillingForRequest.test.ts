@@ -32,6 +32,7 @@ const fundedSources = {
       usageKnown: true,
     },
     {
+      budgetAllocated: true,
       hasManagedKey: true,
       isActive: true,
       organizationId: 'org-9',
