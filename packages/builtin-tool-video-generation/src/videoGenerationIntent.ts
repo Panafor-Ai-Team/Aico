@@ -14,6 +14,23 @@ const META_QUESTION =
 const EXISTING_VIDEO_TASK =
   /خلاصه|ترجمه|زیرنویس|تحلیل|توضیح|ببین|نگاه|summar|transcri|translat|subtitle|analy[sz]|download|explain|describe|watch/i;
 
+/**
+ * Web/code animation briefs ("logo animation in HTML/CSS/JS", "create with code
+ * not video tool"). These often contain "make the animation" / "create …
+ * animation" and must not trip the video tool offer or direct-call path.
+ *
+ * Paired with {@link HAS_VIDEO_OR_CLIP_NOUN}: code signals alone reject only when
+ * the user did not also name a real video/clip (so "video tutorial about HTML"
+ * still matches).
+ */
+const CODE_OR_WEB_ANIMATION =
+  /\b(?:html|css|javascript|typescript|svg|react|framer[\s-]?motion|gpu-friendly|run(?:nable|s)?\s+(?:immediately\s+)?(?:in\s+the\s+)?browser|single\s+runnable|web\s+animation|css\s+transforms?)\b/i;
+
+const HAS_VIDEO_OR_CLIP_NOUN = /\b(?:video|clip)s?\b|ویدیو|ویدئو|فیلم|کلیپ/i;
+
+const EXPLICIT_NOT_VIDEO =
+  /\b(?:not\s+(?:a\s+)?video(?:\s+tool)?|code\s+not\s+video|with\s+code\s*(?:,\s*)?not\s+video)\b|بدون\s+(?:ویدیو|ویدئو)|(?:کد\s+)?نه\s+(?:ویدیو|ویدئو)/i;
+
 const PERSIAN_VIDEO_NOUN = /ویدیو|ویدئو|فیلم|کلیپ|انیمیشن/;
 
 const PERSIAN_GENERATE_VERB =
@@ -138,13 +155,26 @@ export const extractRequestedVideoAspectRatio = (text: string | null | undefined
 
 /**
  * True when the text is a clear request to produce a video — not a question
- * about prompting and not a task on an existing video.
+ * about prompting, not a task on an existing video, and not a web/code
+ * animation brief (HTML/CSS/JS logo intros, etc.).
  */
 export const isVideoGenerationUserIntent = (text: string | null | undefined): boolean => {
   if (!text) return false;
-  const trimmed = text.trim();
+  // Pipeline may append SYSTEM CONTEXT; intent must use the user's own words.
+  const trimmed = stripInjectedUserContext(text.trim());
   if (!trimmed || trimmed.length > 4000) return false;
-  if (META_QUESTION.test(trimmed) || EXISTING_VIDEO_TASK.test(trimmed)) return false;
+  if (
+    META_QUESTION.test(trimmed) ||
+    EXISTING_VIDEO_TASK.test(trimmed) ||
+    EXPLICIT_NOT_VIDEO.test(trimmed)
+  ) {
+    return false;
+  }
+  // Logo/web animation specs say "make the animation" + HTML/CSS/JS; reject those
+  // unless the user also asked for a video/clip output.
+  if (CODE_OR_WEB_ANIMATION.test(trimmed) && !HAS_VIDEO_OR_CLIP_NOUN.test(trimmed)) {
+    return false;
+  }
 
   if (PERSIAN_VIDEO_NOUN.test(trimmed)) {
     if (PERSIAN_GENERATE_VERB.test(trimmed)) return true;
