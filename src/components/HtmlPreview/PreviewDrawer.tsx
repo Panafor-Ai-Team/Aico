@@ -10,6 +10,8 @@ import { useTranslation } from 'react-i18next';
 
 import { isDesktop } from '@/const/version';
 
+import { ensurePreviewableHtmlDocument } from './detectHtml';
+
 const styles = createStaticStyles(({ css }) => ({
   container: css`
     height: 100%;
@@ -28,7 +30,7 @@ const HtmlPreviewDrawer = memo<HtmlPreviewDrawerProps>(({ content, open, onClose
   const { t } = useTranslation('components');
   const [mode, setMode] = useState<'preview' | 'code'>('preview');
 
-  const htmlContent = content;
+  const htmlContent = ensurePreviewableHtmlDocument(content);
 
   const extractTitle = useCallback(() => {
     const m = htmlContent.match(/<title>([\S\s]*?)<\/title>/i);
@@ -46,8 +48,8 @@ const HtmlPreviewDrawer = memo<HtmlPreviewDrawerProps>(({ content, open, onClose
   const onDownload = useCallback(() => {
     const title = extractTitle();
     const base = title ? sanitizeFileName(title) : `chat-html-preview-${Date.now()}`;
-    exportFile(content, `${base}.html`);
-  }, [content, extractTitle, sanitizeFileName]);
+    exportFile(htmlContent, `${base}.html`);
+  }, [htmlContent, extractTitle, sanitizeFileName]);
 
   const Title = (
     <Flexbox horizontal align={'center'} justify={'space-between'} style={{ width: '100%' }}>
@@ -100,13 +102,13 @@ const HtmlPreviewDrawer = memo<HtmlPreviewDrawerProps>(({ content, open, onClose
           <HtmlPreview
             actionsRender={hideHtmlPreviewActions}
             copyable={false}
+            defaultMode="preview"
             downloadable={false}
             style={{ height: '100%' }}
             styles={{ iframe: { height: '100%' } }}
-            title={t('HtmlPreview.iframeTitle')}
             variant={'borderless'}
           >
-            {content}
+            {htmlContent}
           </HtmlPreview>
         </Block>
       ) : (
@@ -116,7 +118,7 @@ const HtmlPreviewDrawer = memo<HtmlPreviewDrawerProps>(({ content, open, onClose
             showLanguage={false}
             style={{ height: '100%', overflow: 'auto' }}
           >
-            {htmlContent}
+            {content}
           </Highlighter>
         </Block>
       )}
