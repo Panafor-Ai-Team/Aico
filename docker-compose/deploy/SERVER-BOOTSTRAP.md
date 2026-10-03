@@ -87,6 +87,8 @@ Edit **both** files. Required:
 - `AUTH_TRUSTED_ORIGINS=https://chat.panafor.com,https://adchat.panafor.com`
 - `INTERNAL_APP_URL=http://localhost:3210`
 - `AICO_CONTROL_PLANE_PUBLIC_URL=https://adchat.panafor.com`
+- `AICO_MANAGED_PROVIDER=cheapvibecode` (unset falls back to `openrouter`; see `docs/aico/MANAGED_PROVIDER_CUTOVER_RUNBOOK.md`)
+- `CHEAPVIBECODE_MANAGEMENT_API_KEY` in the control-plane env only, never in the product app container
 - Rotate `AUTH_SECRET`, `KEY_VAULTS_SECRET`, `POSTGRES_PASSWORD`, `RUSTFS_SECRET_KEY`, `JWKS_KEY`, `AICO_CONTROL_PLANE_SERVICE_TOKEN` (do not keep example values)
 - Browser-reachable `S3_ENDPOINT` (not `http://rustfs:9000`). One-level host only: `https://s3.panafor.com` → `127.0.0.1:9000` (never `s3.chat.*`)
 
