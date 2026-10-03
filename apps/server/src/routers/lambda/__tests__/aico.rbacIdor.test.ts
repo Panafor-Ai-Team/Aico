@@ -521,7 +521,7 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
     await strangerCaller.getMyWallet();
 
     const ownerCaller = organizationRouter.createCaller(createTestContext(ownerId));
-    await ownerCaller.create({ name: 'PublicCode Org' });
+    const createdOrg = await ownerCaller.create({ name: 'PublicCode Org' });
 
     const wallets = await platformCaller.listUserWallets();
     const strangerWallet = wallets.find((w: any) => w.userId === strangerId);
@@ -529,8 +529,18 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
     expect(strangerWallet?.email).toBe('stranger@rbac.test');
     expect(strangerWallet?.username).toBeNull();
 
+    await platformCaller.addManualCredit({
+      amountUsd: '12.500000',
+      description: 'seed org balance for listOrganizations',
+      idempotencyKey: 'rbac-org-balance-seed',
+      orgId: createdOrg.id,
+    });
+
     const orgs = await platformCaller.listOrganizations({});
     expect(orgs.items.every((o: any) => typeof o.publicCode === 'string')).toBe(true);
+    const listed = orgs.items.find((o: any) => o.id === createdOrg.id);
+    expect(listed?.walletBalanceUsd).toBe('12.500000');
+    expect(listed?.walletBalanceMicroUsd).toBe('12500000');
   });
 
   it('AICO-P1-023: unverified phone cannot create organization', async () => {
