@@ -8,6 +8,7 @@ import {
 } from './resolveManagedKeyErrorDescription';
 
 const orgSource: AicoBillingSource = {
+  budgetAllocated: true,
   hasManagedKey: true,
   isActive: true,
   organizationId: 'org-1',

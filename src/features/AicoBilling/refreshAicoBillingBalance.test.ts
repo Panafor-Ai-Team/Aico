@@ -23,6 +23,7 @@ const billingSources: AicoBillingSourcesResponse = {
       usageKnown: true,
     },
     {
+      budgetAllocated: true,
       hasManagedKey: true,
       isActive: true,
       organizationId: 'org-1',

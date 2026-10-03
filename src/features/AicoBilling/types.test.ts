@@ -23,6 +23,7 @@ const sources: AicoBillingSource[] = [
     usageKnown: true,
   },
   {
+    budgetAllocated: true,
     hasManagedKey: true,
     isActive: true,
     organizationId: 'org-1',
@@ -34,6 +35,7 @@ const sources: AicoBillingSource[] = [
     source: 'organization',
   },
   {
+    budgetAllocated: true,
     hasManagedKey: false,
     isActive: true,
     organizationId: 'org-2',
@@ -138,6 +140,7 @@ describe('AicoBilling types helpers', () => {
 
     it('blocks org $0 even when trial is active', () => {
       const emptyOrg: AicoBillingSource = {
+        budgetAllocated: true,
         hasManagedKey: true,
         isActive: true,
         organizationId: 'org-1',
@@ -150,6 +153,42 @@ describe('AicoBilling types helpers', () => {
       };
       expect(getBillingChatBlockReason(emptyOrg, { trialActive: true })).toBe(
         'MEMBER_BUDGET_UNFUNDED',
+      );
+    });
+
+    it('blocks org sources with no member allocation (not “inactive”)', () => {
+      const unallocated: AicoBillingSource = {
+        budgetAllocated: false,
+        hasManagedKey: false,
+        isActive: false,
+        organizationId: 'org-1',
+        organizationName: 'Acme',
+        remainingMicroUsd: '0',
+        remainingPi: '0',
+        remainingUsd: '0.000000',
+        renewalBlocked: false,
+        source: 'organization',
+      };
+      expect(getBillingChatBlockReason(unallocated, { trialActive: false })).toBe(
+        'MEMBER_BUDGET_NOT_ALLOCATED',
+      );
+    });
+
+    it('blocks deactivated member budgets separately from missing allocation', () => {
+      const inactive: AicoBillingSource = {
+        budgetAllocated: true,
+        hasManagedKey: false,
+        isActive: false,
+        organizationId: 'org-1',
+        organizationName: 'Acme',
+        remainingMicroUsd: '0',
+        remainingPi: '0',
+        remainingUsd: '0.000000',
+        renewalBlocked: false,
+        source: 'organization',
+      };
+      expect(getBillingChatBlockReason(inactive, { trialActive: false })).toBe(
+        'MEMBER_BUDGET_INACTIVE',
       );
     });
 

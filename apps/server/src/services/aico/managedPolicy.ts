@@ -257,7 +257,10 @@ export class AicoManagedPolicy {
     }
 
     let budget = await this.orgModel.getMemberBudget(me.id);
-    if (!budget?.isActive) {
+    if (!budget) {
+      throw new AicoManagedPolicyError('MEMBER_BUDGET_NOT_ALLOCATED', ChatErrorType.InvalidUserKey);
+    }
+    if (!budget.isActive) {
       throw new AicoManagedPolicyError('MEMBER_BUDGET_INACTIVE', ChatErrorType.InvalidUserKey);
     }
     if (budget.renewalStatus === 'renewal_pending' || budget.renewalStatus === 'renewal_failed') {

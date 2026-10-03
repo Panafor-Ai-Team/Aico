@@ -46,6 +46,8 @@ export const AICO_ERROR_CODES = [
   'PERSONAL_WALLET_INACTIVE',
   'MEMBER_BUDGET_UNFUNDED',
   'MEMBER_BUDGET_INACTIVE',
+  /** Org wallet may be funded, but this member never received an allocation. */
+  'MEMBER_BUDGET_NOT_ALLOCATED',
   'MEMBER_BUDGET_RENEWAL_BLOCKED',
   // Usage ledger
   'USAGE_CONCURRENCY_LIMIT',
@@ -95,6 +97,8 @@ export const AICO_ERROR_MESSAGES_FA: Record<AicoErrorCode, string> = {
   MANAGED_KEY_UNAVAILABLE: 'کلید مدیریت‌شده در دسترس نیست. لطفاً بعداً تلاش کنید.',
   MANAGED_OPERATION_NOT_METERED: 'این قابلیت موقتاً در دسترس نیست.',
   MEMBER_BUDGET_INACTIVE: 'سهمیه عضویت شما غیرفعال است.',
+  MEMBER_BUDGET_NOT_ALLOCATED:
+    'هنوز سهمیه‌ای از کیف پول سازمان برای شما تخصیص داده نشده است. از مدیر سازمان بخواهید در بخش مدیریت سازمان برایتان سهمیه تعیین کند.',
   MEMBER_BUDGET_RENEWAL_BLOCKED:
     'تمدید سهمیه عضویت در حال انجام یا ناموفق است؛ فعلاً نمی‌توانید چت کنید.',
   MEMBER_BUDGET_UNFUNDED: 'سهمیه سازمانی انتخاب‌شده موجودی ندارد.',

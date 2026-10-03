@@ -144,7 +144,7 @@ export const createManagedBillingHooks = (params: {
   const subject = (): HoldSubject => {
     if (!isOrg) return { type: 'wallet', userId: authorized.userId };
     if (!authorized.budgetId || !authorized.orgId || !authorized.orgMemberId) {
-      throw policyError('MEMBER_BUDGET_INACTIVE:not_found');
+      throw policyError('MEMBER_BUDGET_NOT_ALLOCATED');
     }
     return {
       budgetId: authorized.budgetId,
@@ -168,7 +168,7 @@ export const createManagedBillingHooks = (params: {
       }
       case 'not_found': {
         return policyError(
-          isOrg ? 'MEMBER_BUDGET_INACTIVE:not_found' : 'PERSONAL_WALLET_INACTIVE:not_found',
+          isOrg ? 'MEMBER_BUDGET_NOT_ALLOCATED' : 'PERSONAL_WALLET_INACTIVE:not_found',
         );
       }
       case 'renewal_blocked': {

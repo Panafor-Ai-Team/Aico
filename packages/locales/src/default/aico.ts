@@ -32,6 +32,8 @@ export default {
     'This chat is using a direct provider (for example Google or OpenAI) that needs its own API key. Switch the model to {{brandName}} Auto or another {{brandName}} model — your wallet balance already covers those.',
   'errors.managedKey.wrongProviderTitle': 'Switch to a {{brandName}} model',
   'errors.MEMBER_BUDGET_INACTIVE': 'Your organization member budget is inactive.',
+  'errors.MEMBER_BUDGET_NOT_ALLOCATED':
+    'No organization quota has been allocated to you yet. Ask an org admin to allocate credit from the organization wallet.',
   'errors.MEMBER_BUDGET_RENEWAL_BLOCKED':
     'Organization budget renewal is pending or failed — chat is blocked until it completes.',
   'errors.MEMBER_BUDGET_UNFUNDED': 'The selected organization budget has no remaining credit.',
