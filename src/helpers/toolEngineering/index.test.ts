@@ -347,7 +347,7 @@ describe('toolEngineering', () => {
   });
 
   describe('createChatToolsEngine', () => {
-    it('should enable image generation in chat mode when model lacks native image output', () => {
+    it('should not enable image generation in chat mode without a media offer', () => {
       mockCurrentChatConfig = { enableAgentMode: false };
       mockImageOutputSupport = false;
 
@@ -362,17 +362,22 @@ describe('toolEngineering', () => {
         provider: 'anthropic',
       });
 
-      expect(result.enabledToolIds).toContain('lobe-image-generation');
+      expect(result.enabledToolIds).not.toContain('lobe-image-generation');
     });
 
-    it('should enable image generation in chat mode when model can call tools, even with native image output', () => {
+    it('should enable image generation in chat mode when media offer is on, even with native image output', () => {
       mockCurrentChatConfig = { enableAgentMode: false };
       mockImageOutputSupport = true;
 
-      const toolsEngine = createAgentToolsEngine({
-        model: 'gpt-image-chat',
-        provider: 'openai',
-      });
+      const toolsEngine = createAgentToolsEngine(
+        {
+          model: 'gpt-image-chat',
+          provider: 'openai',
+        },
+        undefined,
+        undefined,
+        { mediaGenerationOffer: { image: true, video: false } },
+      );
 
       const result = toolsEngine.generateToolsDetailed({
         toolIds: [],
@@ -478,14 +483,9 @@ describe('toolEngineering', () => {
       });
 
       // lobe-agent is always-on (alwaysOnToolIds), so it rides along with user tools.
-      // Image generation is a default agent-mode tool when the model can call tools.
-      expect(result.enabledToolIds).toEqual([
-        'search',
-        'lobe-web-browsing',
-        'lobe-image-generation',
-        'lobe-agent',
-      ]);
-      expect(result.enabledToolIds).toHaveLength(4);
+      // Image generation is intent/pin gated and off for plain text turns.
+      expect(result.enabledToolIds).toEqual(['search', 'lobe-web-browsing', 'lobe-agent']);
+      expect(result.enabledToolIds).toHaveLength(3);
     });
 
     it('should enable lobe-agent when it is injected into runtime plugin ids', () => {
@@ -559,7 +559,7 @@ describe('toolEngineering', () => {
       });
     });
 
-    it('should enable image generation by default in agent mode when model lacks native image output', () => {
+    it('should not enable image generation in agent mode without a media offer', () => {
       mockImageOutputSupport = false;
 
       const toolsEngine = createAgentToolsEngine({
@@ -573,16 +573,21 @@ describe('toolEngineering', () => {
         toolIds: [],
       });
 
-      expect(result.enabledToolIds).toContain('lobe-image-generation');
+      expect(result.enabledToolIds).not.toContain('lobe-image-generation');
     });
 
-    it('should enable image generation by default in agent mode when model can call tools, even with native image output', () => {
+    it('should enable image generation in agent mode when media offer is on', () => {
       mockImageOutputSupport = true;
 
-      const toolsEngine = createAgentToolsEngine({
-        model: 'gpt-image-chat',
-        provider: 'openai',
-      });
+      const toolsEngine = createAgentToolsEngine(
+        {
+          model: 'gpt-image-chat',
+          provider: 'openai',
+        },
+        undefined,
+        undefined,
+        { mediaGenerationOffer: { image: true, video: false } },
+      );
 
       const result = toolsEngine.generateToolsDetailed({
         model: 'gpt-image-chat',
@@ -597,10 +602,15 @@ describe('toolEngineering', () => {
       mockIsCanUseFC = false;
       mockImageOutputSupport = false;
 
-      const toolsEngine = createAgentToolsEngine({
-        model: 'plain-text-model',
-        provider: 'test',
-      });
+      const toolsEngine = createAgentToolsEngine(
+        {
+          model: 'plain-text-model',
+          provider: 'test',
+        },
+        undefined,
+        undefined,
+        { mediaGenerationOffer: { image: true, video: false } },
+      );
 
       const result = toolsEngine.generateToolsDetailed({
         model: 'plain-text-model',

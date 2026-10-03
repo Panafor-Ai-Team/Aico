@@ -136,6 +136,13 @@ export interface ServerCreateAgentToolsEngineParams {
    * inside a sub-agent / group run.
    */
   manifestContext?: BuiltinToolResolveContext;
+  /**
+   * Whether to offer image/video generation tools this turn. Computed by the
+   * caller via `resolveMediaGenerationOffer` (intent and/or pin). Defaults to
+   * off so text turns do not pay media-tool schema tokens. Clear photo/video
+   * asks still run via directToolCalls without being in the offer set.
+   */
+  mediaGenerationOffer?: { image?: boolean; video?: boolean };
   /** Model name for function calling compatibility check */
   model: string;
   /** Active chat model abilities for mode-specific builtin tool gates */

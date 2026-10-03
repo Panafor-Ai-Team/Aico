@@ -321,7 +321,7 @@ describe('createServerAgentToolsEngine', () => {
     expect(result.enabledToolIds).not.toContain(WebBrowsingManifest.identifier);
   });
 
-  it('should enable ImageGeneration in chat mode when model lacks native image output', () => {
+  it('should not enable ImageGeneration in chat mode without a media offer', () => {
     const context = createMockContext();
     const engine = createServerAgentToolsEngine(context, {
       agentConfig: {
@@ -339,16 +339,17 @@ describe('createServerAgentToolsEngine', () => {
       toolIds: [],
     });
 
-    expect(result.enabledToolIds).toContain(ImageGenerationManifest.identifier);
+    expect(result.enabledToolIds).not.toContain(ImageGenerationManifest.identifier);
   });
 
-  it('should enable ImageGeneration in chat mode when model can call tools, even with native image output', () => {
+  it('should enable ImageGeneration in chat mode when media offer is on, even with native image output', () => {
     const context = createMockContext();
     const engine = createServerAgentToolsEngine(context, {
       agentConfig: {
         chatConfig: { enableAgentMode: false },
         plugins: [],
       },
+      mediaGenerationOffer: { image: true },
       model: 'gpt-image-chat',
       modelAbilities: { functionCall: true, imageOutput: true },
       provider: 'openai',
@@ -372,6 +373,7 @@ describe('createServerAgentToolsEngine', () => {
         chatConfig: { enableAgentMode: false },
         plugins: [],
       },
+      mediaGenerationOffer: { image: true },
       model: 'plain-text-model',
       modelAbilities: { functionCall: false, imageOutput: false },
       provider: 'test',
@@ -386,7 +388,7 @@ describe('createServerAgentToolsEngine', () => {
     expect(result.enabledToolIds).not.toContain(ImageGenerationManifest.identifier);
   });
 
-  it('should enable ImageGeneration by default in agent mode when model lacks native image output', () => {
+  it('should not enable ImageGeneration in agent mode without offer or pin', () => {
     const context = createMockContext();
     const engine = createServerAgentToolsEngine(context, {
       agentConfig: { plugins: [] },
@@ -401,13 +403,14 @@ describe('createServerAgentToolsEngine', () => {
       toolIds: [],
     });
 
-    expect(result.enabledToolIds).toContain(ImageGenerationManifest.identifier);
+    expect(result.enabledToolIds).not.toContain(ImageGenerationManifest.identifier);
   });
 
-  it('should enable ImageGeneration by default in agent mode when model can call tools, even with native image output', () => {
+  it('should enable ImageGeneration in agent mode when media offer is on', () => {
     const context = createMockContext();
     const engine = createServerAgentToolsEngine(context, {
       agentConfig: { plugins: [] },
+      mediaGenerationOffer: { image: true },
       model: 'gpt-image-chat',
       modelAbilities: { functionCall: true, imageOutput: true },
       provider: 'openai',
@@ -428,6 +431,7 @@ describe('createServerAgentToolsEngine', () => {
     });
     const engine = createServerAgentToolsEngine(context, {
       agentConfig: { plugins: [] },
+      mediaGenerationOffer: { image: true },
       model: 'plain-text-model',
       modelAbilities: { functionCall: false, imageOutput: false },
       provider: 'test',
@@ -462,13 +466,14 @@ describe('createServerAgentToolsEngine', () => {
     expect(result.enabledToolIds).toContain(ImageGenerationManifest.identifier);
   });
 
-  it('should enable VideoGeneration in chat mode when model can call tools', () => {
+  it('should enable VideoGeneration in chat mode when media offer is on', () => {
     const context = createMockContext();
     const engine = createServerAgentToolsEngine(context, {
       agentConfig: {
         chatConfig: { enableAgentMode: false },
         plugins: [],
       },
+      mediaGenerationOffer: { video: true },
       model: 'claude-sonnet',
       modelAbilities: { functionCall: true },
       provider: 'anthropic',
@@ -483,10 +488,11 @@ describe('createServerAgentToolsEngine', () => {
     expect(result.enabledToolIds).toContain(VideoGenerationManifest.identifier);
   });
 
-  it('should enable VideoGeneration by default in agent mode when model can call tools', () => {
+  it('should enable VideoGeneration in agent mode when media offer is on', () => {
     const context = createMockContext();
     const engine = createServerAgentToolsEngine(context, {
       agentConfig: { plugins: [] },
+      mediaGenerationOffer: { video: true },
       model: 'gpt-4',
       modelAbilities: { functionCall: true },
       provider: 'openai',
@@ -510,6 +516,7 @@ describe('createServerAgentToolsEngine', () => {
         chatConfig: { enableAgentMode: false },
         plugins: [],
       },
+      mediaGenerationOffer: { video: true },
       model: 'plain-text-model',
       modelAbilities: { functionCall: false },
       provider: 'test',

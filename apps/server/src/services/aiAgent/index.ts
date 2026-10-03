@@ -23,7 +23,11 @@ import {
   shouldExposeSelfFeedbackIntentTool,
 } from '@lobechat/builtin-tool-self-iteration';
 import { TaskIdentifier } from '@lobechat/builtin-tool-task';
-import { builtinTools, manualModeExcludeToolIds } from '@lobechat/builtin-tools';
+import {
+  builtinTools,
+  manualModeExcludeToolIds,
+  resolveMediaGenerationOffer,
+} from '@lobechat/builtin-tools';
 import { isHeterogeneousAgentModelId, LOADING_FLAT } from '@lobechat/const';
 import {
   type AgentGroupConfig,
@@ -3128,6 +3132,17 @@ export class AiAgentService {
       const activeComposioManifests = dropDisabledManifests(composioManifests);
       const activeConnectorManifests = dropDisabledManifests(connectorManifests);
 
+      // Intent-gate image/video offer set. History excludes the current turn
+      // (`selfMessageIds`); append the in-memory prompt so pending-ask detection
+      // matches directToolCalls. Clear asks still run without being offered.
+      const historyForMediaOffer = await loadHistoryMessages();
+      const mediaGenerationOffer = resolveMediaGenerationOffer({
+        messages: [...historyForMediaOffer, { content: prompt, role: 'user' }],
+        modelCanUseTools: toolsContext.isModelSupportToolUse(model, provider),
+        plugins: agentPlugins,
+        toolMode: resolveToolMode(agentConfig.chatConfig ?? undefined),
+      });
+
       toolsEngine = createServerAgentToolsEngine(toolsContext, {
         additionalManifests: [
           ...activeLobehubSkillManifests,
@@ -3154,6 +3169,7 @@ export class AiAgentService {
         hasEnabledKnowledgeBases,
         isBotConversation,
         isGroupSupervisor,
+        mediaGenerationOffer,
         modelAbilities,
         // Context-aware builtin manifests: inside a sub-agent (or group) run,
         // lobe-agent drops `callSubAgent` so the model can't recurse into nested

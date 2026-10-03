@@ -210,6 +210,7 @@ export const createServerAgentToolsEngine = (
     isBotConversation = false,
     isGroupSupervisor = false,
     manifestContext,
+    mediaGenerationOffer,
     model,
     modelAbilities: _modelAbilities,
     provider,
@@ -256,12 +257,12 @@ export const createServerAgentToolsEngine = (
 
   const searchMode = agentConfig.chatConfig?.searchMode ?? 'auto';
   const isSearchEnabled = useApplicationBuiltinSearchTool ?? searchMode !== 'off';
-  // Same Create → Image pipeline via `lobe-image-generation`. Offer it whenever
-  // the chat model can call tools — including models with native `imageOutput`.
-  // Gating those out left Auto / Gemini-image chat turns with an inbox prompt
-  // that promised photo gen, then the model apologizing that the tool is missing.
-  // `lobe-video-generation` (Create → Video pipeline) rides the same gate.
-  const imageGenerationEnabled = context.isModelSupportToolUse(model, provider);
+  // Offer image/video tools only when the caller detected generative intent
+  // (or an agent pin). Always-on FC offering cost ~5k schema tokens per turn;
+  // clear photo/video asks still run via directToolCalls without the offer.
+  const modelCanUseTools = context.isModelSupportToolUse(model, provider);
+  const imageGenerationEnabled = modelCanUseTools && Boolean(mediaGenerationOffer?.image);
+  const videoGenerationEnabled = modelCanUseTools && Boolean(mediaGenerationOffer?.video);
   // Tool mode: explicit `toolMode` wins; otherwise derive from `enableAgentMode`
   // (undefined = agent). `custom` = toolset is exactly the agent's plugins.
   const toolMode = resolveToolMode(agentConfig.chatConfig ?? undefined);
@@ -290,7 +291,7 @@ export const createServerAgentToolsEngine = (
     [ImageGenerationManifest.identifier]: imageGenerationEnabled,
     [KnowledgeBaseManifest.identifier]: hasEnabledKnowledgeBases,
     [MemoryManifest.identifier]: globalMemoryEnabled,
-    [VideoGenerationManifest.identifier]: imageGenerationEnabled,
+    [VideoGenerationManifest.identifier]: videoGenerationEnabled,
     [WebBrowsingManifest.identifier]: isSearchEnabled,
   };
 
@@ -351,7 +352,7 @@ export const createServerAgentToolsEngine = (
     [RemoteDeviceManifest.identifier]: deviceCapable && hasDeviceProxy && !deviceLocked,
     [WebBrowsingManifest.identifier]: isSearchEnabled,
     [ImageGenerationManifest.identifier]: imageGenerationEnabled,
-    [VideoGenerationManifest.identifier]: imageGenerationEnabled,
+    [VideoGenerationManifest.identifier]: videoGenerationEnabled,
   };
 
   const excludedIdentifiers = new Set(disabledPluginIds);

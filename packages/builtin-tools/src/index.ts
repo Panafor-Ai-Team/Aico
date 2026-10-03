@@ -38,6 +38,12 @@ import { WebOnboardingManifest } from '@lobechat/builtin-tool-web-onboarding';
 import { isDesktop, RECOMMENDED_SKILLS, RecommendedSkillType } from '@lobechat/const';
 import { type LobeBuiltinTool } from '@lobechat/types';
 
+export {
+  type MediaGenerationOffer,
+  type MediaGenerationToolMode,
+  resolveMediaGenerationOffer,
+} from './resolveMediaGenerationOffer';
+
 /**
  * Default tool IDs that will always be added to the tools list.
  * Shared between frontend (createAgentToolsEngine) and server (createServerAgentToolsEngine).
