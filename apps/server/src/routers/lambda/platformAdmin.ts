@@ -291,7 +291,19 @@ export const platformAdminRouter = router({
         .optional(),
     )
     .query(async ({ ctx, input }) => {
-      return ctx.organizationModel.listOrganizations(input ?? {});
+      // Mirror listUserWallets: the admin SPA reads `walletBalanceUsd` (decimal
+      // string). Returning the raw row left that field undefined, so every org
+      // wallet rendered as $0.00.
+      const result = await ctx.organizationModel.listOrganizations(input ?? {});
+      return {
+        ...result,
+        items: result.items.map((org) => ({
+          ...org,
+          walletBalanceMicroUsd: String(org.walletBalanceMicroUsd ?? 0),
+          walletBalanceToman: tomanString(org.walletBalanceToman ?? 0),
+          walletBalanceUsd: microUsdToDecimalString(org.walletBalanceMicroUsd ?? 0),
+        })),
+      };
     }),
 
   createOrganization: platformProcedure
