@@ -75,12 +75,12 @@ export const getBillingChatBlockReason = (
     return 'MEMBER_BUDGET_NOT_ALLOCATED';
   }
 
-  if (!source.isActive) {
-    return source.source === 'personal' ? 'PERSONAL_WALLET_INACTIVE' : 'MEMBER_BUDGET_INACTIVE';
-  }
-
   if (source.source === 'organization' && source.renewalBlocked) {
     return 'MEMBER_BUDGET_RENEWAL_BLOCKED';
+  }
+
+  if (!source.isActive) {
+    return source.source === 'personal' ? 'PERSONAL_WALLET_INACTIVE' : 'MEMBER_BUDGET_INACTIVE';
   }
 
   if (!source.hasManagedKey) {
