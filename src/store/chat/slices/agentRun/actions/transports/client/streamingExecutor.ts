@@ -262,6 +262,8 @@ export class StreamingExecutorActionImpl {
       // sub-agent runs. Replaces the former dropSubAgentInGroup + applyPluginFilters
       // isSubAgent hard-coding.
       { isSubAgent, scope },
+      // Intent-gate image/video offer set from this turn's transcript.
+      { messages },
     );
     // When skillActivateMode is 'manual':
     // Exclude only discovery tools (activator, skill-store) so runtime-managed defaults
