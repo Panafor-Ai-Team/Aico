@@ -3,7 +3,7 @@
 import { type MarkdownProps } from '@lobehub/ui';
 import { type ReactNode, useMemo, useState } from 'react';
 
-import { HtmlPreviewDrawer } from '@/components/HtmlPreview';
+import { ChatHtmlCodeBlock, HtmlPreviewDrawer } from '@/components/HtmlPreview';
 import { useUserStore } from '@/store/user';
 import { userGeneralSettingsSelectors } from '@/store/user/selectors';
 
@@ -44,15 +44,38 @@ export const useChatMarkdown = ({
 
   const [drawerContent, setDrawerContent] = useState<string | null>(null);
 
+  const htmlPreviewProps = useMemo(
+    () => ({
+      defaultHeight: 420,
+      onExpand: (content: string) => setDrawerContent(content),
+      streamingMode: 'auto' as const,
+    }),
+    [],
+  );
+
   const components = useMemo(
-    () =>
-      Object.fromEntries(
+    () => ({
+      ...Object.fromEntries(
         markdownElements.map((element: MarkdownElement) => {
           const Component = element.Component;
           return [element.tag, (props: any) => <Component {...props} id={id} />];
         }),
       ),
-    [id],
+      // Override lobe-ui CodeBlock so plaintext/untagged full HTML documents
+      // and ```html fragments get an interactive preview instead of a dead
+      // source block.
+      pre: (props: any) => (
+        <ChatHtmlCodeBlock
+          {...props}
+          enableHtmlPreview
+          enableMermaid
+          fullFeatured
+          animated={animated}
+          html={htmlPreviewProps}
+        />
+      ),
+    }),
+    [animated, htmlPreviewProps, id],
   );
 
   const markdownProps = useMemo(
@@ -61,9 +84,7 @@ export const useChatMarkdown = ({
         animated,
         citations,
         componentProps: {
-          html: {
-            onExpand: (content: string) => setDrawerContent(content),
-          },
+          html: htmlPreviewProps,
         },
         components,
         enableCustomFootnotes: true,
@@ -76,7 +97,7 @@ export const useChatMarkdown = ({
         // Word granularity keeps each word in one text node — same idea as onboarding PlainTypewriter.
         streamAnimationGranularity: 'word',
       }) satisfies Partial<MarkdownProps>,
-    [animated, citations, components, enableStream],
+    [animated, citations, components, enableStream, htmlPreviewProps],
   );
 
   const drawer = useMemo(
