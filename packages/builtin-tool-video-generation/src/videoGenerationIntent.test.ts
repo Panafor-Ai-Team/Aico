@@ -140,6 +140,32 @@ describe('isVideoGenerationUserIntent', () => {
     expect(isVideoGenerationUserIntent('یه فیلم خوب معرفی کن')).toBe(false);
     expect(isVideoGenerationUserIntent('سلام')).toBe(false);
   });
+
+  it('rejects web/code logo animation briefs that say "make the animation"', () => {
+    // Regression: ENGLISH_VIDEO_COMMAND used to match "Make the animation …"
+    // and offer the video tool for HTML/CSS/JS brand intros.
+    const logoWebAnimation = [
+      'Create a premium cinematic logo animation based on the uploaded logo.',
+      'Build it as a working web animation using HTML, CSS, and JavaScript. If React is available, use React + Motion.',
+      'Make the animation loop seamlessly if possible.',
+      'Use SVG whenever possible. Use CSS transforms and GPU-friendly animations.',
+      'The result must run immediately in the browser.',
+      'create with code not video tool',
+    ].join('\n');
+
+    expect(isVideoGenerationUserIntent(logoWebAnimation)).toBe(false);
+    expect(
+      isVideoGenerationUserIntent(
+        'Make the animation settle in the center. Use HTML CSS and SVG. create with code not video tool',
+      ),
+    ).toBe(false);
+    expect(isVideoGenerationUserIntent('انیمیشن لوگو با HTML و CSS بساز، نه ویدیو')).toBe(false);
+  });
+
+  it('still detects video requests that mention HTML as the subject', () => {
+    expect(isVideoGenerationUserIntent('Generate a video tutorial about HTML and CSS')).toBe(true);
+    expect(isVideoGenerationUserIntent('ویدیو آموزشی React بساز')).toBe(true);
+  });
 });
 
 describe('findPendingUserMessage', () => {
