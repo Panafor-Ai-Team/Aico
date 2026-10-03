@@ -192,6 +192,24 @@ describe('AicoBilling types helpers', () => {
       );
     });
 
+    it('reports a failed renewal as a renewal block, not a disabled budget', () => {
+      const renewalFailed: AicoBillingSource = {
+        budgetAllocated: true,
+        hasManagedKey: true,
+        isActive: false,
+        organizationId: 'org-1',
+        organizationName: 'Acme',
+        remainingMicroUsd: '0',
+        remainingPi: '0',
+        remainingUsd: '0.000000',
+        renewalBlocked: true,
+        source: 'organization',
+      };
+      expect(getBillingChatBlockReason(renewalFailed, { trialActive: false })).toBe(
+        'MEMBER_BUDGET_RENEWAL_BLOCKED',
+      );
+    });
+
     it('allows funded sources', () => {
       expect(canChatWithBillingSource(sources[0], { trialActive: false })).toBe(true);
       expect(canChatWithBillingSource(sources[1], { trialActive: false })).toBe(true);

@@ -141,6 +141,26 @@ describe('aicoBilling router under the shared inference key', () => {
     await expect(caller.getManagedProviderStatus()).resolves.toMatchObject({ hasCredit: true });
   });
 
+  it.each([
+    ['a deactivated budget', { isActive: false }],
+    ['a failed renewal', { isActive: false, renewalStatus: 'renewal_failed' }],
+    ['a pending renewal', { renewalStatus: 'renewal_pending' }],
+  ])('shows no spendable org credit for %s', async (_label, state) => {
+    h.shared = true;
+    const org = await seedKeylessBudget();
+    await testDB.update(memberBudgets).set(state).where(eq(memberBudgets.orgId, org.id));
+    const caller = aicoBillingRouter.createCaller(createTestContext(userId));
+
+    const sources = await caller.getMyBillingSources();
+    const source = sources.sources.find(
+      (s) => s.source === 'organization' && s.organizationId === org.id,
+    )!;
+
+    expect(source.remainingMicroUsd).toBe('0');
+    expect(source.remainingPi).toBe('0');
+    expect(source.remainingUsd).toBe('0.000000');
+  });
+
   it('does not count a budget fully committed to open holds as org credit', async () => {
     const org = await seedKeylessBudget();
     await testDB

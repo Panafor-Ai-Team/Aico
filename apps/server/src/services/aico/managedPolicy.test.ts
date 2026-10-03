@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OrganizationModel } from '@/database/models/organization';
 import { users } from '@/database/schemas';
 import {
+  memberBudgets,
   modelAccessRules,
   organizationMembers,
   organizations,
@@ -83,6 +84,7 @@ describe('org wallet: Auto model is not gated by the team allow-list', () => {
   const ownerId = 'auto-bypass-owner';
 
   const cleanup = async () => {
+    await db.delete(memberBudgets);
     await db.delete(modelAccessRules);
     await db.delete(organizationTeamMembers);
     await db.delete(organizationTeams);
@@ -147,6 +149,26 @@ describe('org wallet: Auto model is not gated by the team allow-list', () => {
     await expect(
       policy.authorize({ billing, modelId: 'some/other-image-model', userId: ownerId }),
     ).rejects.toMatchObject({ code: 'MODEL_NOT_ALLOWED:some/other-image-model' });
+  });
+
+  it('reports a failed renewal as a renewal block, not a disabled budget', async () => {
+    const org = await orgModel.createOrganization({ name: 'Renewal Org', ownerUserId: ownerId });
+    const me = (await orgModel.listMembers(org.id)).find((m) => m.userId === ownerId)!;
+    // What `failBatch` in the renewal scheduler leaves behind.
+    await db.insert(memberBudgets).values({
+      isActive: false,
+      orgId: org.id,
+      orgMemberId: me.id,
+      periodAmountMicroUsd: 5_000_000,
+      renewalStatus: 'renewal_failed',
+    });
+
+    const policy = new AicoManagedPolicy(db, async () => null);
+    const billing = parseAicoBillingContext({ organizationId: org.id, source: 'organization' });
+
+    await expect(
+      policy.authorize({ billing, modelId: OPENROUTER_AUTO_MODEL_ID, userId: ownerId }),
+    ).rejects.toMatchObject({ code: 'MEMBER_BUDGET_RENEWAL_BLOCKED' });
   });
 
   it('lets Auto through even when the team is locked to zero models', async () => {
