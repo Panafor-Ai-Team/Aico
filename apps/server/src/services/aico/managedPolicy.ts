@@ -260,14 +260,16 @@ export class AicoManagedPolicy {
     if (!budget) {
       throw new AicoManagedPolicyError('MEMBER_BUDGET_NOT_ALLOCATED', ChatErrorType.InvalidUserKey);
     }
-    if (!budget.isActive) {
-      throw new AicoManagedPolicyError('MEMBER_BUDGET_INACTIVE', ChatErrorType.InvalidUserKey);
-    }
+    // Before `isActive`: a failed renewal also deactivates the budget, and
+    // reporting that as "inactive" hides the fixable cause.
     if (budget.renewalStatus === 'renewal_pending' || budget.renewalStatus === 'renewal_failed') {
       throw new AicoManagedPolicyError(
         'MEMBER_BUDGET_RENEWAL_BLOCKED',
         ChatErrorType.InvalidUserKey,
       );
+    }
+    if (!budget.isActive) {
+      throw new AicoManagedPolicyError('MEMBER_BUDGET_INACTIVE', ChatErrorType.InvalidUserKey);
     }
     const held = authoritative ? Math.max(0, Number(budget.heldMicroUsd ?? 0)) : 0;
     if (cycleRemainingMicroUsd(budget) - held <= 0) {

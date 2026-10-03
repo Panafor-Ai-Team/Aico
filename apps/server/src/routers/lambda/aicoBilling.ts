@@ -236,6 +236,10 @@ export const aicoBillingRouter = router({
             }
 
             const checkpointBp = Number(budget?.checkpointMultiplierBp ?? multiplierBp);
+            // `authorize` refuses an inactive or renewal-blocked budget, so its
+            // cycle figure is not spendable. Showing it made the chat box
+            // advertise credit that every send then rejected.
+            if (!budget?.isActive || renewalBlocked) remainingMicroUsd = 0;
 
             return {
               budgetAllocated: Boolean(budget),
