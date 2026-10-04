@@ -755,6 +755,7 @@ table member_budgets {
 
   indexes {
     org_member_id [name: 'member_budgets_org_member_uidx', unique]
+    openrouter_key_id [name: 'member_budgets_openrouter_key_id_uidx', unique]
     org_id [name: 'member_budgets_org_id_idx']
     next_renewal_at [name: 'member_budgets_next_renewal_at_idx']
     renewal_status [name: 'member_budgets_renewal_status_idx']

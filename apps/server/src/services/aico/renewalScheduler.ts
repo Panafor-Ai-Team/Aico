@@ -54,6 +54,7 @@ interface DueBudget {
   currentPeriod: BudgetPeriod;
   /** Active-cycle cap (OR limit source) — never includes pending hold. */
   currentPeriodAmountMicroUsd: number;
+  keyId: string | null;
   memberId: string;
   nextPeriod: BudgetPeriod;
   nextPeriodAmountMicroUsd: number;
@@ -121,6 +122,7 @@ export const processDueRenewals = async (
       budgetId: row.budget.id,
       currentPeriod: row.budget.period as BudgetPeriod,
       currentPeriodAmountMicroUsd: Number(row.budget.periodAmountMicroUsd ?? 0),
+      keyId: row.budget.openrouterKeyId ?? null,
       memberId: row.budget.orgMemberId,
       nextPeriod,
       nextPeriodAmountMicroUsd,
@@ -333,21 +335,61 @@ const renewOrg = async (params: {
   // reset at the boundary; the counter's settled value on one whose do not —
   // see `AicoOpenRouterKeyService.settleMemberPeriod`.
   const nextBaselines = new Map<string, number>();
+  // A key's remaining allowance is one pot of money: refund it to one budget only.
+  const refundedBudgetByKey = new Map<string, string>();
+  const duplicateKeys: { budgetId: string; keyId: string; refundedBudgetId: string }[] = [];
+  const overCap: { budgetId: string; capMicroUsd: number; reportedMicroUsd: number }[] = [];
   try {
     for (const b of budgets) {
       const settled = await keyService.settleMemberPeriod(b.memberId);
       nextBaselines.set(b.memberId, settled?.nextCycleBaselineMicroUsd ?? 0);
+
+      const refundedBudgetId = b.keyId ? refundedBudgetByKey.get(b.keyId) : undefined;
+      if (b.keyId && refundedBudgetId) {
+        duplicateKeys.push({ budgetId: b.budgetId, keyId: b.keyId, refundedBudgetId });
+        refunds.set(b.memberId, 0);
+        continue;
+      }
+      if (b.keyId) refundedBudgetByKey.set(b.keyId, b.budgetId);
+
       const usage = BigInt(settled?.usageMicroUsd ?? 0);
-      // Never refund from reserved (may include pending). Prefer OR remaining;
-      // fall back to current-cycle cap − usage only.
-      const unused =
+      // Never refund from reserved (may include pending), and never more than
+      // this cycle funded. Prefer OR remaining; fall back to cap − usage.
+      const cap = confirmedUnusedMicro(BigInt(b.currentPeriodAmountMicroUsd), usage);
+      const reported =
         settled?.remainingMicroUsd == null
-          ? confirmedUnusedMicro(BigInt(b.currentPeriodAmountMicroUsd), usage)
+          ? cap
           : BigInt(Math.max(0, Math.floor(settled.remainingMicroUsd)));
-      refunds.set(b.memberId, Number(unused));
+      if (reported > cap) {
+        overCap.push({
+          budgetId: b.budgetId,
+          capMicroUsd: Number(cap),
+          reportedMicroUsd: Number(reported),
+        });
+      }
+      refunds.set(b.memberId, Number(reported > cap ? cap : reported));
     }
   } catch (error) {
     return failBatch(`SETTLEMENT_FAILED:${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (duplicateKeys.length > 0) {
+    await sendSecurityAlert(db, {
+      dedupeKey: `renewal.duplicate_key:${batchKey}`,
+      details: { batchKey, duplicates: duplicateKeys, orgId },
+      severity: 'critical',
+      summary: `Renewal found ${duplicateKeys.length} budget(s) sharing a key in org ${orgId}; refunded each key once`,
+      type: 'renewal.duplicate_key',
+    });
+  }
+  if (overCap.length > 0) {
+    await sendSecurityAlert(db, {
+      dedupeKey: `renewal.refund_over_cap:${batchKey}`,
+      details: { batchKey, budgets: overCap, orgId },
+      severity: 'warning',
+      summary: `Renewal clamped ${overCap.length} refund(s) above the funded cycle cap in org ${orgId}`,
+      type: 'renewal.refund_over_cap',
+    });
   }
 
   const refundedMicroUsd = [...refunds.values()].reduce((sum, v) => sum + v, 0);

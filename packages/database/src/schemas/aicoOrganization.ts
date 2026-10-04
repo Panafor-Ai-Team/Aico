@@ -370,6 +370,11 @@ export const memberBudgets = pgTable(
   },
   (t) => [
     uniqueIndex('member_budgets_org_member_uidx').on(t.orgMemberId),
+    // Renewal refunds each budget from its key's remaining allowance, so two
+    // budgets on one key would refund the same money twice.
+    uniqueIndex('member_budgets_openrouter_key_id_uidx')
+      .on(t.openrouterKeyId)
+      .where(sql`${t.openrouterKeyId} IS NOT NULL`),
     index('member_budgets_org_id_idx').on(t.orgId),
     index('member_budgets_next_renewal_at_idx').on(t.nextRenewalAt),
     index('member_budgets_renewal_status_idx').on(t.renewalStatus),
