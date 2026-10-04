@@ -16,7 +16,9 @@ export type SecurityAlertType =
   | 'outbox.exhausted'
   | 'master.balance_unknown_error'
   | 'master.below_threshold'
-  | 'master.check_stale';
+  | 'master.check_stale'
+  | 'renewal.duplicate_key'
+  | 'renewal.refund_over_cap';
 
 export interface SendSecurityAlertParams {
   cooldownMs?: number;
