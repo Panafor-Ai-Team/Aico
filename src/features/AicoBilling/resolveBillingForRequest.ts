@@ -21,16 +21,36 @@ import {
 const isManagedProvider = (provider: string): boolean =>
   provider === 'aico' || MANAGED_PROVIDER_IDS.includes(provider as ManagedProviderId);
 
+let inFlightBillingSources: Promise<AicoBillingSourcesResponse> | null = null;
+
 const fetchBillingSourcesForAllowGate = async (): Promise<AicoBillingSourcesResponse> => {
   const cached = getBillingSourcesAllowGateCache();
   if (cached) return cached;
+  if (inFlightBillingSources) return inFlightBillingSources;
 
   // Skip upstream remaining/sync — placeHold is the authoritative funds check.
-  const data = (await lambdaClient.aicoBilling.getMyBillingSources.query({
-    syncLive: false,
-  })) as AicoBillingSourcesResponse;
-  seedBillingSourcesAllowGateCache(data);
-  return data;
+  inFlightBillingSources = (
+    lambdaClient.aicoBilling.getMyBillingSources.query({
+      syncLive: false,
+    }) as Promise<AicoBillingSourcesResponse>
+  )
+    .then((data) => {
+      seedBillingSourcesAllowGateCache(data);
+      return data;
+    })
+    .finally(() => {
+      inFlightBillingSources = null;
+    });
+
+  return inFlightBillingSources;
+};
+
+/** Refresh the allow-gate snapshot in the background so the next send skips the RPC. */
+export const prewarmAicoBillingAllowGate = (provider: string | undefined): void => {
+  if (!provider || !isManagedProvider(provider)) return;
+  if (getBillingSourcesAllowGateCache() || inFlightBillingSources) return;
+
+  fetchBillingSourcesForAllowGate().catch(() => {});
 };
 
 export const resolveAicoBillingForRequest = async (
