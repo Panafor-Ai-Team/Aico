@@ -23,6 +23,8 @@ const toggleTaskAgentPanelMock = vi.hoisted(() => vi.fn());
 const messageErrorMock = vi.hoisted(() => vi.fn());
 
 const chatState = vi.hoisted(() => ({
+  activeAgentId: undefined as string | undefined,
+  activeTopicId: undefined as string | undefined,
   inputMessage: 'hello',
   mainInputEditor: {
     clearContent: clearContentMock,
@@ -145,6 +147,7 @@ vi.mock('@/store/global/selectors', () => ({
 vi.mock('@/store/chat', () => {
   const useChatStore = (selector: (state: typeof chatState) => unknown) => selector(chatState);
   useChatStore.getState = () => chatState;
+  useChatStore.setState = (partial: Partial<typeof chatState>) => Object.assign(chatState, partial);
 
   return { useChatStore };
 });
@@ -188,6 +191,8 @@ describe('Home InputArea useSend', () => {
     homeDailyBriefState.advance.mockReset();
     homeDailyBriefState.currentPair = undefined;
     chatState.inputMessage = 'hello';
+    chatState.activeAgentId = undefined;
+    chatState.activeTopicId = undefined;
     fileState.chatContextSelections = [];
     fileState.chatUploadFileList = [];
     homeState.inputActiveMode = null;
@@ -368,6 +373,45 @@ describe('Home InputArea useSend', () => {
       await sentPayload.onTopicCreated('tpc_created');
     });
 
+    expect(routerMock.replace).toHaveBeenCalledWith('/agent/agt_inbox/tpc_created');
+  });
+
+  it('switches the open agent chat to the created topic before the route transition commits', async () => {
+    chatState.activeAgentId = 'agt_inbox';
+    const { result } = renderHook(() => useSend());
+
+    await act(async () => {
+      await result.current.send({
+        clearContent: vi.fn(),
+        editor: {} as Parameters<SendButtonHandler>[0]['editor'],
+        getEditorData: () => undefined,
+        getMarkdownContent: () => 'hello',
+      });
+    });
+
+    const sentPayload = sendMessageMock.mock.calls[0][0];
+    sentPayload.onTopicCreated('tpc_created');
+
+    expect(chatState.activeTopicId).toBe('tpc_created');
+    expect(routerMock.replace).toHaveBeenCalledWith('/agent/agt_inbox/tpc_created');
+  });
+
+  it('leaves the active topic alone when another agent chat is open', async () => {
+    chatState.activeAgentId = 'agt_other';
+    const { result } = renderHook(() => useSend());
+
+    await act(async () => {
+      await result.current.send({
+        clearContent: vi.fn(),
+        editor: {} as Parameters<SendButtonHandler>[0]['editor'],
+        getEditorData: () => undefined,
+        getMarkdownContent: () => 'hello',
+      });
+    });
+
+    sendMessageMock.mock.calls[0][0].onTopicCreated('tpc_created');
+
+    expect(chatState.activeTopicId).toBeUndefined();
     expect(routerMock.replace).toHaveBeenCalledWith('/agent/agt_inbox/tpc_created');
   });
 
