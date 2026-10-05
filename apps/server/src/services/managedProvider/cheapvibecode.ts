@@ -115,6 +115,13 @@ export const cvcTokensToUsd = (tokens: number): number => {
 const RATE_LIMIT_RETRIES = 3;
 const RATE_LIMIT_BACKOFF_MS = [400, 1200, 3000];
 
+/**
+ * Per-attempt cap on waiting for response headers. From the production host some
+ * connections to CVC are accepted and never answered; without a cap Node waits
+ * minutes, and every caller (billing sources, the chat allow-gate) hangs with it.
+ */
+const REQUEST_TIMEOUT_MS = 8000;
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Comma-separated per their Primary/Fallback domain guidance, tried in order. */
@@ -166,6 +173,8 @@ const cvcRequest = async <T>(
   for (const baseUrl of baseUrls) {
     for (let attempt = 0; attempt <= RATE_LIMIT_RETRIES; attempt += 1) {
       let res: Response;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
       try {
         res = await fetch(`${baseUrl}${path}`, {
           ...init,
@@ -174,12 +183,16 @@ const cvcRequest = async <T>(
             'Content-Type': 'application/json',
             ...init.headers,
           },
+          signal: controller.signal,
         });
       } catch (error) {
+        // A timed-out edit may still have been received, so it is outcome-unknown too.
         if (options.mutation) throw new CheapVibeCodeAmbiguousEditError(null);
         // Network-level failure: try the fallback domain rather than retrying.
         lastError = error as Error;
         break;
+      } finally {
+        clearTimeout(timer);
       }
 
       if (res.status === 429 && attempt < RATE_LIMIT_RETRIES) {

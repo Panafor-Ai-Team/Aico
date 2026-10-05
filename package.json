@@ -584,6 +584,8 @@
     "overrides": {
       "@lobehub/charts": "5.4.0",
       "@lobehub/editor": "4.23.1",
+      "@lobehub/icons": "5.15.0",
+      "@lobehub/tts": "5.1.2",
       "@lobehub/ui": "5.24.0",
       "@react-pdf/image": "3.0.4",
       "@types/react": "19.2.13",

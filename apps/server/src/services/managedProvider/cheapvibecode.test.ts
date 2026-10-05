@@ -18,6 +18,14 @@ const jsonResponse = (body: unknown, status = 200) =>
     status,
   });
 
+/** A connection that accepts the request and never answers until it is aborted. */
+const hangUntilAborted = (_url: string, init?: RequestInit) =>
+  new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () =>
+      reject(new DOMException('The operation was aborted.', 'AbortError')),
+    );
+  });
+
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -137,6 +145,24 @@ describe('HttpCheapVibeCodeClient', () => {
         client().deleteKey({ apiKey: 'sk-cvc-member', hash: 'k1' }),
       ).rejects.toBeInstanceOf(CheapVibeCodeAmbiguousEditError);
       expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports an edit that never answers as outcome-unknown instead of hanging', async () => {
+      vi.useFakeTimers();
+      try {
+        fetchMock.mockImplementation(hangUntilAborted);
+
+        const settled = client()
+          .deleteKey({ apiKey: 'sk-cvc-member', hash: 'k1' })
+          .then(() => null)
+          .catch((error: Error) => error);
+        await vi.advanceTimersByTimeAsync(10_000);
+
+        expect(await settled).toBeInstanceOf(CheapVibeCodeAmbiguousEditError);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('still retries a 429, which CVC did not process', async () => {
@@ -391,6 +417,24 @@ describe('HttpCheapVibeCodeClient', () => {
       const settled = await pending;
       expect(settled).toBeInstanceOf(Error);
       expect(settled?.message).toContain('429');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives up on a balance read that never answers instead of hanging the caller', async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementation(hangUntilAborted);
+
+      const settled = client()
+        .getKey({ apiKey: 'sk-cvc-member', hash: 'h' })
+        .then(() => null)
+        .catch((error: Error) => error);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(await settled).toBeInstanceOf(Error);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }

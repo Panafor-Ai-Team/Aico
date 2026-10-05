@@ -18,7 +18,7 @@ describe('@lobehub overrides', () => {
     expect(semver.valid(overrides['@lobehub/ui'])).not.toBeNull();
   });
 
-  it.each(['@lobehub/editor', '@lobehub/charts'])(
+  it.each(['@lobehub/editor', '@lobehub/charts', '@lobehub/icons', '@lobehub/tts'])(
     'pins %s to an exact version while @lobehub/ui is pinned',
     (name) => {
       expect(semver.valid(overrides[name])).not.toBeNull();
