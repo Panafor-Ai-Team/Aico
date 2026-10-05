@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetBillingSourcesAllowGateCacheForTests } from './billingSourcesAllowGateCache';
 import {
   assertAicoBillingAllowsChat,
-  prewarmAicoBillingAllowGate,
   resolveAicoBillingForRequest,
 } from './resolveBillingForRequest';
 import { setAicoBillingContext, useAicoBillingStore } from './store';
@@ -150,69 +149,5 @@ describe('assertAicoBillingAllowsChat', () => {
     });
 
     await expect(assertAicoBillingAllowsChat('aico')).resolves.toEqual({ source: 'personal' });
-  });
-});
-
-describe('prewarmAicoBillingAllowGate', () => {
-  beforeEach(() => {
-    useAicoBillingStore.setState({ context: null, hydrated: false });
-    resetBillingSourcesAllowGateCacheForTests();
-    getMyBillingSources.mockReset();
-  });
-
-  it('skips non-managed or missing providers', () => {
-    prewarmAicoBillingAllowGate('openai');
-    prewarmAicoBillingAllowGate(undefined);
-
-    expect(getMyBillingSources).not.toHaveBeenCalled();
-  });
-
-  it('warms the allow-gate so the next send skips the RPC', async () => {
-    setAicoBillingContext({ organizationId: 'org-9', source: 'organization' });
-    getMyBillingSources.mockResolvedValue(fundedSources);
-
-    prewarmAicoBillingAllowGate('aico');
-    prewarmAicoBillingAllowGate('aico');
-    await vi.waitFor(() => expect(getMyBillingSources).toHaveBeenCalledTimes(1));
-
-    await expect(assertAicoBillingAllowsChat('aico')).resolves.toEqual({
-      organizationId: 'org-9',
-      source: 'organization',
-    });
-    expect(getMyBillingSources).toHaveBeenCalledTimes(1);
-    expect(getMyBillingSources).toHaveBeenCalledWith({ syncLive: false });
-  });
-
-  it('lets a send during an in-flight prewarm share the same request', async () => {
-    setAicoBillingContext({ organizationId: 'org-9', source: 'organization' });
-    let resolveSources!: (value: typeof fundedSources) => void;
-    getMyBillingSources.mockReturnValue(
-      new Promise((resolve) => {
-        resolveSources = resolve;
-      }),
-    );
-
-    prewarmAicoBillingAllowGate('aico');
-    const send = assertAicoBillingAllowsChat('aico');
-    resolveSources(fundedSources);
-
-    await expect(send).resolves.toEqual({ organizationId: 'org-9', source: 'organization' });
-    expect(getMyBillingSources).toHaveBeenCalledTimes(1);
-  });
-
-  it('swallows prewarm failures and lets the send retry', async () => {
-    setAicoBillingContext({ organizationId: 'org-9', source: 'organization' });
-    getMyBillingSources.mockRejectedValueOnce(new Error('offline'));
-    getMyBillingSources.mockResolvedValueOnce(fundedSources);
-
-    prewarmAicoBillingAllowGate('aico');
-    await vi.waitFor(() => expect(getMyBillingSources).toHaveBeenCalledTimes(1));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    await expect(assertAicoBillingAllowsChat('aico')).resolves.toEqual({
-      organizationId: 'org-9',
-      source: 'organization',
-    });
-    expect(getMyBillingSources).toHaveBeenCalledTimes(2);
   });
 });
