@@ -11,7 +11,7 @@ description: >-
 # Aico upstream sync
 
 Bring `upstream/canary` (`lobehub/lobehub`) into Aico `origin/canary` **without
-losing fork-only product**. Ship via **`aico-ship`** (GitHub EN + Plane FA + PR).
+losing fork-only product**. Ship via **`aico-ship`** (GitHub issue + PR).
 
 Remotes (expected):
 
@@ -26,8 +26,7 @@ Default base for the sync PR: **`canary`**. Never force-push `canary` / `main`.
 
 | Concern                                      | Use                  |
 | -------------------------------------------- | -------------------- |
-| Dual trackers + PR closeout                  | `aico-ship`          |
-| Plane MCP / Persian comments                 | `plane`              |
+| GitHub issue + PR closeout                   | `aico-ship`          |
 | Branch / commit / `gh pr create` mechanics   | `pr` (ignore Linear) |
 | Migration renumber after merge               | `db-migrations`      |
 | Risk gates, conflict policy, protected paths | **this skill**       |
@@ -57,7 +56,7 @@ Upstream sync:
 - [ ] 1. Preconditions
 - [ ] 2. Fetch + divergence report
 - [ ] 3. Impact / risk gate (ask if needed)
-- [ ] 4. Trackers (GitHub + Plane) via aico-ship
+- [ ] 4. GitHub issue via aico-ship
 - [ ] 5. Sync branch + merge
 - [ ] 6. Resolve conflicts (policy below)
 - [ ] 7. Verify
@@ -118,16 +117,13 @@ Produce an **Impact brief** before merging:
 
 If the user only wanted analysis: stop after this brief. Do not create branch/PR unless they confirm.
 
-### 4. Trackers (before or right after branch)
+### 4. GitHub issue (before or right after branch)
 
-Follow **`aico-ship`**: create GitHub issue (EN) + Plane work item (FA), cross-link, **no prior duplicate search**.
+Follow **`aico-ship`**: create a GitHub issue (EN), **no prior duplicate search**.
 
-Suggested titles:
+Suggested title: `Sync upstream/canary into Aico (behind N)`
 
-- GitHub: `Sync upstream/canary into Aico (behind N)`
-- Plane: `همگام‌سازی upstream/canary با فورک Aico (N کامیت عقب)`
-
-Bodies should list: behind/ahead counts, high-risk protected paths, and that the sync PR will target `canary`.
+The body should list: behind/ahead counts, high-risk protected paths, and that the sync PR will target `canary`.
 
 ### 5. Sync branch + merge
 
@@ -197,8 +193,7 @@ OpenRouter provider, branding, admin panels, and fa-IR/RTL.
 Then **`aico-ship` finish-job**:
 
 - Push sync branch to `origin`
-- `gh pr create --base canary` with `Fixes #n` + Plane `AICO-xx`
-- Plane → **Testing** + Persian completion comment with PR URL
+- `gh pr create --base canary` with `Fixes #n`
 
 PR description must include:
 
@@ -213,11 +208,11 @@ PR description must include:
 - Blind `git checkout --theirs` on `apps/server/src/services/aico/**`, `openrouter/**`, `PlatformAdmin`, `AicoBilling`, branding
 - Renumbering **away** Aico migrations to match upstream numbers
 - Patching `pr` / `linear` skills instead of using `aico-ship`
-- Opening a PR without GitHub+Plane trackers when user asked to ship the sync
+- Opening a PR without a GitHub issue when user asked to ship the sync
 - Claiming “no risk” when protected paths appear in `changed in both`
 
 ## Additional resources
 
 - Protected path inventory: [PROTECTED.md](PROTECTED.md)
-- Dual-track ship: `aico-ship`
+- Issue + PR ship: `aico-ship`
 - Migrations: `db-migrations`

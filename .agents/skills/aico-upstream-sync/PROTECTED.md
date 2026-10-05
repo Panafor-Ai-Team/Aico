@@ -75,7 +75,7 @@ When upstream adds a migration with the **same numeric prefix**, keep Aico’s f
 
 - `.agents/skills/aico-ship/**`
 - `.agents/skills/aico-upstream-sync/**`
-- Cursor rules for Plane/GitHub language
+- Cursor rules for GitHub language
 
 Do not replace these with upstream `pr` / `linear` behavior.
 
