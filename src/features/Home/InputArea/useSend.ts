@@ -240,6 +240,16 @@ export const useSend = (mode: HomeMode = 'chat') => {
               message,
               onTopicCreated: (topicId) => {
                 router.replace(AGENT_CHAT_TOPIC_URL(selectedAgentId, topicId, false));
+                // The route commits as a transition, after sendMessage has already dropped
+                // the temp messages from the new-topic key; without an urgent switch the
+                // open chat paints its empty welcome state for a few frames.
+                if (useChatStore.getState().activeAgentId === selectedAgentId) {
+                  useChatStore.setState(
+                    { activeTopicId: topicId },
+                    false,
+                    'Home/useSend/switchToCreatedTopic',
+                  );
+                }
               },
               pageSelections,
             });
