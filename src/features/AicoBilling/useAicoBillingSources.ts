@@ -7,6 +7,7 @@ import { lambdaClient } from '@/libs/trpc/client';
 
 import { seedBillingSourcesAllowGateCache } from './billingSourcesAllowGateCache';
 import { AICO_BILLING_SOURCES_SWR_KEY } from './cacheKeys';
+import { loadBillingSources } from './loadBillingSources';
 import { useAicoBillingStore } from './store';
 import {
   type AicoBillingContext,
@@ -20,10 +21,9 @@ export const useAicoBillingSources = () => {
   const context = useAicoBillingStore((s) => s.context);
   const setContext = useAicoBillingStore((s) => s.setContext);
 
-  const { data, error, isLoading, mutate } = useClientDataSWR(
+  const { data, error, isLoading, mutate } = useClientDataSWR<AicoBillingSourcesResponse>(
     AICO_BILLING_SOURCES_SWR_KEY,
-    () =>
-      lambdaClient.aicoBilling.getMyBillingSources.query() as Promise<AicoBillingSourcesResponse>,
+    loadBillingSources,
   );
 
   useEffect(() => {
@@ -48,11 +48,11 @@ export const useAicoBillingSources = () => {
             ? { source: 'personal' }
             : { organizationId: next.organizationId, source: 'organization' },
         );
-        await mutate();
       } catch (err) {
         if (previous) setContext(previous);
         throw err;
       }
+      void mutate();
     },
     [mutate, setContext],
   );
