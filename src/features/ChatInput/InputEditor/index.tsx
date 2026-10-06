@@ -19,7 +19,6 @@ import { useHotkeysContext } from 'react-hotkeys-hook';
 import { useTranslation } from 'react-i18next';
 
 import { usePasteFile, useUploadFiles } from '@/components/DragUploadZone';
-import { prewarmAicoBillingAllowGate } from '@/features/AicoBilling/resolveBillingForRequest';
 import { useEnterToSend } from '@/hooks/useEnterToSend';
 import { useIMECompositionEvent } from '@/hooks/useIMECompositionEvent';
 import { usePermission } from '@/hooks/usePermission';
@@ -585,10 +584,6 @@ const InputEditor = memo<{
           updateMarkdownContent();
           inputHistory.handleEditorChange();
           saveDraftDebounced();
-          // Only the client runtime runs the billing allow-gate before streaming.
-          if (!heterogeneousType && !useChatStore.getState().isGatewayModeEnabled(agentId)) {
-            prewarmAicoBillingAllowGate(provider);
-          }
         }}
         onCompositionStart={({ event }) => {
           compositionProps.onCompositionStart(event);
