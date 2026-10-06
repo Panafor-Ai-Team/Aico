@@ -236,4 +236,38 @@ Drill on 2026-09-21: restore OK, users=15, messages=506, topics=52, files=71, 23
 - **LLM egress:** `openrouter.ai` answers from this DC, but providers can geo-block **inference** from Iranian IPs. Before go-live, run one real completion with a test key. If it is refused, route LLM traffic through the foreign relay: a ParsPack Germany/Hetzner server with a WireGuard tunnel, or an HTTP proxy via `HTTPS_PROXY` on the app container.
 - **`OPENROUTER_MANAGEMENT_BASE_URL`:** code change needed so key allocation goes through the relay.
 - **Backups when this host is prod:** run `./scripts/panachat-backup.sh --install-cron`, then ship its backups off this platform (for example, reverse the pull above so kamyar or the foreign server pulls from here).
-- **Mail (Stalwart):** belongs on the foreign server if it provides outbound port 25 and rDNS (ticket question 3).
+- **Mail (Stalwart):** now runs on this host (see §10). Open items: the PTR for `94.184.43.17` and the DKIM TXT records in ArvanCloud.
+
+---
+
+## 10. Mailer (Stalwart on this host)
+
+Stalwart `v0.16` moved here from kamyar on 2026-09-21. Compose file: `/home/panachat/stalwart/docker-compose.yml` (external volumes `stalwart-etc`, `stalwart-data`; never `down -v`). SMTP 25 / 465 / 587 and IMAP 143 / 993 are public and allowed in ufw. WebAdmin listens on `127.0.0.1:8080`, and nginx serves it at `https://mailer.panafor.com/admin`.
+
+| Item          | Value                                                                                                |
+| ------------- | ---------------------------------------------------------------------------------------------------- |
+| App SMTP      | `mailer.panafor.com:587` STARTTLS, user `noreply@panafor.com`, from `Panachat <noreply@panafor.com>` |
+| App route     | `panachat-network` alias `mailer.panafor.com` (no hairpin through the public IP)                     |
+| Admin account | `admin@panafor.com`; the password is in `/home/panachat/stalwart/admin-credentials.txt` (mode 600)   |
+| JMAP helper   | `echo '<methodCalls JSON>' \| ~/stalwart/jmap.py` (runs as the admin above)                          |
+| Outbound 25   | open from this DC (tested 2026-09-28)                                                                |
+
+**DNS for sending** (ArvanCloud, DNS-only):
+
+- SPF `panafor.com`: `v=spf1 mx ip4:79.175.131.62 ip4:5.135.244.12 a:mailer.panafor.com a:mail.panafor.com -all` (covers this host through `a:mailer.panafor.com`)
+- DMARC `_dmarc.panafor.com`: `v=DMARC1; p=none; rua=mailto:noreply@panafor.com; fo=1`
+- DKIM: Stalwart signs with `v1-ed25519-20260818` and `v1-rsa-20260818`. Publish `<selector>._domainkey.panafor.com` TXT using the values in WebAdmin → Domains → `panafor.com` → DNS records. The domain has **automatic DKIM rotation** (every 90 days) while DNS is managed manually. Publish the new selector's record whenever Stalwart rotates, or signatures fail.
+- PTR: ask ParsPack to set `94.184.43.17` → `mailer.panafor.com`. Gmail rejects or spam-folders mail from IPs without rDNS.
+
+**WebAdmin shows 502.** Stalwart's port-scan detector can auto-ban the Docker gateway (`172.18.0.1` etc.), because nginx and docker-proxy connect from there. Symptom: `curl http://127.0.0.1:8080/` on the host returns an empty reply, while `docker exec stalwart curl http://127.0.0.1:8080/` returns 302. Fix, then `docker restart stalwart` (the ban list is cached in memory):
+
+```bash
+echo '[["x:BlockedIp/get",{"ids":null},"b"]]' | ~/stalwart/jmap.py | grep -B1 -A4 '"172\.'
+echo '[["x:BlockedIp/set",{"destroy":["<id>"]},"d"]]' | ~/stalwart/jmap.py
+```
+
+`AllowedIp` entries for `172.18.0.0/16`, `172.19.0.0/16` and `172.20.0.0/16` were added on 2026-09-28 to stop this from happening again.
+
+**Locked out of the admin account.** Add `env_file: [{path: .env, required: false}]` to the service, put `STALWART_RECOVERY_ADMIN=admin:<long-random>` in `~/stalwart/.env` (mode 600), then run `docker compose up -d`. Reset the real admin's password, then remove both and recreate the container again.
+
+**End-to-end check.** Send as the app user on 587 to a Gmail inbox and use "Show original" to confirm SPF, DKIM and DMARC PASS. Bounces land in the `noreply@panafor.com` mailbox. `x:QueuedMessage/query` via the helper shows messages that are still waiting to be delivered.

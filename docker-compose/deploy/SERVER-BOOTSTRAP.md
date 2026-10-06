@@ -135,7 +135,7 @@ A records (or AAAA) pointing at `5.135.244.12`:
 
 Inbound MX for `panafor.com` currently points at `mail.panafor.com` (`194.180.11.117`). Keep that MX if that box still receives `@panafor.com` mail. Do **not** switch MX to `mailer.panafor.com` unless you are moving inboxes onto kamyar.
 
-For Panachat **sending** from kamyar, also publish (copy exact DKIM from Stalwart → Management → Domains → DNS):
+For Panachat **sending**, also publish these records (copy the exact DKIM value from Stalwart → Management → Domains → DNS). Stalwart now runs on the ParsPack host. See [SERVER-BOOTSTRAP-IRAN.md §10](./SERVER-BOOTSTRAP-IRAN.md#10-mailer-stalwart-on-this-host) for the current selectors and PTR.
 
 - SPF TXT on `panafor.com` must **include** this VPS, e.g. `v=spf1 mx ip4:5.135.244.12 a:mailer.panafor.com -all` (merge with any existing SPF; do not drop `mail.panafor.com`)
 - DKIM TXT `selector._domainkey.panafor.com` from Stalwart
@@ -326,6 +326,8 @@ Architecture notes: [canary-cicd.md](../../.cursor/skills/self-host-deploy/canar
 
 ## 12. Mailer (Stalwart SMTP for Panachat)
 
+> Stalwart moved off kamyar to the ParsPack host (`94.184.43.17`) on 2026-09-21. `mailer.panafor.com` now points there. See [SERVER-BOOTSTRAP-IRAN.md §10](./SERVER-BOOTSTRAP-IRAN.md#10-mailer-stalwart-on-this-host) for the live setup and troubleshooting. The steps below are kept for rebuilding it on a kamyar-style host.
+
 Stalwart runs as a **separate** Docker container on this VPS (volumes `stalwart-etc`, `stalwart-data`). Nginx fronts **WebAdmin only**. SMTP stays on host ports 25 / 465 / 587.
 
 Compose lives at `/home/panachat/stalwart/docker-compose.yml`. Publish 8080 on **loopback**: `'127.0.0.1:8080:8080'`. Nginx site: copy [`nginx/panachat-mailer-site.example.conf`](nginx/panachat-mailer-site.example.conf) to `/etc/nginx/sites-available/panachat-mailer`, `server_name mailer.panafor.com`, then certbot.
@@ -349,6 +351,6 @@ SMTP_PASS='…'
 SMTP_FROM=Panachat <noreply@panafor.com>
 ```
 
-Recreate the **active app slot** after env changes (`compose up -d --force-recreate panachat-green` or `panachat-blue`). Never `docker compose down -v`. App containers use `extra_hosts: mailer.panafor.com:host-gateway` so SMTP does not hairpin through the public IP.
+Recreate the **active app slot** after env changes (`compose up -d --force-recreate panachat-green` or `panachat-blue`). Never `docker compose down -v`. The app reaches SMTP over `panachat-network`: the Stalwart service joins that network with the alias `mailer.panafor.com` (matches the TLS cert). Do not use `extra_hosts: host-gateway`, because the cross-bridge hairpin drops data.
 
 Point Stalwart SMTP TLS at `/etc/letsencrypt/live/mailer.panafor.com/` (or a deploy-hook copy) so STARTTLS on 587 matches the hostname.
