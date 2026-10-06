@@ -118,6 +118,9 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
     }
 
     // ============  1. init chat model   ============ //
+    // Timed so the next first-token stall can be attributed to pre-LLM setup
+    // vs mid-stream from logs alone (production saw 5+ min partial stalls).
+    const chatSetupStartedAt = Date.now();
     // Single policy boundary: `AicoManagedPolicy` resolves the funded
     // wallet/budget, runs the model allow-list check (assertModelAllowed),
     // and injects the managed key — no env/BYOK fallback.
@@ -144,6 +147,11 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
       pricingContext: await resolveManagedPricingContext(serverDB),
       signal: req.signal,
     });
+
+    const chatSetupMs = Date.now() - chatSetupStartedAt;
+    if (chatSetupMs > 10_000) {
+      console.warn(`Route: [${provider}] slow pre-LLM setup: ${chatSetupMs}ms model=${data.model}`);
+    }
 
     // Under ledger enforce, `usage_logs` is written when the hold settles and the
     // hold is the spend. Under shadow the settle still writes the priced row, but

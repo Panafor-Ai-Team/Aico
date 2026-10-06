@@ -52,6 +52,26 @@ import {
 } from './serverCallLlmContextHints';
 import type { ServerCallLlmTooling } from './serverCallLlmTooling';
 
+/**
+ * Per-lookup cap so one hanging DB/external read cannot stall first-token for
+ * minutes (production saw 5+ min partial stalls, killed by maxDuration=300).
+ * Fail-open: every lookup below already treats errors as "skip this context",
+ * a timeout degrades exactly the same way.
+ */
+// ponytail: fixed 8s cap per lookup; tune per-loader if timeout logs get noisy
+const CONTEXT_LOOKUP_TIMEOUT_MS = 8_000;
+
+const withContextLookupTimeout = <T>(promise: Promise<T>, label: string): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      log('Context lookup timed out after %dms, skipping: %s', CONTEXT_LOOKUP_TIMEOUT_MS, label);
+      reject(new Error(`Context lookup timed out: ${label}`));
+    }, CONTEXT_LOOKUP_TIMEOUT_MS);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+};
+
 interface BuildServerCallLlmContextInput {
   ctx: RuntimeExecutorContext;
   llmPayload: CallLLMPayload;
@@ -140,21 +160,28 @@ const buildServerCallLlmContextInner = async ({
   if (!alreadyHasTopicRefs && ctx.serverDB && ctx.userId) {
     const topicModel = new TopicModel(ctx.serverDB, ctx.userId, ctx.workspaceId);
     const messageModel = new MessageModelClass(ctx.serverDB, ctx.userId, ctx.workspaceId);
-    topicReferences = await resolveTopicReferences(
-      messagesForContext as Array<{ content: string | unknown }>,
-      async (topicId) => topicModel.findById(topicId),
-      async (topicId) => {
-        const topic = await topicModel.findById(topicId);
-        return messageModel.query(
-          {
-            agentId: topic?.agentId ?? undefined,
-            groupId: topic?.groupId ?? undefined,
-            topicId,
+    try {
+      topicReferences = await withContextLookupTimeout(
+        resolveTopicReferences(
+          messagesForContext as Array<{ content: string | unknown }>,
+          async (topicId) => topicModel.findById(topicId),
+          async (topicId) => {
+            const topic = await topicModel.findById(topicId);
+            return messageModel.query(
+              {
+                agentId: topic?.agentId ?? undefined,
+                groupId: topic?.groupId ?? undefined,
+                topicId,
+              },
+              { postProcessUrl: buildPostProcessUrl(ctx) },
+            );
           },
-          { postProcessUrl: buildPostProcessUrl(ctx) },
-        );
-      },
-    );
+        ),
+        'topic-references',
+      );
+    } catch (error) {
+      log('Failed to resolve topic references: %O', error);
+    }
   }
 
   // Fetch agent documents for context injection.
@@ -167,7 +194,10 @@ const buildServerCallLlmContextInner = async ({
         ctx.userId,
         state.metadata?.workspaceId ?? ctx.workspaceId,
       );
-      const docs = await agentDocService.getAgentContextDocuments(agentId);
+      const docs = await withContextLookupTimeout(
+        agentDocService.getAgentContextDocuments(agentId),
+        'agent-documents',
+      );
       if (docs.length > 0) {
         agentDocuments = toAgentContextDocuments(docs);
         log('Resolved %d agent documents for agent %s', agentDocuments.length, agentId);
@@ -206,25 +236,37 @@ const buildServerCallLlmContextInner = async ({
       );
       const personaModel = new UserPersonaModel(ctx.serverDB, ctx.userId);
 
+      // Each leg is capped: one hanging read must not stall the whole
+      // onboarding context (getState has no .catch, so without a cap it
+      // would hang this Promise.all forever).
       const [onboardingState, soulDoc, persona, userInfo] = await Promise.all([
-        onboardingService.getState(),
-        onboardingService
-          .getInboxAgentId()
-          .then((inboxAgentId) =>
-            inboxAgentId ? docService.getDocumentByFilename(inboxAgentId, 'SOUL.md') : null,
-          )
-          .catch((error) => {
-            log('Failed to fetch SOUL.md for onboarding context: %O', error);
+        withContextLookupTimeout(onboardingService.getState(), 'onboarding-state'),
+        withContextLookupTimeout(
+          onboardingService
+            .getInboxAgentId()
+            .then((inboxAgentId) =>
+              inboxAgentId ? docService.getDocumentByFilename(inboxAgentId, 'SOUL.md') : null,
+            )
+            .catch((error) => {
+              log('Failed to fetch SOUL.md for onboarding context: %O', error);
+              return null;
+            }),
+          'onboarding-soul-doc',
+        ).catch(() => null),
+        withContextLookupTimeout(
+          personaModel.getLatestPersonaDocument().catch((error) => {
+            log('Failed to fetch user persona for onboarding context: %O', error);
             return null;
           }),
-        personaModel.getLatestPersonaDocument().catch((error) => {
-          log('Failed to fetch user persona for onboarding context: %O', error);
-          return null;
-        }),
-        onboardingService.getInitialUserInfo().catch((error) => {
-          log('Failed to fetch initial user info for onboarding context: %O', error);
-          return undefined;
-        }),
+          'onboarding-persona',
+        ).catch(() => null),
+        withContextLookupTimeout(
+          onboardingService.getInitialUserInfo().catch((error) => {
+            log('Failed to fetch initial user info for onboarding context: %O', error);
+            return undefined;
+          }),
+          'onboarding-user-info',
+        ).catch(() => undefined),
       ]);
 
       onboardingContext = {
@@ -254,7 +296,10 @@ const buildServerCallLlmContextInner = async ({
   if (lobehubSkillTopicId && ctx.serverDB && ctx.userId) {
     try {
       const topicModelForLobehub = new TopicModel(ctx.serverDB, ctx.userId, ctx.workspaceId);
-      const topicRecord = await topicModelForLobehub.findById(lobehubSkillTopicId);
+      const topicRecord = await withContextLookupTimeout(
+        topicModelForLobehub.findById(lobehubSkillTopicId),
+        'lobehub-topic-title',
+      );
       lobehubSkillTopicTitle = topicRecord?.title ?? '';
     } catch (error) {
       log('Failed to load topic title for lobehub skill placeholders: %O', error);
@@ -276,7 +321,10 @@ const buildServerCallLlmContextInner = async ({
   let serverLanguage = '';
   if (ctx.serverDB && ctx.userId) {
     try {
-      const userInfo = await UserModel.getInfoForAIGeneration(ctx.serverDB, ctx.userId);
+      const userInfo = await withContextLookupTimeout(
+        UserModel.getInfoForAIGeneration(ctx.serverDB, ctx.userId),
+        'user-info-variables',
+      );
       serverUsername = userInfo.userName;
       serverLanguage = userInfo.responseLanguage;
     } catch (error) {
@@ -290,7 +338,10 @@ const buildServerCallLlmContextInner = async ({
     try {
       const { formatUploadedFilesPrompt } = await import('@lobechat/builtin-tool-cloud-sandbox');
       const fileModel = new FileModel(ctx.serverDB, ctx.userId);
-      const uploadedFiles = await fileModel.findFilesToInitInSandbox(lobehubSkillTopicId);
+      const uploadedFiles = await withContextLookupTimeout(
+        fileModel.findFilesToInitInSandbox(lobehubSkillTopicId),
+        'sandbox-uploaded-files',
+      );
       sandboxUploadedFiles = formatUploadedFilesPrompt(uploadedFiles);
     } catch (error) {
       log('Failed to resolve files for {{sandbox_uploaded_files}} substitution: %O', error);
@@ -326,9 +377,12 @@ const buildServerCallLlmContextInner = async ({
         ctx.userId,
         state.metadata?.workspaceId ?? ctx.workspaceId,
       );
-      const [planDocument] = await topicDocumentModel.findByTopicId(lobehubSkillTopicId, {
-        type: AGENT_PLAN_FILE_TYPE,
-      });
+      const [planDocument] = await withContextLookupTimeout(
+        topicDocumentModel.findByTopicId(lobehubSkillTopicId, {
+          type: AGENT_PLAN_FILE_TYPE,
+        }),
+        'plan-todo',
+      );
       if (planDocument) {
         const todos = normalizeTodosState(
           planDocument.metadata?.todos,
@@ -347,9 +401,14 @@ const buildServerCallLlmContextInner = async ({
       const marketService = new MarketService({ userInfo: { userId: ctx.userId } });
       // Inside a workspace, the agent must only see the workspace's shared
       // organization credentials — personal creds are not visible here.
-      const credsResult = ctx.workspaceId
-        ? await marketService.market.organizations.creds({ workspaceId: ctx.workspaceId }).list()
-        : await marketService.market.creds.list();
+      // External HTTP with no server-side timeout of its own — cap it so a
+      // hanging marketplace call cannot stall first-token.
+      const credsResult = await withContextLookupTimeout(
+        ctx.workspaceId
+          ? marketService.market.organizations.creds({ workspaceId: ctx.workspaceId }).list()
+          : marketService.market.creds.list(),
+        'creds-list',
+      );
       const userCreds = (credsResult as any)?.data ?? [];
       credsListStr = generateCredsList(
         userCreds.map((cred: any): CredSummary => ({
@@ -373,18 +432,19 @@ const buildServerCallLlmContextInner = async ({
       // Connected = ACTIVE Composio connections across BOTH the legacy plugin
       // projection AND the connector table (agent-scoped connections live only
       // in the latter — see loadConnectedComposioIds).
-      const connectedIds = await loadConnectedComposioIds(
-        ctx.serverDB,
-        ctx.userId,
-        ctx.workspaceId,
-        agentId,
+      const connectedIds = await withContextLookupTimeout(
+        loadConnectedComposioIds(ctx.serverDB, ctx.userId, ctx.workspaceId, agentId),
+        'composio-connected-ids',
       );
       // Disabled services are dropped from both lists — not surfaced as
       // "connected, use directly" nor as "available to connect".
       let disabledIdSet = new Set<string>();
       if (agentId) {
         const agentModel = new AgentModel(ctx.serverDB, ctx.userId, ctx.workspaceId);
-        const agentConfig = await agentModel.getAgentConfigById(agentId);
+        const agentConfig = await withContextLookupTimeout(
+          agentModel.getAgentConfigById(agentId),
+          'composio-agent-config',
+        );
         disabledIdSet = new Set(getDisabledPluginIds(agentConfig?.plugins ?? undefined));
       }
       const connected: ComposioServiceSummary[] = excludeDisabledComposioServices(
@@ -415,10 +475,10 @@ const buildServerCallLlmContextInner = async ({
   if (editingAgentId && ctx.serverDB && ctx.userId) {
     try {
       const editingAgentModel = new AgentModel(ctx.serverDB, ctx.userId, ctx.workspaceId);
-      const editingConfig = (await editingAgentModel.getAgentConfigById(editingAgentId)) as Record<
-        string,
-        any
-      > | null;
+      const editingConfig = (await withContextLookupTimeout(
+        editingAgentModel.getAgentConfigById(editingAgentId),
+        'agent-builder-config',
+      )) as Record<string, any> | null;
       if (editingConfig) {
         const enabledPlugins: string[] = getActivePluginIds(
           Array.isArray(editingConfig.plugins) ? editingConfig.plugins : undefined,
@@ -443,11 +503,9 @@ const buildServerCallLlmContextInner = async ({
           try {
             // Agent-scoped connections aren't in the plugin table — union the
             // connector table so the builder marks them installed too.
-            const connectedComposioIds = await loadConnectedComposioIds(
-              ctx.serverDB,
-              ctx.userId,
-              ctx.workspaceId,
-              editingAgentId,
+            const connectedComposioIds = await withContextLookupTimeout(
+              loadConnectedComposioIds(ctx.serverDB, ctx.userId, ctx.workspaceId, editingAgentId),
+              'agent-builder-composio-ids',
             );
             for (const tool of COMPOSIO_APP_TYPES) {
               officialTools.push({
