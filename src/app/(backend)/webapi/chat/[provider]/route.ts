@@ -115,6 +115,10 @@ const recordManagedUsage = async (params: {
 
 export const POST = checkAuth(async (req: Request, { params, userId, serverDB }) => {
   const provider = (await params)!.provider!;
+  // Client-facing error bodies must never reveal the upstream gateway id
+  // (openrouter/cheapvibecode): managed traffic is presented as `aico`.
+  // Server-side logs below keep the real provider.
+  const publicProvider = AicoManagedPolicy.isManagedProvider(provider) ? 'aico' : provider;
 
   try {
     // Aico product: wallet → provisioned OpenRouter keys only. Never accept
@@ -229,7 +233,7 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
     if (e instanceof AicoManagedPolicyError) {
       return createErrorResponse(e.errorType as any, {
         error: e.code || e.message,
-        provider,
+        provider: publicProvider,
       });
     }
 
@@ -248,6 +252,6 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
       console.error(`Route: [${provider}] ${errorType}:`, error);
     }
 
-    return createErrorResponse(errorType, { error, ...res, provider });
+    return createErrorResponse(errorType, { error, ...res, provider: publicProvider });
   }
 });
