@@ -61,7 +61,20 @@ const SERVER_LLM_RETRY_POLICY = {
 // The message carries "timed out" so the retry classifier keeps it retryable.
 const LLM_FIRST_BYTE_TIMEOUT_MS = 60_000;
 
+// Cumulative first-byte budget for one call_llm step across its attempts.
+// Per-attempt caps alone still sum to minutes during a full outage; once the
+// budget is spent, remaining attempts fail immediately so the run ends fast.
+// Healthy and flapping upstreams finish inside the budget and never notice it.
+const LLM_FIRST_BYTE_BUDGET_MS = 120_000;
+
+// Marks our own stall-guard timeouts. Neutral to the error classifier (keeps
+// them retryable via "timed out") but lets the retry policy skip backoff
+// sleeps: spacing retries helps rate limits, which fail fast — not hangs.
+const STALL_GUARD_MARKER = '[stall-guard]';
+
 class ServerLLMRetryPolicy implements LLMRetryPolicy {
+  private lastFailureWasStall = false;
+
   constructor(private readonly ctx: RuntimeExecutorContext) {}
 
   classifyError(error: unknown) {
@@ -89,6 +102,7 @@ class ServerLLMRetryPolicy implements LLMRetryPolicy {
       maxAttempts,
       delayMs,
     );
+    this.lastFailureWasStall = error.message?.includes(STALL_GUARD_MARKER) ?? false;
   }
 
   resolveRetryBudget(provider: string) {
@@ -96,6 +110,12 @@ class ServerLLMRetryPolicy implements LLMRetryPolicy {
   }
 
   async waitForRetry(delayMs: number): Promise<void> {
+    // A hung gateway will not recover during backoff; retry at once instead
+    // of adding up to a minute of dead sleep across attempts.
+    if (this.lastFailureWasStall) {
+      this.lastFailureWasStall = false;
+      return;
+    }
     await sleep(delayMs);
   }
 }
@@ -182,6 +202,12 @@ export class ServerLLMTransport implements LLMTransport {
     string,
     ReturnType<ServerLLMTransport['createModelRuntime']>
   >();
+
+  // Cumulative first-byte budget tracking for the current call_llm step.
+  // Attempt numbers restart at 1 on every step, which is the reset signal.
+  private firstByteBudgetKey?: string;
+  private firstByteBudgetStartedAt = 0;
+  private lastAttemptNumber = 0;
 
   constructor(
     private readonly ctx: RuntimeExecutorContext,
@@ -274,19 +300,42 @@ export class ServerLLMTransport implements LLMTransport {
       }),
     };
     const operationLogId = `${this.ctx.operationId}:${this.ctx.stepIndex}`;
+    // New step (attempts restart at 1) or new operation: restart the budget.
+    if (this.firstByteBudgetKey !== operationLogId || input.attempt <= this.lastAttemptNumber) {
+      this.firstByteBudgetKey = operationLogId;
+      this.firstByteBudgetStartedAt = Date.now();
+    }
+    this.lastAttemptNumber = input.attempt;
+    const firstByteCapMs = Math.max(
+      0,
+      Math.min(
+        LLM_FIRST_BYTE_TIMEOUT_MS,
+        LLM_FIRST_BYTE_BUDGET_MS - (Date.now() - this.firstByteBudgetStartedAt),
+      ),
+    );
     let notifyFirstChunk!: () => void;
     const firstChunkPromise = new Promise<void>((resolve) => {
       notifyFirstChunk = resolve;
     });
     let firstByteTimer: ReturnType<typeof setTimeout> | undefined;
     const firstByteTimeout = new Promise<never>((_, reject) => {
+      if (firstByteCapMs <= 0) {
+        // Budget spent by earlier attempts: fail at once so the remaining
+        // attempts exhaust immediately instead of burning another minute each.
+        reject(
+          new Error(
+            `LLM attempt timed out: first-byte budget of ${LLM_FIRST_BYTE_BUDGET_MS}ms spent (model ${input.model}) ${STALL_GUARD_MARKER}`,
+          ),
+        );
+        return;
+      }
       firstByteTimer = setTimeout(() => {
         reject(
           new Error(
-            `LLM attempt timed out: no chunk within ${LLM_FIRST_BYTE_TIMEOUT_MS}ms (model ${input.model})`,
+            `LLM attempt timed out: no chunk within ${firstByteCapMs}ms (model ${input.model}) ${STALL_GUARD_MARKER}`,
           ),
         );
-      }, LLM_FIRST_BYTE_TIMEOUT_MS);
+      }, firstByteCapMs);
     });
     const attempt = createServerCallLlmAttempt({
       attempt: input.attempt,
