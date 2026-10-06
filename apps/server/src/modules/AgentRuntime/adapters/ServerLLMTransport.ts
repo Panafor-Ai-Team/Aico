@@ -54,6 +54,13 @@ const SERVER_LLM_RETRY_POLICY = {
   noRetryProviders: [BRANDING_PROVIDER],
 };
 
+// Bound for time-to-first-chunk of one LLM attempt. Attempts that produce no
+// chunk at all (tool-call-only turns, fast failures) settle on their own; a
+// hung upstream that sends nothing fails here instead of riding the OpenAI
+// SDK default (10 min) and multiplying across the 6-attempt retry policy.
+// The message carries "timed out" so the retry classifier keeps it retryable.
+const LLM_FIRST_BYTE_TIMEOUT_MS = 60_000;
+
 class ServerLLMRetryPolicy implements LLMRetryPolicy {
   constructor(private readonly ctx: RuntimeExecutorContext) {}
 
@@ -267,6 +274,20 @@ export class ServerLLMTransport implements LLMTransport {
       }),
     };
     const operationLogId = `${this.ctx.operationId}:${this.ctx.stepIndex}`;
+    let notifyFirstChunk!: () => void;
+    const firstChunkPromise = new Promise<void>((resolve) => {
+      notifyFirstChunk = resolve;
+    });
+    let firstByteTimer: ReturnType<typeof setTimeout> | undefined;
+    const firstByteTimeout = new Promise<never>((_, reject) => {
+      firstByteTimer = setTimeout(() => {
+        reject(
+          new Error(
+            `LLM attempt timed out: no chunk within ${LLM_FIRST_BYTE_TIMEOUT_MS}ms (model ${input.model})`,
+          ),
+        );
+      }, LLM_FIRST_BYTE_TIMEOUT_MS);
+    });
     const attempt = createServerCallLlmAttempt({
       attempt: input.attempt,
       blobStore: this.blobStore,
@@ -277,7 +298,10 @@ export class ServerLLMTransport implements LLMTransport {
       messageCount: chatPayload.messages.length,
       model: input.model,
       modelRuntime,
-      onFirstChunk: input.onFirstChunk ?? (() => {}),
+      onFirstChunk: () => {
+        notifyFirstChunk();
+        input.onFirstChunk?.();
+      },
       operationLogId,
       provider: input.provider,
       resolved,
@@ -290,12 +314,32 @@ export class ServerLLMTransport implements LLMTransport {
       userAgent: input.state.metadata?.userAgent,
     });
 
+    // A hung upstream loses at the first-byte cap; an attempt that settles on
+    // its own (fast failure, tool-call-only turn with no text chunks) resolves
+    // through `executing`; once the first chunk lands the cap is disarmed and
+    // the remainder streams unbounded so long generations are never cut.
+    const executing = attempt.execute();
     try {
-      await attempt.execute();
+      const firstByteOrSettled = await Promise.race([
+        firstByteTimeout,
+        executing.then(
+          () => 'settled' as const,
+          (error: unknown) => {
+            throw error;
+          },
+        ),
+        firstChunkPromise.then(() => 'first-byte' as const),
+      ]);
+      if (firstByteOrSettled === 'first-byte') {
+        clearTimeout(firstByteTimer);
+        await executing;
+      }
       return { ok: true, output: attempt.snapshot() };
     } catch (error) {
       attempt.clearBuffers();
       return { error, ok: false, output: attempt.snapshot() };
+    } finally {
+      clearTimeout(firstByteTimer);
     }
   }
 }

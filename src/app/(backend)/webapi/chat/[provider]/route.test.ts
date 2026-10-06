@@ -192,7 +192,8 @@ describe('POST handler', () => {
             errorMessage: 'Something went wrong',
             errorType: 500,
           },
-          provider: 'openrouter',
+          // Managed gateway ids never leak to the client: errors say `aico`.
+          provider: 'aico',
         },
         errorType: 500,
       });
@@ -261,8 +262,9 @@ describe('POST handler', () => {
         await vi.advanceTimersByTimeAsync(20_000);
         const response = await pending;
         expect(response.status).toBe(500);
+        // Managed gateway ids never leak to the client: errors say `aico`.
         expect(await response.json()).toMatchObject({
-          body: expect.objectContaining({ provider: 'openrouter' }),
+          body: expect.objectContaining({ provider: 'aico' }),
         });
       } finally {
         vi.useRealTimers();
