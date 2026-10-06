@@ -57,6 +57,27 @@ interface CreateServerCallLlmAttemptInput {
   userAgent?: string;
 }
 
+// Silence mid-stream means a stalled upstream: tokens flow continuously while
+// healthy, so no chunk for this long is never a slow model — fail the attempt
+// (retryable, like the first-byte cap) instead of holding the run open until
+// maxDuration kills it. Long generations keep flowing and never trip this.
+const LLM_STREAM_INACTIVITY_TIMEOUT_MS = 60_000;
+
+// Every chunk/event counts as upstream activity; silence trips the watchdog.
+const watchCallbacks = <T extends object>(callbacks: T, touch: () => void): T => {
+  const watched: Record<string, unknown> = {};
+  for (const [key, fn] of Object.entries(callbacks)) {
+    watched[key] =
+      typeof fn === 'function'
+        ? async (...args: unknown[]) => {
+            touch();
+            return (fn as (...args: unknown[]) => unknown)(...args);
+          }
+        : fn;
+  }
+  return watched as T;
+};
+
 const createStreamExecutionError = (errorData: unknown) => {
   const errorRecord = toRecord(errorData);
   const message = pickString(errorRecord?.message);
@@ -148,6 +169,39 @@ export class ServerCallLlmAttempt {
   }
 
   async execute(): Promise<void> {
+    let rejectStalled!: (reason: Error) => void;
+    const stalled = new Promise<never>((_, reject) => {
+      rejectStalled = reject;
+    });
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    const touchActivity = () => {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        rejectStalled(
+          new Error(
+            `LLM stream stalled: no chunk for ${LLM_STREAM_INACTIVITY_TIMEOUT_MS}ms (timed out waiting for upstream, model ${this.model})`,
+          ),
+        );
+      }, LLM_STREAM_INACTIVITY_TIMEOUT_MS);
+    };
+    touchActivity();
+    try {
+      await Promise.race([
+        this.executeInner({
+          disarmStall: () => clearTimeout(stallTimer),
+          touchActivity,
+        }),
+        stalled,
+      ]);
+    } finally {
+      clearTimeout(stallTimer);
+    }
+  }
+
+  private async executeInner(guard: {
+    disarmStall: () => void;
+    touchActivity: () => void;
+  }): Promise<void> {
     log(
       '[%s][call_llm] calling model-runtime chat (attempt %d/%d, model: %s, messages: %d, tools: %d)',
       this.operationLogId,
@@ -159,96 +213,99 @@ export class ServerCallLlmAttempt {
     );
 
     const response = await this.modelRuntime.chat(this.chatPayload, {
-      callback: {
-        onBase64Image: async ({ image }) => {
-          this.onFirstChunk();
-          this.base64ImageEvents.push({ ...image });
-          await this.streamSink.appendBase64Image(image);
-        },
-        onCompletion: async (data) => {
-          this.completion = data;
-          if (data.usage) this.usage = data.usage;
-          if (data.speed) this.speed = data.speed;
-          if (data.finishReason) this.finishReason = data.finishReason;
-          if (data.reasoning) this.reasoning = data.reasoning;
-          if (data.resolvedModel) this.resolvedModel = data.resolvedModel;
-        },
-        onContentPart: async (part) => {
-          this.onFirstChunk();
-          this.contentPartEvents.push({ ...part });
-          await this.streamSink.appendContentPart(part);
-        },
-        onError: async (errorData) => {
-          this.streamError = errorData;
-          console.error(`[${this.operationLogId}][stream_error]`, errorData);
-        },
-        onGrounding: async (groundingData) => {
-          log(`[${this.operationLogId}][grounding] %O`, groundingData);
-          this.grounding = groundingData;
+      callback: watchCallbacks(
+        {
+          onBase64Image: async ({ image }) => {
+            this.onFirstChunk();
+            this.base64ImageEvents.push({ ...image });
+            await this.streamSink.appendBase64Image(image);
+          },
+          onCompletion: async (data) => {
+            this.completion = data;
+            if (data.usage) this.usage = data.usage;
+            if (data.speed) this.speed = data.speed;
+            if (data.finishReason) this.finishReason = data.finishReason;
+            if (data.reasoning) this.reasoning = data.reasoning;
+            if (data.resolvedModel) this.resolvedModel = data.resolvedModel;
+          },
+          onContentPart: async (part) => {
+            this.onFirstChunk();
+            this.contentPartEvents.push({ ...part });
+            await this.streamSink.appendContentPart(part);
+          },
+          onError: async (errorData) => {
+            this.streamError = errorData;
+            console.error(`[${this.operationLogId}][stream_error]`, errorData);
+          },
+          onGrounding: async (groundingData) => {
+            log(`[${this.operationLogId}][grounding] %O`, groundingData);
+            this.grounding = groundingData;
 
-          await this.ctx.streamManager.publishStreamChunk(
-            this.ctx.operationId,
-            this.ctx.stepIndex,
-            {
-              chunkType: 'grounding',
-              grounding: groundingData,
-            },
-          );
-        },
-        onReasoningPart: async (part) => {
-          this.onFirstChunk();
-          this.reasoningPartEvents.push({ ...part });
-          await this.streamSink.appendReasoningPart(part);
-        },
-        onText: async (text) => {
-          this.onFirstChunk();
-          timing(
-            '[%s] onText received chunk at %d, length: %d',
-            this.operationLogId,
-            Date.now(),
-            text.length,
-          );
-          await this.streamSink.appendText(text);
-        },
-        onThinking: async (reasoning) => {
-          this.onFirstChunk();
-          timing(
-            '[%s] onThinking received chunk at %d, length: %d',
-            this.operationLogId,
-            Date.now(),
-            reasoning.length,
-          );
-          await this.streamSink.appendThinking(reasoning);
-        },
-        onToolsCalling: async ({ toolsCalling: raw }) => {
-          const resolvedCalls = new ToolNameResolver().resolve(
-            raw,
-            this.resolved.promptManifestMap,
-            this.resolved.tools.map((tool) => tool.function.name),
-          );
-          const payload = resolvedCalls.map((toolCall) => ({
-            ...toolCall,
-            executor: this.resolved.executorMap?.[toolCall.identifier],
-            source: this.resolved.sourceMap[toolCall.identifier],
-          }));
+            await this.ctx.streamManager.publishStreamChunk(
+              this.ctx.operationId,
+              this.ctx.stepIndex,
+              {
+                chunkType: 'grounding',
+                grounding: groundingData,
+              },
+            );
+          },
+          onReasoningPart: async (part) => {
+            this.onFirstChunk();
+            this.reasoningPartEvents.push({ ...part });
+            await this.streamSink.appendReasoningPart(part);
+          },
+          onText: async (text) => {
+            this.onFirstChunk();
+            timing(
+              '[%s] onText received chunk at %d, length: %d',
+              this.operationLogId,
+              Date.now(),
+              text.length,
+            );
+            await this.streamSink.appendText(text);
+          },
+          onThinking: async (reasoning) => {
+            this.onFirstChunk();
+            timing(
+              '[%s] onThinking received chunk at %d, length: %d',
+              this.operationLogId,
+              Date.now(),
+              reasoning.length,
+            );
+            await this.streamSink.appendThinking(reasoning);
+          },
+          onToolsCalling: async ({ toolsCalling: raw }) => {
+            const resolvedCalls = new ToolNameResolver().resolve(
+              raw,
+              this.resolved.promptManifestMap,
+              this.resolved.tools.map((tool) => tool.function.name),
+            );
+            const payload = resolvedCalls.map((toolCall) => ({
+              ...toolCall,
+              executor: this.resolved.executorMap?.[toolCall.identifier],
+              source: this.resolved.sourceMap[toolCall.identifier],
+            }));
 
-          this.toolsCalling = payload;
-          // Keep raw arguments through execution so malformed JSON can reach the
-          // tool error path and give the model a self-repair signal. Finalizers
-          // sanitize only the persisted DB and replay-state copies.
-          this.toolCalls = raw;
+            this.toolsCalling = payload;
+            // Keep raw arguments through execution so malformed JSON can reach the
+            // tool error path and give the model a self-repair signal. Finalizers
+            // sanitize only the persisted DB and replay-state copies.
+            this.toolCalls = raw;
 
-          await this.streamSink.flushTextBuffer();
-          await this.ctx.streamManager.publishStreamChunk(
-            this.ctx.operationId,
-            this.ctx.stepIndex,
-            {
-              chunkType: 'tools_calling',
-              toolsCalling: payload,
-            },
-          );
+            await this.streamSink.flushTextBuffer();
+            await this.ctx.streamManager.publishStreamChunk(
+              this.ctx.operationId,
+              this.ctx.stepIndex,
+              {
+                chunkType: 'tools_calling',
+                toolsCalling: payload,
+              },
+            );
+          },
         },
-      },
+        guard.touchActivity,
+      ),
       metadata: {
         clientIp: this.clientIp,
         operationId: this.ctx.operationId,
@@ -260,6 +317,10 @@ export class ServerCallLlmAttempt {
     });
 
     await consumeStreamUntilDone(response);
+
+    // The stream is done: uploads and finalizers below run without chunk
+    // activity and must not trip the watchdog.
+    guard.disarmStall();
 
     if (this.streamError) throw createStreamExecutionError(this.streamError);
 

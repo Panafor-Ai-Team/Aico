@@ -39,6 +39,8 @@ describe('ServerLLMTransport runAttempt first-byte timeout', () => {
       const transport = new ServerLLMTransport(makeCtx());
       const chat = vi.fn().mockReturnValue(new Promise(() => {}));
       const pending = (transport as any).runAttemptWithRuntime(makeInput(), { chat });
+      // Attach before advancing timers so the timeout rejection is never unhandled.
+      void pending.catch(() => {});
 
       await vi.advanceTimersByTimeAsync(60_000);
       const result = await pending;
@@ -53,18 +55,22 @@ describe('ServerLLMTransport runAttempt first-byte timeout', () => {
     }
   });
 
-  it('lets a slow completion through once the first chunk has landed', async () => {
+  it('lets a slow completion through while chunks keep flowing', async () => {
     vi.useFakeTimers();
     try {
       const transport = new ServerLLMTransport(makeCtx());
       const chat = vi.fn().mockImplementation(async (_payload: any, options: any) => {
         await options?.callback?.onText?.('hello');
-        await new Promise((resolve) => setTimeout(resolve, 61_000));
-        return new Response('hello');
+        // 61s total but never silent for 60s: neither the first-byte cap
+        // (disarmed at the first chunk) nor the inactivity watchdog may fire.
+        await new Promise((resolve) => setTimeout(resolve, 59_000));
+        await options?.callback?.onText?.(' world');
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        return new Response('hello world');
       });
       const pending = (transport as any).runAttemptWithRuntime(makeInput(), { chat });
 
-      await vi.advanceTimersByTimeAsync(62_000);
+      await vi.advanceTimersByTimeAsync(65_000);
       const result = await pending;
 
       expect(result.ok).toBe(true);
