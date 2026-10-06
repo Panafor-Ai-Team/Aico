@@ -63,7 +63,7 @@ const makeRequest = (body: Record<string, unknown>) =>
     body: JSON.stringify({ aicoBilling: billing, ...body }),
   });
 
-// 模拟请求和响应
+// Mock request and response
 let request: Request;
 beforeEach(() => {
   request = makeRequest({ model: 'test-model' });
@@ -83,6 +83,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 
@@ -248,6 +249,44 @@ describe('POST handler', () => {
       });
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(recordUsage).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails fast instead of hanging when runtime init stalls', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(initModelRuntimeFromDB).mockReturnValue(new Promise(() => {}));
+        const pending = POST(makeRequest({ model: 'test-model' }), {
+          params: Promise.resolve({ provider: 'openrouter' }),
+        });
+        await vi.advanceTimersByTimeAsync(20_000);
+        const response = await pending;
+        expect(response.status).toBe(500);
+        expect(await response.json()).toMatchObject({
+          body: expect.objectContaining({ provider: 'openrouter' }),
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('fails fast instead of hanging when upstream sends no headers', async () => {
+      vi.useFakeTimers();
+      try {
+        const mockRuntime: LobeRuntimeAI = {
+          baseURL: 'abc',
+          chat: vi.fn().mockReturnValue(new Promise(() => {})),
+        };
+        vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+        const pending = POST(makeRequest({ model: 'test-model' }), {
+          params: Promise.resolve({ provider: 'openrouter' }),
+        });
+        await vi.advanceTimersByTimeAsync(60_000);
+        const response = await pending;
+        expect(response.status).toBe(500);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('keeps settling spend but leaves the priced row to the shadow hold', async () => {

@@ -27,6 +27,29 @@ import { resolveValidWorkspaceIdFromRequest } from '../../_utils/workspace';
 // this enforce user to enable fluid compute
 export const maxDuration = 300;
 
+// Bounds for the pre-stream setup on the direct chat path. This route does not
+// use the agent-runtime context builder, so its per-lookup caps do not apply
+// here: a hanging DB read or key repair inside initModelRuntimeFromDB would
+// otherwise stall first-token until maxDuration kills the stream mid-sentence.
+const SETUP_TIMEOUT_MS = 20_000;
+// Cap for waiting on upstream headers (time to first byte). Cleared once the
+// stream starts, so long generations are never cut mid-stream.
+const CHAT_START_TIMEOUT_MS = 60_000;
+
+const withSetupTimeout = <T>(promise: Promise<T>, label: string): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        Object.assign(new Error(`Chat setup timed out: ${label}`), {
+          errorType: ChatErrorType.InternalServerError,
+        }),
+      );
+    }, SETUP_TIMEOUT_MS);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+};
+
 const resolveBillingContext = (
   req: Request,
   body: ChatStreamPayload & { aicoBilling?: unknown },
@@ -124,10 +147,13 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
     // Single policy boundary: `AicoManagedPolicy` resolves the funded
     // wallet/budget, runs the model allow-list check (assertModelAllowed),
     // and injects the managed key — no env/BYOK fallback.
-    const modelRuntime = await initModelRuntimeFromDB(serverDB, userId, provider, workspaceId, {
-      billingContext,
-      modelId: data.model,
-    });
+    const modelRuntime = await withSetupTimeout(
+      initModelRuntimeFromDB(serverDB, userId, provider, workspaceId, {
+        billingContext,
+        modelId: data.model,
+      }),
+      'init-runtime',
+    );
 
     // ============  2. create chat completion   ============ //
 
@@ -139,14 +165,41 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
       traceOptions = createTraceOptions(data, { provider, trace: tracePayload });
     }
 
-    const response = await modelRuntime.chat(data, {
-      user: userId,
-      ...traceOptions,
-      // Managed traffic is resold capacity: the cost reported alongside the
-      // stream must already carry the platform multiplier.
-      pricingContext: await resolveManagedPricingContext(serverDB),
-      signal: req.signal,
+    // Fail fast when upstream sends no headers (gateway stall). The timer is
+    // cleared once chat() resolves at stream start, so the body can stream up
+    // to maxDuration without being cut. The race rejects on its own: a hung
+    // upstream that ignores abort signals still resolves to an error here.
+    const startController = new AbortController();
+    let startTimer: ReturnType<typeof setTimeout> | undefined;
+    const startTimeout = new Promise<never>((_, reject) => {
+      startTimer = setTimeout(() => {
+        startController.abort(new Error('Chat start timed out: upstream-headers'));
+        reject(
+          Object.assign(new Error('Chat start timed out: upstream-headers'), {
+            errorType: ChatErrorType.InternalServerError,
+          }),
+        );
+      }, CHAT_START_TIMEOUT_MS);
     });
+    const chatSignal = req.signal
+      ? AbortSignal.any([req.signal, startController.signal])
+      : startController.signal;
+    let response;
+    try {
+      response = await Promise.race([
+        modelRuntime.chat(data, {
+          user: userId,
+          ...traceOptions,
+          // Managed traffic is resold capacity: the cost reported alongside the
+          // stream must already carry the platform multiplier.
+          pricingContext: await resolveManagedPricingContext(serverDB),
+          signal: chatSignal,
+        }),
+        startTimeout,
+      ]);
+    } finally {
+      clearTimeout(startTimer);
+    }
 
     const chatSetupMs = Date.now() - chatSetupStartedAt;
     if (chatSetupMs > 10_000) {
