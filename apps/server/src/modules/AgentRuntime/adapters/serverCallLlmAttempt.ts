@@ -177,9 +177,11 @@ export class ServerCallLlmAttempt {
     const touchActivity = () => {
       clearTimeout(stallTimer);
       stallTimer = setTimeout(() => {
+        // Keep "[stall-guard]": the retry policy skips backoff sleeps for our
+        // own stall timeouts, while "timed out" keeps them retryable.
         rejectStalled(
           new Error(
-            `LLM stream stalled: no chunk for ${LLM_STREAM_INACTIVITY_TIMEOUT_MS}ms (timed out waiting for upstream, model ${this.model})`,
+            `LLM stream stalled: no chunk for ${LLM_STREAM_INACTIVITY_TIMEOUT_MS}ms (timed out waiting for upstream, model ${this.model}) [stall-guard]`,
           ),
         );
       }, LLM_STREAM_INACTIVITY_TIMEOUT_MS);
