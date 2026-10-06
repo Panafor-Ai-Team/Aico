@@ -54,6 +54,10 @@ const withSetupTimeout = <T>(promise: Promise<T>, label: string): Promise<T> => 
 // healthy. Error the stream so the run ends instead of holding the operation
 // open until maxDuration kills it. Long generations keep flowing and never
 // trip this. Status and headers pass through untouched.
+//
+// Only real SSE event lines count as activity: gateways send blank lines and
+// `: comment` keep-alives to hold the connection, and those bytes must not
+// reset the watchdog or a stalled run would look alive forever.
 const STREAM_INACTIVITY_TIMEOUT_MS = 60_000;
 
 const withStreamInactivityGuard = (
@@ -64,6 +68,8 @@ const withStreamInactivityGuard = (
   const body = response.body;
   if (!body) return response;
   const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let carry = '';
   let timer: ReturnType<typeof setTimeout> | undefined;
   const guarded = new ReadableStream({
     async start(controller) {
@@ -84,7 +90,16 @@ const withStreamInactivityGuard = (
           const { done, value } = await reader.read();
           if (done) break;
           controller.enqueue(value);
-          arm();
+          carry += decoder.decode(value, { stream: true });
+          const lines = carry.split('\n');
+          carry = lines.pop() ?? '';
+          if (carry.length > 4096) carry = carry.slice(-4096);
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed === '' || trimmed.startsWith(':')) continue;
+            arm();
+            break;
+          }
         }
         controller.close();
       } catch (error) {

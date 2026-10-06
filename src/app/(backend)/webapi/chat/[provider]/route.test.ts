@@ -330,6 +330,63 @@ describe('POST handler', () => {
       }
     });
 
+    it('ignores SSE keep-alives when watching for stream activity', async () => {
+      vi.useFakeTimers();
+      try {
+        const encoder = new TextEncoder();
+        let controller!: ReadableStreamDefaultController<Uint8Array>;
+        const keepAliveStream = new ReadableStream<Uint8Array>({
+          start(c) {
+            controller = c;
+            controller.enqueue(encoder.encode('data: {"x":1}\n\n'));
+          },
+        });
+        const mockRuntime: LobeRuntimeAI = {
+          baseURL: 'abc',
+          chat: vi.fn().mockResolvedValue(
+            new Response(keepAliveStream, {
+              headers: { 'Content-Type': 'text/event-stream' },
+            }),
+          ),
+        };
+        vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+        const response = await POST(makeRequest({ model: 'test-model' }), {
+          params: Promise.resolve({ provider: 'openrouter' }),
+        });
+
+        const reader = response.body!.getReader();
+        await reader.read();
+
+        // Gateway keep-alives carry bytes but no progress: they must not
+        // reset the watchdog or a stalled run would look alive forever.
+        await vi.advanceTimersByTimeAsync(20_000);
+        controller.enqueue(encoder.encode(': ping\n\n'));
+        await vi.advanceTimersByTimeAsync(20_000);
+        controller.enqueue(encoder.encode(': ping\n\n'));
+
+        // Drain whatever the gateway sent; the stream must terminate in the
+        // stall error. Reads are attached before advancing timers so the
+        // stream error is never unhandled.
+        const assertion = (async () => {
+          for (;;) {
+            try {
+              const next = await reader.read();
+              if (next.done) throw new Error('stream closed without stall error');
+            } catch (error) {
+              expect(String((error as Error)?.message ?? error)).toMatch(/stalled/);
+              return;
+            }
+          }
+        })();
+        await vi.advanceTimersByTimeAsync(25_000);
+        await assertion;
+        reader.releaseLock();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('keeps settling spend but leaves the priced row to the shadow hold', async () => {
       ledger.mode = 'shadow';
       try {
