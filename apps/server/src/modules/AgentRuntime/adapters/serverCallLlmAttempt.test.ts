@@ -460,4 +460,23 @@ describe('ServerCallLlmAttempt', () => {
       }),
     );
   });
+
+  it('fails a mid-stream stall with a timeout instead of holding the run open', async () => {
+    vi.useFakeTimers();
+    try {
+      const { attempt } = createAttempt(async ({ callback }) => {
+        await callback?.onText?.('partial answer');
+        // Upstream stalls mid-stream: headers arrived, no more chunks.
+        await new Promise(() => {});
+      });
+
+      const pending = attempt.execute();
+      // Attach before advancing timers so the timeout rejection is never unhandled.
+      const assertion = expect(pending).rejects.toThrow(/timed out/);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

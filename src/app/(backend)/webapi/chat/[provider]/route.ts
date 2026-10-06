@@ -50,6 +50,61 @@ const withSetupTimeout = <T>(promise: Promise<T>, label: string): Promise<T> => 
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 };
 
+// Mid-stream silence means a stalled upstream: tokens flow continuously while
+// healthy. Error the stream so the run ends instead of holding the operation
+// open until maxDuration kills it. Long generations keep flowing and never
+// trip this. Status and headers pass through untouched.
+const STREAM_INACTIVITY_TIMEOUT_MS = 60_000;
+
+const withStreamInactivityGuard = (
+  response: Response,
+  provider: string,
+  model?: string,
+): Response => {
+  const body = response.body;
+  if (!body) return response;
+  const reader = body.getReader();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const guarded = new ReadableStream({
+    async start(controller) {
+      const arm = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          reader.cancel().catch(() => {});
+          controller.error(
+            new Error(
+              `Chat stream stalled: no chunk for ${STREAM_INACTIVITY_TIMEOUT_MS}ms (timed out waiting for upstream, model ${model ?? provider})`,
+            ),
+          );
+        }, STREAM_INACTIVITY_TIMEOUT_MS);
+      };
+      arm();
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          controller.enqueue(value);
+          arm();
+        }
+        controller.close();
+      } catch (error) {
+        controller.error(error);
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    cancel() {
+      clearTimeout(timer);
+      reader.cancel().catch(() => {});
+    },
+  });
+  return new Response(guarded, {
+    headers: response.headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
+};
+
 const resolveBillingContext = (
   req: Request,
   body: ChatStreamPayload & { aicoBilling?: unknown },
@@ -210,6 +265,11 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
       console.warn(`Route: [${provider}] slow pre-LLM setup: ${chatSetupMs}ms model=${data.model}`);
     }
 
+    const guardedResponse =
+      response instanceof Response
+        ? withStreamInactivityGuard(response, provider, data.model)
+        : response;
+
     // Under ledger enforce, `usage_logs` is written when the hold settles and the
     // hold is the spend. Under shadow the settle still writes the priced row, but
     // the key read below is what moves the balance, so it keeps running.
@@ -228,7 +288,7 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
       );
     }
 
-    return response;
+    return guardedResponse;
   } catch (e) {
     if (e instanceof AicoManagedPolicyError) {
       return createErrorResponse(e.errorType as any, {

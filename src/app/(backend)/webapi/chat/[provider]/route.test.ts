@@ -291,6 +291,45 @@ describe('POST handler', () => {
       }
     });
 
+    it('errors a stalled mid-stream response instead of holding the run open', async () => {
+      vi.useFakeTimers();
+      try {
+        const hanging = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"x":1}\n\n'));
+            // Never closes: upstream stalled mid-stream.
+          },
+        });
+        const mockRuntime: LobeRuntimeAI = {
+          baseURL: 'abc',
+          chat: vi
+            .fn()
+            .mockResolvedValue(
+              new Response(hanging, { headers: { 'Content-Type': 'text/event-stream' } }),
+            ),
+        };
+        vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+        const response = await POST(makeRequest({ model: 'test-model' }), {
+          params: Promise.resolve({ provider: 'openrouter' }),
+        });
+
+        expect(response.headers.get('Content-Type')).toContain('text/event-stream');
+        const reader = response.body!.getReader();
+        const first = await reader.read();
+        expect(first.done).toBe(false);
+
+        const stalled = reader.read();
+        // Attach before advancing timers so the stream error is never unhandled.
+        const assertion = expect(stalled).rejects.toThrow(/stalled/);
+        await vi.advanceTimersByTimeAsync(60_000);
+        await assertion;
+        reader.releaseLock();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('keeps settling spend but leaves the priced row to the shadow hold', async () => {
       ledger.mode = 'shadow';
       try {
