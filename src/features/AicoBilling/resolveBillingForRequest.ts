@@ -23,24 +23,40 @@ const isManagedProvider = (provider: string): boolean =>
 
 let inFlightBillingSources: Promise<AicoBillingSourcesResponse> | null = null;
 
+/**
+ * Cap so a hanging billing RPC fails fast instead of stalling first-token
+ * for minutes. The 30s snapshot cache keeps the hot path RPC-free anyway.
+ */
+// ponytail: fixed 8s cap; raise only if slow networks trigger false timeouts
+const ALLOW_GATE_TIMEOUT_MS = 8_000;
+
 const fetchBillingSourcesForAllowGate = async (): Promise<AicoBillingSourcesResponse> => {
   const cached = getBillingSourcesAllowGateCache();
   if (cached) return cached;
   if (inFlightBillingSources) return inFlightBillingSources;
 
   // Skip upstream remaining/sync — placeHold is the authoritative funds check.
-  inFlightBillingSources = (
+  const request = (
     lambdaClient.aicoBilling.getMyBillingSources.query({
       syncLive: false,
     }) as Promise<AicoBillingSourcesResponse>
-  )
-    .then((data) => {
-      seedBillingSourcesAllowGateCache(data);
-      return data;
-    })
-    .finally(() => {
-      inFlightBillingSources = null;
-    });
+  ).then((data) => {
+    seedBillingSourcesAllowGateCache(data);
+    return data;
+  });
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('Billing allow-gate timed out')),
+      ALLOW_GATE_TIMEOUT_MS,
+    );
+  });
+
+  inFlightBillingSources = Promise.race([request, timeout]).finally(() => {
+    clearTimeout(timer);
+    inFlightBillingSources = null;
+  });
 
   return inFlightBillingSources;
 };
