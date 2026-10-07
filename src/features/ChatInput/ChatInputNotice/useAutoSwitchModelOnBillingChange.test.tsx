@@ -1,26 +1,35 @@
 import { renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { EnabledProviderWithModels } from '@/types/aiProvider';
+
 import {
   isModelInList,
   pickBillingSwitchFallbackModel,
   useAutoSwitchModelOnBillingChange,
 } from './useAutoSwitchModelOnBillingChange';
 
-interface TestModel {
-  id: string;
-}
-
-interface TestProviderWithModels {
-  children: TestModel[];
-  id: string;
-}
-
-const personalList: TestProviderWithModels[] = [
-  { children: [{ id: 'gpt-4o' }, { id: 'openrouter/auto' }], id: 'openai' },
+const personalList: EnabledProviderWithModels[] = [
+  {
+    children: [
+      { abilities: {}, id: 'gpt-4o' },
+      { abilities: {}, id: 'openrouter/auto' },
+    ],
+    id: 'openai',
+    name: 'OpenAI',
+    source: 'builtin',
+  },
 ];
-const orgList: TestProviderWithModels[] = [
-  { children: [{ id: 'openrouter/auto' }, { id: 'glm-5-flash' }], id: 'aico' },
+const orgList: EnabledProviderWithModels[] = [
+  {
+    children: [
+      { abilities: {}, id: 'openrouter/auto' },
+      { abilities: {}, id: 'glm-5-flash' },
+    ],
+    id: 'aico',
+    name: 'Aico',
+    source: 'builtin',
+  },
 ];
 
 const testState = vi.hoisted(() => ({
@@ -30,7 +39,7 @@ const testState = vi.hoisted(() => ({
   isInitRuntime: true,
   isModelListPending: false,
   isPreferenceLoading: false,
-  list: [] as TestProviderWithModels[],
+  list: [] as EnabledProviderWithModels[],
   model: 'gpt-4o',
   provider: 'openai',
   selectionPolicy: 'member' as 'fixed' | 'member',
@@ -102,7 +111,11 @@ describe('isModelInList / pickBillingSwitchFallbackModel', () => {
       model: 'openrouter/auto',
       provider: 'aico',
     });
-    expect(pickBillingSwitchFallbackModel([{ children: [{ id: 'x-1' }], id: 'p' }])).toEqual({
+    expect(
+      pickBillingSwitchFallbackModel([
+        { children: [{ abilities: {}, id: 'x-1' }], id: 'p', name: 'P', source: 'builtin' },
+      ]),
+    ).toEqual({
       model: 'x-1',
       provider: 'p',
     });
