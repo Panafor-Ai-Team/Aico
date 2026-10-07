@@ -189,6 +189,7 @@ describe('aicoBilling router under the shared inference key', () => {
     const source = sources.sources.find(
       (s) => s.source === 'organization' && s.organizationId === org.id,
     )!;
+    if (source.source !== 'organization') throw new Error('expected an organization source');
 
     expect(h.ensureMemberKey).toHaveBeenCalled();
     expect(source.hasManagedKey).toBe(false);
