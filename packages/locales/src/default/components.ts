@@ -246,7 +246,7 @@ export default {
   'ModelSwitchPanel.searchPlaceholder': 'Search models...',
   'ModelSwitchPanel.title': 'Model',
   'ModelSwitchPanel.useModelFrom': 'Use this model from:',
-  'ModelSwitchPanel.addModel.button': '+ Add model',
+  'ModelSwitchPanel.addModel.button': 'Add model',
   'ModelSwitchPanel.addModel.title': 'Manage models',
   'ModelSwitchPanel.addModel.empty': 'No models match your search.',
   'ModelSwitchPanel.addModel.loading': 'Loading models...',

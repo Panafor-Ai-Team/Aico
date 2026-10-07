@@ -134,7 +134,7 @@
   "ModelSelect.staleModel.removed.hint": "该模型已不可用，调用可能失败，请从下方选择新模型",
   "ModelSelect.staleModel.removed.tag": "已失效",
   "ModelSelect.staleModel.removed.tooltip": "该模型已从服务中移除，相关功能可能无法工作，请重新选择模型",
-  "ModelSwitchPanel.addModel.button": "+ 添加模型",
+  "ModelSwitchPanel.addModel.button": "添加模型",
   "ModelSwitchPanel.addModel.empty": "没有匹配的模型。",
   "ModelSwitchPanel.addModel.hint": "启用或关闭聊天选择器中的模型，与「设置 → AI 服务商」同一目录。",
   "ModelSwitchPanel.addModel.loadMore": "加载更多",
