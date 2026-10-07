@@ -4,6 +4,7 @@ import type { ModulePreloadOptions } from 'vite';
 
 import { viteEmotionSpeedy } from './emotionSpeedy';
 import { lobeIconImports } from './lobeIconImports';
+import { lobeUiImports } from './lobeUiImports';
 import { viteMarkdownImport } from './markdownImport';
 import { viteNodeModuleStub } from './nodeModuleStub';
 import { vitePlatformResolve } from './platformResolve';
@@ -361,6 +362,7 @@ export function sharedRendererPlugins(options: SharedRendererOptions) {
         hotKeys: ['altKey', 'ctrlKey'],
       }),
     react(),
+    lobeUiImports(),
     ...(options.platform === 'desktop' ? [] : lobeIconImports()),
   ];
 }
