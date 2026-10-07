@@ -34,7 +34,7 @@ export {
  * which is why `baseURL` is configurable per deployment rather than pinned.
  */
 export const params = {
-  baseURL: 'https://cheapvibecode.ru/v1',
+  baseURL: 'https://ru.cheapvibecode.ru/v1',
   chatCompletion: {
     handlePayload: (payload) => {
       const {

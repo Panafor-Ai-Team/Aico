@@ -129,7 +129,7 @@ const resolveBaseUrls = (): string[] => {
   const configured = aicoEnv.CHEAPVIBECODE_BASE_URL.split(',')
     .map((url) => url.trim().replace(/\/$/, ''))
     .filter(Boolean);
-  return configured.length > 0 ? configured : ['https://cheapvibecode.ru'];
+  return configured.length > 0 ? configured : ['https://ru.cheapvibecode.ru'];
 };
 
 const readBalanceTokens = (json: unknown): number => {
