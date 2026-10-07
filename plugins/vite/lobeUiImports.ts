@@ -1,4 +1,3 @@
-import transformImports from '@rolldown/plugin-transform-imports';
 import type { PluginOption } from 'vite';
 
 /**
@@ -12,7 +11,13 @@ import type { PluginOption } from 'vite';
  * Deep imports keep each route's UI dependencies in its own lazy chunk.
  *
  * Member > path map generated from node_modules/@lobehub/ui/es/index.mjs
- * (v5.24.0). Regenerate when upgrading @lobehub/ui.
+ * (v5.24.0). Regenerate when upgrading @lobehub/ui. Rule: a member uses a
+ * default import only if the barrel imports it with `import X from`;
+ * `{ X }`-style barrel imports must stay named (base-ui atoms modules,
+ * Modal/imperative, styles, utils, and stores have no default export).
+ * Deliberately unmapped: ErrorBoundary (barrel re-exports it from the
+ * external react-error-boundary package, which app code cannot resolve
+ * directly under pnpm).
  */
 const defaultMembers: Array<[string, string]> = [
   ['A', '@lobehub/ui/es/A/index'],
@@ -46,25 +51,6 @@ const defaultMembers: Array<[string, string]> = [
   ['Drawer', '@lobehub/ui/es/Drawer/Drawer'],
   ['Dropdown', '@lobehub/ui/es/Dropdown/Dropdown'],
   ['DropdownMenu', '@lobehub/ui/es/base-ui/DropdownMenu/DropdownMenu'],
-  ['DropdownMenuCheckboxItemPrimitive', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuFooter', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuGroup', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuGroupLabel', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuHeader', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuItem', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuItemContent', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuItemExtra', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuItemIcon', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuItemLabel', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuPopup', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuPortal', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuPositioner', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuRoot', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuScrollViewport', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuSeparator', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuSubmenuArrow', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuSubmenuRoot', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
-  ['DropdownMenuSubmenuTrigger', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
   ['EditableText', '@lobehub/ui/es/EditableText/EditableText'],
   ['EditorSlashMenu', '@lobehub/ui/es/EditorSlashMenu/EditorSlashMenu'],
   ['EmojiPicker', '@lobehub/ui/es/EmojiPicker/EmojiPicker'],
@@ -85,7 +71,6 @@ const defaultMembers: Array<[string, string]> = [
   ['Grid', '@lobehub/ui/es/Grid/Grid'],
   ['GroupAvatar', '@lobehub/ui/es/GroupAvatar/GroupAvatar'],
   ['GuideCard', '@lobehub/ui/es/GuideCard/GuideCard'],
-  ['HTML_PREVIEW_DEFAULT_SANDBOX', '@lobehub/ui/es/HtmlPreview/const'],
   ['Header', '@lobehub/ui/es/Header/Header'],
   ['Hotkey', '@lobehub/ui/es/Hotkey/Hotkey'],
   ['HotkeyInput', '@lobehub/ui/es/HotkeyInput/HotkeyInput'],
@@ -107,21 +92,10 @@ const defaultMembers: Array<[string, string]> = [
   ['Mermaid', '@lobehub/ui/es/Mermaid/Mermaid'],
   ['Meta', '@lobehub/ui/es/ThemeProvider/Meta'],
   ['Modal', '@lobehub/ui/es/Modal/Modal'],
-  ['MotionProvider', '@lobehub/ui/es/MotionProvider/index'],
   ['NeuralNetworkLoading', '@lobehub/ui/es/NeuralNetworkLoading/NeuralNetworkLoading'],
   ['Popover', '@lobehub/ui/es/base-ui/Popover/Popover'],
-  ['PopoverBackdrop', '@lobehub/ui/es/base-ui/Popover/atoms'],
   ['PopoverGroup', '@lobehub/ui/es/base-ui/Popover/PopoverGroup'],
-  ['PopoverPopup', '@lobehub/ui/es/base-ui/Popover/atoms'],
-  ['PopoverPortal', '@lobehub/ui/es/base-ui/Popover/atoms'],
-  ['PopoverPositioner', '@lobehub/ui/es/base-ui/Popover/atoms'],
-  ['PopoverRoot', '@lobehub/ui/es/base-ui/Popover/atoms'],
-  ['PopoverTriggerElement', '@lobehub/ui/es/base-ui/Popover/atoms'],
   ['PreviewGroup', '@lobehub/ui/es/Image/PreviewGroup'],
-  ['ScrollAreaCorner', '@lobehub/ui/es/base-ui/ScrollArea/atoms'],
-  ['ScrollAreaRoot', '@lobehub/ui/es/base-ui/ScrollArea/atoms'],
-  ['ScrollAreaScrollbar', '@lobehub/ui/es/base-ui/ScrollArea/atoms'],
-  ['ScrollAreaThumb', '@lobehub/ui/es/base-ui/ScrollArea/atoms'],
   ['ScrollShadow', '@lobehub/ui/es/ScrollShadow/ScrollShadow'],
   ['SearchBar', '@lobehub/ui/es/SearchBar/SearchBar'],
   ['SearchResultCards', '@lobehub/ui/es/Markdown/components/SearchResultCards/index'],
@@ -151,16 +125,6 @@ const defaultMembers: Array<[string, string]> = [
   ['TooltipGroup', '@lobehub/ui/es/base-ui/Tooltip/TooltipGroup'],
   ['Typography', '@lobehub/ui/es/Markdown/Typography'],
   ['Video', '@lobehub/ui/es/Video/index'],
-  ['createModal', '@lobehub/ui/es/Modal/imperative'],
-  ['htmlPreviewContainsScript', '@lobehub/ui/es/HtmlPreview/const'],
-  ['isFullHtmlDocument', '@lobehub/ui/es/HtmlPreview/const'],
-  ['neutralColors', '@lobehub/ui/es/styles/customTheme'],
-  ['neutralColorsSwatches', '@lobehub/ui/es/styles/customTheme'],
-  ['preventDefaultAndStopPropagation', '@lobehub/ui/es/utils/dom'],
-  ['primaryColors', '@lobehub/ui/es/styles/customTheme'],
-  ['setContextMenuInterceptor', '@lobehub/ui/es/base-ui/ContextMenu/store'],
-  ['showContextMenu', '@lobehub/ui/es/base-ui/ContextMenu/store'],
-  ['toast', '@lobehub/ui/es/base-ui/Toast/imperative'],
 ];
 
 /** Same-name named exports: `import { X }` stays `import { X }`. */
@@ -215,24 +179,81 @@ const sameNameMembers: Array<[string, string]> = [
   ['renderDropdownMenuItems', '@lobehub/ui/es/base-ui/DropdownMenu/renderItems'],
   ['useAppElement', '@lobehub/ui/es/ThemeProvider/AppElementContext'],
   ['useCdnFn', '@lobehub/ui/es/ConfigProvider/index'],
+  ['useModalContext', '@lobehub/ui/es/Modal/ModalProvider'],
+  ['useMotionComponent', '@lobehub/ui/es/MotionProvider/index'],
+  ['usePopoverContext', '@lobehub/ui/es/base-ui/Popover/context'],
   ['usePopoverPortalContainer', '@lobehub/ui/es/base-ui/Popover/PopoverPortal'],
+  ['useToast', '@lobehub/ui/es/base-ui/Toast/imperative'],
   ['useTranslation', '@lobehub/ui/es/i18n/useTranslation'],
+  // base-ui atoms modules only have named exports — never default-import them.
+  ['DropdownMenuCheckboxItemPrimitive', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuFooter', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuGroup', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuGroupLabel', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuHeader', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuItem', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuItemContent', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuItemExtra', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuItemIcon', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuItemLabel', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuPopup', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuPortal', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuPositioner', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuRoot', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuScrollViewport', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuSeparator', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuSubmenuArrow', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuSubmenuRoot', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuSubmenuTrigger', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['DropdownMenuTrigger', '@lobehub/ui/es/base-ui/DropdownMenu/atoms'],
+  ['PopoverBackdrop', '@lobehub/ui/es/base-ui/Popover/atoms'],
+  ['PopoverPopup', '@lobehub/ui/es/base-ui/Popover/atoms'],
+  ['PopoverPortal', '@lobehub/ui/es/base-ui/Popover/atoms'],
+  ['PopoverPositioner', '@lobehub/ui/es/base-ui/Popover/atoms'],
+  ['PopoverRoot', '@lobehub/ui/es/base-ui/Popover/atoms'],
+  ['PopoverTriggerElement', '@lobehub/ui/es/base-ui/Popover/atoms'],
+  ['PopoverViewport', '@lobehub/ui/es/base-ui/Popover/atoms'],
+  ['ScrollAreaCorner', '@lobehub/ui/es/base-ui/ScrollArea/atoms'],
+  ['ScrollAreaRoot', '@lobehub/ui/es/base-ui/ScrollArea/atoms'],
+  ['ScrollAreaScrollbar', '@lobehub/ui/es/base-ui/ScrollArea/atoms'],
+  ['ScrollAreaThumb', '@lobehub/ui/es/base-ui/ScrollArea/atoms'],
+  ['ScrollAreaViewport', '@lobehub/ui/es/base-ui/ScrollArea/atoms'],
+  ['MotionProvider', '@lobehub/ui/es/MotionProvider/index'],
+  ['createModal', '@lobehub/ui/es/Modal/imperative'],
+  ['createRawModal', '@lobehub/ui/es/Modal/imperative'],
+  ['generateColorPalette', '@lobehub/ui/es/styles/theme/generateColorPalette'],
+  ['isFullHtmlDocument', '@lobehub/ui/es/HtmlPreview/const'],
+  ['isHtmlContentClosed', '@lobehub/ui/es/HtmlPreview/const'],
+  ['neutralColors', '@lobehub/ui/es/styles/customTheme'],
+  ['neutralColorsSwatches', '@lobehub/ui/es/styles/customTheme'],
+  ['preventDefaultAndStopPropagation', '@lobehub/ui/es/utils/dom'],
+  ['primaryColors', '@lobehub/ui/es/styles/customTheme'],
+  ['primaryColorsSwatches', '@lobehub/ui/es/styles/customTheme'],
+  ['setContextMenuInterceptor', '@lobehub/ui/es/base-ui/ContextMenu/store'],
+  ['showContextMenu', '@lobehub/ui/es/base-ui/ContextMenu/store'],
+  ['stopPropagation', '@lobehub/ui/es/utils/dom'],
+  ['toFloatingUIPlacement', '@lobehub/ui/es/utils/placement'],
+  ['toast', '@lobehub/ui/es/base-ui/Toast/imperative'],
+  ['updateContextMenuItems', '@lobehub/ui/es/base-ui/ContextMenu/store'],
 ];
 
 /**
- * Aliased exports: `import { Orig as Alias }` keeps its alias.
- * Each entry gets its own plugin instance with an exact-match pattern
- * (`^Orig as Alias$`) and a template that re-emits the alias.
+ * Aliased exports: the barrel exports these under a different name
+ * (`Orig as Alias`), so `import { Orig as Alias }` and `import { Alias }`
+ * both rewrite to `import { Orig [as Local] }` from the deep path.
+ * Each entry: [alias (barrel name), deep path, original export name].
  */
 const aliasedMembers: Array<[string, string, string]> = [
   // [alias (barrel name), deep path, original export name]
   ['HTML_PREVIEW_DEFAULT_HEIGHT', '@lobehub/ui/es/HtmlPreview/const', 'DEFAULT_HEIGHT'],
+  ['HTML_PREVIEW_DEFAULT_SANDBOX', '@lobehub/ui/es/HtmlPreview/const', 'DEFAULT_SANDBOX'],
   [
     'HTML_PREVIEW_RESIZE_MESSAGE',
     '@lobehub/ui/es/HtmlPreview/injectAutoHeightScript',
     'AUTO_HEIGHT_MESSAGE_TYPE',
   ],
   ['LobeUIProvider', '@lobehub/ui/es/i18n/context', 'I18nProvider'],
+  ['htmlPreviewContainsScript', '@lobehub/ui/es/HtmlPreview/const', 'containsScript'],
   ['lobeCustomStylish', '@lobehub/ui/es/styles/theme/customStylish', 'generateCustomStylish'],
   ['lobeCustomToken', '@lobehub/ui/es/styles/theme/customToken', 'generateCustomToken'],
   ['lobeStaticStylish', '@lobehub/ui/es/styles/theme/customStylishStatic', 'staticStylish'],
@@ -240,67 +261,82 @@ const aliasedMembers: Array<[string, string, string]> = [
 ];
 
 /**
- * Rewrites @lobehub/ui barrel imports to deep es/ imports.
+ * Rewrites @lobehub/ui barrel imports to deep es/ imports in a single pass.
  * Must run before React/plugin transforms; mirrors lobeIconImports behavior.
+ *
+ * A single pass is required: the rewrite tool used before processes one
+ * member class per plugin instance and rewrites members unknown to that
+ * instance to `from '<Member>'`, so instances clobber each other on mixed
+ * imports. Here every specifier is routed exactly once.
  */
 export const lobeUiImports = (): PluginOption[] => {
-  const plugins: PluginOption[] = [
-    // Default-export components: `import { X }` becomes `import X from ...`
-    transformImports({
-      '@lobehub/ui': {
-        preventFullImport: true,
-        transform: defaultMembers,
-      },
-    }),
+  const defaultPaths = new Map(defaultMembers);
+  const namedPaths = new Map(sameNameMembers);
+  const aliasOrigins = new Map(
+    aliasedMembers.map(([alias, from, orig]) => [alias, { from, orig }]),
+  );
 
-    // Same-name named exports stay named.
-    transformImports({
-      '@lobehub/ui': {
-        preventFullImport: true,
-        skipDefaultConversion: true,
-        transform: sameNameMembers,
-      },
-    }),
-
-    // Aliased named exports (`import { Orig as Alias }`): transform-imports
-    // drops the original name under skipDefaultConversion, so rewrite these
-    // with a small dedicated plugin that preserves `Orig as Alias`.
-    // Only 7 members use aliases; all other barrel imports go through
-    // transform-imports above (which handles mixed specifier lists itself).
+  return [
     {
       enforce: 'pre',
-      name: 'lobe-ui-aliased-imports',
+      name: 'lobe-ui-imports',
       transform(code, id) {
         if (!/\.[cm]?[jt]sx?$/.test(id) || !code.includes('@lobehub/ui')) return;
+        if (
+          /import\s+(?:\*\s+as\s+\S+|['"])@lobehub\/ui['"]/.test(code) ||
+          /import\s*\(\s*['"]@lobehub\/ui['"]\s*\)/.test(code)
+        ) {
+          throw new Error(
+            `lobe-ui-imports: namespace, side-effect, or dynamic imports from '@lobehub/ui' pull in the whole barrel: ${id}`,
+          );
+        }
         let changed = false;
-        const found = new Set<string>();
         const out = code.replaceAll(
-          /import\s*\{([^}]+)\}\s*from\s*(['"])@lobehub\/ui\2/g,
-          (full, specifiers: string, quote: string) => {
-            const parts = specifiers
+          /import\s+(type\s+)?\{([^}]+)\}\s*from\s*(['"])@lobehub\/ui\3/g,
+          (full, typeKeyword: string | undefined, specifiers: string, quote: string) => {
+            const typePrefix = typeKeyword ?? '';
+            const rewritten: Array<string> = [];
+            const rest: Array<string> = [];
+            for (const part of specifiers
               .split(',')
               .map((s) => s.trim())
-              .filter(Boolean);
-            const rewritten: string[] = [];
-            const rest: string[] = [];
-            for (const part of parts) {
-              const m = part.match(/^(\S+)\s+as\s+(\S+)$/);
+              .filter(Boolean)) {
+              // Each specifier: [type] Original [as Local]
+              const m = part.match(/^(type\s+)?(\S+)(?:\s+as\s+(\S+))?$/);
               if (!m) {
                 rest.push(part);
                 continue;
               }
-              const [, orig, alias] = m;
-              const entry = aliasedMembers.find(([a, , o]) => a === alias && o === orig);
-              if (!entry) {
-                rest.push(part);
-                continue;
+              const [, inlineType, specOrig, specLocal] = m;
+              const prefix = typePrefix || inlineType || '';
+              const local = specLocal ?? specOrig;
+              const defaultPath = defaultPaths.get(specOrig);
+              if (defaultPath) {
+                rewritten.push(`import ${prefix}${local} from ${quote}${defaultPath}${quote}`);
+              } else {
+                const namedPath = namedPaths.get(specOrig);
+                // Aliased barrel exports can be imported either as
+                // `Orig as Alias` or directly as `Alias` (optionally
+                // re-aliased by the importer), so check both names.
+                const aliasEntry = namedPath
+                  ? null
+                  : (aliasOrigins.get(specLocal) ?? aliasOrigins.get(specOrig));
+                const from = namedPath ?? aliasEntry?.from;
+                const orig = aliasEntry?.orig ?? specOrig;
+                if (!from) {
+                  rest.push(part);
+                  continue;
+                }
+                rewritten.push(
+                  `import ${prefix}{ ${orig}${local === orig ? '' : ` as ${local}`} } from ${quote}${from}${quote}`,
+                );
               }
-              found.add(alias);
-              rewritten.push(`import { ${orig} as ${alias} } from ${quote}${entry[1]}${quote};`);
             }
             if (!rewritten.length) return full;
             changed = true;
-            const kept = rest.length ? `import { ${rest.join(', ')} } from '@lobehub/ui';` : '';
+            const kept = rest.length
+              ? `import ${typePrefix}{ ${rest.join(', ')} } from '@lobehub/ui'`
+              : '';
             return [...rewritten, kept].filter(Boolean).join('\n');
           },
         );
@@ -309,24 +345,10 @@ export const lobeUiImports = (): PluginOption[] => {
       },
     },
   ];
+};
 
-  for (const plugin of plugins) {
-    // transform-imports only processes known extensions by default - include .mjs
-    // (mirrors lobeIconImports' includeModuleExtensions). Skip the custom
-    // alias plugin (a plain object without a transform filter shape).
-    if (!plugin || typeof plugin !== 'object' || Array.isArray(plugin) || !('transform' in plugin))
-      continue;
-    const transform = (plugin as { transform?: unknown }).transform;
-    if (typeof transform === 'object' && transform) {
-      (plugin as { transform: unknown }).transform = {
-        ...(transform as Record<string, unknown>),
-        filter: {
-          ...(transform as { filter?: Record<string, unknown> }).filter,
-          id: /\.[cm]?[jt]sx?$/,
-        },
-      };
-    }
-  }
-
-  return plugins;
+export const __testing = {
+  aliasedMembers,
+  defaultMembers,
+  sameNameMembers,
 };
