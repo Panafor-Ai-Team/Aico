@@ -86,6 +86,10 @@ export default {
   'org.allocateFailed': 'Allocation failed',
   'org.allocateHint':
     'Set a recurring π spending cap for this member. Unused balance does not roll over at renewal. Period changes apply at the next reset boundary.',
+  'org.allocateKeyCapacity':
+    'Budget allocated, but provider key slots are full — the member cannot spend it yet',
+  'org.allocateKeyFailed':
+    'Budget allocated, but the managed key could not be created — the member cannot spend it yet',
   'org.allocatePeriod': 'Reset period',
   'org.allocatePeriodHint':
     'Resets at midnight UTC. Weeks are Monday–Sunday UTC. Next boundary is shown in your local timezone below.',
@@ -501,6 +505,9 @@ export default {
   'wallet.previewUsd': 'Equivalent now: ${{usd}}',
   'wallet.keyPending': 'Key will be created when credits are added',
   'wallet.keyProvisioned': 'Managed key active',
+  'wallet.keyCapacityExhausted':
+    'Provider key slots are full — quota is allocated but unusable until slots free up',
+  'wallet.keyProvisionFailed': 'Key creation failed — quota is allocated but unusable right now',
   'wallet.linkOrg': 'Organization admin',
   'wallet.manualCreditHint':
     'Until online payment is live, a platform administrator adds credit for you.',
