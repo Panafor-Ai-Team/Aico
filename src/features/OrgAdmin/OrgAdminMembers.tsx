@@ -662,7 +662,7 @@ export const OrgAdminMembers = () => {
                   }
                   setBusy(true);
                   try {
-                    await lambdaClient.organization.allocateMemberCredit.mutate({
+                    const allocated = await lambdaClient.organization.allocateMemberCredit.mutate({
                       amountUsd: piTokensToBilledUsdString(
                         Number(values.amountPi),
                         fx?.piPerUsd ?? DEFAULT_PI_PER_USD,
@@ -672,7 +672,17 @@ export const OrgAdminMembers = () => {
                       orgMemberId: values.orgMemberId,
                       period: values.period,
                     });
-                    toast.success(t('org.allocateSuccess'));
+                    if (allocated.keyProvisioned === false) {
+                      toast.warning(
+                        t(
+                          allocated.keyProvisionError === 'PROVIDER_CAPACITY'
+                            ? 'org.allocateKeyCapacity'
+                            : 'org.allocateKeyFailed',
+                        ),
+                      );
+                    } else {
+                      toast.success(t('org.allocateSuccess'));
+                    }
                     allocIdempotencyKeyRef.current = null;
                     allocForm.resetFields(['amountPi', 'period']);
                     await refreshAll();

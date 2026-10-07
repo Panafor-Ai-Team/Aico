@@ -203,7 +203,10 @@ const cvcRequest = async <T>(
       if (!res.ok) {
         const body = await res.text().catch(() => '');
         // DATA-013: never embed an upstream body in Error.message.
+        // Include the base URL: with multiple failover domains, the domain
+        // that failed is what distinguishes a dead host from a bad request.
         console.warn('[cheapvibecode] API error', {
+          baseUrl,
           bodyPreview: body.slice(0, 200),
           path,
           status: res.status,

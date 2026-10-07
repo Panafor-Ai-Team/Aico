@@ -1,6 +1,13 @@
 export type AicoBillingContext =
   { source: 'personal' } | { source: 'organization'; organizationId: string };
 
+/**
+ * Why a funded source still has no managed key. Surfaced instead of the
+ * eternal "key will be created" pending state when provisioning was
+ * attempted and failed (allocate-time mint or wallet lazy repair).
+ */
+export type AicoKeyProvisionError = 'PROVIDER_CAPACITY' | 'PROVIDER_UNAVAILABLE';
+
 export type AicoPersonalBillingSource = {
   hasManagedKey: boolean;
   isActive: boolean;
@@ -27,6 +34,11 @@ export type AicoOrganizationBillingSource = {
   budgetAllocated: boolean;
   hasManagedKey: boolean;
   isActive: boolean;
+  /**
+   * Set when a funded budget has no key because provisioning failed.
+   * Optional so older cached responses keep typechecking; absent means null.
+   */
+  keyProvisionError?: AicoKeyProvisionError | null;
   organizationId: string;
   organizationName: string;
   remainingMicroUsd: string;

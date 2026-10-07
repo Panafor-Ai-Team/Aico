@@ -32,6 +32,8 @@ export type {
   AicoBillingContext,
   AicoBillingSource,
   AicoBillingSourcesResponse,
+  AicoKeyProvisionError,
+  AicoOrganizationBillingSource,
   AicoPersonalBillingSource,
 } from './types';
 export {

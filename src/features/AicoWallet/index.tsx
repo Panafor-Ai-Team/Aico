@@ -33,6 +33,7 @@ import { userProfileSelectors } from '@/store/user/selectors';
 import { type LooseTFunction } from '@/types/looseTranslation';
 
 import { resolveWalletDisplay } from './resolveWalletDisplay';
+import { resolveSourceKeyMessageKey } from './sourceKeyMessage';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   sourceActive: css`
@@ -192,7 +193,7 @@ export const AicoWallet = () => {
                     </Flexbox>
                     <PiAmount iconSize={18} style={{ fontSize: 18 }} value={source.remainingPi} />
                     <Text style={{ fontSize: 12 }} type="secondary">
-                      {source.hasManagedKey ? t('wallet.keyProvisioned') : t('wallet.keyPending')}
+                      {t(resolveSourceKeyMessageKey(source))}
                     </Text>
                   </button>
                 );

@@ -34,6 +34,7 @@ vi.mock('@/server/services/sms', () => ({
 
 const h = vi.hoisted(() => ({
   authoritative: false,
+  ensureMemberKey: vi.fn(),
   reclaimMemberKey: vi.fn(),
   shared: false,
 }));
@@ -49,6 +50,7 @@ vi.mock('@/server/services/aico/ledger/state', () => ({
 
 vi.mock('@/server/services/openrouter/keyService', () => ({
   AicoOpenRouterKeyService: class {
+    ensureMemberKey = h.ensureMemberKey;
     reclaimMemberKey = h.reclaimMemberKey;
   },
 }));
@@ -60,6 +62,7 @@ const usd = (n: number) => Math.round(n * 1_000_000);
 beforeEach(async () => {
   h.authoritative = false;
   h.shared = false;
+  h.ensureMemberKey.mockReset().mockResolvedValue({ created: false, keyId: null });
   // The key estimate claims the whole $5 cap is unspent.
   h.reclaimMemberKey.mockReset().mockResolvedValue({ remainingMicroUsd: usd(5), usageMicroUsd: 0 });
   testDB = await getTestDB();
@@ -106,6 +109,36 @@ describe('organization router under the usage ledger', () => {
 
     const after = Number((await orgModel.getById(orgId))!.walletBalanceMicroUsd);
     expect(after - before).toBe(usd(2.5));
+  });
+
+  it('allocateMemberCredit reports a key-mint failure instead of throwing after commit', async () => {
+    const orgModel = new OrganizationModel(testDB);
+    const org = await orgModel.createOrganization({ name: 'Key Fail Co', ownerUserId: ownerId });
+    await orgModel.addManualCredit({
+      amountMicroUsd: usd(10),
+      amountToman: 500_000,
+      createdByUserId: ownerId,
+      description: 'fund',
+      fxRateTomanPerUsd: 50_000,
+      orgId: org.id,
+      type: 'topup',
+    });
+    const me = (await orgModel.listMembers(org.id)).find((m) => m.userId === ownerId)!;
+    h.ensureMemberKey.mockRejectedValueOnce(new Error('Control plane proxy 500'));
+    const caller = organizationRouter.createCaller(createTestContext(ownerId));
+
+    const result = await caller.allocateMemberCredit({
+      amountMicroUsd: String(usd(5)),
+      orgId: org.id,
+      orgMemberId: me.id,
+      period: 'monthly',
+    });
+
+    expect(result.keyProvisioned).toBe(false);
+    expect(result.keyProvisionError).toBe('PROVIDER_UNAVAILABLE');
+    // The quota landed despite the key failure — no silent double-allocate trap.
+    const budget = await orgModel.getMemberBudgetForOrg({ orgId: org.id, orgMemberId: me.id });
+    expect(Number(budget?.periodAmountMicroUsd)).toBe(usd(5));
   });
 });
 

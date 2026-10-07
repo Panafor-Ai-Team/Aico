@@ -8,6 +8,7 @@ import { OrganizationModel } from '@/database/models/organization';
 import { aicoKeyOutbox, users } from '@/database/schemas';
 import type { LobeChatDatabase } from '@/database/type';
 import {
+  hasValidManagedKeyId,
   microUsdToDecimalString,
   tomanString,
   usdDecimalStringToMicro,
@@ -27,6 +28,7 @@ import {
 import { piFromBilledMicro } from '@/server/services/aico/piToken';
 import { recordAicoSecurityEvent } from '@/server/services/aico/securityAudit';
 import { EmailService } from '@/server/services/email';
+import { isManagedKeyCapacityError } from '@/server/services/managedProvider/cheapvibecode';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 import { SmsService } from '@/server/services/sms';
 
@@ -919,8 +921,31 @@ export const organizationRouter = router({
           period: input.period,
           periodAmountMicroUsd,
         });
-        const keyService = new AicoOpenRouterKeyService(ctx.serverDB);
-        await keyService.ensureMemberKey(input.orgMemberId);
+        // The quota above is committed; a key-mint failure must not fail the
+        // whole mutation (the old throw-after-commit is what produced the
+        // allocate/reclaim retry mess). Report it so the admin sees quota
+        // landed but unusable yet.
+        let keyProvisionError: 'PROVIDER_CAPACITY' | 'PROVIDER_UNAVAILABLE' | null = null;
+        try {
+          const keyService = new AicoOpenRouterKeyService(ctx.serverDB);
+          await keyService.ensureMemberKey(input.orgMemberId);
+        } catch (error) {
+          console.warn('[organization] allocate-time member key provisioning failed', {
+            orgId: input.orgId,
+            orgMemberId: input.orgMemberId,
+            error,
+          });
+          keyProvisionError = isManagedKeyCapacityError(error)
+            ? 'PROVIDER_CAPACITY'
+            : 'PROVIDER_UNAVAILABLE';
+        }
+        const refreshed = await ctx.organizationModel.getMemberBudgetForOrg({
+          orgId: input.orgId,
+          orgMemberId: input.orgMemberId,
+        });
+        const keyProvisioned =
+          isSharedInferenceKey() || hasValidManagedKeyId(refreshed?.openrouterKeyId);
+        if (!keyProvisioned && !keyProvisionError) keyProvisionError = 'PROVIDER_UNAVAILABLE';
         await recordAicoSecurityEvent(ctx.serverDB, {
           action: 'org.budget.allocate',
           actorUserId: ctx.userId,
@@ -940,6 +965,8 @@ export const organizationRouter = router({
           budgetPeriod: result.budget.period,
           budgetPeriodAmountMicroUsd: String(result.budget.periodAmountMicroUsd),
           budgetPeriodAmountUsd: microUsdToDecimalString(result.budget.periodAmountMicroUsd),
+          keyProvisioned,
+          keyProvisionError,
           orgBalanceMicroUsd: String(result.organization.walletBalanceMicroUsd ?? 0),
           orgBalanceUsd: microUsdToDecimalString(result.organization.walletBalanceMicroUsd ?? 0),
           pendingPeriod: result.budget.pendingPeriod ?? null,
