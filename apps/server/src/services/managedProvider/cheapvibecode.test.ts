@@ -79,7 +79,7 @@ describe('HttpCheapVibeCodeClient', () => {
       await client().updateKey({ apiKey: 'sk-cvc-member', disabled: true, hash: 'k1' });
 
       const [url, init] = fetchMock.mock.calls[0];
-      expect(url).toBe('https://cheapvibecode.ru/v1/keys/edit');
+      expect(url).toBe('https://ru.cheapvibecode.ru/v1/keys/edit');
       expect(init.method).toBe('POST');
       expect(init.headers.Authorization).toBe('Bearer sk-cvc-primary');
       expect(editBody()).toEqual({ active: false, key: 'sk-cvc-member' });
@@ -291,7 +291,7 @@ describe('HttpCheapVibeCodeClient', () => {
     const created = await client().createKey({ limitUsd: 0.8, name: 'aico-member' });
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('https://cheapvibecode.ru/v1/keys');
+    expect(url).toBe('https://ru.cheapvibecode.ru/v1/keys');
     expect(JSON.parse(init.body)).toEqual({ name: 'aico-member', token_limit: 20_000_000 });
     expect(created).toMatchObject({ hash: 'key-uuid', key: 'sk-cvc-minted', limit: 0.8 });
     // No native period reset — the nulls are what tell callers to checkpoint.
@@ -353,7 +353,7 @@ describe('HttpCheapVibeCodeClient', () => {
     const info = await client().getKey({ apiKey: 'sk-cvc-member', hash: 'key-uuid' });
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('https://cheapvibecode.ru/v1/balance');
+    expect(url).toBe('https://ru.cheapvibecode.ru/v1/balance');
     expect(init.headers.Authorization).toBe('Bearer sk-cvc-member');
     expect(info.limitRemaining).toBe(0.8);
   });

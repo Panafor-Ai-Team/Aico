@@ -24,6 +24,7 @@ import {
   piFromRawMicro,
   piPerUsdAtMultiplier,
 } from '@/server/services/aico/piToken';
+import { isManagedKeyCapacityError } from '@/server/services/managedProvider/cheapvibecode';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 
 const billingProcedure = authedProcedure.use(serverDatabase).use(async ({ ctx, next }) => {
@@ -214,6 +215,9 @@ export const aicoBillingRouter = router({
               renewalStatus === 'renewal_pending' || renewalStatus === 'renewal_failed';
 
             let remainingMicroUsd = orgRemaining();
+            // Surfaced so the wallet can say *why* a funded budget has no key
+            // instead of the eternal "key will be created" pending state.
+            let keyProvisionError: 'PROVIDER_CAPACITY' | 'PROVIDER_UNAVAILABLE' | null = null;
 
             if (
               syncLive &&
@@ -229,6 +233,9 @@ export const aicoBillingRouter = router({
                   orgMemberId: me.id,
                   error,
                 });
+                keyProvisionError = isManagedKeyCapacityError(error)
+                  ? 'PROVIDER_CAPACITY'
+                  : 'PROVIDER_UNAVAILABLE';
                 return null;
               });
               budget = await ctx.organizationModel.getMemberBudget(me.id);
@@ -245,6 +252,7 @@ export const aicoBillingRouter = router({
               budgetAllocated: Boolean(budget),
               hasManagedKey: sharedKey || hasValidManagedKeyId(budget?.openrouterKeyId),
               isActive: Boolean(budget?.isActive),
+              keyProvisionError,
               organizationId: org.id,
               organizationName: org.name,
               remainingMicroUsd: String(remainingMicroUsd),
@@ -264,6 +272,7 @@ export const aicoBillingRouter = router({
         budgetAllocated: boolean;
         hasManagedKey: boolean;
         isActive: boolean;
+        keyProvisionError: 'PROVIDER_CAPACITY' | 'PROVIDER_UNAVAILABLE' | null;
         organizationId: string;
         organizationName: string;
         remainingMicroUsd: string;

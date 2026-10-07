@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanupAicoTables, seedUsers } from '@/database/models/__tests__/aico.phase2.helpers';
 import { OrganizationModel } from '@/database/models/organization';
 import { memberBudgets, userWallets } from '@/database/schemas/aicoOrganization';
+import { ManagedKeyCapacityError } from '@/server/services/managedProvider/cheapvibecode';
 
 import { aicoBillingRouter } from '../aicoBilling';
 import { createTestContext } from './integration/setup';
@@ -170,5 +171,28 @@ describe('aicoBilling router under the shared inference key', () => {
     const caller = aicoBillingRouter.createCaller(createTestContext(userId));
 
     await expect(caller.getManagedProviderStatus()).resolves.toMatchObject({ hasCredit: false });
+  });
+
+  it.each([
+    ['provider capacity exhaustion', new ManagedKeyCapacityError(), 'PROVIDER_CAPACITY'],
+    ['an unreachable provider', new Error('Control plane proxy 500'), 'PROVIDER_UNAVAILABLE'],
+  ])('surfaces %s instead of a silent keyPending', async (_label, failure, code) => {
+    const org = await seedKeylessBudget();
+    await testDB
+      .update(memberBudgets)
+      .set({ isActive: true })
+      .where(eq(memberBudgets.orgId, org.id));
+    h.ensureMemberKey.mockRejectedValueOnce(failure);
+    const caller = aicoBillingRouter.createCaller(createTestContext(userId));
+
+    const sources = await caller.getMyBillingSources();
+    const source = sources.sources.find(
+      (s) => s.source === 'organization' && s.organizationId === org.id,
+    )!;
+
+    expect(h.ensureMemberKey).toHaveBeenCalled();
+    expect(source.hasManagedKey).toBe(false);
+    expect(source.remainingMicroUsd).toBe(String(usd(2.5)));
+    expect(source.keyProvisionError).toBe(code);
   });
 });
