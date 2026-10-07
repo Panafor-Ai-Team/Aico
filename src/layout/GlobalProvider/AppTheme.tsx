@@ -92,6 +92,7 @@ export interface AppThemeProps {
   customFontURL?: string;
   defaultNeutralColor?: NeutralColors;
   defaultPrimaryColor?: PrimaryColors;
+  // Retained for API compat; external CDN proxy is permanently disabled.
   globalCDN?: boolean;
 }
 
@@ -106,7 +107,11 @@ const AppTheme = memo<AppThemeProps>(
   }) => {
     const language = useGlobalStore(systemStatusSelectors.language);
     const documentDir = getDocumentDirection(language);
-    const { fontFamily, fontURL } = useLocaleThemeFont({ customFontFamily, customFontURL, language });
+    const { fontFamily, fontURL } = useLocaleThemeFont({
+      customFontFamily,
+      customFontURL,
+      language,
+    });
     const isDark = useIsDark();
 
     const [primaryColor, neutralColor, animationMode] = useUserStore((s) => [
@@ -179,7 +184,8 @@ const AppTheme = memo<AppThemeProps>(
             aAs: Link,
             imgAs: Image,
             imgUnoptimized: true,
-            proxy: globalCDN ? 'unpkg' : undefined,
+            // Self-hosted fonts only: 'unpkg'/npmmirror are unreachable from Iran.
+            proxy: undefined,
           }}
         >
           {/* @lobehub/ui ThemeProvider nests an antd ConfigProvider without direction,

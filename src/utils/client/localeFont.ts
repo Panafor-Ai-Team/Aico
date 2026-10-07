@@ -8,7 +8,7 @@ export interface LocaleFontConfig {
 export const LOCALE_FONT_CONFIG: Partial<Record<Locales, LocaleFontConfig>> = {
   'fa-IR': {
     fontFamily: 'Vazirmatn',
-    fontURL: 'https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css',
+    fontURL: '/fonts/vazirmatn/font-face.css',
   },
 };
 

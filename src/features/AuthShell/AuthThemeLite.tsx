@@ -17,6 +17,7 @@ import Image from '@/libs/next/Image';
 import Link from '@/libs/next/Link';
 
 interface AuthThemeLiteProps extends PropsWithChildren {
+  // Retained for API compat; external CDN proxy is permanently disabled.
   globalCDN?: boolean;
 }
 
@@ -48,7 +49,8 @@ const AuthThemeLite = memo<AuthThemeLiteProps>(({ children, globalCDN }) => {
             aAs: Link,
             imgAs: Image,
             imgUnoptimized: true,
-            proxy: globalCDN ? 'unpkg' : undefined,
+            // Self-hosted fonts only: 'unpkg'/npmmirror are unreachable from Iran.
+            proxy: undefined,
           }}
         >
           <LazyMotion features={domMax}>{children}</LazyMotion>

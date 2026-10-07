@@ -8,7 +8,7 @@ describe('getLocaleFontConfig', () => {
 
     expect(config).toEqual({
       fontFamily: 'Vazirmatn',
-      fontURL: 'https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css',
+      fontURL: '/fonts/vazirmatn/font-face.css',
     });
   });
 
@@ -27,7 +27,9 @@ describe('getLocaleFontConfig', () => {
 
 describe('mergeThemeFontFamily', () => {
   it('prepends primary font to the base stack', () => {
-    expect(mergeThemeFontFamily('Vazirmatn', 'Geist,sans-serif')).toBe('Vazirmatn,Geist,sans-serif');
+    expect(mergeThemeFontFamily('Vazirmatn', 'Geist,sans-serif')).toBe(
+      'Vazirmatn,Geist,sans-serif',
+    );
   });
 
   it('returns undefined when primary font is absent', () => {
