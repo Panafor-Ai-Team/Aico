@@ -50,6 +50,23 @@ describe('CheapVibeCode generation models', () => {
     expect(models['grok-imagine-video']).toMatchObject({ enabled: true, type: 'video' });
     // GPT Image 2 defaults to medium quality.
     expect((models['gpt-image-2'] as any).parameters.quality.default).toBe('medium');
+    // GPT Image 2 shares the 2.5 quality-tiered fee (CVC prices them the same),
+    // so it must serve the same lookup table, not a priceless card.
+    expect(models['gpt-image-2'].pricing?.approximatePricePerImage).toEqual(expect.any(Number));
+    expect((models['gpt-image-2'] as any).pricing?.units?.[0]).toMatchObject({
+      name: 'imageGeneration',
+      strategy: 'lookup',
+      unit: 'image',
+    });
+    expect(
+      ((models['gpt-image-2'] as any).pricing?.units?.[0] as { lookup?: { prices?: object } })
+        .lookup?.prices,
+    ).toMatchObject({
+      auto: expect.any(Number),
+      high: expect.any(Number),
+      low: expect.any(Number),
+      medium: expect.any(Number),
+    });
     // GPT Image 2.5 Sunburst / Flare: same Images surface as GPT Image 2, plus
     // quality-tiered fixed CVC token pricing.
     for (const id of ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare']) {
@@ -95,6 +112,13 @@ describe('CheapVibeCode generation models', () => {
       default: '1K',
       enum: ['512', '1K', '2K', '4K'],
     });
+    // Nano Banana 2: single 100K-token tier per image on CVC.
+    expect(models['nano-banana-2'].pricing?.approximatePricePerImage).toEqual(expect.any(Number));
+    expect((models['nano-banana-2'] as any).pricing?.units?.[0]).toMatchObject({
+      name: 'imageGeneration',
+      strategy: 'fixed',
+      unit: 'image',
+    });
     // Grok Imagine Image keeps aspect + resolution (xAI / CVC video field names).
     expect((models['grok-imagine-image'] as any).parameters.aspectRatio.default).toBe('auto');
     expect((models['grok-imagine-image'] as any).parameters.resolution).toEqual({
@@ -102,6 +126,27 @@ describe('CheapVibeCode generation models', () => {
       enum: ['1k', '2k'],
     });
     expect((models['grok-imagine-image'] as any).parameters.reasoningEffort).toBeUndefined();
+    // Grok Imagine Image: quality-tiered CVC fee (auto billed as medium).
+    expect(models['grok-imagine-image'].pricing?.approximatePricePerImage).toEqual(
+      expect.any(Number),
+    );
+    expect((models['grok-imagine-image'] as any).pricing?.units?.[0]).toMatchObject({
+      name: 'imageGeneration',
+      strategy: 'lookup',
+      unit: 'image',
+    });
+    expect(
+      (
+        (models['grok-imagine-image'] as any).pricing?.units?.[0] as {
+          lookup?: { prices?: object };
+        }
+      ).lookup?.prices,
+    ).toMatchObject({
+      auto: expect.any(Number),
+      high: expect.any(Number),
+      low: expect.any(Number),
+      medium: expect.any(Number),
+    });
     // Resolution × source lookup so the chat confirm card price moves with quality.
     expect(models['grok-imagine-video'].pricing?.units?.[0]).toMatchObject({
       name: 'videoGeneration',

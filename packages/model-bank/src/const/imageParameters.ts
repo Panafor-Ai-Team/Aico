@@ -182,6 +182,48 @@ export const cheapVibeCodeGptImage25Parameters: ModelParamsSchema = {
 };
 
 /**
+ * Fixed per-image CheapVibeCode token charge for Nano Banana 2: a single
+ * 100K tier regardless of resolution. Converted at {@link cheapVibeCodeTokensToUsd}.
+ */
+export const cheapVibeCodeNanoBanana2Pricing: Pricing = {
+  approximatePricePerImage: cheapVibeCodeTokensToUsd(100_000),
+  units: [
+    {
+      name: 'imageGeneration',
+      rate: cheapVibeCodeTokensToUsd(100_000),
+      strategy: 'fixed',
+      unit: 'image',
+    },
+  ],
+};
+
+/**
+ * Fixed per-image CheapVibeCode token charge for Grok Imagine Image by
+ * quality tier: low 100K · medium 250K · high 350K. `auto` quality is billed
+ * as medium. The schema exposes no quality control, so exact costing falls
+ * back to the medium approximate until one exists.
+ */
+export const cheapVibeCodeGrokImagineImagePricing: Pricing = {
+  approximatePricePerImage: cheapVibeCodeTokensToUsd(250_000),
+  units: [
+    {
+      lookup: {
+        prices: {
+          auto: cheapVibeCodeTokensToUsd(250_000),
+          high: cheapVibeCodeTokensToUsd(350_000),
+          low: cheapVibeCodeTokensToUsd(100_000),
+          medium: cheapVibeCodeTokensToUsd(250_000),
+        },
+        pricingParams: ['quality'],
+      },
+      name: 'imageGeneration',
+      strategy: 'lookup',
+      unit: 'image',
+    },
+  ],
+};
+
+/**
  * Fixed per-image CheapVibeCode token charge for GPT Image 2.5 Sunburst / Flare:
  * low 50K · medium 100K · high 150K. `auto` quality is billed as medium until
  * CVC documents otherwise. Converted at {@link cheapVibeCodeTokensToUsd}.
