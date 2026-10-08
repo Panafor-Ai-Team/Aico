@@ -14,7 +14,9 @@ import {
   cheapVibeCodeGptImage25Parameters,
   cheapVibeCodeGptImage25Pricing,
   cheapVibeCodeGrokImagineImageParameters,
+  cheapVibeCodeGrokImagineImagePricing,
   cheapVibeCodeNanoBanana2Parameters,
+  cheapVibeCodeNanoBanana2Pricing,
 } from 'model-bank/imageParameters';
 import {
   cheapVibeCodeGrokImagineVideoParameters,
@@ -108,6 +110,9 @@ const CHEAPVIBECODE_GENERATION_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
     displayName: 'GPT Image 2',
     id: 'gpt-image-2',
     parameters: cheapVibeCodeGptImage2Parameters,
+    // CVC's own announcement prices 2.5 Sunburst/Flare the same as GPT Image 2,
+    // so GPT Image 2 shares their quality-tiered token fee.
+    pricing: cheapVibeCodeGptImage25Pricing,
     type: 'image',
   },
   {
@@ -132,12 +137,16 @@ const CHEAPVIBECODE_GENERATION_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
     displayName: 'Nano Banana 2',
     id: 'nano-banana-2',
     parameters: cheapVibeCodeNanoBanana2Parameters,
+    // CVC fixed fee: a single 100K-token tier per image.
+    pricing: cheapVibeCodeNanoBanana2Pricing,
     type: 'image',
   },
   {
     displayName: 'Grok Imagine Image',
     id: 'grok-imagine-image',
     parameters: cheapVibeCodeGrokImagineImageParameters,
+    // CVC fixed fee per image by quality tier (auto billed as medium).
+    pricing: cheapVibeCodeGrokImagineImagePricing,
     type: 'image',
   },
   {
