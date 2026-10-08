@@ -13,7 +13,7 @@ import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
 import { aicoPanelStyles } from '@/features/AicoPanels';
 import { lambdaClient } from '@/libs/trpc/client';
 
-import { buildTeamModelTabs, type TeamCatalogModel } from './teamModelTabs';
+import { buildTeamModelTabs, getTeamModelCost, type TeamCatalogModel } from './teamModelTabs';
 
 export type { TeamCatalogModel } from './teamModelTabs';
 
@@ -144,6 +144,7 @@ export const TeamModelsForm = ({
         />
       </Flexbox>
       <Text type="secondary">{t('org.teamModelsHint')}</Text>
+      <Text type="secondary">{t('org.teamModelsCostHint')}</Text>
       <SearchBar
         allowClear
         placeholder={t('org.teamModelsSearch')}
@@ -176,6 +177,21 @@ export const TeamModelsForm = ({
         ) : (
           visibleModels.map((model) => {
             const isAuto = model.id === OPENROUTER_AUTO_MODEL_ID;
+            const cost = isAuto ? null : getTeamModelCost(model);
+            const costLabel = !cost
+              ? null
+              : cost.kind === 'chat-single'
+                ? cost.coefficient
+                : cost.kind === 'chat-split'
+                  ? `↑${cost.input} ↓${cost.output}`
+                  : cost.kind === 'per-image'
+                    ? t('org.teamModelCostPerImage', { amount: cost.piAmount })
+                    : t('org.teamModelCostPerVideo', { amount: cost.piAmount });
+            const subtitle = isAuto
+              ? t('org.teamModelAutoAlwaysOn')
+              : costLabel
+                ? `${formatBrandedModelId(model.id)} · ${costLabel}`
+                : formatBrandedModelId(model.id);
             return (
               <Flexbox horizontal className={styles.row} justify="space-between" key={model.id}>
                 <Flexbox horizontal align="center" gap={10} style={{ minWidth: 0 }}>
@@ -183,7 +199,7 @@ export const TeamModelsForm = ({
                   <Flexbox style={{ minWidth: 0 }}>
                     <Text ellipsis>{model.displayName || model.id}</Text>
                     <Text ellipsis fontSize={12} type="secondary">
-                      {isAuto ? t('org.teamModelAutoAlwaysOn') : formatBrandedModelId(model.id)}
+                      {subtitle}
                     </Text>
                   </Flexbox>
                 </Flexbox>

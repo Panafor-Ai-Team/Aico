@@ -228,7 +228,11 @@ export default {
   'org.tabs.wallet': 'Wallet',
   'org.team': 'Team',
   'org.teamModelAutoAlwaysOn': 'Always on',
+  'org.teamModelCostPerImage': '~{{amount}} π /img',
+  'org.teamModelCostPerVideo': '~{{amount}} π /video',
   'org.teamModelFailed': 'Failed to update team model',
+  'org.teamModelsCostHint':
+    'Costs are charged from the organization wallet. Chat shows the usage coefficient (×); image/video shows π per item.',
   'org.teamModelsEmpty': 'No models found',
   'org.teamModelsHint':
     'Switch a model on to let this team use it on the organization wallet. Changes are saved immediately.',
