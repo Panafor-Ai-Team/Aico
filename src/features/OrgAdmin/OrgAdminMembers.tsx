@@ -173,7 +173,14 @@ export const OrgAdminMembers = () => {
     () =>
       (catalogModels || [])
         .filter((model) => TEAM_MODEL_TYPES.has(model.type || 'chat'))
-        .map((model) => ({ displayName: model.displayName, id: model.id, type: model.type })),
+        .map((model) => ({
+          approximatePricePerImage: model.pricing?.approximatePricePerImage,
+          approximatePricePerVideo: model.pricing?.approximatePricePerVideo,
+          displayName: model.displayName,
+          id: model.id,
+          pricing: model.pricing,
+          type: model.type,
+        })),
     [catalogModels],
   );
 
