@@ -25,6 +25,7 @@ import { PiAmount, PiTokenIcon } from '@/features/AicoBilling/PiTokenIcon';
 import { AICO_TABLE_SCROLL, aicoPanelStyles } from '@/features/AicoPanels';
 import { createBudgetSweepModal } from '@/features/OrgAdmin/BudgetSweepModal';
 import { presentInviteLink } from '@/features/OrgAdmin/InviteLinkModal';
+import { resolveOrgLandingView } from '@/features/OrgAdmin/resolveOrgLandingView';
 import { TeamModelsForm } from '@/features/OrgAdmin/TeamModelsForm';
 import { buildPhoneVerifyRedirectUrl, isValidIranianPhoneNumber } from '@/libs/better-auth/phone';
 import { useClientDataSWR } from '@/libs/swr';
@@ -137,13 +138,22 @@ export const OrgAdminMembers = () => {
   const isOwner = currentOrg?.myRole === 'owner';
   const isSuspended = currentOrg?.status === 'suspended';
   const readOnly = isSuspended;
+  // Invitees join as `member` and manage nothing — they still get a member
+  // view of their org instead of the creation form (see resolveOrgLandingView).
+  const view = resolveOrgLandingView(mine, selectedOrgId);
+  const memberOrg = view === 'member' ? mine?.find((o) => o.id === selectedOrgId) : undefined;
 
   useEffect(() => {
     if (!selectedOrgId && manageable[0]?.id) {
       setSelectedOrgId(manageable[0].id);
       navigate(`/org/${manageable[0].id}/members`, { replace: true });
+    } else if (!selectedOrgId && mine?.[0]?.id) {
+      // Member of an org but manager of none (e.g. right after accepting an
+      // invite): land on the joined org instead of the creation form.
+      setSelectedOrgId(mine[0].id);
+      navigate(`/org/${mine[0].id}/members`, { replace: true });
     }
-  }, [manageable, navigate, selectedOrgId]);
+  }, [manageable, mine, navigate, selectedOrgId]);
 
   const {
     data: roster,
@@ -322,7 +332,27 @@ export const OrgAdminMembers = () => {
 
   if (loadingMine) return <Text type="secondary">{t('org.loading')}</Text>;
 
-  if (manageable.length === 0) {
+  // Member of the selected org but manager of none: the admin console below
+  // is manager-only (all its queries 403), so show membership instead of the
+  // creation form — the single-org invariant forbids creating a second org.
+  if (view === 'member' && memberOrg) {
+    return (
+      <Flexbox className={aicoPanelStyles.page} gap={16}>
+        <Block className={aicoPanelStyles.section} variant="outlined">
+          <Flexbox gap={4}>
+            <Text strong style={{ fontSize: 18 }}>
+              {t('invite.accepted')}
+            </Text>
+            <Text type="secondary">
+              {memberOrg.name} · {t('org.role.member')}
+            </Text>
+          </Flexbox>
+        </Block>
+      </Flexbox>
+    );
+  }
+
+  if (view === 'create') {
     return (
       <Flexbox className={aicoPanelStyles.page} gap={16}>
         <Block className={aicoPanelStyles.section} variant="outlined">
