@@ -22,6 +22,7 @@ vi.spyOn(console, 'error').mockImplementation(() => {});
 const provider = 'fal';
 const bizErrorType = 'ProviderBizError';
 const invalidErrorType = 'InvalidProviderAPIKey';
+const serviceUnavailableErrorType = 'ProviderServiceUnavailable';
 
 let instance: LobeFalAI;
 
@@ -347,6 +348,26 @@ describe('LobeFalAI', () => {
         await expect(instance.createImage(payload)).rejects.toEqual({
           error: { error: apiError },
           errorType: invalidErrorType,
+        });
+      });
+
+      it('should throw ProviderServiceUnavailable on 503 error', async () => {
+        // Arrange
+        const apiError = new Error('Service Unavailable') as Error & { status: number };
+        apiError.status = 503;
+        mockFal.subscribe.mockRejectedValue(apiError);
+
+        const payload: CreateImagePayload = {
+          model: 'flux/dev',
+          params: {
+            prompt: 'Test image',
+          },
+        };
+
+        // Act & Assert
+        await expect(instance.createImage(payload)).rejects.toEqual({
+          error: { error: apiError },
+          errorType: serviceUnavailableErrorType,
         });
       });
 
