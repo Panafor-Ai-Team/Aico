@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LobeChatDatabase } from '@/database/type';
 
 import {
+  getManagedChatPricing,
   getManagedModelRates,
   type ManagedModelRates,
   rateToPusdPerToken,
@@ -150,6 +151,24 @@ describe('getManagedModelRates', () => {
     ];
     await expect(getManagedModelRates(db, 'tiered')).resolves.toBeNull();
     await expect(getManagedModelRates(db, 'no-pricing')).resolves.toBeNull();
+  });
+});
+
+describe('getManagedChatPricing', () => {
+  it('returns the synced catalog pricing for a dynamic model id', async () => {
+    await expect(getManagedChatPricing(db, 'glm-5.3-flash')).resolves.toEqual(cvcPricing(0.3));
+  });
+
+  it('falls back to the bundled CVC snapshot by exact id', async () => {
+    catalogRows.rows = [];
+    await expect(getManagedChatPricing(db, 'gpt-5.6-luna')).resolves.toEqual(cvcPricing(0.33));
+  });
+
+  it('returns undefined for unknown or malformed pricing', async () => {
+    catalogRows.rows = [row('malformed', 1, { pricing: { units: 'nope' } })];
+    await expect(getManagedChatPricing(db, 'unknown-model')).resolves.toBeUndefined();
+    await expect(getManagedChatPricing(db, 'malformed')).resolves.toBeUndefined();
+    await expect(getManagedChatPricing(db, '')).resolves.toBeUndefined();
   });
 });
 

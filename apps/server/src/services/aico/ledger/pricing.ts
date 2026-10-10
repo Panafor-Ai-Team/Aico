@@ -5,6 +5,7 @@ import {
   resolveAutoModel,
   resolveAutoRoute,
 } from '@lobechat/model-runtime';
+import type { Pricing } from 'model-bank';
 import cvcModels from 'model-bank/cheapvibecode';
 
 import { OpenRouterModelCatalogModel } from '@/database/models/openrouterModelCatalog';
@@ -135,6 +136,37 @@ export const getManagedModelRates = async (
 
 const maxPerTokenRate = (rates: ManagedModelRates) =>
   rates.inputPusdPerToken + (rates.outputPusdPerToken ?? 0n);
+
+const isUsableChatPricing = (pricing: unknown): pricing is Pricing => {
+  const units = (pricing as { units?: unknown } | null)?.units;
+  return Array.isArray(units);
+};
+
+/**
+ * Model-bank pricing for one chat model id, for stream-time `usage.cost`.
+ *
+ * Same sources as the ledger (synced catalog first, bundled CVC snapshot as
+ * fallback) so every catalog model records a cost — today only static-bank
+ * models (e.g. GPT-5.6 Luna) do, and everything else streams with no cost.
+ * Undefined when the id is unknown or its pricing is unusable; callers fall
+ * back to static-bank lookup and provider-reported cost as before.
+ */
+export const getManagedChatPricing = async (
+  db: LobeChatDatabase,
+  modelId: string,
+): Promise<Pricing | undefined> => {
+  if (!modelId) return undefined;
+
+  const catalog = await loadCatalog(db);
+  const rowPricing = catalog.get(modelId)?.pricing;
+  if (isUsableChatPricing(rowPricing)) return rowPricing;
+
+  const bundled = cvcModels.find((model) => model.id === modelId);
+  if (bundled?.pricing && isUsableChatPricing(bundled.pricing)) {
+    return bundled.pricing as Pricing;
+  }
+  return undefined;
+};
 
 /**
  * Rates for a chat payload. Auto is priced as the model the runtime will route
