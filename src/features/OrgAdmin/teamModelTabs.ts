@@ -23,18 +23,32 @@ const teamModelType = (model: TeamCatalogModel) => model.type || 'chat';
 
 /**
  * One tab per model type in the catalog, chat → image → video first, then any
- * other type. Built from the whole catalog (not the search result) so tabs
- * don't vanish while the admin is typing.
+ * other type. An `all` tab leads when the catalog spans several types so the
+ * admin can search across everything. Built from the whole catalog (not the
+ * search result) so tabs don't vanish while the admin is typing.
+ *
+ * When `isEnabled` is given, each tab lists enabled models first (stable —
+ * catalog order is kept within each group).
  */
-export const buildTeamModelTabs = (models: TeamCatalogModel[]) => {
+export const buildTeamModelTabs = (
+  models: TeamCatalogModel[],
+  isEnabled?: (modelId: string) => boolean,
+) => {
   const byType = new Map<string, TeamCatalogModel[]>();
   for (const model of models) {
     const type = teamModelType(model);
     byType.set(type, [...(byType.get(type) ?? []), model]);
   }
-  return [...byType.entries()]
-    .sort(([a], [b]) => rank(a) - rank(b))
-    .map(([type, items]) => ({ items, type }));
+  const ordered: Array<{ items: TeamCatalogModel[]; type: string }> = [];
+  if (byType.size > 1) ordered.push({ items: [...models], type: 'all' });
+  for (const [type, items] of [...byType.entries()].sort(([a], [b]) => rank(a) - rank(b))) {
+    ordered.push({ items, type });
+  }
+  if (!isEnabled) return ordered;
+  for (const tab of ordered) {
+    tab.items.sort((a, b) => Number(isEnabled(b.id)) - Number(isEnabled(a.id)));
+  }
+  return ordered;
 };
 
 const positiveRate = (value: unknown): number | undefined =>

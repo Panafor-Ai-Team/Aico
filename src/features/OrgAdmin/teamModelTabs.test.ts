@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { buildTeamModelTabs, getTeamModelCost } from './teamModelTabs';
 
 describe('buildTeamModelTabs', () => {
-  it('orders tabs chat → image → video, then other types', () => {
+  it('orders tabs all → chat → image → video, then other types', () => {
     const tabs = buildTeamModelTabs([
       { id: 'v1', type: 'video' },
       { id: 'tts1', type: 'tts' },
@@ -11,7 +11,8 @@ describe('buildTeamModelTabs', () => {
       { id: 'c1', type: 'chat' },
     ]);
 
-    expect(tabs.map((tab) => tab.type)).toEqual(['chat', 'image', 'video', 'tts']);
+    expect(tabs.map((tab) => tab.type)).toEqual(['all', 'chat', 'image', 'video', 'tts']);
+    expect(tabs[0].items.map((model) => model.id).sort()).toEqual(['c1', 'i1', 'tts1', 'v1']);
   });
 
   it('puts untyped models in the chat tab', () => {
@@ -25,8 +26,53 @@ describe('buildTeamModelTabs', () => {
     expect(tabs[0].items.map((model) => model.id)).toEqual(['a', 'b', 'c']);
   });
 
+  it('skips the all tab when the catalog has a single type', () => {
+    const tabs = buildTeamModelTabs([
+      { id: 'a', type: 'chat' },
+      { id: 'b', type: 'chat' },
+    ]);
+
+    expect(tabs.map((tab) => tab.type)).toEqual(['chat']);
+  });
+
   it('returns no tabs for an empty catalog', () => {
     expect(buildTeamModelTabs([])).toEqual([]);
+  });
+
+  it('sorts enabled models before disabled ones in every tab', () => {
+    const models = [
+      { id: 'c-off', type: 'chat' },
+      { id: 'c-on', type: 'chat' },
+      { id: 'i-off', type: 'image' },
+      { id: 'i-on', type: 'image' },
+    ];
+    const isEnabled = (id: string) => id.endsWith('-on');
+
+    const tabs = buildTeamModelTabs(models, isEnabled);
+
+    expect(tabs.find((tab) => tab.type === 'chat')?.items.map((model) => model.id)).toEqual([
+      'c-on',
+      'c-off',
+    ]);
+    expect(tabs.find((tab) => tab.type === 'image')?.items.map((model) => model.id)).toEqual([
+      'i-on',
+      'i-off',
+    ]);
+    expect(tabs.find((tab) => tab.type === 'all')?.items.map((model) => model.id)).toEqual([
+      'c-on',
+      'i-on',
+      'c-off',
+      'i-off',
+    ]);
+  });
+
+  it('keeps catalog order when no enabled predicate is given', () => {
+    const tabs = buildTeamModelTabs([
+      { id: 'b', type: 'chat' },
+      { id: 'a', type: 'chat' },
+    ]);
+
+    expect(tabs[0].items.map((model) => model.id)).toEqual(['b', 'a']);
   });
 });
 

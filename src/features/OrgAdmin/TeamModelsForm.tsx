@@ -84,7 +84,14 @@ export const TeamModelsForm = ({
     setEnabledIds(new Set(team?.modelIds ?? []));
   }, [team?.id, team?.modelIds]);
 
-  const tabs = useMemo(() => buildTeamModelTabs(models), [models]);
+  const tabs = useMemo(
+    () =>
+      buildTeamModelTabs(
+        models,
+        (modelId) => modelId === OPENROUTER_AUTO_MODEL_ID || enabledIds.has(modelId),
+      ),
+    [models, enabledIds],
+  );
   const currentType = tabs.some((tab) => tab.type === activeType) ? activeType : tabs[0]?.type;
 
   const visibleModels = useMemo(() => {
@@ -198,8 +205,22 @@ export const TeamModelsForm = ({
                   <BrandedModelIcon model={model.id} size={24} />
                   <Flexbox style={{ minWidth: 0 }}>
                     <Text ellipsis>{model.displayName || model.id}</Text>
+                    {/* bdi keeps Latin ids and coefficients (`4×`) left-to-right
+                        inside RTL locales — otherwise × mirrors to the wrong side. */}
                     <Text ellipsis fontSize={12} type="secondary">
-                      {subtitle}
+                      {isAuto ? (
+                        subtitle
+                      ) : (
+                        <>
+                          <bdi>{formatBrandedModelId(model.id)}</bdi>
+                          {costLabel ? (
+                            <>
+                              {' · '}
+                              <bdi>{costLabel}</bdi>
+                            </>
+                          ) : null}
+                        </>
+                      )}
                     </Text>
                   </Flexbox>
                 </Flexbox>
