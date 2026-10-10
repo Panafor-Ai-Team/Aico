@@ -225,6 +225,7 @@
   "org.teamModelsEmpty": "مدلی پیدا نشد",
   "org.teamModelsHint": "مدلی را روشن کنید تا این تیم بتواند با کیف پول سازمان از آن استفاده کند. تغییرات فوراً ذخیره می‌شوند.",
   "org.teamModelsSearch": "جستجوی مدل‌ها…",
+  "org.teamModelsType.all": "همه",
   "org.teamModelsType.chat": "گفتگو",
   "org.teamModelsType.image": "تصویر",
   "org.teamModelsType.video": "ویدیو",

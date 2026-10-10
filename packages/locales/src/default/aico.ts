@@ -237,6 +237,7 @@ export default {
   'org.teamModelsHint':
     'Switch a model on to let this team use it on the organization wallet. Changes are saved immediately.',
   'org.teamModelsSearch': 'Search models…',
+  'org.teamModelsType.all': 'All',
   'org.teamModelsType.chat': 'Chat',
   'org.teamModelsType.image': 'Image',
   'org.teamModelsType.video': 'Video',

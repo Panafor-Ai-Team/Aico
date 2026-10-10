@@ -225,6 +225,7 @@
   "org.teamModelsEmpty": "Aucun modèle trouvé",
   "org.teamModelsHint": "Activez un modèle pour que cette équipe puisse l’utiliser avec le portefeuille de l’organisation. Les changements sont enregistrés immédiatement.",
   "org.teamModelsSearch": "Rechercher des modèles…",
+  "org.teamModelsType.all": "Tous",
   "org.teamModelsType.chat": "Chat",
   "org.teamModelsType.image": "Image",
   "org.teamModelsType.video": "Vidéo",
