@@ -1,3 +1,4 @@
+import type { Pricing } from 'model-bank';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const loadModelsMock = vi.hoisted(() => vi.fn());
@@ -109,5 +110,38 @@ describe('getModelPricing', () => {
     expect(loadModelsMock).toHaveBeenCalledWith({
       pricingContext: { plan: 'premium', scope: 'personal' },
     });
+  });
+
+  it('prefers catalog-resolved pricing for models missing from the static bank', async () => {
+    const catalogPricing: Pricing = {
+      units: [
+        { name: 'textInput', rate: 0.0132, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 0.0132, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    };
+
+    const result = await getModelPricing('dynamic-catalog-model', 'openrouter', {
+      plan: 'aico',
+      resolvedPricing: { modelId: 'dynamic-catalog-model', pricing: catalogPricing },
+      scope: 'personal',
+    });
+
+    expect(result).toEqual(catalogPricing);
+    expect(loadModelsMock).not.toHaveBeenCalled();
+  });
+
+  it('ignores catalog-resolved pricing for a different model id', async () => {
+    const result = await getModelPricing('gpt-4o', 'openai', {
+      plan: 'aico',
+      resolvedPricing: {
+        modelId: 'other-model',
+        pricing: {
+          units: [{ name: 'textInput', rate: 99, strategy: 'fixed', unit: 'millionTokens' }],
+        } as Pricing,
+      },
+      scope: 'personal',
+    });
+
+    expect(result?.units[0]).toMatchObject({ rate: 2.5 });
   });
 });

@@ -21,10 +21,6 @@ export async function getModelPricing(
   provider?: string,
   pricingContext?: ModelPricingContext,
 ): Promise<Pricing | undefined> {
-  const { loadModels } =
-    (await import('@lobechat/business-model-bank/model-config')) as BusinessModelConfigModule;
-  const models = await loadModels(pricingContext ? { pricingContext } : undefined);
-
   // Managed Aico traffic resells upstream capacity: the caller passes the
   // platform multiplier so every cost derived from this pricing is the billed
   // amount. Raw rates stay server-side.
@@ -40,6 +36,18 @@ export async function getModelPricing(
       composeMultiplierBp(pricingContext?.costMultiplierBp, modelBp),
     );
   };
+
+  // Server-resolved managed-catalog pricing wins: the static bank never lists
+  // dynamic catalog ids, and without this every such model streams with no
+  // usage.cost.
+  const resolved = pricingContext?.resolvedPricing;
+  if (resolved && resolved.modelId === model && resolved.pricing) {
+    return withMultiplier(resolved.pricing);
+  }
+
+  const { loadModels } =
+    (await import('@lobechat/business-model-bank/model-config')) as BusinessModelConfigModule;
+  const models = await loadModels(pricingContext ? { pricingContext } : undefined);
 
   // 1. First try to get pricing from the specified provider
   if (provider) {

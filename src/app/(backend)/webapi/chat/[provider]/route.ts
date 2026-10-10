@@ -14,6 +14,7 @@ import {
   parseAicoBillingContext,
 } from '@/server/services/aico/billingContext';
 import { getLedgerConfig } from '@/server/services/aico/ledger/config';
+import { getManagedChatPricing } from '@/server/services/aico/ledger/pricing';
 import { AicoManagedPolicy, AicoManagedPolicyError } from '@/server/services/aico/managedPolicy';
 import { resolveManagedPricingContext } from '@/server/services/aico/usageMultiplier';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
@@ -259,6 +260,15 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
       ? AbortSignal.any([req.signal, startController.signal])
       : startController.signal;
     let response;
+    // Catalog-resolved pricing so dynamic model ids (missing from the static
+    // bank) still stream a usage.cost. Best-effort: lookup failure falls back
+    // to today's static-bank behavior.
+    const managedPricing = await getManagedChatPricing(serverDB, data.model || '').catch(
+      (error) => {
+        console.warn('[aico] managed chat pricing lookup failed', error?.message);
+        return undefined;
+      },
+    );
     try {
       response = await Promise.race([
         modelRuntime.chat(data, {
@@ -266,7 +276,12 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
           ...traceOptions,
           // Managed traffic is resold capacity: the cost reported alongside the
           // stream must already carry the platform multiplier.
-          pricingContext: await resolveManagedPricingContext(serverDB),
+          pricingContext: {
+            ...(await resolveManagedPricingContext(serverDB)),
+            ...(managedPricing && data.model
+              ? { resolvedPricing: { modelId: data.model, pricing: managedPricing } }
+              : {}),
+          },
           signal: chatSignal,
         }),
         startTimeout,
