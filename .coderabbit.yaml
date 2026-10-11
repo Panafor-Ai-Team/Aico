@@ -1,0 +1,55 @@
+# CodeRabbit review configuration for Aico.
+# Reference: https://docs.coderabbit.ai/reference/configuration
+#
+# NOTE: this file alone does not enable reviews. An organization owner must
+# install the CodeRabbit GitHub App on this repository first:
+# https://github.com/marketplace/coderabbitai (or https://coderabbit.ai).
+# After installation, CodeRabbit reads this file from each PR's branch.
+
+language: 'en-US'
+
+tone_instructions: 'Be direct and concise. Prioritize correctness, security, and fail-closed behavior over style nits.'
+
+reviews:
+  # Balanced feedback; the human reviewer still owns the final approval.
+  profile: 'chill'
+  # Advisory only: never block merges, never auto-approve.
+  request_changes_workflow: false
+  fail_commit_status: false
+  high_level_summary: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    ignore_title_keywords:
+      - 'WIP'
+      - 'DO NOT MERGE'
+  path_filters:
+    # Generated i18n snapshots (source of truth: packages/locales/src/default/).
+    - '!locales/**'
+    # Generated release notes.
+    - '!changelog/**'
+    - '!CHANGELOG.md'
+    # Drizzle migration snapshots (review the .sql files, not the JSON).
+    - '!packages/database/migrations/meta/**'
+    # Vitest snapshots are asserted by the tests themselves.
+    - '!**/__snapshots__/**'
+  path_instructions:
+    - path: 'apps/server/src/**'
+      instructions: |
+        - Every TRPC procedure touching user data must carry workspace/RBAC scoping (withScopedPermission, requireWorkspaceRoleWhenScoped, or an ownership check). Flag any endpoint that lists, reads, or mutates cross-user rows without it.
+        - Managed-model access (AicoManagedPolicy / initModelRuntimeFromDB) must stay uniform across all execution paths (chat, image, video, transcription, agents). A disabled or ungranted model must be denied on every path, never just hidden in one picker.
+        - Fail closed on unresolved access policy; never fall back to shared/env keys, and never log key material, ciphertext, or PII.
+    - path: 'packages/database/**'
+      instructions: |
+        - Migrations must be upgrade-safe: defaults or backfills for new NOT NULL columns, no destructive data loss, no silent setting resets.
+        - Every query must scope by userId/workspaceId/orgId where applicable; flag cross-tenant reads (budget/key/member lookups by bare id).
+    - path: 'src/**'
+      instructions: |
+        - Prefer @lobehub/ui/base-ui components over the root package, and antd only as a last resort. Prefer createStaticStyles with cssVar tokens over runtime styles.
+        - Route segments under src/routes must stay thin and delegate to src/features; flag business logic or heavy UI added directly in route files.
+        - User-facing strings must use i18n keys (packages/locales/src/default), never hardcoded copy.
+    - path: '**/*.test.{ts,tsx}'
+      instructions: |
+        - Tests must assert observable behavior/state, not internals. Bug fixes must include a regression test that fails before the fix and passes after it. Never approve skipped tests added just to get green.
