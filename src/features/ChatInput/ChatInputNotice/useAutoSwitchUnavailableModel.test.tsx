@@ -5,9 +5,9 @@ import type { EnabledProviderWithModels } from '@/types/aiProvider';
 
 import {
   isModelInList,
-  pickBillingSwitchFallbackModel,
-  useAutoSwitchModelOnBillingChange,
-} from './useAutoSwitchModelOnBillingChange';
+  pickUnavailableModelFallback,
+  useAutoSwitchUnavailableModel,
+} from './useAutoSwitchUnavailableModel';
 
 const personalList: EnabledProviderWithModels[] = [
   {
@@ -34,7 +34,6 @@ const orgList: EnabledProviderWithModels[] = [
 
 const testState = vi.hoisted(() => ({
   agentConfigLoading: false,
-  billingContext: undefined as { organizationId?: string; source: string } | undefined,
   canSelectModel: true,
   isInitRuntime: true,
   isModelListPending: false,
@@ -63,16 +62,6 @@ vi.mock('@/features/ChatInput/hooks/useAgentModelSelection', () => ({
   }),
 }));
 
-vi.mock('@/features/AicoBilling/store', () => ({
-  useAicoBillingStore: <T,>(selector: StoreSelector<T, { context: unknown }>) =>
-    selector({ context: testState.billingContext }),
-}));
-
-vi.mock('@/features/AicoBilling/types', () => ({
-  billingContextKey: (ctx: { organizationId?: string; source: string }) =>
-    ctx.source === 'personal' ? 'personal' : `organization:${ctx.organizationId}`,
-}));
-
 vi.mock('@/hooks/useEnabledChatModels', () => ({
   useEnabledChatModelsState: () => ({
     isPending: testState.isModelListPending,
@@ -99,7 +88,7 @@ vi.mock('@/store/aiInfra', () => ({
     selector({ ready: testState.isInitRuntime }),
 }));
 
-describe('isModelInList / pickBillingSwitchFallbackModel', () => {
+describe('isModelInList / pickUnavailableModelFallback', () => {
   it('finds the current model in its provider', () => {
     expect(isModelInList(personalList, 'gpt-4o', 'openai')).toBe(true);
     expect(isModelInList(orgList, 'gpt-4o', 'aico')).toBe(false);
@@ -107,26 +96,25 @@ describe('isModelInList / pickBillingSwitchFallbackModel', () => {
   });
 
   it('prefers Auto, else the first listed model', () => {
-    expect(pickBillingSwitchFallbackModel(orgList)).toEqual({
+    expect(pickUnavailableModelFallback(orgList)).toEqual({
       model: 'openrouter/auto',
       provider: 'aico',
     });
     expect(
-      pickBillingSwitchFallbackModel([
+      pickUnavailableModelFallback([
         { children: [{ abilities: {}, id: 'x-1' }], id: 'p', name: 'P', source: 'builtin' },
       ]),
     ).toEqual({
       model: 'x-1',
       provider: 'p',
     });
-    expect(pickBillingSwitchFallbackModel([])).toBeUndefined();
+    expect(pickUnavailableModelFallback([])).toBeUndefined();
   });
 });
 
-describe('useAutoSwitchModelOnBillingChange', () => {
+describe('useAutoSwitchUnavailableModel', () => {
   beforeEach(() => {
     testState.agentConfigLoading = false;
-    testState.billingContext = { source: 'personal' };
     testState.canSelectModel = true;
     testState.isInitRuntime = true;
     testState.isModelListPending = false;
@@ -139,22 +127,25 @@ describe('useAutoSwitchModelOnBillingChange', () => {
   });
 
   it('does nothing on mount or when the model stays valid', () => {
-    const { rerender } = renderHook(() => useAutoSwitchModelOnBillingChange());
+    const { rerender } = renderHook(() => useAutoSwitchUnavailableModel());
     expect(testState.selectModel).not.toHaveBeenCalled();
 
-    // Org list still contains the (re-picked) model -> no switch.
-    testState.model = 'glm-5-flash';
-    testState.provider = 'aico';
-    testState.billingContext = { organizationId: 'org-1', source: 'organization' };
-    testState.list = orgList;
+    // Revalidation with an identical list -> no switch.
+    testState.list = personalList;
     rerender();
     expect(testState.selectModel).not.toHaveBeenCalled();
   });
 
-  it('switches to Auto when the wallet change strands the model', () => {
-    const { rerender } = renderHook(() => useAutoSwitchModelOnBillingChange());
+  it('does nothing on mount with an already-missing model (keeps the warning)', () => {
+    testState.model = 'gone-model';
+    renderHook(() => useAutoSwitchUnavailableModel());
+    expect(testState.selectModel).not.toHaveBeenCalled();
+  });
 
-    testState.billingContext = { organizationId: 'org-1', source: 'organization' };
+  it('switches to Auto when the wallet change strands the model', () => {
+    const { rerender } = renderHook(() => useAutoSwitchUnavailableModel());
+
+    // Personal -> organization: new settled list lacks the model.
     testState.list = orgList;
     rerender();
 
@@ -165,13 +156,60 @@ describe('useAutoSwitchModelOnBillingChange', () => {
     });
   });
 
-  it('waits for the new list instead of switching on the stale one', () => {
-    const { rerender } = renderHook(() => useAutoSwitchModelOnBillingChange());
+  it('switches to fallback when a settled list loses the model without a billing change', () => {
+    // Admin revokes/deletes the model mid-session: same list source, settled
+    // list drops the current model -> session must auto-switch.
+    const { rerender } = renderHook(() => useAutoSwitchUnavailableModel());
+    expect(testState.selectModel).not.toHaveBeenCalled();
 
-    // Context flips while the org allow-list is still loading: the old
-    // personal list is stale, the model check must wait.
-    testState.billingContext = { organizationId: 'org-1', source: 'organization' };
+    testState.list = [
+      {
+        children: [{ abilities: {}, id: 'openrouter/auto' }],
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'builtin',
+      },
+    ];
+    rerender();
+
+    expect(testState.selectModel).toHaveBeenCalledTimes(1);
+    expect(testState.selectModel).toHaveBeenCalledWith({
+      model: 'openrouter/auto',
+      provider: 'openai',
+    });
+  });
+
+  it('switches an org-wallet revocation to the org Auto fallback', () => {
+    testState.list = orgList;
+    testState.model = 'glm-5-flash';
+    testState.provider = 'aico';
+    const { rerender } = renderHook(() => useAutoSwitchUnavailableModel());
+    expect(testState.selectModel).not.toHaveBeenCalled();
+
+    // Team allow-list shrinks: only Auto remains.
+    testState.list = [
+      {
+        children: [{ abilities: {}, id: 'openrouter/auto' }],
+        id: 'aico',
+        name: 'Aico',
+        source: 'builtin',
+      },
+    ];
+    rerender();
+
+    expect(testState.selectModel).toHaveBeenCalledTimes(1);
+    expect(testState.selectModel).toHaveBeenCalledWith({
+      model: 'openrouter/auto',
+      provider: 'aico',
+    });
+  });
+
+  it('waits for the settled list instead of switching mid-reload', () => {
+    const { rerender } = renderHook(() => useAutoSwitchUnavailableModel());
+
+    // Revoke lands while the list reloads: must not switch on the transient.
     testState.isModelListPending = true;
+    testState.list = [];
     rerender();
     expect(testState.selectModel).not.toHaveBeenCalled();
 
@@ -181,20 +219,36 @@ describe('useAutoSwitchModelOnBillingChange', () => {
     expect(testState.selectModel).toHaveBeenCalledTimes(1);
   });
 
-  it('never switches a locked selection', () => {
-    testState.canSelectModel = false;
-    const { rerender } = renderHook(() => useAutoSwitchModelOnBillingChange());
+  it('fires only once: no second switch after the store moves to the fallback', () => {
+    const { rerender } = renderHook(() => useAutoSwitchUnavailableModel());
 
-    testState.billingContext = { organizationId: 'org-1', source: 'organization' };
+    testState.list = orgList;
+    rerender();
+    expect(testState.selectModel).toHaveBeenCalledTimes(1);
+
+    // Store catches up with the switch; further renders stay quiet.
+    testState.model = 'openrouter/auto';
+    testState.provider = 'aico';
+    rerender();
+    rerender();
+    expect(testState.selectModel).toHaveBeenCalledTimes(1);
+  });
+
+  it('never switches a locked selection, even when the model is revoked', () => {
+    testState.canSelectModel = false;
+    const { rerender } = renderHook(() => useAutoSwitchUnavailableModel());
+
     testState.list = orgList;
     rerender();
     expect(testState.selectModel).not.toHaveBeenCalled();
   });
 
-  it('does nothing when the context never changes, even with a missing model', () => {
-    testState.model = 'gone-model';
-    renderHook(() => useAutoSwitchModelOnBillingChange());
-    // Deprecations keep the explicit warning; only wallet switches auto-move.
+  it('does nothing when the revoked list has no fallback (warning stays)', () => {
+    const { rerender } = renderHook(() => useAutoSwitchUnavailableModel());
+
+    testState.list = [];
+    testState.isModelListPending = false;
+    rerender();
     expect(testState.selectModel).not.toHaveBeenCalled();
   });
 });

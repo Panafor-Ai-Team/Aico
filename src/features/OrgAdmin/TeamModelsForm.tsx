@@ -12,6 +12,7 @@ import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
 import { aicoPanelStyles } from '@/features/AicoPanels';
 import { lambdaClient } from '@/libs/trpc/client';
 
+import { revalidateTeamModelAccess } from './teamModelAccessSync';
 import {
   buildTeamModelTabs,
   collectEnableAllModelIds,
@@ -133,6 +134,9 @@ export const TeamModelsForm = ({
         orgId,
         teamId,
       });
+      // Same-browser sessions (including the admin's own chat) must see the
+      // new grants at once — not after the focus throttle or poll interval.
+      revalidateTeamModelAccess(orgId);
       await onSaved();
     } catch (err) {
       toastAicoError(err, t, 'org.teamModelFailed');
@@ -160,6 +164,8 @@ export const TeamModelsForm = ({
         orgId,
         teamId,
       });
+      // A revocation must drop the model from every mounted selector at once.
+      revalidateTeamModelAccess(orgId);
       await onSaved();
     } catch (err) {
       update(!enabled);

@@ -6,9 +6,11 @@ import {
   OPENROUTER_AUTO_MODEL_ID,
 } from '@lobechat/business-const';
 import { ChatErrorType, type ErrorType } from '@lobechat/types';
+import { eq } from 'drizzle-orm';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { OrganizationModel } from '@/database/models/organization';
+import { openrouterModelCatalog } from '@/database/schemas';
 import type { LobeChatDatabase } from '@/database/type';
 import {
   cycleRemainingMicroUsd,
@@ -320,20 +322,26 @@ export class AicoManagedPolicy {
     billing: AicoBillingContext,
     modelId: string,
   ) => {
+    // Auto is the product's meta-router, not an admin-grantable team model —
+    // always usable on the org wallet regardless of the team's allow-list.
+    if (modelId === OPENROUTER_AUTO_MODEL_ID) return;
+    // Same reasoning for the product's default image generator: image
+    // generation is a product feature rather than a chat-model grant, and a
+    // team that never listed it would otherwise fail every image request with
+    // MODEL_NOT_ALLOWED. Other image models still need an explicit grant.
+    if (isDefaultAutoImageModelId(modelId)) return;
+    // Platform catalog kill-switch: a model the platform admin disabled is
+    // unusable on every wallet, even when a team allow-list still grants it.
+    // Unknown ids (custom models, non-catalog gateways) keep the previous
+    // allow-list-only behavior.
+    await this.assertCatalogModelEnabled(modelId);
+
     if (billing.source === 'organization') {
       const members = await this.orgModel.listMembers(billing.organizationId);
       const me = members.find((m) => m.userId === userId && m.status === 'active');
       if (!me) {
         throw new AicoManagedPolicyError('ORG_MEMBERSHIP_REQUIRED', ChatErrorType.Forbidden);
       }
-      // Auto is the product's meta-router, not an admin-grantable team model —
-      // always usable on the org wallet regardless of the team's allow-list.
-      if (modelId === OPENROUTER_AUTO_MODEL_ID) return;
-      // Same reasoning for the product's default image generator: image
-      // generation is a product feature rather than a chat-model grant, and a
-      // team that never listed it would otherwise fail every image request with
-      // MODEL_NOT_ALLOWED. Other image models still need an explicit grant.
-      if (isDefaultAutoImageModelId(modelId)) return;
       const allowed = await this.orgModel.getAllowedModelsForMember(me.id);
       if (!allowed || allowed.length === 0 || !allowed.includes(modelId)) {
         throw new AicoManagedPolicyError(`MODEL_NOT_ALLOWED:${modelId}`, ChatErrorType.BadRequest);
@@ -352,6 +360,23 @@ export class AicoManagedPolicy {
           ChatErrorType.BadRequest,
         );
       }
+    }
+  };
+
+  /**
+   * Platform catalog kill-switch (single indexed PK lookup). The `enabled`
+   * flag on `openrouter_model_catalog` is the platform admin's setting; a
+   * disabled row denies managed execution on every wallet, closing the gap
+   * where a reservation in a team allow-list kept a switched-off model usable.
+   */
+  private assertCatalogModelEnabled = async (modelId: string) => {
+    const [row] = await this.db
+      .select({ enabled: openrouterModelCatalog.enabled })
+      .from(openrouterModelCatalog)
+      .where(eq(openrouterModelCatalog.id, modelId))
+      .limit(1);
+    if (row && row.enabled === false) {
+      throw new AicoManagedPolicyError(`MODEL_DISABLED:${modelId}`, ChatErrorType.BadRequest);
     }
   };
 

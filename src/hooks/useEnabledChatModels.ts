@@ -52,6 +52,14 @@ interface EnabledChatModelsState {
 }
 
 /**
+ * How often an open org-wallet session re-checks team access and the managed
+ * catalog. An admin revocation/deletion otherwise only reaches the client on
+ * window focus (throttled) — the revoked model would sit in the selector and
+ * the session would stay parked on it. Same cadence as the inbox unread poll.
+ */
+export const ORG_MODEL_ACCESS_REFRESH_INTERVAL = 60_000;
+
+/**
  * Enabled chat models for the model switcher.
  *
  * - Personal wallet: user's enabled managed models (preferences).
@@ -75,11 +83,16 @@ export const useEnabledChatModelsState = (): EnabledChatModelsState => {
   const { data: allowed, isLoading: isAllowedLoading } = useClientDataSWR(
     orgId ? ['aico-my-allowed-models', orgId] : null,
     () => lambdaClient.organization.getMyAllowedModels.query({ organizationId: orgId! }),
+    // Poll while mounted: team access is revoked server-side at any moment and
+    // the selector + auto-switch must pick that up without a focus change.
+    { refreshInterval: ORG_MODEL_ACCESS_REFRESH_INTERVAL },
   );
 
   const { data: catalog, isLoading: isCatalogLoading } = useClientDataSWR(
     orgId ? ['aico-managed-model-catalog', orgId] : null,
     () => aiModelService.getAiProviderModelList(DEFAULT_PROVIDER),
+    // Same poll: an admin catalog disable must also drop the model promptly.
+    { refreshInterval: ORG_MODEL_ACCESS_REFRESH_INTERVAL },
   );
 
   const isPending =
@@ -102,12 +115,16 @@ export const useEnabledChatModelsState = (): EnabledChatModelsState => {
 
     // Auto is the product's meta-router, not an admin-grantable team model —
     // always present in org wallet mode regardless of the team's allow-list.
+    // A model the platform admin disabled (`enabled: false`) is hidden even
+    // when team-granted — a deleted/disabled model must leave the selector so
+    // the session can fall back instead of parking on it.
     const allowSet = new Set(allowed.modelIds);
     const children = catalog
       .filter(
         (model) =>
           (model.type || 'chat') === 'chat' &&
-          (model.id === OPENROUTER_AUTO_MODEL_ID || allowSet.has(model.id)),
+          (model.id === OPENROUTER_AUTO_MODEL_ID ||
+            (allowSet.has(model.id) && model.enabled !== false)),
       )
       .map(catalogModelToSelect);
 
