@@ -1,8 +1,12 @@
+import { resolveAgentModelConfig } from '@lobechat/types';
+
 import { useAgentManagementAccess } from '@/features/ResourcePermission/useAgentManagementAccess';
 import { useModelSupportToolUse } from '@/hooks/useModelSupportToolUse';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
 import { aiProviderSelectors, useAiInfraStore } from '@/store/aiInfra';
+import { useChatStore } from '@/store/chat';
+import { topicSelectors } from '@/store/chat/slices/topic/selectors';
 import { useUserStore } from '@/store/user';
 
 export type ChatInputMode = 'agent' | 'chat';
@@ -45,12 +49,14 @@ export const resolveEffectiveAgentMode = ({
 };
 
 export const useEffectiveAgentMode = (agentId: string) => {
-  const [sharedEnableAgentMode, model, provider, agent] = useAgentStore((s) => [
-    agentByIdSelectors.getAgentEnableModeById(agentId)(s),
-    agentByIdSelectors.getAgentModelById(agentId)(s),
-    agentByIdSelectors.getAgentModelProviderById(agentId)(s),
-    agentByIdSelectors.getAgentById(agentId)(s),
-  ]);
+  const [sharedEnableAgentMode, sharedModel, sharedProvider, sharedAgencyConfig, agent] =
+    useAgentStore((s) => [
+      agentByIdSelectors.getAgentEnableModeById(agentId)(s),
+      agentByIdSelectors.getAgentModelById(agentId)(s),
+      agentByIdSelectors.getAgentModelProviderById(agentId)(s),
+      agentByIdSelectors.getAgencyConfigById(agentId)(s),
+      agentByIdSelectors.getAgentById(agentId)(s),
+    ]);
   const { canManageAgent, isAccessLoading } = useAgentManagementAccess(agentId);
   const usesWorkspaceMemberMode =
     !!agent?.workspaceId && agent.visibility !== 'private' && !canManageAgent;
@@ -63,6 +69,30 @@ export const useEffectiveAgentMode = (agentId: string) => {
     ? preference.agentModeOverrides?.[agentId]
     : undefined;
   const enableAgentMode = memberModeOverride ?? sharedEnableAgentMode;
+  // Gate tool support on the EFFECTIVE model — the same source the model
+  // trigger renders and generation runs (member override, then the active
+  // topic pin). Gating on the shared default strands callers whose effective
+  // model differs: a tool-capable effective model reads as "agent
+  // unsupported" and the chat→agent switch stays disabled.
+  const memberModelOverride = usesWorkspaceMemberMode
+    ? preference.agentModelOverrides?.[agentId]
+    : undefined;
+  const memberResolvedModel = resolveAgentModelConfig(
+    {
+      agencyConfig: sharedAgencyConfig,
+      canManage: canManageAgent,
+      model: sharedModel,
+      provider: sharedProvider,
+      visibility: agent?.visibility,
+      workspaceId: agent?.workspaceId,
+    },
+    memberModelOverride,
+  );
+  const topicPin = useChatStore(topicSelectors.activeTopicModel);
+  const model = topicPin?.model ?? memberResolvedModel.model;
+  const provider = topicPin?.model
+    ? topicPin.provider
+    : (memberResolvedModel.provider ?? sharedProvider);
   const supportToolUse = useModelSupportToolUse(model, provider);
   const isModelListReady = useAiInfraStore(aiProviderSelectors.isInitAiProviderRuntimeState);
 

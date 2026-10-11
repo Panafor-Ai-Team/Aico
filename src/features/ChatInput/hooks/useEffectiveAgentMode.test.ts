@@ -9,6 +9,7 @@ const testState = vi.hoisted(() => ({
     isAccessLoading: false,
   },
   agent: {
+    agencyConfig: undefined as { modelSelectionPolicy?: 'fixed' | 'member' } | undefined,
     agent: undefined as { visibility?: 'private' | 'public'; workspaceId?: string } | undefined,
     enableAgentMode: true,
     model: 'model-1',
@@ -17,16 +18,29 @@ const testState = vi.hoisted(() => ({
   aiInfra: {
     isReady: true,
   },
+  chat: {
+    topicPin: undefined as { model: string; provider: string } | undefined,
+  },
+  lastSupportCheck: undefined as { model: string; provider: string } | undefined,
+  supportMap: undefined as Record<string, boolean> | undefined,
   supportToolUse: true,
   user: {
     fetchedPreference: undefined as
-      { agentModeOverrides?: Record<string, boolean> } | null | undefined,
+      | {
+          agentModeOverrides?: Record<string, boolean>;
+          agentModelOverrides?: Record<string, { model: string; provider: string }>;
+        }
+      | null
+      | undefined,
     isLoading: false,
     useFetchWorkspaceUserPreference: () => ({
       data: testState.user.fetchedPreference,
       isLoading: testState.user.isLoading,
     }),
-    workspaceUserPreference: {} as { agentModeOverrides?: Record<string, boolean> },
+    workspaceUserPreference: {} as {
+      agentModeOverrides?: Record<string, boolean>;
+      agentModelOverrides?: Record<string, { model: string; provider: string }>;
+    },
   },
 }));
 
@@ -35,7 +49,11 @@ vi.mock('@/features/ResourcePermission/useAgentManagementAccess', () => ({
 }));
 
 vi.mock('@/hooks/useModelSupportToolUse', () => ({
-  useModelSupportToolUse: () => testState.supportToolUse,
+  useModelSupportToolUse: (model: string, provider: string) => {
+    testState.lastSupportCheck = { model, provider };
+    if (testState.supportMap) return !!testState.supportMap[`${provider}/${model}`];
+    return testState.supportToolUse;
+  },
 }));
 
 vi.mock('@/store/agent', () => ({
@@ -44,10 +62,21 @@ vi.mock('@/store/agent', () => ({
 
 vi.mock('@/store/agent/selectors', () => ({
   agentByIdSelectors: {
+    getAgencyConfigById: () => (s: typeof testState.agent) => s.agencyConfig,
     getAgentById: () => (s: typeof testState.agent) => s.agent,
     getAgentEnableModeById: () => (s: typeof testState.agent) => s.enableAgentMode,
     getAgentModelById: () => (s: typeof testState.agent) => s.model,
     getAgentModelProviderById: () => (s: typeof testState.agent) => s.provider,
+  },
+}));
+
+vi.mock('@/store/chat', () => ({
+  useChatStore: (selector: (s: typeof testState.chat) => unknown) => selector(testState.chat),
+}));
+
+vi.mock('@/store/chat/slices/topic/selectors', () => ({
+  topicSelectors: {
+    activeTopicModel: (s: typeof testState.chat) => s.topicPin,
   },
 }));
 
@@ -66,11 +95,15 @@ vi.mock('@/store/user', () => ({
 beforeEach(() => {
   testState.access.canManageAgent = false;
   testState.access.isAccessLoading = false;
+  testState.agent.agencyConfig = undefined;
   testState.agent.agent = undefined;
   testState.agent.enableAgentMode = true;
   testState.agent.model = 'model-1';
   testState.agent.provider = 'provider-1';
   testState.aiInfra.isReady = true;
+  testState.chat.topicPin = undefined;
+  testState.lastSupportCheck = undefined;
+  testState.supportMap = undefined;
   testState.supportToolUse = true;
   testState.user.fetchedPreference = undefined;
   testState.user.isLoading = false;
@@ -202,5 +235,68 @@ describe('useEffectiveAgentMode', () => {
     const { result } = renderHook(() => useEffectiveAgentMode('agent-1'));
 
     expect(result.current.isPreferenceLoading).toBe(true);
+  });
+
+  it('gates agent mode on the member-overridden model instead of the shared default', () => {
+    // Shared default lacks tool calling, but the ordinary member picked a
+    // tool-capable model — the switcher must check the effective model, or
+    // the member is stranded in chat mode with the agent option disabled.
+    testState.agent.agent = { visibility: 'public', workspaceId: 'workspace-1' };
+    testState.agent.model = 'chat-only-model';
+    testState.agent.provider = 'provider-1';
+    testState.user.workspaceUserPreference = {
+      agentModelOverrides: { 'agent-1': { model: 'tool-model', provider: 'provider-1' } },
+    };
+    testState.supportMap = { 'provider-1/tool-model': true };
+
+    const { result } = renderHook(() => useEffectiveAgentMode('agent-1'));
+
+    expect(testState.lastSupportCheck).toEqual({ model: 'tool-model', provider: 'provider-1' });
+    expect(result.current).toMatchObject({
+      canSelectAgentMode: true,
+      currentMode: 'agent',
+      isAgentModeUnavailable: false,
+    });
+  });
+
+  it('gates agent mode on the active topic pin when it overrides the agent model', () => {
+    // The trigger shows the topic pin and generation runs it — a tool-less
+    // pin must surface chat mode even though the agent default supports tools.
+    testState.agent.model = 'tool-model';
+    testState.agent.provider = 'provider-1';
+    testState.chat.topicPin = { model: 'chat-only-model', provider: 'provider-1' };
+    testState.supportMap = { 'provider-1/tool-model': true };
+
+    const { result } = renderHook(() => useEffectiveAgentMode('agent-1'));
+
+    expect(testState.lastSupportCheck).toEqual({
+      model: 'chat-only-model',
+      provider: 'provider-1',
+    });
+    expect(result.current).toMatchObject({
+      canSelectAgentMode: false,
+      currentMode: 'chat',
+      isAgentModeUnavailable: true,
+    });
+  });
+
+  it('keeps the agent option selectable for a tool-capable topic pin on a chat-mode agent', () => {
+    // Stored conversation mode + a tool-capable pin: the pill stays chat,
+    // but the agent option must not read as unsupported — otherwise the
+    // chat→agent switch is impossible from this topic.
+    testState.agent.enableAgentMode = false;
+    testState.agent.model = 'chat-only-model';
+    testState.agent.provider = 'provider-1';
+    testState.chat.topicPin = { model: 'tool-model', provider: 'provider-1' };
+    testState.supportMap = { 'provider-1/tool-model': true };
+
+    const { result } = renderHook(() => useEffectiveAgentMode('agent-1'));
+
+    expect(testState.lastSupportCheck).toEqual({ model: 'tool-model', provider: 'provider-1' });
+    expect(result.current).toMatchObject({
+      canSelectAgentMode: true,
+      currentMode: 'chat',
+      isAgentModeUnavailable: false,
+    });
   });
 });
