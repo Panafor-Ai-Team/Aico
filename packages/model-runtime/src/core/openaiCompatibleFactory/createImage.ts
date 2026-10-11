@@ -176,6 +176,7 @@ async function generateByImageMode(
               provider,
               imageOptions?.pricingContext,
             ),
+            provider,
           ),
         }
       : {}),

@@ -1,6 +1,9 @@
 import { mutate } from '@/libs/swr';
 
-import { seedBillingSourcesAllowGateCache } from './billingSourcesAllowGateCache';
+import {
+  invalidateBillingSourcesAllowGateCache,
+  seedBillingSourcesAllowGateCache,
+} from './billingSourcesAllowGateCache';
 import { AICO_BILLING_SOURCES_SWR_KEY, AICO_MY_WALLET_SWR_KEY } from './cacheKeys';
 import { DEFAULT_PI_PER_USD } from './piToken';
 import type { AicoBillingContext, AicoBillingSourcesResponse } from './types';
@@ -59,6 +62,10 @@ export const refreshAicoBillingBalance = async (
   const { billingContext, costUsd } = options;
   const costMicroUsd = Math.round((costUsd ?? 0) * 1_000_000);
   const revalidate = async () => {
+    // Drop the allow-gate snapshot first: it may still hold this call's
+    // optimistic debit, and the next send's gate must never decide on
+    // pre-settlement numbers. The fetch below re-seeds it with truth.
+    invalidateBillingSourcesAllowGateCache();
     await Promise.allSettled([
       mutate(AICO_BILLING_SOURCES_SWR_KEY),
       mutate(AICO_MY_WALLET_SWR_KEY),

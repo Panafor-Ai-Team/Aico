@@ -1,6 +1,7 @@
 import type { ModelTokensUsage, ModelUsage } from '@lobechat/types';
 import debug from 'debug';
 import type { Pricing } from 'model-bank';
+import { ModelProvider } from 'model-bank';
 import type OpenAI from 'openai';
 
 import type { ChatPayloadForTransformStream } from '../streams/protocol';
@@ -60,8 +61,15 @@ const withPricingOrProviderCost = (
   usage: ModelUsage,
   pricing: Pricing | undefined,
   providerUsage: unknown,
+  providerId?: string,
 ): ModelUsage => {
   const priced = withUsageCost(usage, pricing);
+  // Only OpenRouter documents usage.cost as billed USD. CheapVibeCode's
+  // figure (when present) is denominated in its own token unit — trusting it
+  // as USD debited hundreds of phantom "dollars" from the optimistic wallet
+  // balance for a trivial message until the reconcile restored it. A missing
+  // cost safely degrades to no optimistic debit + authoritative reconcile.
+  if (providerId === ModelProvider.CheapVibeCode) return priced;
   const reported = readProviderReportedCost(providerUsage);
   if (reported === undefined) return priced;
   return { ...priced, cost: reported };
@@ -151,7 +159,12 @@ export const convertOpenAIUsage = (
 
   log('convertOpenAIUsage data(completion-api): %O', finalData);
 
-  return withPricingOrProviderCost(finalData as ModelUsage, payload?.pricing, usage);
+  return withPricingOrProviderCost(
+    finalData as ModelUsage,
+    payload?.pricing,
+    usage,
+    payload?.provider,
+  );
 };
 
 export const convertOpenAIResponseUsage = (
@@ -218,12 +231,18 @@ export const convertOpenAIResponseUsage = (
   log('convertOpenAIResponseUsage data(response-api): %O', finalData);
 
   // Cast because we've built it to match; prefer provider-reported cost when present.
-  return withPricingOrProviderCost(finalData as ModelUsage, payload?.pricing, usage);
+  return withPricingOrProviderCost(
+    finalData as ModelUsage,
+    payload?.pricing,
+    usage,
+    payload?.provider,
+  );
 };
 
 export const convertOpenAIImageUsage = (
   usage: OpenAI.Images.ImagesResponse.Usage,
   pricing?: Pricing,
+  providerId?: string,
 ): ModelUsage => {
   // OpenAI's Images API reports `input_tokens` / `output_tokens` plus an
   // `input_tokens_details` breakdown. OpenRouter's /images/generations instead
@@ -246,5 +265,5 @@ export const convertOpenAIImageUsage = (
     totalTokens: raw.total_tokens,
   };
 
-  return withPricingOrProviderCost(data as ModelUsage, pricing, usage);
+  return withPricingOrProviderCost(data as ModelUsage, pricing, usage, providerId);
 };

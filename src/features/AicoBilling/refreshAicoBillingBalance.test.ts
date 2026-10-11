@@ -2,11 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mutate } from '@/libs/swr';
 
+import { invalidateBillingSourcesAllowGateCache } from './billingSourcesAllowGateCache';
 import { AICO_BILLING_SOURCES_SWR_KEY, AICO_MY_WALLET_SWR_KEY } from './cacheKeys';
 import { refreshAicoBillingBalance } from './refreshAicoBillingBalance';
 import type { AicoBillingSourcesResponse } from './types';
 
 vi.mock('@/libs/swr', () => ({ mutate: vi.fn() }));
+vi.mock('./billingSourcesAllowGateCache', () => ({
+  invalidateBillingSourcesAllowGateCache: vi.fn(),
+  seedBillingSourcesAllowGateCache: vi.fn(),
+}));
 
 const billingSources: AicoBillingSourcesResponse = {
   preferredBillingSource: 'personal',
@@ -42,6 +47,7 @@ const billingSources: AicoBillingSourcesResponse = {
 describe('refreshAicoBillingBalance', () => {
   beforeEach(() => {
     vi.mocked(mutate).mockReset().mockResolvedValue(undefined);
+    vi.mocked(invalidateBillingSourcesAllowGateCache).mockClear();
   });
 
   afterEach(() => {
@@ -78,6 +84,15 @@ describe('refreshAicoBillingBalance', () => {
 
     expect(mutate).toHaveBeenNthCalledWith(2, AICO_BILLING_SOURCES_SWR_KEY);
     expect(mutate).toHaveBeenNthCalledWith(3, AICO_MY_WALLET_SWR_KEY);
+    // The gate must not keep deciding sends on the optimistic (pre-settlement)
+    // snapshot once the authoritative refresh runs.
+    expect(invalidateBillingSourcesAllowGateCache).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidates the allow-gate snapshot on a plain refresh too', async () => {
+    await refreshAicoBillingBalance();
+
+    expect(invalidateBillingSourcesAllowGateCache).toHaveBeenCalledTimes(1);
   });
 
   it('revalidates both balance caches when no optimistic cost is available', async () => {
