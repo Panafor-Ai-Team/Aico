@@ -647,6 +647,67 @@ describe('convertUsage', () => {
 
     expect(result.cost).toBeCloseTo(2, 10);
   });
+
+  // BUG-3 repro: CheapVibeCode does not promise usage.cost in USD, but the
+  // converter trusted any numeric cost as billed USD. A CVC-unit figure (e.g.
+  // hundreds of CVC tokens for a "salam") then debited hundreds of "dollars"
+  // from the optimistic wallet balance until the reconcile restored it.
+  it('ignores provider-reported usage.cost from CheapVibeCode and uses computed pricing', () => {
+    const pricing: Pricing = {
+      units: [
+        { name: 'textInput', rate: 1, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 2, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    };
+
+    const usage = {
+      completion_tokens: 500_000,
+      cost: 4200,
+      prompt_tokens: 1_000_000,
+      total_tokens: 1_500_000,
+    } as OpenAI.Completions.CompletionUsage & { cost: number };
+
+    const result = convertOpenAIUsage(usage, { pricing, provider: 'cheapvibecode' });
+
+    // 1M * 1 + 0.5M * 2 per million = 2 USD, not the reported 4200 units.
+    expect(result.cost).toBeCloseTo(2, 10);
+  });
+
+  it('keeps the OpenRouter provider-reported override explicitly', () => {
+    const pricing: Pricing = {
+      units: [
+        { name: 'textInput', rate: 1, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 2, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    };
+
+    const usage = {
+      completion_tokens: 500_000,
+      cost: 0.0042,
+      prompt_tokens: 1_000_000,
+      total_tokens: 1_500_000,
+    } as OpenAI.Completions.CompletionUsage & { cost: number };
+
+    const result = convertOpenAIUsage(usage, { pricing, provider: 'openrouter' });
+
+    expect(result.cost).toBe(0.0042);
+  });
+
+  it('never trusts CheapVibeCode cost, even with no pricing to compute from', () => {
+    const usage = {
+      completion_tokens: 10,
+      cost: 4200,
+      prompt_tokens: 20,
+      total_tokens: 30,
+    } as OpenAI.Completions.CompletionUsage & { cost: number };
+
+    // A wrong-unit cost corrupts the optimistic wallet debit; missing cost
+    // safely degrades to no optimistic debit + authoritative reconcile.
+    const result = convertOpenAIUsage(usage, { provider: 'cheapvibecode' });
+
+    expect(result.cost).toBeUndefined();
+    expect(result.totalTokens).toBe(30);
+  });
 });
 
 describe('convertOpenAIImageUsage', () => {
