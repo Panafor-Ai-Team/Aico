@@ -44,6 +44,7 @@ const testState = vi.hoisted(() => ({
     isGroupContext: false,
     isResourceGated: false,
   },
+  topicPin: undefined as { model: string; provider: string } | undefined,
 }));
 
 type StoreSelector<T = unknown, S = Record<PropertyKey, unknown>> = (state: S) => T;
@@ -101,6 +102,17 @@ vi.mock('@/store/aiInfra', () => ({
     selector(testState.aiInfra),
 }));
 
+vi.mock('@/store/chat', () => ({
+  useChatStore: <T,>(selector: StoreSelector<T, Record<string, unknown>>) =>
+    selector({ topicPin: testState.topicPin }),
+}));
+
+vi.mock('@/store/chat/slices/topic/selectors', () => ({
+  topicSelectors: {
+    activeTopicModel: (s: { topicPin: unknown }) => s.topicPin,
+  },
+}));
+
 describe('useChatInputNotice', () => {
   beforeEach(() => {
     testState.agent.agencyConfig = undefined;
@@ -125,6 +137,7 @@ describe('useChatInputNotice', () => {
       isGroupContext: false,
       isResourceGated: false,
     };
+    testState.topicPin = undefined;
   });
 
   it('returns the agent view-only notice when the member lacks use access', () => {
@@ -388,5 +401,32 @@ describe('useChatInputNotice', () => {
     const { result } = renderHook(() => useChatInputNotice());
 
     expect(result.current).toEqual({ key: 'input.modelUnavailable', type: 'warning' });
+  });
+
+  it('warns on a revoked topic pin while the agent default stays healthy', () => {
+    testState.aiInfra.isInitAiProviderRuntimeState = true;
+    testState.aiInfra.enabledChatModelList = [
+      { children: [{ abilities: { functionCall: true }, id: 'gpt-4o' }], id: 'openai' },
+    ];
+    // Agent default is fine, but the open topic is pinned to a revoked model —
+    // the trigger shows the pin, so the notice must judge the pin.
+    testState.topicPin = { model: 'gone-model', provider: 'openai' };
+
+    const { result } = renderHook(() => useChatInputNotice());
+
+    expect(result.current).toEqual({ key: 'input.modelUnavailable', type: 'warning' });
+  });
+
+  it('stays silent when the pin is valid but the agent default is revoked', () => {
+    testState.aiInfra.isInitAiProviderRuntimeState = true;
+    testState.agent.model = 'gone-model';
+    testState.topicPin = { model: 'gpt-4o', provider: 'openai' };
+    testState.aiInfra.enabledChatModelList = [
+      { children: [{ abilities: { functionCall: true }, id: 'gpt-4o' }], id: 'openai' },
+    ];
+
+    const { result } = renderHook(() => useChatInputNotice());
+
+    expect(result.current).toBeUndefined();
   });
 });

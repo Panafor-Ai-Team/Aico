@@ -43,6 +43,12 @@ const withBrandedProviderName = <T extends { id: string; name: string }>(provide
 
 interface EnabledChatModelsState {
   /**
+   * Whether absence from the list is evidence of revocation (org allow-list
+   * and catalog actually loaded) rather than missing data. The auto-switch
+   * judges "model revoked" only on a confirmed list.
+   */
+  isDataConfirmed: boolean;
+  /**
    * True while the list is still a fail-closed placeholder: billing context not
    * resolved yet, managed status in flight, or the org allow-list/catalog still
    * loading. Consumers that judge "model missing" must wait on this.
@@ -100,6 +106,15 @@ export const useEnabledChatModelsState = (): EnabledChatModelsState => {
     !!isManagedStatusLoading ||
     (!!orgId && (!!isAllowedLoading || !!isCatalogLoading));
 
+  /**
+   * Whether absence from the list is evidence (not just missing data). The
+   * auto-switch must only treat "model not in list" as revoked when the org
+   * allow-list and catalog actually loaded: a first load that errors leaves a
+   * degraded fail-closed list, which must never read as "revoked" and clobber
+   * the user's model. Legitimately empty responses are defined values, not this.
+   */
+  const isDataConfirmed = !orgId || (allowed !== undefined && catalog !== undefined);
+
   const list = useMemo(() => {
     const list = enabledChatModelList || [];
     const scoped = (aicoManaged ? filterAicoManagedProviders(list) : list).map(
@@ -150,7 +165,7 @@ export const useEnabledChatModelsState = (): EnabledChatModelsState => {
     return [orgProvider, ...byok];
   }, [aicoManaged, allowed, catalog, enabledChatModelList, orgId]);
 
-  return { isPending, list };
+  return { isDataConfirmed, isPending, list };
 };
 
 export const useEnabledChatModels = (): EnabledProviderWithModels[] =>

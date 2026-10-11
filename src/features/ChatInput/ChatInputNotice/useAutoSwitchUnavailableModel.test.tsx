@@ -33,8 +33,10 @@ const orgList: EnabledProviderWithModels[] = [
 ];
 
 const testState = vi.hoisted(() => ({
+  activeTopicId: undefined as string | undefined,
   agentConfigLoading: false,
   canSelectModel: true,
+  isDataConfirmed: true,
   isInitRuntime: true,
   isModelListPending: false,
   isPreferenceLoading: false,
@@ -43,6 +45,8 @@ const testState = vi.hoisted(() => ({
   provider: 'openai',
   selectionPolicy: 'member' as 'fixed' | 'member',
   selectModel: vi.fn(),
+  topicPin: undefined as { model: string; provider: string } | undefined,
+  updateTopicModel: vi.fn(),
 }));
 
 type StoreSelector<T = unknown, S = Record<PropertyKey, unknown>> = (state: S) => T;
@@ -64,9 +68,25 @@ vi.mock('@/features/ChatInput/hooks/useAgentModelSelection', () => ({
 
 vi.mock('@/hooks/useEnabledChatModels', () => ({
   useEnabledChatModelsState: () => ({
+    isDataConfirmed: testState.isDataConfirmed,
     isPending: testState.isModelListPending,
     list: testState.list,
   }),
+}));
+
+vi.mock('@/store/chat', () => ({
+  useChatStore: <T,>(selector: StoreSelector<T, Record<string, unknown>>) =>
+    selector({
+      activeTopicId: testState.activeTopicId,
+      topicPin: testState.topicPin,
+      updateTopicModel: testState.updateTopicModel,
+    }),
+}));
+
+vi.mock('@/store/chat/slices/topic/selectors', () => ({
+  topicSelectors: {
+    activeTopicModel: (s: { topicPin: unknown }) => s.topicPin,
+  },
 }));
 
 vi.mock('@/store/agent', () => ({
@@ -114,8 +134,10 @@ describe('isModelInList / pickUnavailableModelFallback', () => {
 
 describe('useAutoSwitchUnavailableModel', () => {
   beforeEach(() => {
+    testState.activeTopicId = undefined;
     testState.agentConfigLoading = false;
     testState.canSelectModel = true;
+    testState.isDataConfirmed = true;
     testState.isInitRuntime = true;
     testState.isModelListPending = false;
     testState.isPreferenceLoading = false;
@@ -124,6 +146,8 @@ describe('useAutoSwitchUnavailableModel', () => {
     testState.provider = 'openai';
     testState.selectionPolicy = 'member';
     testState.selectModel = vi.fn();
+    testState.topicPin = undefined;
+    testState.updateTopicModel = vi.fn();
   });
 
   it('does nothing on mount or when the model stays valid', () => {
@@ -136,8 +160,23 @@ describe('useAutoSwitchUnavailableModel', () => {
     expect(testState.selectModel).not.toHaveBeenCalled();
   });
 
-  it('does nothing on mount with an already-missing model (keeps the warning)', () => {
+  it('switches on mount with an already-missing model once the list is confirmed', () => {
+    // Cold load onto a revoked model (or a poll that lands while the hook was
+    // unmounted): there is no valid->missing transition to observe, but a
+    // confirmed list still proves the session is parked.
     testState.model = 'gone-model';
+    renderHook(() => useAutoSwitchUnavailableModel());
+    expect(testState.selectModel).toHaveBeenCalledTimes(1);
+    expect(testState.selectModel).toHaveBeenCalledWith({
+      model: 'openrouter/auto',
+      provider: 'openai',
+    });
+  });
+
+  it('does nothing on mount with a missing model while the list is unconfirmed', () => {
+    // First load errored: the degraded list must not read as "revoked".
+    testState.model = 'gone-model';
+    testState.isDataConfirmed = false;
     renderHook(() => useAutoSwitchUnavailableModel());
     expect(testState.selectModel).not.toHaveBeenCalled();
   });
@@ -250,5 +289,71 @@ describe('useAutoSwitchUnavailableModel', () => {
     testState.isModelListPending = false;
     rerender();
     expect(testState.selectModel).not.toHaveBeenCalled();
+  });
+
+  it('re-pins a revoked topic model while the agent default stays healthy', () => {
+    // The reported bug: the agent default is fine, but the topic pin still
+    // names the revoked model — judging the agent alone parks the session.
+    testState.activeTopicId = 'topic-1';
+    testState.topicPin = { model: 'gone-model', provider: 'openai' };
+    renderHook(() => useAutoSwitchUnavailableModel());
+
+    expect(testState.selectModel).not.toHaveBeenCalled();
+    expect(testState.updateTopicModel).toHaveBeenCalledTimes(1);
+    expect(testState.updateTopicModel).toHaveBeenCalledWith('topic-1', {
+      model: 'openrouter/auto',
+      provider: 'openai',
+    });
+  });
+
+  it('repairs both agent default and topic pin when both name a revoked model', () => {
+    testState.activeTopicId = 'topic-1';
+    testState.model = 'gone-model';
+    testState.topicPin = { model: 'gone-model', provider: 'openai' };
+    renderHook(() => useAutoSwitchUnavailableModel());
+
+    expect(testState.selectModel).toHaveBeenCalledTimes(1);
+    expect(testState.updateTopicModel).toHaveBeenCalledTimes(1);
+    expect(testState.updateTopicModel).toHaveBeenCalledWith('topic-1', {
+      model: 'openrouter/auto',
+      provider: 'openai',
+    });
+  });
+
+  it('leaves a valid topic pin alone when only the agent default is revoked', () => {
+    testState.activeTopicId = 'topic-1';
+    testState.model = 'gone-model';
+    testState.topicPin = { model: 'gpt-4o', provider: 'openai' };
+    renderHook(() => useAutoSwitchUnavailableModel());
+
+    // Agent default repaired; the healthy pin is not rewritten.
+    expect(testState.selectModel).toHaveBeenCalledTimes(1);
+    expect(testState.updateTopicModel).not.toHaveBeenCalled();
+  });
+
+  it('re-pins the topic even for a locked selection (agent config untouched)', () => {
+    testState.canSelectModel = false;
+    testState.activeTopicId = 'topic-1';
+    testState.topicPin = { model: 'gone-model', provider: 'openai' };
+    renderHook(() => useAutoSwitchUnavailableModel());
+
+    expect(testState.selectModel).not.toHaveBeenCalled();
+    expect(testState.updateTopicModel).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats managed provider aliases as the same slot across a gateway cutover', () => {
+    const cutoverList: EnabledProviderWithModels[] = [
+      {
+        children: [{ abilities: {}, id: 'glm-5-flash' }],
+        id: 'cheapvibecode',
+        name: 'Aico',
+        source: 'builtin',
+      },
+    ];
+    expect(isModelInList(cutoverList, 'glm-5-flash', 'openrouter')).toBe(true);
+    expect(isModelInList(cutoverList, 'glm-5-flash', 'aico')).toBe(true);
+    expect(isModelInList(cutoverList, 'missing-model', 'openrouter')).toBe(false);
+    // Non-managed providers never alias: an unrelated id must not match.
+    expect(isModelInList(personalList, 'gpt-4o', 'unknown-provider')).toBe(false);
   });
 });
