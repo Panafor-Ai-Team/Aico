@@ -4,6 +4,7 @@ import type {
   ModelReasoningResponseItem,
   ModelUsage,
 } from '@lobechat/types';
+import { mergeStreamUsage } from '@lobechat/utils/mergeStreamUsage';
 import type { Pricing } from 'model-bank';
 
 import { parseToolCalls } from '../../helpers';
@@ -616,7 +617,10 @@ export function createCallbacksTransformer(
           }
 
           case 'usage': {
-            usage = data;
+            // A stream can carry several usage events; merge monotonically so
+            // a trailing zero-total artifact can never wipe out the real
+            // totals delivered to onCompletion.
+            usage = mergeStreamUsage(usage, data);
             await callbacks.onUsage?.(data);
             break;
           }
