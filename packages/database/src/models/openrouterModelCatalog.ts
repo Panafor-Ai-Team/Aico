@@ -68,6 +68,12 @@ export type OpenRouterCatalogModelInput = {
 const SYNC_STATE_ID = 'default';
 
 const AUTO_CATALOG_CARD: OpenRouterCatalogModelInput = {
+  // The router itself never appears in an upstream listing, so no sync ever
+  // persists abilities for it — yet it resolves tool requests to tool-capable
+  // models at runtime (`resolveAutoModel` keeps dedicated tool slots). Without
+  // `functionCall` the chat mode switcher disables the agent option for the
+  // product default model ("current model does not support tool calling").
+  abilities: { functionCall: true },
   contextWindowTokens: 2_000_000,
   description:
     'Routes each request to the best available model based on context length, topic, and complexity.',
@@ -213,6 +219,20 @@ const withCheapVibeCodeReasoningEffort = (
     };
   });
 };
+
+/**
+ * Stamp tool calling onto the served Auto card. Rows written before
+ * `AUTO_CATALOG_CARD` published `functionCall` still read as `abilities: {}`,
+ * and an upstream snapshot may contribute its own ability-less Auto row — both
+ * must serve as tool-capable without waiting for the next cron sync, because
+ * agent mode (and every other `functionCall` gate) keys off served abilities.
+ */
+const withAutoToolCalling = (models: AiProviderModelListItem[]): AiProviderModelListItem[] =>
+  models.map((model) =>
+    model.id === OPENROUTER_AUTO_MODEL_ID
+      ? { ...model, abilities: { ...model.abilities, functionCall: true } }
+      : model,
+  );
 
 const toProviderCard = (card: OpenRouterCatalogModelInput): AiProviderModelListItem =>
   ({
@@ -415,7 +435,9 @@ export class OpenRouterModelCatalogModel {
         type: normalizeAiModelType(row.type),
       } as AiProviderModelListItem;
     });
-    const mapped = withCheapVibeCodeReasoningEffort(withManagedGenerationCards(rowModels));
+    const mapped = withAutoToolCalling(
+      withCheapVibeCodeReasoningEffort(withManagedGenerationCards(rowModels)),
+    );
 
     if (mapped.some((m) => m.id === OPENROUTER_AUTO_MODEL_ID)) {
       // Serve path must be self-healing: a catalog synced before the embedding
@@ -430,7 +452,9 @@ export class OpenRouterModelCatalogModel {
 
     return [
       {
-        abilities: {},
+        // `withAutoToolCalling` above only covers rows; the injected card
+        // carries the same ability explicitly so the literal is never a lie.
+        abilities: { functionCall: true },
         contextWindowTokens: AUTO_CATALOG_CARD.contextWindowTokens,
         description: AUTO_CATALOG_CARD.description,
         displayName: OPENROUTER_AUTO_DISPLAY_NAME,
