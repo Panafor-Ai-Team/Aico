@@ -1,3 +1,4 @@
+import { OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
 import type { Pricing, PricingUnit, PricingUnitName } from 'model-bank';
 
 import {
@@ -22,6 +23,15 @@ const rank = (type: string) => TYPE_ORDER.indexOf(type) + 1 || TYPE_ORDER.length
 const teamModelType = (model: TeamCatalogModel) => model.type || 'chat';
 
 /**
+ * Platform infra that is always on for every team and never becomes a rule
+ * row: the Auto meta-router and embedding models (system-agent memory runs on
+ * platform credentials, not team grants). Shown as locked rows so tab totals
+ * match the provider catalog instead of drifting by one.
+ */
+export const isAlwaysOnTeamModel = (model: Pick<TeamCatalogModel, 'id' | 'type'>) =>
+  model.id === OPENROUTER_AUTO_MODEL_ID || model.type === 'embedding';
+
+/**
  * One tab per model type in the catalog, chat → image → video first, then any
  * other type. An `all` tab leads when the catalog spans several types so the
  * admin can search across everything. Built from the whole catalog (not the
@@ -29,18 +39,26 @@ const teamModelType = (model: TeamCatalogModel) => model.type || 'chat';
  *
  * When `isEnabled` is given, each tab lists enabled models first (stable —
  * catalog order is kept within each group).
+ *
+ * Embedding infra rides the `all` tab only: it gets no type tab of its own,
+ * keeping tab totals identical to the provider catalog.
  */
 export const buildTeamModelTabs = (
   models: TeamCatalogModel[],
   isEnabled?: (modelId: string) => boolean,
 ) => {
   const byType = new Map<string, TeamCatalogModel[]>();
+  const infra: TeamCatalogModel[] = [];
   for (const model of models) {
+    if (model.type === 'embedding') {
+      infra.push(model);
+      continue;
+    }
     const type = teamModelType(model);
     byType.set(type, [...(byType.get(type) ?? []), model]);
   }
   const ordered: Array<{ items: TeamCatalogModel[]; type: string }> = [];
-  if (byType.size > 1) ordered.push({ items: [...models], type: 'all' });
+  if (byType.size > 1 || infra.length > 0) ordered.push({ items: [...models], type: 'all' });
   for (const [type, items] of [...byType.entries()].sort(([a], [b]) => rank(a) - rank(b))) {
     ordered.push({ items, type });
   }
@@ -53,6 +71,20 @@ export const buildTeamModelTabs = (
 
 const positiveRate = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+
+/**
+ * Every grantable model id across all tabs, de-duplicated (the `all` tab
+ * repeats the per-type tabs) in first-seen order. Always-on infra (Auto,
+ * embeddings) is excluded — it never becomes a rule row.
+ */
+export const collectEnableAllModelIds = (tabs: Array<{ items: TeamCatalogModel[] }>): string[] => [
+  ...new Set(
+    tabs
+      .flatMap((tab) => tab.items)
+      .filter((model) => !isAlwaysOnTeamModel(model))
+      .map((model) => model.id),
+  ),
+];
 
 /** First rate of a pricing unit (fixed → rate, tiered → first tier, lookup → first price). */
 const unitRate = (
@@ -77,6 +109,24 @@ export type TeamModelCost =
   | { kind: 'per-video'; piAmount: string };
 
 /**
+ * LTR-isolate a coefficient label for RTL-safe plain-text rendering: without
+ * isolation the trailing `×` mirrors to the wrong side (`×4`) in RTL locales.
+ * Uses explicit U+2066/U+2069 escapes so the isolates stay visible in source.
+ */
+const bidiIsolate = (value: string): string => `\u2066${value}\u2069`;
+
+/**
+ * Plain-text chat coefficient label (`4×`, `↑1× ↓4×`) for surfaces that render
+ * strings instead of JSX (e.g. the provider model list). Null for per-asset
+ * costs and anything else without a chat coefficient.
+ */
+export const formatCoefficientLabel = (cost: TeamModelCost): string | null => {
+  if (cost.kind === 'chat-single') return bidiIsolate(cost.coefficient);
+  if (cost.kind === 'chat-split') return bidiIsolate(`↑${cost.input} ↓${cost.output}`);
+  return null;
+};
+
+/**
  * What the org admin pays when a team uses this model, in the same convention
  * as the site's model picker: chat shows the CVC usage coefficient (×),
  * image/video shows the π amount per item. Null when the catalog has no usable
@@ -84,6 +134,9 @@ export type TeamModelCost =
  */
 export const getTeamModelCost = (model: TeamCatalogModel): TeamModelCost | null => {
   const type = teamModelType(model);
+  // Embedding infra has per-token input pricing but no per-team cost meaning —
+  // showing a chat coefficient for it would be wrong.
+  if (type === 'embedding') return null;
   if (type === 'image') {
     const rate =
       positiveRate(model.approximatePricePerImage) ??

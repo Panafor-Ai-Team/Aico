@@ -35,7 +35,7 @@ import { useUserStore } from '@/store/user';
 import { userProfileSelectors } from '@/store/user/selectors';
 
 /** Model types a team can be granted; embeddings are not user-selectable. */
-const TEAM_MODEL_TYPES = new Set(['chat', 'image', 'video']);
+const TEAM_MODEL_TYPES = new Set(['chat', 'image', 'video', 'embedding']);
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   dangerCard: css`
