@@ -20,6 +20,8 @@ export const filterOrgScopedImageModels = (
     .filter(
       (model) =>
         (model.type || 'chat') === 'image' &&
+        // A model the platform admin disabled is hidden even when team-granted.
+        model.enabled !== false &&
         (allowSet.has(model.id) || isDefaultAutoImageModelId(model.id)),
     )
     .map((model) => ({

@@ -1,11 +1,15 @@
 import { OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
 import type { LobeChatDatabase } from '@lobechat/database';
 import { getTestDB } from '@lobechat/database/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { cleanupAicoTables, seedUsers } from '@/database/models/__tests__/aico.phase2.helpers';
 import { OrganizationModel } from '@/database/models/organization';
-import { memberBudgets, userWallets } from '@/database/schemas/aicoOrganization';
+import {
+  memberBudgets,
+  openrouterModelCatalog,
+  userWallets,
+} from '@/database/schemas/aicoOrganization';
 
 import { ManagedKeyCapacityError } from '../managedProvider/cheapvibecode';
 import type { LedgerGate } from './ledger/gate';
@@ -167,5 +171,46 @@ describe('AicoManagedPolicy under the usage ledger', () => {
     await expect(policy.authorize(params)).rejects.toMatchObject({
       code: 'MEMBER_BUDGET_UNFUNDED',
     });
+  });
+});
+
+describe('platform catalog kill-switch', () => {
+  const disabledModel = 'openai/disabled-probe-model';
+  const enabledModel = 'openai/enabled-probe-model';
+
+  beforeEach(async () => {
+    await db.delete(openrouterModelCatalog);
+    await db.insert(openrouterModelCatalog).values([
+      { enabled: false, id: disabledModel, syncedAt: new Date() },
+      { enabled: true, id: enabledModel, syncedAt: new Date() },
+    ]);
+    await db.insert(userWallets).values({
+      balanceMicroUsd: 1_000_000,
+      rawCapacityMicroUsd: 1_000_000,
+      userId,
+    });
+  });
+
+  afterEach(async () => {
+    await db.delete(openrouterModelCatalog);
+  });
+
+  it('denies a catalog-disabled model even on a funded personal wallet', async () => {
+    const policy = new AicoManagedPolicy(db, async () => 'decrypted', undefined, sharedGate);
+
+    await expect(
+      policy.authorize({ billing: { source: 'personal' }, modelId: disabledModel, userId }),
+    ).rejects.toMatchObject({ code: `MODEL_DISABLED:${disabledModel}` });
+  });
+
+  it('allows a catalog-enabled model on a funded personal wallet', async () => {
+    const policy = new AicoManagedPolicy(db, async () => 'decrypted', undefined, sharedGate);
+
+    const authorized = await policy.authorize({
+      billing: { source: 'personal' },
+      modelId: enabledModel,
+      userId,
+    });
+    expect(authorized.apiKey).toBe(SHARED);
   });
 });

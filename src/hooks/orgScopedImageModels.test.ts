@@ -19,6 +19,20 @@ describe('filterOrgScopedImageModels', () => {
     expect(result.map((model) => model.id)).toEqual(['meta/muse-image', 'granted/image-model']);
   });
 
+  it('drops team-granted models the platform admin disabled', () => {
+    const catalogWithDisabled = [
+      { enabled: false, id: 'granted/image-model', type: 'image' },
+      { enabled: true, id: 'other/image-model', type: 'image' },
+    ] as any[];
+
+    const result = filterOrgScopedImageModels(catalogWithDisabled, [
+      'granted/image-model',
+      'other/image-model',
+    ]);
+
+    expect(result.map((model) => model.id)).toEqual(['other/image-model']);
+  });
+
   it('always keeps the product default image model, even for a team that never granted it', () => {
     const result = filterOrgScopedImageModels(catalog, ['granted/image-model']);
 

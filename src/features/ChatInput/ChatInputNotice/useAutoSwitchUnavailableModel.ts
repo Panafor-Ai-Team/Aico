@@ -1,8 +1,6 @@
 import { OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
 import { useEffect, useRef } from 'react';
 
-import { useAicoBillingStore } from '@/features/AicoBilling/store';
-import { billingContextKey } from '@/features/AicoBilling/types';
 import { useAgentId } from '@/features/ChatInput/hooks/useAgentId';
 import { useAgentModelSelection } from '@/features/ChatInput/hooks/useAgentModelSelection';
 import { useEnabledChatModelsState } from '@/hooks/useEnabledChatModels';
@@ -27,12 +25,12 @@ export const isModelInList = (
   Boolean(list.find((item) => item.id === provider)?.children.some((item) => item.id === model));
 
 /**
- * Fallback model for a freshly switched wallet whose list lacks the current
- * model. Prefers the Auto meta-router (always allow-listed in org mode, the
- * product default elsewhere), else the first listed chat model. Undefined
- * when the list is empty (then the unavailable-model notice stays).
+ * Fallback model when the current one leaves the enabled list. Prefers the
+ * Auto meta-router (always allow-listed in org mode, the product default
+ * elsewhere), else the first listed chat model. Undefined when the list is
+ * empty (then the unavailable-model notice stays).
  */
-export const pickBillingSwitchFallbackModel = (
+export const pickUnavailableModelFallback = (
   list: EnabledProviderWithModels[],
 ): ModelSelection | undefined => {
   for (const item of list) {
@@ -46,23 +44,21 @@ export const pickBillingSwitchFallbackModel = (
 };
 
 /**
- * Auto-switch the agent's model right after a wallet (billing context)
- * switch leaves the current model outside the newly enabled list — e.g.
- * personal → organization where the team allow-list lacks the model.
- * Without this the chatbox sits on the "model unavailable" warning until
- * the user picks manually.
+ * Auto-switch the agent's model once its current model drops out of the
+ * settled enabled list — wallet switch, admin revocation/disable, or model
+ * deletion. Without this the chatbox sits on the "model unavailable" warning
+ * until the user picks manually.
  *
- * Only fires on an actual context change (not on deprecations or cold-load
- * flashes), only against a settled list, and never for locked selections
- * (fixed agents, use-only access) — `selectModel` itself also refuses those.
+ * Fires only on a settled valid→missing transition (not on mount with an
+ * already-missing model, not on deprecations seen at cold load, not on
+ * loading flashes), only against a settled list, and never for locked
+ * selections (fixed agents, use-only access) — `selectModel` itself also
+ * refuses those.
  */
-export const useAutoSwitchModelOnBillingChange = () => {
+export const useAutoSwitchUnavailableModel = () => {
   const agentId = useAgentId();
   const { canSelectModel, isPreferenceLoading, model, provider, selectionPolicy, selectModel } =
     useAgentModelSelection(agentId);
-  const billingKey = useAicoBillingStore((s) =>
-    s.context ? billingContextKey(s.context) : undefined,
-  );
   const { isPending: isModelListPending, list: enabledChatModelList } = useEnabledChatModelsState();
   const isAgentConfigLoading = useAgentStore(agentByIdSelectors.isAgentConfigLoadingById(agentId));
   const isModelConfigReady = useAiInfraStore((s) =>
@@ -73,25 +69,22 @@ export const useAutoSwitchModelOnBillingChange = () => {
   const isSettled =
     isModelConfigReady && !isAgentConfigLoading && !isMemberOverridePending && !isModelListPending;
 
-  // Set on every context change; cleared once a settled pass reconciles.
-  // Survives unsettled renders (SWR allow-list still loading) so the switch
-  // happens against the new list, never the stale one.
-  const needsReconcileRef = useRef(false);
-  const prevKeyRef = useRef<string | undefined>(undefined);
+  const inList =
+    isSettled && model && provider
+      ? isModelInList(enabledChatModelList, model, provider)
+      : undefined;
+
+  // Last settled validity; stays untouched while unsettled so a reload that
+  // lands on a shrunken list still reconciles instead of re-baselining.
+  const wasInListRef = useRef<boolean | undefined>(undefined);
 
   useEffect(() => {
-    const prev = prevKeyRef.current;
-    prevKeyRef.current = billingKey;
-    if (prev !== undefined && prev !== billingKey) needsReconcileRef.current = true;
-    if (!needsReconcileRef.current) return;
-    if (!billingKey || !isSettled || !canSelectModel || !model || !provider) return;
-    if (isModelInList(enabledChatModelList, model, provider)) {
-      needsReconcileRef.current = false;
-      return;
-    }
-    const fallback = pickBillingSwitchFallbackModel(enabledChatModelList);
+    if (!isSettled || !canSelectModel || !model || !provider || inList === undefined) return;
+    const was = wasInListRef.current;
+    wasInListRef.current = inList;
+    if (was !== true || inList) return;
+    const fallback = pickUnavailableModelFallback(enabledChatModelList);
     if (!fallback) return;
-    needsReconcileRef.current = false;
     void selectModel(fallback);
-  }, [billingKey, canSelectModel, enabledChatModelList, isSettled, model, provider, selectModel]);
+  }, [canSelectModel, enabledChatModelList, inList, isSettled, model, provider, selectModel]);
 };

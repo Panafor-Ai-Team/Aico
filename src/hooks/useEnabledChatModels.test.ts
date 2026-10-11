@@ -108,7 +108,7 @@ describe('useEnabledChatModels', () => {
             {
               abilities: { functionCall: true },
               displayName: 'GPT-4o mini',
-              enabled: false,
+              enabled: true,
               id: 'openai/gpt-4o-mini',
               type: 'chat',
             },
@@ -131,6 +131,58 @@ describe('useEnabledChatModels', () => {
     expect(result.current).toHaveLength(1);
     expect(result.current[0].id).toBe('openrouter');
     expect(result.current[0].children.map((m) => m.id)).toEqual(['openai/gpt-4o-mini']);
+  });
+
+  it('on org wallet hides team-granted models the platform admin disabled', async () => {
+    useAicoBillingStore.mockImplementation((selector: any) =>
+      selector({ context: { organizationId: 'org-1', source: 'organization' } }),
+    );
+    useAiInfraStore.mockImplementation((selector: any) =>
+      selector({
+        enabledChatModelList: [
+          {
+            children: [{ id: 'openrouter/auto', displayName: 'Auto' }],
+            id: 'openrouter',
+            name: 'OpenRouter',
+            source: 'builtin',
+          },
+        ],
+      }),
+    );
+
+    useClientDataSWR.mockImplementation((key: unknown) => {
+      if (key === 'aico-provider-status') return { data: { managed: true } };
+      if (Array.isArray(key) && key[0] === 'aico-my-allowed-models') {
+        return { data: { modelIds: ['openai/gpt-4o-mini', 'openai/gpt-4o'] } };
+      }
+      if (Array.isArray(key) && key[0] === 'aico-managed-model-catalog') {
+        return {
+          data: [
+            {
+              abilities: { functionCall: true },
+              displayName: 'GPT-4o mini',
+              enabled: false,
+              id: 'openai/gpt-4o-mini',
+              type: 'chat',
+            },
+            {
+              abilities: {},
+              displayName: 'Other',
+              enabled: true,
+              id: 'openai/gpt-4o',
+              type: 'chat',
+            },
+          ],
+        };
+      }
+      return { data: undefined };
+    });
+
+    const { useEnabledChatModels } = await import('./useEnabledChatModels');
+    const { result } = renderHook(() => useEnabledChatModels());
+
+    expect(result.current).toHaveLength(1);
+    expect(result.current[0].children.map((m) => m.id)).toEqual(['openai/gpt-4o']);
   });
 
   it('on org wallet always includes Auto even when the team allow-list omits it', async () => {
@@ -168,6 +220,52 @@ describe('useEnabledChatModels', () => {
       'openrouter/auto',
       'openai/gpt-4o-mini',
     ]);
+  });
+
+  describe('org access freshness', () => {
+    it('polls the allow-list and catalog so revocations land without a focus change', async () => {
+      useAicoBillingStore.mockImplementation((selector: any) =>
+        selector({ context: { organizationId: 'org-1', source: 'organization' } }),
+      );
+      useClientDataSWR.mockImplementation((key: unknown) => {
+        if (key === 'aico-provider-status') return { data: { managed: true } };
+        return { data: undefined };
+      });
+
+      const { ORG_MODEL_ACCESS_REFRESH_INTERVAL, useEnabledChatModels } =
+        await import('./useEnabledChatModels');
+      renderHook(() => useEnabledChatModels());
+
+      const configs = Object.fromEntries(
+        useClientDataSWR.mock.calls
+          .filter(([key]) => Array.isArray(key))
+          .map(([key, _fetcher, config]) => [(key as string[])[0], config]),
+      );
+      expect(configs['aico-my-allowed-models']).toMatchObject({
+        refreshInterval: ORG_MODEL_ACCESS_REFRESH_INTERVAL,
+      });
+      expect(configs['aico-managed-model-catalog']).toMatchObject({
+        refreshInterval: ORG_MODEL_ACCESS_REFRESH_INTERVAL,
+      });
+      expect(ORG_MODEL_ACCESS_REFRESH_INTERVAL).toBeGreaterThan(0);
+    });
+
+    it('does not poll in personal mode (no org queries issued)', async () => {
+      useClientDataSWR.mockImplementation((key: unknown) => {
+        if (key === 'aico-provider-status') return { data: { managed: true } };
+        return { data: undefined };
+      });
+
+      const { useEnabledChatModels } = await import('./useEnabledChatModels');
+      renderHook(() => useEnabledChatModels());
+
+      const orgKeys = useClientDataSWR.mock.calls.filter(
+        ([key]) =>
+          Array.isArray(key) &&
+          (key[0] === 'aico-my-allowed-models' || key[0] === 'aico-managed-model-catalog'),
+      );
+      expect(orgKeys).toHaveLength(0);
+    });
   });
 
   describe('isPending', () => {
