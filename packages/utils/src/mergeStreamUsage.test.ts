@@ -80,4 +80,18 @@ describe('mergeStreamUsage', () => {
     expect(merged?.cost).toBe(0.02);
     expect(merged?.totalTokens).toBe(200);
   });
+
+  it('does not let a zero-total artifact zero out the cost', () => {
+    // A trailing tool/result chunk converts to `{ ...zeros, cost: 0 }` —
+    // pricing 0 tokens yields a 0 cost, not a missing one. Treating that as a
+    // reported figure wiped the real cost and hid the cost chip until the
+    // next fetch.
+    const merged = mergeStreamUsage(
+      { cost: 0.25, totalInputTokens: 1200, totalOutputTokens: 45, totalTokens: 1245 },
+      { cost: 0, totalInputTokens: 0, totalOutputTokens: 0, totalTokens: 0 },
+    );
+
+    expect(merged?.cost).toBe(0.25);
+    expect(merged?.totalTokens).toBe(1245);
+  });
 });

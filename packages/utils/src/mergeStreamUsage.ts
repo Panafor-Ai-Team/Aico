@@ -14,8 +14,11 @@ import type { ModelUsage } from '@lobechat/types';
  *   "unknown", never 0, so partial snapshots can't drag a known total down).
  * - `cost` follows the latest reported figure (rates can be corrected;
  *   cementing a stale/phantom cost would repeat the wallet-debit flicker).
- * - Events carrying no information (no positive token count and no cost) are
- *   ignored outright instead of blanking the snapshot.
+ *   A `0` cost is NOT a reported figure — pricing 0 tokens yields 0, so a
+ *   zero-total artifact arrives as `{ ...zeros, cost: 0 }`; only a positive
+ *   cost counts.
+ * - Events carrying no information (no positive token count and no positive
+ *   cost) are ignored outright instead of blanking the snapshot.
  */
 export const mergeStreamUsage = (
   previous: ModelUsage | undefined,
@@ -32,7 +35,7 @@ export const mergeStreamUsage = (
     if (nextValue === undefined) continue;
 
     if (key === 'cost') {
-      if (typeof nextValue === 'number' && Number.isFinite(nextValue)) merged.cost = nextValue;
+      if (isPositiveFinite(nextValue)) merged.cost = nextValue;
       continue;
     }
 
@@ -55,7 +58,7 @@ const isPositiveFinite = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value > 0;
 
 const isInformativeUsage = (usage: ModelUsage): boolean => {
-  if (typeof usage.cost === 'number' && Number.isFinite(usage.cost)) return true;
+  if (isPositiveFinite(usage.cost)) return true;
 
   return Object.entries(usage).some(([key, value]) => key !== 'cost' && isPositiveFinite(value));
 };
