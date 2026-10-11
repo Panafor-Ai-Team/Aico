@@ -14,6 +14,7 @@ import type {
 } from '@lobechat/types';
 import { ChatErrorType } from '@lobechat/types';
 import { fetchEventSource } from '@lobechat/utils/client/fetchEventSource/index';
+import { mergeStreamUsage } from '@lobechat/utils/mergeStreamUsage';
 import { nanoid } from '@lobechat/utils/uuid';
 
 import { getMessageError } from './parseError';
@@ -458,7 +459,11 @@ export const fetchSSE = async (url: string, options: RequestInit & FetchSSEOptio
         }
 
         case 'usage': {
-          usage = data;
+          // A stream can carry several usage events (final chunk, trailing
+          // tool/result chunks, usage-only chunks); merge monotonically so a
+          // trailing zero-total artifact can never wipe out the real totals
+          // and make the token counter jump backward.
+          usage = mergeStreamUsage(usage, data);
           options.onMessageHandle?.({ type: 'usage', usage: data });
           break;
         }

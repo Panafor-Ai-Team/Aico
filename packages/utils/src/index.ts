@@ -13,6 +13,7 @@ export * from './imageToBase64';
 export * from './jina';
 export * from './keyboard';
 export * from './merge';
+export * from './mergeStreamUsage';
 export * from './mimeType';
 export * from './multimodalContent';
 export * from './number';

@@ -772,4 +772,58 @@ describe('fetchSSE', () => {
       });
     });
   });
+
+  describe('usage accumulation', () => {
+    const fireUsageEvents = (options: FetchEventSourceInit, events: unknown[]) => {
+      options.onopen!({ clone: () => ({ ok: true, headers: new Headers() }) } as any);
+      for (const data of events) {
+        options.onmessage!({ event: 'usage', data: JSON.stringify(data) } as any);
+      }
+    };
+
+    it('does not let a trailing zero-total artifact wipe out real usage', async () => {
+      const mockOnFinish = vi.fn();
+
+      (fetchEventSource as any).mockImplementationOnce(
+        (url: string, options: FetchEventSourceInit) => {
+          fireUsageEvents(options, [
+            { totalInputTokens: 1200, totalOutputTokens: 45, totalTokens: 1245 },
+            // Trailing tool/result chunks can carry zero-total usage payloads.
+            { totalInputTokens: 0, totalOutputTokens: 0, totalTokens: 0 },
+          ]);
+        },
+      );
+
+      await fetchSSE('/', { onFinish: mockOnFinish });
+
+      expect(mockOnFinish).toHaveBeenCalled();
+      expect(mockOnFinish.mock.calls[0][1].usage).toMatchObject({
+        totalInputTokens: 1200,
+        totalOutputTokens: 45,
+        totalTokens: 1245,
+      });
+    });
+
+    it('merges partial usage snapshots monotonically', async () => {
+      const mockOnFinish = vi.fn();
+
+      (fetchEventSource as any).mockImplementationOnce(
+        (url: string, options: FetchEventSourceInit) => {
+          fireUsageEvents(options, [
+            { totalInputTokens: 1200 },
+            { totalInputTokens: 1200, totalOutputTokens: 45, totalTokens: 1245 },
+          ]);
+        },
+      );
+
+      await fetchSSE('/', { onFinish: mockOnFinish });
+
+      expect(mockOnFinish).toHaveBeenCalled();
+      expect(mockOnFinish.mock.calls[0][1].usage).toMatchObject({
+        totalInputTokens: 1200,
+        totalOutputTokens: 45,
+        totalTokens: 1245,
+      });
+    });
+  });
 });

@@ -720,6 +720,31 @@ describe('createCallbacksTransformer', () => {
     expect(onThinking).toHaveBeenNthCalledWith(2, ' about this');
   });
 
+  it('should not let a trailing zero-total usage event wipe out real usage', async () => {
+    const onCompletion = vi.fn();
+    const transformer = createCallbacksTransformer({ onCompletion });
+
+    const chunks = [
+      'event: usage\n',
+      'data: {"totalInputTokens":1200,"totalOutputTokens":45,"totalTokens":1245}\n\n',
+      // Trailing tool/result chunks can carry zero-total usage payloads.
+      'event: usage\n',
+      'data: {"totalInputTokens":0,"totalOutputTokens":0,"totalTokens":0}\n\n',
+    ];
+
+    await processChunks(transformer, chunks);
+
+    expect(onCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usage: expect.objectContaining({
+          totalInputTokens: 1200,
+          totalOutputTokens: 45,
+          totalTokens: 1245,
+        }),
+      }),
+    );
+  });
+
   it('should preserve reasoning signatures in final callback data', async () => {
     const onCompletion = vi.fn();
     const transformer = createCallbacksTransformer({ onCompletion });
