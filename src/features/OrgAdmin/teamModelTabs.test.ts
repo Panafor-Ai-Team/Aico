@@ -1,6 +1,13 @@
+import { OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
 import { describe, expect, it } from 'vitest';
 
-import { buildTeamModelTabs, getTeamModelCost } from './teamModelTabs';
+import {
+  buildTeamModelTabs,
+  collectEnableAllModelIds,
+  formatCoefficientLabel,
+  getTeamModelCost,
+  isAlwaysOnTeamModel,
+} from './teamModelTabs';
 
 describe('buildTeamModelTabs', () => {
   it('orders tabs all → chat → image → video, then other types', () => {
@@ -74,6 +81,44 @@ describe('buildTeamModelTabs', () => {
 
     expect(tabs[0].items.map((model) => model.id)).toEqual(['b', 'a']);
   });
+
+  it('shows embedding infra only in the all tab, with no type tab', () => {
+    const tabs = buildTeamModelTabs([
+      { id: 'c1', type: 'chat' },
+      { id: 'openai/text-embedding-3-small', type: 'embedding' },
+    ]);
+
+    expect(tabs.map((tab) => tab.type)).toEqual(['all', 'chat']);
+    expect(tabs[0].items.map((model) => model.id)).toEqual(['c1', 'openai/text-embedding-3-small']);
+  });
+});
+
+describe('collectEnableAllModelIds', () => {
+  it('collects every id once, in catalog order', () => {
+    const tabs = buildTeamModelTabs(
+      [
+        { id: 'c-off', type: 'chat' },
+        { id: 'i-off', type: 'image' },
+      ],
+      () => false,
+    );
+
+    expect(collectEnableAllModelIds(tabs)).toEqual(['c-off', 'i-off']);
+  });
+
+  it('returns an empty list when there are no tabs', () => {
+    expect(collectEnableAllModelIds([])).toEqual([]);
+  });
+
+  it('excludes always-on infra (Auto router, embeddings) from rule rows', () => {
+    const tabs = buildTeamModelTabs([
+      { id: OPENROUTER_AUTO_MODEL_ID, type: 'chat' },
+      { id: 'c1', type: 'chat' },
+      { id: 'openai/text-embedding-3-small', type: 'embedding' },
+    ]);
+
+    expect(collectEnableAllModelIds(tabs)).toEqual(['c1']);
+  });
 });
 
 describe('getTeamModelCost', () => {
@@ -135,5 +180,46 @@ describe('getTeamModelCost', () => {
   it('returns null when the catalog has no usable price', () => {
     expect(getTeamModelCost({ id: 'm3', type: 'chat' })).toBeNull();
     expect(getTeamModelCost({ id: 'img2', type: 'image' })).toBeNull();
+  });
+
+  it('returns null for embedding infra (no per-team cost display)', () => {
+    expect(
+      getTeamModelCost({
+        id: 'openai/text-embedding-3-small',
+        pricing: {
+          currency: 'USD',
+          units: [{ name: 'textInput', rate: 0.02, strategy: 'fixed', unit: 'millionTokens' }],
+        },
+        type: 'embedding',
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('isAlwaysOnTeamModel', () => {
+  it('is true for the Auto router and embedding infra, false for grantable models', () => {
+    expect(isAlwaysOnTeamModel({ id: OPENROUTER_AUTO_MODEL_ID, type: 'chat' })).toBe(true);
+    expect(isAlwaysOnTeamModel({ id: 'openai/text-embedding-3-small', type: 'embedding' })).toBe(
+      true,
+    );
+    expect(isAlwaysOnTeamModel({ id: 'c1', type: 'chat' })).toBe(false);
+    expect(isAlwaysOnTeamModel({ id: 'i1', type: 'image' })).toBe(false);
+  });
+});
+
+describe('formatCoefficientLabel', () => {
+  it('isolates a single coefficient for RTL-safe plain-text rendering', () => {
+    expect(formatCoefficientLabel({ coefficient: '4×', kind: 'chat-single' })).toBe('⁦4×⁩');
+  });
+
+  it('isolates a split input/output coefficient', () => {
+    expect(formatCoefficientLabel({ input: '1×', kind: 'chat-split', output: '4×' })).toBe(
+      '⁦↑1× ↓4×⁩',
+    );
+  });
+
+  it('returns null for per-asset costs', () => {
+    expect(formatCoefficientLabel({ kind: 'per-image', piAmount: '1,000' })).toBeNull();
+    expect(formatCoefficientLabel({ kind: 'per-video', piAmount: '2,000' })).toBeNull();
   });
 });

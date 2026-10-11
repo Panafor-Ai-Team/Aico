@@ -804,7 +804,9 @@ export const organizationRouter = router({
   setTeamModels: orgProcedure
     .input(
       z.object({
-        modelIds: z.array(z.string().min(1)).max(200),
+        // Catalog-scale bulk ops (e.g. enable-all over ~500 models) go through
+        // here in one replace call; per-request DoS ceiling stays sane.
+        modelIds: z.array(z.string().min(1)).max(2000),
         orgId: z.string().min(1),
         teamId: z.string().min(1),
       }),

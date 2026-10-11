@@ -223,6 +223,7 @@
   "org.teamModelFailed": "به‌روزرسانی مدل تیم ناموفق بود",
   "org.teamModelsCostHint": "هزینه‌ها از کیف پول سازمان کم می‌شود. برای گفتگو ضریب مصرف (×) و برای تصویر/ویدیو مبلغ π هر مورد نمایش داده می‌شود.",
   "org.teamModelsEmpty": "مدلی پیدا نشد",
+  "org.teamModelsEnableAll": "روشن کردن همه",
   "org.teamModelsHint": "مدلی را روشن کنید تا این تیم بتواند با کیف پول سازمان از آن استفاده کند. تغییرات فوراً ذخیره می‌شوند.",
   "org.teamModelsSearch": "جستجوی مدل‌ها…",
   "org.teamModelsType.all": "همه",

@@ -10,6 +10,8 @@ import { useTranslation } from 'react-i18next';
 import { BrandedModelIcon, formatBrandedModelId } from '@/components/Branding';
 import { ModelInfoTags } from '@/components/ModelSelect';
 import NewModelBadge from '@/components/ModelSelect/NewModelBadge';
+import { isPiPricingProvider } from '@/features/ModelSwitchPanel/hooks/useModelDetailPanel';
+import { formatCoefficientLabel, getTeamModelCost } from '@/features/OrgAdmin/teamModelTabs';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { usePermission } from '@/hooks/usePermission';
 import { aiModelSelectors, useAiInfraStore } from '@/store/aiInfra';
@@ -99,6 +101,13 @@ const ModelItem = memo<ModelItemProps>(
 
       switch (type) {
         case 'chat': {
+          // Managed traffic bills in π/coefficients, never USD: show the same
+          // coefficient label as the org team switches instead of `$` lines.
+          if (isPiPricingProvider(activeAiProvider)) {
+            const cost = getTeamModelCost({ id, pricing, type });
+            const label = cost ? formatCoefficientLabel(cost) : null;
+            return label ? [label] : [];
+          }
           const inputRate = getTextInputUnitRate(pricing);
           const outputRate = getTextOutputUnitRate(pricing);
           return [

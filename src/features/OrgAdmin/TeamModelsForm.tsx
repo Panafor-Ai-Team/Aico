@@ -1,8 +1,7 @@
 'use client';
 
-import { OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
 import { Flexbox, SearchBar, Text } from '@lobehub/ui';
-import { Select, Switch, Tabs } from '@lobehub/ui/base-ui';
+import { Button, Select, Switch, Tabs } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -13,7 +12,14 @@ import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
 import { aicoPanelStyles } from '@/features/AicoPanels';
 import { lambdaClient } from '@/libs/trpc/client';
 
-import { buildTeamModelTabs, getTeamModelCost, type TeamCatalogModel } from './teamModelTabs';
+import {
+  buildTeamModelTabs,
+  collectEnableAllModelIds,
+  getTeamModelCost,
+  isAlwaysOnTeamModel,
+  type TeamCatalogModel,
+} from './teamModelTabs';
+import { usePreservedListScroll } from './usePreservedListScroll';
 
 export type { TeamCatalogModel } from './teamModelTabs';
 
@@ -72,6 +78,7 @@ export const TeamModelsForm = ({
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const [keyword, setKeyword] = useState('');
   const [activeType, setActiveType] = useState<string>();
+  const [enablingAll, setEnablingAll] = useState(false);
 
   const team = teams.find((item) => item.id === teamId);
 
@@ -84,15 +91,23 @@ export const TeamModelsForm = ({
     setEnabledIds(new Set(team?.modelIds ?? []));
   }, [team?.id, team?.modelIds]);
 
+  // Always-on infra (Auto router, embeddings) renders as locked rows so the
+  // listed totals match the provider catalog; it never becomes a rule row.
+  const alwaysOnIds = useMemo(
+    () => new Set(models.filter(isAlwaysOnTeamModel).map((model) => model.id)),
+    [models],
+  );
+
   const tabs = useMemo(
     () =>
-      buildTeamModelTabs(
-        models,
-        (modelId) => modelId === OPENROUTER_AUTO_MODEL_ID || enabledIds.has(modelId),
-      ),
-    [models, enabledIds],
+      buildTeamModelTabs(models, (modelId) => alwaysOnIds.has(modelId) || enabledIds.has(modelId)),
+    [alwaysOnIds, enabledIds, models],
   );
   const currentType = tabs.some((tab) => tab.type === activeType) ? activeType : tabs[0]?.type;
+  // Enabling a model reorders its row to the top — the viewport must stay put.
+  const { listRef, onListScroll } = usePreservedListScroll(
+    `${teamId ?? ''}|${currentType ?? ''}|${keyword}`,
+  );
 
   const visibleModels = useMemo(() => {
     const items = tabs.find((tab) => tab.type === currentType)?.items ?? [];
@@ -105,7 +120,26 @@ export const TeamModelsForm = ({
     );
   }, [currentType, keyword, tabs]);
 
-  const isOn = (modelId: string) => modelId === OPENROUTER_AUTO_MODEL_ID || enabledIds.has(modelId);
+  const isOn = (modelId: string) => alwaysOnIds.has(modelId) || enabledIds.has(modelId);
+
+  // One-click sync with the catalog: replaces the team allow-list with every
+  // grantable model. Always-on infra never becomes a rule row.
+  const enableAll = async () => {
+    if (!teamId || enablingAll) return;
+    setEnablingAll(true);
+    try {
+      await lambdaClient.organization.setTeamModels.mutate({
+        modelIds: collectEnableAllModelIds(tabs),
+        orgId,
+        teamId,
+      });
+      await onSaved();
+    } catch (err) {
+      toastAicoError(err, t, 'org.teamModelFailed');
+    } finally {
+      setEnablingAll(false);
+    }
+  };
 
   const toggle = async (modelId: string, enabled: boolean) => {
     if (!teamId) return;
@@ -152,13 +186,24 @@ export const TeamModelsForm = ({
       </Flexbox>
       <Text type="secondary">{t('org.teamModelsHint')}</Text>
       <Text type="secondary">{t('org.teamModelsCostHint')}</Text>
-      <SearchBar
-        allowClear
-        placeholder={t('org.teamModelsSearch')}
-        value={keyword}
-        variant="filled"
-        onChange={(e) => setKeyword(e.target.value)}
-      />
+      <Flexbox horizontal align="center" gap={8}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <SearchBar
+            allowClear
+            placeholder={t('org.teamModelsSearch')}
+            value={keyword}
+            variant="filled"
+            onChange={(e) => setKeyword(e.target.value)}
+          />
+        </div>
+        <Button
+          disabled={readOnly || !teamId || enablingAll}
+          loading={enablingAll}
+          onClick={() => void enableAll()}
+        >
+          {t('org.teamModelsEnableAll')}
+        </Button>
+      </Flexbox>
       {tabs.length > 1 && (
         <div className={aicoPanelStyles.tabs}>
           <Tabs
@@ -178,13 +223,13 @@ export const TeamModelsForm = ({
           />
         </div>
       )}
-      <Flexbox className={styles.list}>
+      <Flexbox className={styles.list} ref={listRef} onScroll={onListScroll}>
         {visibleModels.length === 0 ? (
           <div className={styles.empty}>{t('org.teamModelsEmpty')}</div>
         ) : (
           visibleModels.map((model) => {
-            const isAuto = model.id === OPENROUTER_AUTO_MODEL_ID;
-            const cost = isAuto ? null : getTeamModelCost(model);
+            const isAlwaysOn = isAlwaysOnTeamModel(model);
+            const cost = isAlwaysOn ? null : getTeamModelCost(model);
             const costLabel = !cost
               ? null
               : cost.kind === 'chat-single'
@@ -194,7 +239,7 @@ export const TeamModelsForm = ({
                   : cost.kind === 'per-image'
                     ? t('org.teamModelCostPerImage', { amount: cost.piAmount })
                     : t('org.teamModelCostPerVideo', { amount: cost.piAmount });
-            const subtitle = isAuto
+            const subtitle = isAlwaysOn
               ? t('org.teamModelAutoAlwaysOn')
               : costLabel
                 ? `${formatBrandedModelId(model.id)} · ${costLabel}`
@@ -208,7 +253,7 @@ export const TeamModelsForm = ({
                     {/* bdi keeps Latin ids and coefficients (`4×`) left-to-right
                         inside RTL locales — otherwise × mirrors to the wrong side. */}
                     <Text ellipsis fontSize={12} type="secondary">
-                      {isAuto ? (
+                      {isAlwaysOn ? (
                         subtitle
                       ) : (
                         <>
@@ -226,7 +271,7 @@ export const TeamModelsForm = ({
                 </Flexbox>
                 <Switch
                   checked={isOn(model.id)}
-                  disabled={readOnly || isAuto || !teamId}
+                  disabled={readOnly || isAlwaysOn || !teamId}
                   loading={pendingIds.has(model.id)}
                   size="small"
                   onChange={(checked) => void toggle(model.id, checked)}
