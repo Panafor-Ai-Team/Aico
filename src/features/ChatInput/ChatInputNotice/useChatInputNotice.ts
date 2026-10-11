@@ -5,7 +5,11 @@ import { useEnabledChatModelsState } from '@/hooks/useEnabledChatModels';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
 import { aiProviderSelectors, useAiInfraStore } from '@/store/aiInfra';
+import { useChatStore } from '@/store/chat';
+import { topicSelectors } from '@/store/chat/slices/topic/selectors';
 import { type EnabledProviderWithModels } from '@/types/aiProvider';
+
+import { isModelInList } from './useAutoSwitchUnavailableModel';
 
 interface ResolveChatInputNoticeParams {
   currentChatModel?: unknown;
@@ -21,9 +25,7 @@ const findEnabledChatModel = (
   model: string,
   provider: string,
 ) => {
-  return enabledChatModelList
-    .find((item) => item.id === provider)
-    ?.children.find((item) => item.id === model);
+  return isModelInList(enabledChatModelList, model, provider) ? { id: model, provider } : undefined;
 };
 
 export const resolveChatInputNotice = ({
@@ -78,9 +80,19 @@ export const useChatInputNotice = (): ChatInputNotice | undefined => {
     agentByIdSelectors.isAgentHeterogeneousById(agentId)(s),
   ]);
 
-  // Same source as the model trigger renders, so the notice can never judge a
-  // different model than the one the user sees (member overrides included).
-  const { isPreferenceLoading, model, provider, selectionPolicy } = useAgentModelSelection(agentId);
+  // Same source as the model trigger renders (topic pin wins), so the notice
+  // can never judge a different model than the one the user sees (member
+  // overrides included) — a revoked pin warns even when the agent default
+  // is still healthy.
+  const {
+    isPreferenceLoading,
+    model: agentModel,
+    provider: agentProvider,
+    selectionPolicy,
+  } = useAgentModelSelection(agentId);
+  const topicPin = useChatStore(topicSelectors.activeTopicModel);
+  const model = topicPin?.model ?? agentModel;
+  const provider = topicPin?.model ? topicPin.provider : agentProvider;
 
   // `isPreferenceLoading` is true for every workspace agent while the shared
   // preferences request is in flight, but the override only feeds the

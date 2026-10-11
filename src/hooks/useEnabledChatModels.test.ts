@@ -318,4 +318,52 @@ describe('useEnabledChatModels', () => {
       expect(result.current.isPending).toBe(false);
     });
   });
+
+  describe('isDataConfirmed', () => {
+    it('is unconfirmed while org data never loaded (first-load error reads degraded, not revoked)', async () => {
+      useAicoBillingStore.mockImplementation((selector: any) =>
+        selector({ context: { organizationId: 'org-1', source: 'organization' } }),
+      );
+      useClientDataSWR.mockImplementation((key: unknown) => {
+        if (key === 'aico-provider-status') return { data: { managed: true } };
+        return { data: undefined, error: new Error('boom'), isLoading: false };
+      });
+
+      const { useEnabledChatModelsState } = await import('./useEnabledChatModels');
+      const { result } = renderHook(() => useEnabledChatModelsState());
+
+      expect(result.current.isDataConfirmed).toBe(false);
+    });
+
+    it('is confirmed once the org allow-list and catalog arrive', async () => {
+      useAicoBillingStore.mockImplementation((selector: any) =>
+        selector({ context: { organizationId: 'org-1', source: 'organization' } }),
+      );
+      useClientDataSWR.mockImplementation((key: unknown) => {
+        if (key === 'aico-provider-status') return { data: { managed: true } };
+        if (Array.isArray(key) && key[0] === 'aico-my-allowed-models') {
+          return { data: { modelIds: [] }, isLoading: false };
+        }
+        if (Array.isArray(key) && key[0] === 'aico-managed-model-catalog') {
+          return { data: [], isLoading: false };
+        }
+        return { data: undefined };
+      });
+
+      const { useEnabledChatModelsState } = await import('./useEnabledChatModels');
+      const { result } = renderHook(() => useEnabledChatModelsState());
+
+      // Legitimately empty responses are defined values, not missing data.
+      expect(result.current.isDataConfirmed).toBe(true);
+    });
+
+    it('is confirmed in personal mode without org data', async () => {
+      useClientDataSWR.mockImplementation(() => ({ data: { managed: true } }));
+
+      const { useEnabledChatModelsState } = await import('./useEnabledChatModels');
+      const { result } = renderHook(() => useEnabledChatModelsState());
+
+      expect(result.current.isDataConfirmed).toBe(true);
+    });
+  });
 });
