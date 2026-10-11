@@ -361,4 +361,44 @@ describe('OpenRouterModelCatalogModel', () => {
     // Providers without a published coefficient (OpenRouter) omit the rate.
     expect(byId(await catalog.listCoefficients())['claude-opus-5']).toBeNull();
   });
+
+  it('serves the Auto router as tool-capable: agent mode depends on functionCall', async () => {
+    // Regression: the Auto card carried no abilities, so `isModelSupportToolUse`
+    // was false for the product default model and the chat mode switcher showed
+    // the agent option disabled ("current model does not support tool calling").
+    // Auto resolves tool requests to tool-capable models at runtime
+    // (`resolveAutoModel` has dedicated tool slots), so it must serve
+    // `functionCall: true`.
+    await catalog.replaceCatalog({
+      models: [{ id: 'glm-5.3-flash', type: 'chat' }],
+      triggeredBy: 'test',
+    });
+
+    const rows = await catalog.listAsProviderModels();
+    expect(rows.find((r) => r.id === 'openrouter/auto')?.abilities).toMatchObject({
+      functionCall: true,
+    });
+  });
+
+  it('backfills functionCall for Auto rows synced before the ability was published', async () => {
+    // Rows persisted by older syncs carry `abilities: {}`; they must read as
+    // tool-capable on the serve path without waiting for the next cron sync.
+    const now = new Date();
+    await db.insert(openrouterModelCatalog).values([
+      {
+        abilities: {},
+        displayName: 'Panachat Auto',
+        enabled: true,
+        id: 'openrouter/auto',
+        payload: {},
+        syncedAt: now,
+        type: 'chat',
+      },
+    ]);
+
+    const rows = await catalog.listAsProviderModels();
+    expect(rows.find((r) => r.id === 'openrouter/auto')?.abilities).toMatchObject({
+      functionCall: true,
+    });
+  });
 });

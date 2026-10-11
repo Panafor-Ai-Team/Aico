@@ -8,6 +8,12 @@ import type { AIChatModelCard, AIEmbeddingModelCard, AIImageModelCard } from '..
 // https://openrouter.ai/docs/api-reference/list-available-models
 const openrouterChatModels: AIChatModelCard[] = [
   {
+    // Tool-capable: the managed Auto router resolves tool requests to
+    // tool-capable models at runtime. Without this the mode switcher disables
+    // the agent option for the product default model.
+    abilities: {
+      functionCall: true,
+    },
     contextWindowTokens: 2_000_000,
     description:
       'Based on context length, topic, and complexity, your request is routed to Llama 3 70B Instruct, Claude 3.5 Sonnet (self-moderated), or GPT-4o.',
