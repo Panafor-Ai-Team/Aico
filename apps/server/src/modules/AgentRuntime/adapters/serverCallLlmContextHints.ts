@@ -1,5 +1,5 @@
 import { type CallLLMPayload, stripAssistantReasoningForReplay } from '@lobechat/agent-runtime';
-import { BRANDING_PROVIDER } from '@lobechat/business-const';
+import { BRANDING_PROVIDER, isManagedAutoModelId } from '@lobechat/business-const';
 import {
   applyModelExtendParams,
   isDeepSeekThinkingEligibleModel,
@@ -8,7 +8,7 @@ import {
   type ModelExtendParams,
 } from '@lobechat/model-runtime';
 import type { UIChatMessage } from '@lobechat/types';
-import { type ExtendParamsType, ModelProvider } from 'model-bank';
+import { type ExtendParamsType, type ModelAbilities, ModelProvider } from 'model-bank';
 
 import { AiModelModel } from '@/database/models/aiModel';
 
@@ -165,9 +165,27 @@ export const resolveServerCallLlmContextHints = async ({
     ? (llmPayload.messages as UIChatMessage[])
     : stripAssistantReasoningForReplay(llmPayload.messages as UIChatMessage[]);
 
+  // The product Auto router has no static model-bank card, yet it resolves
+  // image and tool requests to capable models at request time
+  // (`resolveAutoModel` keeps dedicated slots). Without this carve-out every
+  // server-side run on Auto reads as vision-less and context engineering
+  // strips image parts before the router ever sees them.
+  const autoRouterInfo = (
+    targetModel: string,
+    targetProvider: string,
+  ): { abilities: ModelAbilities; id: string; providerId: string } | undefined =>
+    isManagedAutoModelId(targetModel)
+      ? {
+          abilities: { functionCall: true, vision: true },
+          id: targetModel,
+          providerId: targetProvider,
+        }
+      : undefined;
+
   const findModelInfo = (targetModel: string, targetProvider: string) =>
     builtinModels.find((item) => item.id === targetModel && item.providerId === targetProvider) ??
-    builtinModels.find((item) => item.id === targetModel);
+    builtinModels.find((item) => item.id === targetModel) ??
+    autoRouterInfo(targetModel, targetProvider);
 
   return {
     capabilities: {

@@ -2,18 +2,18 @@ import type { EnabledAiModel } from 'model-bank';
 import { ModelProvider } from 'model-bank/modelProvider';
 
 import { getAiInfraStoreState } from '@/store/aiInfra';
-import { aiProviderSelectors } from '@/store/aiInfra/selectors';
+import { aiModelSelectors, aiProviderSelectors } from '@/store/aiInfra/selectors';
 
 export const getEnabledRuntimeModel = (
   model: string,
   provider: string,
 ): EnabledAiModel | undefined => {
   const state = getAiInfraStoreState();
-  const exactModel = state.enabledAiModels?.find(
-    (item) => item.id === model && item.providerId === provider,
-  );
+  // Alias-tolerant like the rest of the capability gates: a stored
+  // `openrouter/<model>` selection keeps resolving after a gateway cutover.
+  const matchedModel = aiModelSelectors.getEnabledModelById(model, provider)(state);
 
-  if (exactModel || provider !== ModelProvider.LobeHub) return exactModel;
+  if (matchedModel || provider !== ModelProvider.LobeHub) return matchedModel;
 
   return state.enabledAiModels?.find((item) => item.id === model);
 };

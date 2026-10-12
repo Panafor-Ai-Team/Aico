@@ -377,6 +377,24 @@ describe('OpenRouterModelCatalogModel', () => {
     const rows = await catalog.listAsProviderModels();
     expect(rows.find((r) => r.id === 'openrouter/auto')?.abilities).toMatchObject({
       functionCall: true,
+      vision: true,
+    });
+  });
+
+  it('serves the Auto router as vision-capable: image uploads depend on vision', async () => {
+    // Regression: the Auto card carried no `vision`, so `canUploadImage` was
+    // false for the product default model and image uploads were rejected
+    // ("current model does not support this type of upload"). Auto routes
+    // image requests to vision-capable models at runtime (`resolveAutoModel`
+    // keeps dedicated vision slots), so it must serve `vision: true`.
+    await catalog.replaceCatalog({
+      models: [{ id: 'glm-5.3-flash', type: 'chat' }],
+      triggeredBy: 'test',
+    });
+
+    const rows = await catalog.listAsProviderModels();
+    expect(rows.find((r) => r.id === 'openrouter/auto')?.abilities).toMatchObject({
+      vision: true,
     });
   });
 
@@ -399,6 +417,7 @@ describe('OpenRouterModelCatalogModel', () => {
     const rows = await catalog.listAsProviderModels();
     expect(rows.find((r) => r.id === 'openrouter/auto')?.abilities).toMatchObject({
       functionCall: true,
+      vision: true,
     });
   });
 });

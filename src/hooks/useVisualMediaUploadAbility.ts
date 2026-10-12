@@ -1,3 +1,4 @@
+import { findChatModelInList, useEnabledChatModelsState } from '@/hooks/useEnabledChatModels';
 import { useModelSupportAudio } from '@/hooks/useModelSupportAudio';
 import { useModelSupportFiles } from '@/hooks/useModelSupportFiles';
 import { useModelSupportToolUse } from '@/hooks/useModelSupportToolUse';
@@ -32,11 +33,22 @@ export const isUploadBlockedByAbility = (
 };
 
 export const useVisualMediaUploadAbility = (model: string, provider: string, agentId?: string) => {
-  const supportVision = useModelSupportVision(model, provider);
-  const supportVideo = useModelSupportVideo(model, provider);
-  const supportAudio = useModelSupportAudio(model, provider);
-  const supportFiles = useModelSupportFiles(model, provider);
+  const rawVision = useModelSupportVision(model, provider);
+  const rawVideo = useModelSupportVideo(model, provider);
+  const rawAudio = useModelSupportAudio(model, provider);
+  const rawFiles = useModelSupportFiles(model, provider);
   const supportToolUse = useModelSupportToolUse(model, provider);
+  // Prefer the switcher-visible entry's abilities: they are the freshest
+  // served copy (the org catalog re-syncs on a poll while the raw
+  // runtime-state snapshot only refreshes on mount/focus). A just-enabled
+  // ability otherwise stays rejected until a page refresh. Explicit flags win;
+  // unknown falls back to the raw lookup so a transient list never blocks.
+  const { list: enabledChatModelList } = useEnabledChatModelsState();
+  const listedAbilities = findChatModelInList(enabledChatModelList, model, provider)?.abilities;
+  const supportVision = listedAbilities?.vision ?? rawVision;
+  const supportVideo = listedAbilities?.video ?? rawVideo;
+  const supportAudio = listedAbilities?.audio ?? rawAudio;
+  const supportFiles = listedAbilities?.files ?? rawFiles;
   const enableVisualUnderstanding = useServerConfigStore(
     serverConfigSelectors.enableVisualUnderstanding,
   );
