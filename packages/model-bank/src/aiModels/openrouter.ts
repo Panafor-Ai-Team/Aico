@@ -8,11 +8,13 @@ import type { AIChatModelCard, AIEmbeddingModelCard, AIImageModelCard } from '..
 // https://openrouter.ai/docs/api-reference/list-available-models
 const openrouterChatModels: AIChatModelCard[] = [
   {
-    // Tool-capable: the managed Auto router resolves tool requests to
-    // tool-capable models at runtime. Without this the mode switcher disables
-    // the agent option for the product default model.
+    // Tool- and vision-capable: the managed Auto router resolves tool requests
+    // to tool-capable models and image requests to vision-capable models at
+    // runtime. Without these the mode switcher disables the agent option and
+    // image uploads are rejected for the product default model.
     abilities: {
       functionCall: true,
+      vision: true,
     },
     contextWindowTokens: 2_000_000,
     description:

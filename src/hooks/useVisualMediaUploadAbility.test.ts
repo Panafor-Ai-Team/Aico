@@ -20,6 +20,31 @@ vi.mock('@/hooks/useModelSupportFiles');
 vi.mock('@/hooks/useModelSupportToolUse');
 vi.mock('@/hooks/useModelSupportVideo');
 vi.mock('@/hooks/useModelSupportVision');
+
+const enabledListState = vi.hoisted(() => ({ list: [] as any[] }));
+
+vi.mock('@/libs/trpc/client', () => ({
+  lambdaClient: {
+    aicoBilling: { getManagedProviderStatus: { query: vi.fn() } },
+    organization: { getMyAllowedModels: { query: vi.fn() } },
+  },
+}));
+
+vi.mock('@/services/aiModel', () => ({
+  aiModelService: { getAiProviderModelList: vi.fn() },
+}));
+
+vi.mock('@/hooks/useEnabledChatModels', async () => {
+  const actual = await vi.importActual('@/hooks/useEnabledChatModels');
+  return {
+    ...actual,
+    useEnabledChatModelsState: () => ({
+      isDataConfirmed: true,
+      isPending: false,
+      list: enabledListState.list,
+    }),
+  };
+});
 vi.mock('@/store/agent', () => ({ useAgentStore: vi.fn() }));
 vi.mock('@/store/agent/selectors', () => ({
   agentByIdSelectors: {
@@ -65,6 +90,7 @@ const mockedUseServerConfigStore = vi.mocked(useServerConfigStore);
 describe('useVisualMediaUploadAbility', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    enabledListState.list = [];
     mockedUseModelSupportAudio.mockReturnValue(false);
     mockedUseModelSupportFiles.mockReturnValue(undefined);
     mockedUseModelSupportVision.mockReturnValue(false);
@@ -240,6 +266,36 @@ describe('useVisualMediaUploadAbility', () => {
     const { result } = renderHook(() => useVisualMediaUploadAbility('model', 'provider'));
 
     expect(result.current.canUploadDocument).toBe(false);
+  });
+
+  it('prefers switcher-visible abilities over a stale raw lookup for image upload', () => {
+    // Regression (Panachat Auto): the raw snapshot predates the served
+    // `vision` flag while the switcher list already carries it — uploads must
+    // not wait for a page refresh.
+    mockedUseModelSupportVision.mockReturnValue(false);
+    enabledListState.list = [
+      {
+        children: [{ abilities: { vision: true }, id: 'openrouter/auto' }],
+        id: 'cheapvibecode',
+        name: 'Panachat',
+        source: 'builtin',
+      },
+    ];
+
+    const { result } = renderHook(() =>
+      useVisualMediaUploadAbility('openrouter/auto', 'cheapvibecode'),
+    );
+
+    expect(result.current.canUploadImage).toBe(true);
+  });
+
+  it('falls back to the raw lookup when the model is absent from the visible list', () => {
+    mockedUseModelSupportVision.mockImplementation((id) => id === 'model');
+    enabledListState.list = [];
+
+    const { result } = renderHook(() => useVisualMediaUploadAbility('model', 'provider'));
+
+    expect(result.current.canUploadImage).toBe(true);
   });
 });
 
