@@ -5,7 +5,7 @@ import type {
 } from '@lobechat/agent-runtime';
 import {
   didPreviousTurnGenerateImage,
-  findPendingUserMessageText,
+  findPendingUserMessage,
   hasPreviousImageGeneration,
   isImageGenerationUserIntent,
   resolveDirectImageGenerationToolCall,
@@ -46,7 +46,8 @@ export class ServerContextBuilder implements ContextBuilder {
     // checked first: "make a video from this photo" names a photo too.
     // Prefer raw payload messages for image intent (assistantGroup / no injectors).
     const rawMessages = input.payload.messages;
-    const latestUserText = findPendingUserMessageText(result.processedMessages);
+    const pendingForChoice = findPendingUserMessage(result.processedMessages);
+    const latestUserText = pendingForChoice?.text ?? '';
     const directToolCall =
       resolveDirectVideoGenerationToolCall({
         executorMap: tooling.resolved.executorMap,
@@ -62,6 +63,7 @@ export class ServerContextBuilder implements ContextBuilder {
     if (
       !directToolCall &&
       isImageGenerationUserIntent(latestUserText, {
+        hasAttachedImages: (pendingForChoice?.imageUrls.length ?? 0) > 0,
         hasPreviousGenerated: hasPreviousImageGeneration(rawMessages),
         previousTurnGeneratedImage: didPreviousTurnGenerateImage(rawMessages),
       })
