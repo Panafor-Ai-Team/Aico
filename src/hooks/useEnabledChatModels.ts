@@ -41,6 +41,28 @@ const withBrandedProviderName = <T extends { id: string; name: string }>(provide
     ? { ...provider, name: formatBrandedProviderId(provider.id) }
     : provider;
 
+/**
+ * Find a model in the switcher-visible list (same universe the model trigger
+ * renders and writes), with the managed-provider alias leniency the runtime
+ * applies at request time. Returns the list entry so callers read the same
+ * abilities the switcher badges show — never a staler copy.
+ */
+export const findChatModelInList = (
+  list: EnabledProviderWithModels[],
+  model: string,
+  provider: string,
+): AiModelForSelect | undefined => {
+  const exact = list
+    .find((item) => item.id === provider)
+    ?.children.find((item) => item.id === model);
+  if (exact) return exact;
+
+  if (!isAicoManagedRuntimeProvider(provider)) return undefined;
+  return list
+    .find((item) => isAicoManagedRuntimeProvider(item.id))
+    ?.children.find((item) => item.id === model);
+};
+
 interface EnabledChatModelsState {
   /**
    * Whether absence from the list is evidence of revocation (org allow-list
