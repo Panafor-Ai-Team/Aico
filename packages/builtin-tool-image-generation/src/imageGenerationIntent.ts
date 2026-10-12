@@ -81,6 +81,7 @@ type NestedToolLike = {
 type MessageLike = {
   children?: Array<{ tools?: NestedToolLike[] | null } | null> | null;
   content?: unknown;
+  imageList?: Array<{ alt?: string; id?: string; url?: string } | null> | null;
   name?: string;
   plugin?: { apiName?: string; identifier?: string };
   pluginState?: PluginStateLike;
@@ -392,7 +393,8 @@ export const findPendingUserMessageText = (messages: MessageLike[] | null | unde
 
 /**
  * Latest unanswered user turn, with attachment URLs from that turn (multipart
- * image parts or `<files_info>` in SYSTEM CONTEXT).
+ * image parts, the `imageList` field live turns carry, or `<files_info>` in
+ * SYSTEM CONTEXT).
  */
 export const findPendingUserMessage = (
   messages: MessageLike[] | null | undefined,
@@ -409,8 +411,17 @@ export const findPendingUserMessage = (
     const text = stripInjectedUserContext(rawText);
     if (!text) return undefined;
 
+    const fieldUrls = Array.isArray(message.imageList)
+      ? message.imageList
+          .map((item) => item?.url)
+          .filter((url): url is string => typeof url === 'string' && /^https?:\/\//i.test(url))
+      : [];
     const imageUrls = [
-      ...new Set([...imageUrlsOfContent(message.content), ...imageUrlsOfInjectedContext(rawText)]),
+      ...new Set([
+        ...imageUrlsOfContent(message.content),
+        ...fieldUrls,
+        ...imageUrlsOfInjectedContext(rawText),
+      ]),
     ];
     return { imageUrls, text };
   }

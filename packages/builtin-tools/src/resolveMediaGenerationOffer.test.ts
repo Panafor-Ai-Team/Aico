@@ -52,6 +52,23 @@ describe('resolveMediaGenerationOffer', () => {
     ).toEqual({ image: true, video: false });
   });
 
+  it('offers image when the attachment travels as an imageList field', () => {
+    // Live turn shape: plain-text content + imageList, no image_url parts.
+    expect(
+      resolveMediaGenerationOffer({
+        messages: [
+          {
+            content: 'رنگشو زرد کن',
+            imageList: [{ url: 'https://cdn.example.com/balloon.png' }],
+            role: 'user',
+          },
+        ],
+        modelCanUseTools: true,
+        toolMode: 'chat',
+      }),
+    ).toEqual({ image: true, video: false });
+  });
+
   it('does not offer image for a question about an attached image', () => {
     expect(
       resolveMediaGenerationOffer({

@@ -3134,10 +3134,19 @@ export class AiAgentService {
 
       // Intent-gate image/video offer set. History excludes the current turn
       // (`selfMessageIds`); append the in-memory prompt so pending-ask detection
-      // matches directToolCalls. Clear asks still run without being offered.
+      // matches directToolCalls. The current turn's attachments ride along:
+      // without them an attached-image edit looks like plain text and the
+      // image tool is never offered.
       const historyForMediaOffer = await loadHistoryMessages();
       const mediaGenerationOffer = resolveMediaGenerationOffer({
-        messages: [...historyForMediaOffer, { content: prompt, role: 'user' }],
+        messages: [
+          ...historyForMediaOffer,
+          {
+            content: prompt,
+            ...(runAttachments.imageList?.length ? { imageList: runAttachments.imageList } : {}),
+            role: 'user',
+          },
+        ],
         modelCanUseTools: toolsContext.isModelSupportToolUse(model, provider),
         plugins: agentPlugins,
         toolMode: resolveToolMode(agentConfig.chatConfig ?? undefined),
