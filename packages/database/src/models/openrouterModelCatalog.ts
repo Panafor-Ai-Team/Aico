@@ -237,6 +237,26 @@ const withAutoRouterAbilities = (models: AiProviderModelListItem[]): AiProviderM
       : model,
   );
 
+/**
+ * CheapVibeCode publishes no per-model tool/vision flags, so every concrete
+ * row arrives ability-less and agent mode plus image uploads strand on all of
+ * them (only the hand-stamped Auto works). Stamp tool calling and vision onto
+ * every managed chat row at serve time to match what the gateway honors.
+ * Gated on the live gateway: an OpenRouter-backed catalog keeps its truthful
+ * per-model flags. `reasoning` deliberately stays upstream-truthful (it drives
+ * controls and Auto routing, not just gating).
+ */
+export const withCheapVibeCodeChatAbilities = (
+  models: AiProviderModelListItem[],
+  managedProviderId: string = MANAGED_PROVIDER_ID,
+): AiProviderModelListItem[] => {
+  if (managedProviderId !== 'cheapvibecode') return models;
+  return models.map((model) => {
+    if ((model.type || 'chat') !== 'chat' || model.id === OPENROUTER_AUTO_MODEL_ID) return model;
+    return { ...model, abilities: { ...model.abilities, functionCall: true, vision: true } };
+  });
+};
+
 const toProviderCard = (card: OpenRouterCatalogModelInput): AiProviderModelListItem =>
   ({
     abilities: {},
@@ -439,7 +459,9 @@ export class OpenRouterModelCatalogModel {
       } as AiProviderModelListItem;
     });
     const mapped = withAutoRouterAbilities(
-      withCheapVibeCodeReasoningEffort(withManagedGenerationCards(rowModels)),
+      withCheapVibeCodeChatAbilities(
+        withCheapVibeCodeReasoningEffort(withManagedGenerationCards(rowModels)),
+      ),
     );
 
     if (mapped.some((m) => m.id === OPENROUTER_AUTO_MODEL_ID)) {
