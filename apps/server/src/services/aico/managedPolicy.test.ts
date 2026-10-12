@@ -5,18 +5,18 @@ import {
 } from '@lobechat/business-const';
 import type { LobeChatDatabase } from '@lobechat/database';
 import { getTestDB } from '@lobechat/database/test-utils';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { OrganizationModel } from '@/database/models/organization';
 import { users } from '@/database/schemas';
-import {
-  memberBudgets,
+import {   memberBudgets,
   modelAccessRules,
+openrouterModelCatalog,
   organizationMembers,
   organizations,
   organizationTeamMembers,
-  organizationTeams,
-} from '@/database/schemas/aicoOrganization';
+  organizationTeams } from '@/database/schemas/aicoOrganization';
 
 import { parseAicoBillingContext } from './billingContext';
 import { AicoManagedPolicy, AicoManagedPolicyError } from './managedPolicy';
@@ -90,6 +90,7 @@ describe('org wallet: Auto model is not gated by the team allow-list', () => {
     await db.delete(organizationTeams);
     await db.delete(organizationMembers);
     await db.delete(organizations);
+    await db.delete(openrouterModelCatalog);
     await db.delete(users);
   };
 
@@ -169,6 +170,47 @@ describe('org wallet: Auto model is not gated by the team allow-list', () => {
     await expect(
       policy.authorize({ billing, modelId: OPENROUTER_AUTO_MODEL_ID, userId: ownerId }),
     ).rejects.toMatchObject({ code: 'MEMBER_BUDGET_RENEWAL_BLOCKED' });
+  });
+
+  it('lets embedding models through without a team grant, but honors the kill-switch', async () => {
+    // Regression: memory search failed with MODEL_ID_REQUIRED because no
+    // caller passed a model, and threading one would only move the failure to
+    // MODEL_NOT_ALLOWED — embeddings are system-internal, not grantable chat
+    // models, so they skip the team allow-list (catalog kill-switch applies).
+    const org = await orgModel.createOrganization({ name: 'Embedding Org', ownerUserId: ownerId });
+    const teams = await orgModel.listTeams(org.id);
+    await orgModel.setTeamModelAccess({
+      modelIds: ['openai/gpt-4o-mini'],
+      orgId: org.id,
+      teamId: teams[0].id,
+    });
+    await db.insert(openrouterModelCatalog).values({
+      abilities: {},
+      displayName: 'Text Embedding 3 Small',
+      enabled: true,
+      id: 'openai/text-embedding-3-small',
+      payload: {},
+      syncedAt: new Date(),
+      type: 'embedding',
+    });
+
+    const policy = new AicoManagedPolicy(db, async () => null);
+    const billing = parseAicoBillingContext({ organizationId: org.id, source: 'organization' });
+
+    // Clears the allow-list gate and fails later (no budget provisioned) —
+    // never MODEL_NOT_ALLOWED for an ungranted embedder.
+    await expect(
+      policy.authorize({ billing, modelId: 'openai/text-embedding-3-small', userId: ownerId }),
+    ).rejects.toMatchObject({ code: 'MEMBER_BUDGET_NOT_ALLOCATED' });
+
+    // A platform-disabled embedder stays denied.
+    await db
+      .update(openrouterModelCatalog)
+      .set({ enabled: false })
+      .where(eq(openrouterModelCatalog.id, 'openai/text-embedding-3-small'));
+    await expect(
+      policy.authorize({ billing, modelId: 'openai/text-embedding-3-small', userId: ownerId }),
+    ).rejects.toMatchObject({ code: 'MODEL_DISABLED:openai/text-embedding-3-small' });
   });
 
   it('lets Auto through even when the team is locked to zero models', async () => {

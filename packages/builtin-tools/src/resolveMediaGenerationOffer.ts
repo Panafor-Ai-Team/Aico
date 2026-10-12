@@ -1,6 +1,6 @@
 import {
   didPreviousTurnGenerateImage,
-  findPendingUserMessageText,
+  findPendingUserMessage,
   hasPreviousImageGeneration,
   ImageGenerationManifest,
   isImageGenerationUserIntent,
@@ -51,13 +51,15 @@ export const resolveMediaGenerationOffer = (params: {
     return { image: imagePinned, video: videoPinned };
   }
 
-  const pendingText = findPendingUserMessageText(params.messages) ?? '';
+  const pending = findPendingUserMessage(params.messages);
+  const pendingText = pending?.text ?? '';
   const hasPreviousGenerated = hasPreviousImageGeneration(params.messages);
   const previousTurnGeneratedImage = didPreviousTurnGenerateImage(params.messages);
 
   const imageIntent =
     pendingText.length > 0 &&
     isImageGenerationUserIntent(pendingText, {
+      hasAttachedImages: (pending?.imageUrls.length ?? 0) > 0,
       hasPreviousGenerated,
       previousTurnGeneratedImage,
     });

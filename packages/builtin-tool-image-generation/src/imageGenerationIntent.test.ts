@@ -105,6 +105,34 @@ describe('isImageGenerationUserIntent', () => {
     expect(isImageGenerationUserIntent('change it', { hasPreviousGenerated: true })).toBe(false);
   });
 
+  it('detects attached-image edits without an image noun', () => {
+    // Regression: "رنگشو زرد کن" + attached photo never offered generateImage,
+    // so the agent wandered through memory/web/crawl tools and stalled.
+    const attached = { hasAttachedImages: true };
+    expect(isImageGenerationUserIntent('رنگشو زرد کن', attached)).toBe(true);
+    expect(isImageGenerationUserIntent('رنگ ماشین رو عوض کن', attached)).toBe(true);
+    expect(isImageGenerationUserIntent('سیاهش کن', attached)).toBe(true);
+    expect(isImageGenerationUserIntent('اینو عوض کن', attached)).toBe(true);
+    expect(isImageGenerationUserIntent('Change the color to yellow', attached)).toBe(true);
+    expect(isImageGenerationUserIntent('make it black and white', attached)).toBe(true);
+    expect(isImageGenerationUserIntent('edit the background out', attached)).toBe(true);
+  });
+
+  it('still requires an image to edit: same commands without attachments stay out', () => {
+    expect(isImageGenerationUserIntent('رنگشو زرد کن')).toBe(false);
+    expect(isImageGenerationUserIntent('make it yellow')).toBe(false);
+    expect(isImageGenerationUserIntent('اینو عوض کن')).toBe(false);
+  });
+
+  it('does not treat questions about an attached image as edit intent', () => {
+    const attached = { hasAttachedImages: true };
+    expect(isImageGenerationUserIntent('رنگ ماشین چیه؟', attached)).toBe(false);
+    expect(isImageGenerationUserIntent('what color is this car?', attached)).toBe(false);
+    expect(isImageGenerationUserIntent('describe this image', attached)).toBe(false);
+    expect(isImageGenerationUserIntent('turn this into a poem', attached)).toBe(false);
+    expect(isImageGenerationUserIntent('چطور رنگشو عوض کنم؟', attached)).toBe(false);
+  });
+
   it('rejects meta / prompt-engineering questions', () => {
     expect(isImageGenerationUserIntent('چطور عکس بسازم؟')).toBe(false);
     expect(isImageGenerationUserIntent('write me a prompt for a zebra photo')).toBe(false);
@@ -407,6 +435,46 @@ describe('resolveDirectImageGenerationToolCall', () => {
       identifier: 'lobe-image-generation',
     });
     expect(JSON.parse(call!.arguments)).toEqual({ prompt: 'عکس یک سگ' });
+  });
+
+  it('builds an edit call from an attached image and a color command', () => {
+    const attached = 'https://cdn.example.com/balloon.png';
+    const call = resolveDirectImageGenerationToolCall({
+      messages: [
+        {
+          content: [
+            { text: 'رنگشو زرد کن', type: 'text' },
+            { image_url: { url: attached }, type: 'image_url' },
+          ],
+          role: 'user',
+        },
+      ],
+    });
+
+    expect(call).toMatchObject({
+      apiName: 'generateImage',
+      identifier: 'lobe-image-generation',
+    });
+    expect(JSON.parse(call!.arguments)).toEqual({
+      imageUrls: [attached],
+      prompt: 'رنگشو زرد کن',
+    });
+  });
+
+  it('does not build a call for a question about an attached image', () => {
+    const call = resolveDirectImageGenerationToolCall({
+      messages: [
+        {
+          content: [
+            { text: 'what color is this car?', type: 'text' },
+            { image_url: { url: 'https://cdn.example.com/car.png' }, type: 'image_url' },
+          ],
+          role: 'user',
+        },
+      ],
+    });
+
+    expect(call).toBeUndefined();
   });
 
   it('still fires when an unrelated trailing tool follows the photo ask', () => {

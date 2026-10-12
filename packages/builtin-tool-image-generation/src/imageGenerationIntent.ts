@@ -40,6 +40,19 @@ const ANAPHORIC_IMAGE_EDIT =
 const IMAGE_EDIT_CONTINUATION =
   /\b(?:previous|last|above|that|same|earlier)\s+(?:image|picture|photo|one)\b|\b(?:add|remove|replace|change|edit|modify|update|keep)\b.{1,80}\b(?:image|picture|photo|drawing|illustration)\b|(?:تصویر|عکس)\s*قبلی|همون\s*(?:عکس|تصویر)|بهش\s*اضافه|ویرایش\s*کن|تغییر\s*بده/i;
 
+/**
+ * Transformative edits on an ATTACHED image ("رنگشو زرد کن", "make it
+ * yellow"). The attachment is the referent, so no image noun and no prior
+ * generation is needed — unlike the anaphoric path. Interrogatives ("what
+ * color is this?") carry no transformative verb and stay out; without an
+ * attachment nothing here may fire.
+ */
+const ATTACHED_PRONOUN_EDIT = /(?:اینو|همینو|همونو|عکسو|تصویرو)\s*(?:عوض|تغییر|درست|ویرایش|بهتر)/;
+const ATTACHED_COLOR_EDIT_FA =
+  /رنگ\S*(?:\s+\S+){0,3}\s*(?:کن|بکن|بده)|تغییر\s*رنگ|(?:سیاه|سفید|مشکی)\S*\s*(?:کن|بکن|بده)|(?:بکگراند|پس\s*زمینه)\S*\s*(?:عوض|تغییر|حذف)/;
+const ATTACHED_COLOR_EDIT_EN =
+  /\b(?:change|turn|make|convert|recolor|recolour|edit|alter)\b.{1,40}\b(?:colou?r|background|black[\s-]*and[\s-]*white|grayscale|red|blue|green|yellow|black|white|purple|pink|orange|brown|gr[ae]y)\b|\b(?:colou?r|background)\b.{1,40}\b(?:change|turn|make|convert|recolor|recolour|edit|alter)\b/i;
+
 // Must match the context-engine `SYSTEM_CONTEXT_START` / `SYSTEM_CONTEXT_END` markers and
 // the vision-downgrade placeholder, which the chat pipeline appends to the user's own text.
 const INJECTED_CONTEXT_BLOCK =
@@ -116,12 +129,26 @@ export const isAnotherImageAskIntent = (text: string | null | undefined): boolea
  */
 export const isImageGenerationUserIntent = (
   text: string | null | undefined,
-  options?: { hasPreviousGenerated?: boolean; previousTurnGeneratedImage?: boolean },
+  options?: {
+    hasAttachedImages?: boolean;
+    hasPreviousGenerated?: boolean;
+    previousTurnGeneratedImage?: boolean;
+  },
 ): boolean => {
   if (!text) return false;
   const trimmed = text.trim();
   if (!trimmed || trimmed.length > 4000) return false;
   if (META_QUESTION.test(trimmed)) return false;
+
+  // Attached image + transformative edit: the attachment is the referent.
+  if (
+    options?.hasAttachedImages &&
+    (ATTACHED_PRONOUN_EDIT.test(trimmed) ||
+      ATTACHED_COLOR_EDIT_FA.test(trimmed) ||
+      ATTACHED_COLOR_EDIT_EN.test(trimmed))
+  ) {
+    return true;
+  }
 
   // "عکس …" / "یه عکس …" as the opening request is enough in Persian chat.
   const persianLead = stripPersianIndefinite(trimmed);
@@ -498,7 +525,11 @@ export const resolveDirectImageGenerationToolCall = (params: {
   const previousTurnGeneratedImage = didPreviousTurnGenerateImage(history);
 
   if (
-    !isImageGenerationUserIntent(pending.text, { hasPreviousGenerated, previousTurnGeneratedImage })
+    !isImageGenerationUserIntent(pending.text, {
+      hasAttachedImages: pending.imageUrls.length > 0,
+      hasPreviousGenerated,
+      previousTurnGeneratedImage,
+    })
   ) {
     return undefined;
   }
