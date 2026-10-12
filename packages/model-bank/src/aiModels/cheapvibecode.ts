@@ -40,9 +40,12 @@ const reasoningEffortSettings = {
   extendParams: ['reasoningEffort' as const],
 };
 
+// Served abilities are stamped at serve time (`withCheapVibeCodeChatAbilities`)
+// to match what the gateway honors; the flags below mirror that contract so
+// the pre-sync fallback and server-side static lookups agree with it.
 const cheapvibecodeChatModels: AIChatModelCard[] = [
   {
-    abilities: { reasoning: true, vision: true },
+    abilities: { functionCall: true, reasoning: true, vision: true },
     contextWindowTokens: 1_050_000,
     description:
       'The catalog reference point for quality, and the best value among vision-capable models. Default target of the managed auto route.',
@@ -54,7 +57,7 @@ const cheapvibecodeChatModels: AIChatModelCard[] = [
     type: 'chat',
   },
   {
-    abilities: { functionCall: true, reasoning: true },
+    abilities: { functionCall: true, reasoning: true, vision: true },
     contextWindowTokens: 1_050_000,
     description:
       'Highest quality-per-cost in the catalog. Preferred for bulk text work that does not need vision.',
@@ -66,7 +69,7 @@ const cheapvibecodeChatModels: AIChatModelCard[] = [
     type: 'chat',
   },
   {
-    abilities: { reasoning: true },
+    abilities: { functionCall: true, reasoning: true, vision: true },
     contextWindowTokens: 1_050_000,
     description:
       'Reasoning model at flash pricing. Measured charges run ~44% above the published coefficient.',
@@ -77,7 +80,7 @@ const cheapvibecodeChatModels: AIChatModelCard[] = [
     type: 'chat',
   },
   {
-    abilities: { functionCall: true, reasoning: true },
+    abilities: { functionCall: true, reasoning: true, vision: true },
     contextWindowTokens: 500_000,
     description:
       'Strongest reasoning per unit cost, with a smaller context window than the flash tier.',
@@ -89,7 +92,7 @@ const cheapvibecodeChatModels: AIChatModelCard[] = [
     type: 'chat',
   },
   {
-    abilities: { functionCall: true },
+    abilities: { functionCall: true, vision: true },
     contextWindowTokens: 1_000_000,
     displayName: 'Qwen3.8 Flash',
     id: 'qwen3.8-flash',
@@ -145,7 +148,7 @@ const cheapvibecodeChatModels: AIChatModelCard[] = [
     type: 'chat',
   },
   {
-    abilities: { reasoning: true },
+    abilities: { functionCall: true, reasoning: true, vision: true },
     description:
       'Cheapest model in the catalog. Measured charges run ~45% above the published coefficient.',
     displayName: 'MiMo V2.5',

@@ -7,7 +7,10 @@ import {
   openrouterModelSyncState,
 } from '../../schemas';
 import type { LobeChatDatabase } from '../../type';
-import { OpenRouterModelCatalogModel } from '../openrouterModelCatalog';
+import {
+  OpenRouterModelCatalogModel,
+  withCheapVibeCodeChatAbilities,
+} from '../openrouterModelCatalog';
 
 let db: LobeChatDatabase;
 let catalog: OpenRouterModelCatalogModel;
@@ -395,6 +398,35 @@ describe('OpenRouterModelCatalogModel', () => {
     const rows = await catalog.listAsProviderModels();
     expect(rows.find((r) => r.id === 'openrouter/auto')?.abilities).toMatchObject({
       vision: true,
+    });
+  });
+
+  describe('withCheapVibeCodeChatAbilities', () => {
+    const rows = [
+      { abilities: {}, id: 'glm-5.3-flash', type: 'chat' },
+      { abilities: { reasoning: true }, id: 'mimo-v2.5', type: 'chat' },
+      { abilities: {}, id: 'openrouter/auto', type: 'chat' },
+      { abilities: {}, id: 'text-embedding-3-small', type: 'embedding' },
+    ] as any;
+
+    it('stamps tool calling and vision on every managed chat row', () => {
+      const mapped = withCheapVibeCodeChatAbilities(rows, 'cheapvibecode');
+      for (const id of ['glm-5.3-flash', 'mimo-v2.5']) {
+        expect(mapped.find((m) => m.id === id)?.abilities).toMatchObject({
+          functionCall: true,
+          vision: true,
+        });
+      }
+      // Existing flags survive; Auto keeps its dedicated stamp; non-chat untouched.
+      expect(mapped.find((m) => m.id === 'mimo-v2.5')?.abilities).toMatchObject({
+        reasoning: true,
+      });
+      expect(mapped.find((m) => m.id === 'openrouter/auto')?.abilities).toEqual({});
+      expect(mapped.find((m) => m.id === 'text-embedding-3-small')?.abilities).toEqual({});
+    });
+
+    it('leaves an OpenRouter-backed catalog untouched', () => {
+      expect(withCheapVibeCodeChatAbilities(rows, 'openrouter')).toBe(rows);
     });
   });
 
