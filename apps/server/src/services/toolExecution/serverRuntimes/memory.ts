@@ -35,6 +35,7 @@ import { LayersEnum } from '@lobechat/types';
 import { eq } from 'drizzle-orm';
 import type { z } from 'zod';
 
+import { AicoBillingModel } from '@/database/models/aicoBilling';
 import {
   type IdentityEntryBasePayload,
   type IdentityEntryPayload,
@@ -51,6 +52,7 @@ import {
   resolveToolOutcomeScope,
 } from '@/server/services/agentSignal/procedure';
 import { redisPolicyStateStore } from '@/server/services/agentSignal/store/adapters/redis/policyStateStore';
+import { resolvePreferredGenerationBilling } from '@/server/services/aico/generationBilling';
 import type { UserMemoryEmbeddingRuntime } from '@/server/services/memory/userMemory/embedding';
 import { embedUserMemoryTexts } from '@/server/services/memory/userMemory/embedding';
 import { normalizeSearchMemoryParams } from '@/server/services/memory/userMemory/searchParams';
@@ -95,11 +97,25 @@ const getEmbeddingRuntime = async (
   const { provider, model: embeddingModel } =
     getServerDefaultFilesConfig().embeddingModel || DEFAULT_USER_MEMORY_EMBEDDING_MODEL_ITEM;
 
+  // Managed embedding calls must authorize like any other managed traffic:
+  // billing context plus the embedding model id (exempt from team
+  // allow-lists, still gated by the catalog kill-switch). Either missing
+  // fails every memory write with MODEL_ID_REQUIRED / BILLING_CONTEXT_REQUIRED.
+  const billingModel = new AicoBillingModel(serverDB);
+  const billingContext = await resolvePreferredGenerationBilling(
+    async (uid) => (await billingModel.getUserWallet(uid)) ?? null,
+    userId,
+  );
+
   const agentRuntime = await initModelRuntimeFromDB(
     serverDB,
     userId,
     ENABLE_BUSINESS_FEATURES ? BRANDING_PROVIDER : provider,
     workspaceId,
+    {
+      billingContext,
+      modelId: embeddingModel,
+    },
   );
 
   return { agentRuntime, embeddingModel };
@@ -214,6 +230,11 @@ class MemoryServerRuntimeService implements MemoryRuntimeService {
     const defaultEmbeddingConfig =
       getServerDefaultFilesConfig().embeddingModel || DEFAULT_USER_MEMORY_EMBEDDING_MODEL_ITEM;
     const embeddingModel = this.memoryEmbeddingRuntime?.model ?? defaultEmbeddingConfig.model;
+    const billingModel = new AicoBillingModel(this.serverDB);
+    const billingContext = await resolvePreferredGenerationBilling(
+      async (uid) => (await billingModel.getUserWallet(uid)) ?? null,
+      this.userId,
+    );
     const modelRuntime = this.memoryEmbeddingRuntime
       ? initModelRuntimeWithUserPayload(
           this.memoryEmbeddingRuntime.provider,
@@ -225,6 +246,10 @@ class MemoryServerRuntimeService implements MemoryRuntimeService {
           this.userId,
           defaultEmbeddingConfig.provider,
           this.workspaceId,
+          {
+            billingContext,
+            modelId: embeddingModel,
+          },
         );
     const normalizedQueries = [
       ...new Set((normalizedParams.queries ?? []).map((query) => query.trim()).filter(Boolean)),

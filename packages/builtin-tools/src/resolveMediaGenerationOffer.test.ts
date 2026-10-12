@@ -33,6 +33,43 @@ describe('resolveMediaGenerationOffer', () => {
     ).toEqual({ image: true, video: false });
   });
 
+  it('offers image for an attached-image edit without an image noun', () => {
+    // Regression: "رنگشو زرد کن" + attached photo never offered generateImage.
+    expect(
+      resolveMediaGenerationOffer({
+        messages: [
+          {
+            content: [
+              { text: 'رنگشو زرد کن', type: 'text' },
+              { image_url: { url: 'https://cdn.example.com/balloon.png' }, type: 'image_url' },
+            ],
+            role: 'user',
+          },
+        ],
+        modelCanUseTools: true,
+        toolMode: 'chat',
+      }),
+    ).toEqual({ image: true, video: false });
+  });
+
+  it('does not offer image for a question about an attached image', () => {
+    expect(
+      resolveMediaGenerationOffer({
+        messages: [
+          {
+            content: [
+              { text: 'what color is this car?', type: 'text' },
+              { image_url: { url: 'https://cdn.example.com/car.png' }, type: 'image_url' },
+            ],
+            role: 'user',
+          },
+        ],
+        modelCanUseTools: true,
+        toolMode: 'chat',
+      }),
+    ).toEqual({ image: false, video: false });
+  });
+
   it('offers video in chat mode for clear video intent', () => {
     expect(
       resolveMediaGenerationOffer({

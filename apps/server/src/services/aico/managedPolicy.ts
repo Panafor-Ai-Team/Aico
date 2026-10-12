@@ -334,7 +334,12 @@ export class AicoManagedPolicy {
     // unusable on every wallet, even when a team allow-list still grants it.
     // Unknown ids (custom models, non-catalog gateways) keep the previous
     // allow-list-only behavior.
-    await this.assertCatalogModelEnabled(modelId);
+    const catalogType = await this.assertCatalogModelEnabled(modelId);
+    // Embeddings are system-internal (memory search, RAG) — not an
+    // admin-grantable chat model. Requiring a team grant would silently break
+    // memory for orgs that never listed the embedder, the same failure mode
+    // the Auto/image carve-outs above prevent. The kill-switch still applies.
+    if (catalogType === 'embedding') return;
 
     if (billing.source === 'organization') {
       const members = await this.orgModel.listMembers(billing.organizationId);
@@ -368,16 +373,19 @@ export class AicoManagedPolicy {
    * flag on `openrouter_model_catalog` is the platform admin's setting; a
    * disabled row denies managed execution on every wallet, closing the gap
    * where a reservation in a team allow-list kept a switched-off model usable.
+   * Returns the cataloged model type (if any) so callers can exempt
+   * system-internal non-chat models such as embeddings.
    */
-  private assertCatalogModelEnabled = async (modelId: string) => {
+  private assertCatalogModelEnabled = async (modelId: string): Promise<string | undefined> => {
     const [row] = await this.db
-      .select({ enabled: openrouterModelCatalog.enabled })
+      .select({ enabled: openrouterModelCatalog.enabled, type: openrouterModelCatalog.type })
       .from(openrouterModelCatalog)
       .where(eq(openrouterModelCatalog.id, modelId))
       .limit(1);
     if (row && row.enabled === false) {
       throw new AicoManagedPolicyError(`MODEL_DISABLED:${modelId}`, ChatErrorType.BadRequest);
     }
+    return row?.type?.toLowerCase();
   };
 
   /** Serialize wallet micro amounts for API responses (never return raw bigint). */

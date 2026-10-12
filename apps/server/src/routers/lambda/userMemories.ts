@@ -131,8 +131,13 @@ const searchUserMemories = async (
     async (userId) => (await billingModel.getUserWallet(userId)) ?? null,
     ctx.userId,
   );
+  // OR-003 binds every managed key to an explicit model: pass the embedding
+  // model id (exempt from team allow-lists in assertModelAllowed, still gated
+  // by the catalog kill-switch). Without it every memory search fails with
+  // MODEL_ID_REQUIRED.
   const modelRuntime = await initModelRuntimeFromDB(ctx.serverDB, ctx.userId, provider, undefined, {
     billingContext,
+    modelId: embeddingModel,
   });
   const normalizedQueries = [
     ...new Set((normalizedInput.queries ?? []).map((query) => query.trim()).filter(Boolean)),
@@ -182,6 +187,7 @@ const getEmbeddingRuntime = async (serverDB: LobeChatDatabase, userId: string) =
   );
   const agentRuntime = await initModelRuntimeFromDB(serverDB, userId, resolvedProvider, undefined, {
     billingContext,
+    modelId: embeddingModel,
   });
 
   return { agentRuntime, embeddingModel };
