@@ -366,4 +366,54 @@ describe('useEnabledChatModels', () => {
       expect(result.current.isDataConfirmed).toBe(true);
     });
   });
+
+  describe('findChatModelInList', () => {
+    const list = [
+      {
+        children: [
+          { abilities: { functionCall: true }, id: 'openrouter/auto' },
+          { abilities: {}, id: 'chat-only' },
+        ],
+        id: 'cheapvibecode',
+        name: 'Panachat',
+        source: 'builtin',
+      },
+      {
+        children: [{ abilities: {}, id: 'byok-model' }],
+        id: 'byok-cloud',
+        name: 'BYOK',
+        source: 'builtin',
+      },
+    ] as any;
+
+    it('finds an exact provider/model pair with its abilities', async () => {
+      const { findChatModelInList } = await import('./useEnabledChatModels');
+
+      expect(findChatModelInList(list, 'openrouter/auto', 'cheapvibecode')).toMatchObject({
+        id: 'openrouter/auto',
+      });
+    });
+
+    it('resolves a sibling managed provider spelling', async () => {
+      const { findChatModelInList } = await import('./useEnabledChatModels');
+
+      // Stored under the openrouter slot while the live list groups it under cheapvibecode.
+      expect(findChatModelInList(list, 'openrouter/auto', 'openrouter')).toMatchObject({
+        id: 'openrouter/auto',
+      });
+    });
+
+    it('does not cross-match non-managed providers', async () => {
+      const { findChatModelInList } = await import('./useEnabledChatModels');
+
+      expect(findChatModelInList(list, 'byok-model', 'other-byok')).toBeUndefined();
+      expect(findChatModelInList(list, 'chat-only', 'byok-cloud')).toBeUndefined();
+    });
+
+    it('returns undefined for unknown models', async () => {
+      const { findChatModelInList } = await import('./useEnabledChatModels');
+
+      expect(findChatModelInList(list, 'missing', 'cheapvibecode')).toBeUndefined();
+    });
+  });
 });

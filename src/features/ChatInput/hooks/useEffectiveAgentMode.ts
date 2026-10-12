@@ -1,6 +1,7 @@
 import { resolveAgentModelConfig } from '@lobechat/types';
 
 import { useAgentManagementAccess } from '@/features/ResourcePermission/useAgentManagementAccess';
+import { findChatModelInList, useEnabledChatModelsState } from '@/hooks/useEnabledChatModels';
 import { useModelSupportToolUse } from '@/hooks/useModelSupportToolUse';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
@@ -93,7 +94,17 @@ export const useEffectiveAgentMode = (agentId: string) => {
   const provider = topicPin?.model
     ? topicPin.provider
     : (memberResolvedModel.provider ?? sharedProvider);
-  const supportToolUse = useModelSupportToolUse(model, provider);
+  // Gate on the same universe the model switcher offers: its entries carry the
+  // freshest served abilities (the org catalog re-syncs on a poll while the raw
+  // runtime-state snapshot only refreshes on mount/focus, so the two can skew
+  // and a just-picked model reads as tool-less until a page refresh). When the
+  // model isn't listed (list loading, BYOK pin under a managed-only list, …)
+  // fall back to the raw lookup so a transient list never reads as "no tool
+  // calling".
+  const rawSupportToolUse = useModelSupportToolUse(model, provider);
+  const { list: enabledChatModelList } = useEnabledChatModelsState();
+  const listedModel = findChatModelInList(enabledChatModelList, model, provider);
+  const supportToolUse = listedModel ? !!listedModel.abilities?.functionCall : rawSupportToolUse;
   const isModelListReady = useAiInfraStore(aiProviderSelectors.isInitAiProviderRuntimeState);
 
   return {

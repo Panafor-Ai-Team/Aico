@@ -92,6 +92,30 @@ vi.mock('@/store/user', () => ({
   useUserStore: (selector: (s: typeof testState.user) => unknown) => selector(testState.user),
 }));
 
+const enabledListState = vi.hoisted(() => ({ list: [] as any[] }));
+
+vi.mock('@/libs/trpc/client', () => ({
+  lambdaClient: {
+    aicoBilling: { getManagedProviderStatus: { query: vi.fn() } },
+    organization: { getMyAllowedModels: { query: vi.fn() } },
+  },
+}));
+
+vi.mock('@/services/aiModel', () => ({
+  aiModelService: { getAiProviderModelList: vi.fn() },
+}));
+vi.mock('@/hooks/useEnabledChatModels', async () => {
+  const actual = await vi.importActual('@/hooks/useEnabledChatModels');
+  return {
+    ...actual,
+    useEnabledChatModelsState: () => ({
+      isDataConfirmed: true,
+      isPending: false,
+      list: enabledListState.list,
+    }),
+  };
+});
+
 beforeEach(() => {
   testState.access.canManageAgent = false;
   testState.access.isAccessLoading = false;
@@ -105,6 +129,7 @@ beforeEach(() => {
   testState.lastSupportCheck = undefined;
   testState.supportMap = undefined;
   testState.supportToolUse = true;
+  enabledListState.list = [];
   testState.user.fetchedPreference = undefined;
   testState.user.isLoading = false;
   testState.user.workspaceUserPreference = {};
@@ -277,6 +302,47 @@ describe('useEffectiveAgentMode', () => {
       canSelectAgentMode: false,
       currentMode: 'chat',
       isAgentModeUnavailable: true,
+    });
+  });
+
+  it('prefers the switcher-visible abilities over a stale raw lookup (no refresh needed)', () => {
+    // The raw runtime-state snapshot only refreshes on mount/focus while the
+    // switcher list carries freshly served abilities: a model the raw table
+    // still records as tool-less must unlock the moment it is picked.
+    testState.agent.model = 'tool-model';
+    testState.agent.provider = 'provider-1';
+    testState.supportMap = {};
+    enabledListState.list = [
+      {
+        children: [{ abilities: { functionCall: true }, id: 'tool-model' }],
+        id: 'provider-1',
+        name: 'P1',
+        source: 'builtin',
+      },
+    ];
+
+    const { result } = renderHook(() => useEffectiveAgentMode('agent-1'));
+
+    expect(result.current).toMatchObject({
+      canSelectAgentMode: true,
+      currentMode: 'agent',
+      isAgentModeUnavailable: false,
+    });
+  });
+
+  it('falls back to the raw lookup when the model is absent from the visible list', () => {
+    // Loading/fail-closed lists must never read as "no tool calling".
+    testState.agent.model = 'tool-model';
+    testState.agent.provider = 'provider-1';
+    testState.supportMap = { 'provider-1/tool-model': true };
+    enabledListState.list = [];
+
+    const { result } = renderHook(() => useEffectiveAgentMode('agent-1'));
+
+    expect(result.current).toMatchObject({
+      canSelectAgentMode: true,
+      currentMode: 'agent',
+      isAgentModeUnavailable: false,
     });
   });
 

@@ -1,7 +1,24 @@
+import { MANAGED_PROVIDER_IDS } from '@lobechat/business-const';
 import { AiModelSourceEnum } from 'model-bank/aiModel';
 
 import { type AIProviderStoreState } from '@/store/aiInfra/initialState';
 import { ModelSearchImplement } from '@/types/search';
+
+/**
+ * Managed gateways all resolve to the live upstream at request time, so a
+ * stored `openrouter/<model>` selection keeps working after a gateway cutover
+ * to `cheapvibecode` (and vice versa) — as long as the model id itself is
+ * still offered. Capability gates must apply the same leniency, or a
+ * spelling split strands the caller in chat mode ("model does not support
+ * tool calling") until a refresh, even though the model switcher offered the
+ * very same model id.
+ */
+const MANAGED_RUNTIME_PROVIDER_IDS = new Set(
+  [...MANAGED_PROVIDER_IDS, 'aico', 'lobehub'].map((id) => id.toLowerCase()),
+);
+
+export const isManagedRuntimeProviderId = (id: string | null | undefined): boolean =>
+  !!id && MANAGED_RUNTIME_PROVIDER_IDS.has(id.trim().toLowerCase());
 
 const aiProviderChatModelListIds = (s: AIProviderStoreState) =>
   s.aiProviderModelList.filter((item) => item.type === 'chat').map((item) => item.id);
@@ -43,8 +60,17 @@ const isModelLoading = (id: string) => (s: AIProviderStoreState) =>
 const getAiModelById = (id: string) => (s: AIProviderStoreState) =>
   s.aiProviderModelList.find((i) => i.id === id);
 
-const getEnabledModelById = (id: string, provider: string) => (s: AIProviderStoreState) =>
-  s.enabledAiModels?.find((i) => i.id === id && (provider ? provider === i.providerId : true));
+const getEnabledModelById = (id: string, provider: string) => (s: AIProviderStoreState) => {
+  const exact = s.enabledAiModels?.find(
+    (i) => i.id === id && (provider ? provider === i.providerId : true),
+  );
+  if (exact) return exact;
+
+  // Same model id under a sibling managed provider (see above). Exact matches
+  // always win; non-managed providers never cross-match.
+  if (!isManagedRuntimeProviderId(provider)) return undefined;
+  return s.enabledAiModels?.find((i) => i.id === id && isManagedRuntimeProviderId(i.providerId));
+};
 
 const isModelSupportToolUse = (id: string, provider: string) => (s: AIProviderStoreState) => {
   const model = getEnabledModelById(id, provider)(s);
