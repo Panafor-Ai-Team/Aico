@@ -461,6 +461,31 @@ describe('resolveDirectImageGenerationToolCall', () => {
     });
   });
 
+  it('builds an edit call when the image travels as an imageList field, not parts', () => {
+    // Regression: live turns carry attachments as `imageList` with plain-text
+    // content. Mining content only left `hasAttachedImages` false, so neither
+    // the offer, the direct call, nor the fallback ever fired.
+    const attached = 'https://cdn.example.com/balloon.png';
+    const call = resolveDirectImageGenerationToolCall({
+      messages: [
+        {
+          content: 'رنگشو زرد کن',
+          imageList: [{ alt: 'balloon', id: 'file-1', url: attached }],
+          role: 'user',
+        },
+      ],
+    });
+
+    expect(call).toMatchObject({
+      apiName: 'generateImage',
+      identifier: 'lobe-image-generation',
+    });
+    expect(JSON.parse(call!.arguments)).toEqual({
+      imageUrls: [attached],
+      prompt: 'رنگشو زرد کن',
+    });
+  });
+
   it('does not build a call for a question about an attached image', () => {
     const call = resolveDirectImageGenerationToolCall({
       messages: [

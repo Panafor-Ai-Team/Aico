@@ -19,6 +19,7 @@ export type MediaGenerationOffer = {
 
 type MessageLike = {
   content?: unknown;
+  imageList?: Array<{ alt?: string; id?: string; url?: string } | null> | null;
   /** Match image-intent `MessageLike` — no `null` (structural assignability). */
   role?: string;
 };
