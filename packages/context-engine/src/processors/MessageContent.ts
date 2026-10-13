@@ -241,6 +241,12 @@ export class MessageContentProcessor extends BaseProcessor {
 
       if (filesContext) {
         textContent = (textContent + '\n\n' + filesContext).trim();
+        log(
+          '[PERF] filesPrompts messageId=%s injectedChars=%d from %d file(s)',
+          message.id,
+          filesContext.length,
+          (message.fileList || []).length,
+        );
       }
     }
 

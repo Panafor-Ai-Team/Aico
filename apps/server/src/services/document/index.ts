@@ -821,6 +821,7 @@ export class DocumentService {
 
     const logPrefix = `[${file.name}]`;
     log(`${logPrefix} Starting to parse file, path: ${filePath}`);
+    const loadStart = Date.now();
 
     try {
       // Use loadFile to load file content
@@ -829,6 +830,7 @@ export class DocumentService {
       log(`${logPrefix} File parsed successfully %O`, {
         fileType: fileDocument.fileType,
         size: fileDocument.content.length,
+        tookMs: Date.now() - loadStart,
       });
 
       // Extract title from metadata or use file name (remove extension)
