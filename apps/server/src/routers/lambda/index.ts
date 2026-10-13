@@ -63,6 +63,7 @@ import { llmGenerationTracingRouter } from './llmGenerationTracing';
 import { marketRouter } from './market';
 import { messageRouter } from './message';
 import { messengerRouter } from './messenger';
+import { multipartUploadRouter } from './multipartUpload';
 import { notebookRouter } from './notebook';
 import { notificationRouter } from './notification';
 import { oauthAppRouter } from './oauthApp';
@@ -140,6 +141,7 @@ export const lambdaRouter = router({
   market: marketRouter,
   message: messageRouter,
   messenger: messengerRouter,
+  multipartUpload: multipartUploadRouter,
   notebook: notebookRouter,
   notification: notificationRouter,
   oauthApp: oauthAppRouter,
