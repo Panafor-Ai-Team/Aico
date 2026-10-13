@@ -821,8 +821,13 @@ export class AiAgentService {
    * building a bare runtime there would lose the callback and fail with
    * SUB_AGENT_UNAVAILABLE.
    */
-  executeStep(params: AgentExecutionParams): Promise<AgentExecutionResult> {
-    return this.agentRuntimeService.executeStep(params);
+  async executeStep(params: AgentExecutionParams): Promise<AgentExecutionResult> {
+    const stepStart = Date.now();
+    try {
+      return await this.agentRuntimeService.executeStep(params);
+    } finally {
+      log('[PERF] executeStep took=%dms', Date.now() - stepStart);
+    }
   }
 
   /**

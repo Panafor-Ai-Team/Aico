@@ -88,8 +88,16 @@ export const resolveAttachmentsByFileIds = async ({
       let content: string | undefined;
       let parseError: unknown;
       try {
+        const parseStart = Date.now();
         const document = await documentService.parseFile(file.id);
         content = document.content ?? undefined;
+        log(
+          '[PERF] parseFile id=%s name=%s took=%dms contentChars=%d',
+          id,
+          file.name,
+          Date.now() - parseStart,
+          content?.length ?? 0,
+        );
       } catch (error) {
         parseError = error;
       }
