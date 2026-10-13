@@ -180,9 +180,9 @@ const PageExplorerPlaceholder = memo<PageExplorerPlaceholderProps>(
           const content = await file.text();
           await handleCreateDocument(content, file.name.replace(/\.md$|\.markdown$/i, ''));
         }
-        // For PDF and DOCX files, upload to server and parse
-        else if (fileExtension === 'pdf' || fileExtension === 'docx') {
-          const fileName = file.name.replace(/\.(pdf|docx)$/i, '');
+        // For PDF and Word files, upload to server and parse
+        else if (fileExtension === 'pdf' || fileExtension === 'docx' || fileExtension === 'doc') {
+          const fileName = file.name.replace(/\.(pdf|docx?)$/i, '');
 
           // Create optimistic document but don't select it yet
           const tempPageId = createOptimisticPage(fileName);
@@ -278,9 +278,9 @@ const PageExplorerPlaceholder = memo<PageExplorerPlaceholderProps>(
               />
             </Flexbox>
 
-            {/* Upload Files (PDF, DOCX, Markdown) */}
+            {/* Upload Files (PDF, DOC, DOCX, Markdown) */}
             <Upload
-              accept=".md,.markdown,.pdf,.docx"
+              accept=".md,.markdown,.pdf,.doc,.docx"
               beforeUpload={handleUploadFile}
               disabled={!canCreate || isUploading}
               multiple={false}
