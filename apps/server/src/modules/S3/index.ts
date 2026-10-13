@@ -1,10 +1,14 @@
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
+  UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import mime from 'mime';
@@ -180,6 +184,77 @@ export class S3 {
       headers: this.setAcl ? { 'x-amz-acl': PUBLIC_READ_ACL_HEADER } : undefined,
       url,
     };
+  }
+
+  /**
+   * Initiate an S3 multipart upload session for large files.
+   * Part numbers are 1-indexed (1 to 10,000); minimum part size is 5MB except the last part.
+   */
+  public async createMultipartUpload(key: string, contentType?: string): Promise<string> {
+    const command = new CreateMultipartUploadCommand({
+      ACL: this.setAcl ? PUBLIC_READ_ACL_HEADER : undefined,
+      Bucket: this.bucket,
+      ContentType: contentType,
+      Key: key,
+    });
+
+    const response = await this.client.send(command);
+
+    if (!response.UploadId) {
+      throw new Error(`Failed to initiate multipart upload for ${key}`);
+    }
+
+    return response.UploadId;
+  }
+
+  /**
+   * Generate a pre-signed URL for uploading a single part (1-hour expiration).
+   */
+  public async createPartUploadUrl(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+  ): Promise<string> {
+    const command = new UploadPartCommand({
+      Bucket: this.bucket,
+      Key: key,
+      PartNumber: partNumber,
+      UploadId: uploadId,
+    });
+
+    return getSignedUrl(this.signingClient, command, { expiresIn: 3600 });
+  }
+
+  /**
+   * Assemble uploaded parts into the final object. ETags must be collected
+   * from each part upload response and passed with their 1-indexed part numbers.
+   */
+  public async completeMultipartUpload(
+    key: string,
+    uploadId: string,
+    parts: Array<{ ETag: string; PartNumber: number }>,
+  ): Promise<void> {
+    const command = new CompleteMultipartUploadCommand({
+      Bucket: this.bucket,
+      Key: key,
+      MultipartUpload: { Parts: parts },
+      UploadId: uploadId,
+    });
+
+    await this.client.send(command);
+  }
+
+  /**
+   * Abort a multipart upload session to clean up orphaned parts in S3.
+   */
+  public async abortMultipartUpload(key: string, uploadId: string): Promise<void> {
+    const command = new AbortMultipartUploadCommand({
+      Bucket: this.bucket,
+      Key: key,
+      UploadId: uploadId,
+    });
+
+    await this.client.send(command);
   }
 
   public async createPreSignedUrlForPreview(key: string, expiresIn?: number): Promise<string> {

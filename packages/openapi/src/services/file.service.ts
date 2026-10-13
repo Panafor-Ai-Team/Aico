@@ -1016,8 +1016,8 @@ export class FileUploadService extends BaseService {
    * Validate file
    */
   private async validateFile(file: File, skipCheckFileType = false): Promise<void> {
-    // File size limit (100MB)
-    const maxSize = 100 * 1024 * 1024;
+    // File size limit (1GB, large files go through S3 multipart upload)
+    const maxSize = 1024 * 1024 * 1024;
     if (file.size > maxSize) {
       throw this.createBusinessError(
         `File size exceeds maximum limit of ${maxSize / 1024 / 1024}MB`,

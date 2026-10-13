@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fileEnv } from '@/envs/file';
 import { lambdaClient } from '@/libs/trpc/client';
 
-import { UPLOAD_NETWORK_ERROR, uploadService } from '../upload';
+import { MULTIPART_UPLOAD_THRESHOLD, UPLOAD_NETWORK_ERROR, uploadService } from '../upload';
 
 vi.mock('@lobechat/model-runtime', () => ({
   parseDataUri: vi.fn(),
@@ -15,6 +15,20 @@ vi.mock('@lobechat/utils', () => ({
 
 vi.mock('@/libs/trpc/client', () => ({
   lambdaClient: {
+    multipartUpload: {
+      abortMultipartUpload: {
+        mutate: vi.fn(),
+      },
+      completeMultipartUpload: {
+        mutate: vi.fn(),
+      },
+      getPartUploadUrl: {
+        mutate: vi.fn(),
+      },
+      initiateMultipartUpload: {
+        mutate: vi.fn(),
+      },
+    },
     upload: {
       createS3PreSignedUrl: {
         mutate: vi.fn(),
@@ -221,6 +235,126 @@ describe('UploadService', () => {
       expect(result.success).toBe(true);
       // The filename will be regenerated with UUID, keeping the extension
       expect(result.data.filename).toMatch(/^mock-uuid\.json$/);
+    });
+  });
+
+  describe('uploadLargeFileToS3', () => {
+    const uploadId = 'test-upload-id';
+    let etagCounter = 0;
+
+    const createPartXhrMock = () => {
+      const etag = `"etag-${++etagCounter}"`;
+      return {
+        abort: vi.fn(),
+        addEventListener: vi.fn((event: string, handler: (e: unknown) => void) => {
+          if (event === 'load') {
+            setTimeout(() => handler({}), 0);
+          }
+        }),
+        getResponseHeader: vi.fn((name: string) => (name === 'ETag' ? etag : null)),
+        open: vi.fn(),
+        send: vi.fn(),
+        status: 200,
+        upload: {
+          addEventListener: vi.fn(),
+        },
+      };
+    };
+
+    beforeEach(() => {
+      etagCounter = 0;
+      global.XMLHttpRequest = vi.fn(() => createPartXhrMock()) as any;
+
+      vi.mocked(lambdaClient.multipartUpload.initiateMultipartUpload.mutate).mockResolvedValue({
+        key: `${fileEnv.NEXT_PUBLIC_S3_FILE_PATH}/1/mock-uuid.png`,
+        uploadId,
+      });
+      vi.mocked(lambdaClient.multipartUpload.getPartUploadUrl.mutate).mockImplementation(
+        async ({ partNumber }) => ({ url: `https://example.com/part-${partNumber}` }),
+      );
+      vi.mocked(lambdaClient.multipartUpload.completeMultipartUpload.mutate).mockResolvedValue({
+        success: true,
+      });
+      vi.mocked(lambdaClient.multipartUpload.abortMultipartUpload.mutate).mockResolvedValue({
+        success: true,
+      });
+    });
+
+    it('should upload a file end-to-end and assemble parts server-side', async () => {
+      const onProgress = vi.fn();
+      const result = await uploadService.uploadLargeFileToS3(mockFile, { onProgress });
+
+      expect(lambdaClient.multipartUpload.initiateMultipartUpload.mutate).toHaveBeenCalledWith(
+        expect.objectContaining({ pathname: expect.any(String), totalSize: mockFile.size }),
+      );
+      expect(lambdaClient.multipartUpload.getPartUploadUrl.mutate).toHaveBeenCalledWith(
+        expect.objectContaining({ partNumber: 1, uploadId }),
+      );
+      expect(lambdaClient.multipartUpload.completeMultipartUpload.mutate).toHaveBeenCalledWith({
+        key: expect.any(String),
+        parts: [{ ETag: '"etag-1"', PartNumber: 1 }],
+        uploadId,
+      });
+      expect(lambdaClient.multipartUpload.abortMultipartUpload.mutate).not.toHaveBeenCalled();
+      expect(onProgress).toHaveBeenCalledWith(
+        'success',
+        expect.objectContaining({ progress: 100 }),
+      );
+      expect(result).toEqual({
+        date: '1',
+        dirname: `${fileEnv.NEXT_PUBLIC_S3_FILE_PATH}/1`,
+        filename: 'mock-uuid.png',
+        path: `${fileEnv.NEXT_PUBLIC_S3_FILE_PATH}/1/mock-uuid.png`,
+      });
+    });
+
+    it('should retry a failed part and still complete', async () => {
+      const getPartUrl = vi.mocked(lambdaClient.multipartUpload.getPartUploadUrl.mutate);
+      getPartUrl.mockRejectedValueOnce(new Error('network blip'));
+
+      const result = await uploadService.uploadLargeFileToS3(mockFile, {});
+
+      expect(getPartUrl).toHaveBeenCalledTimes(2);
+      expect(lambdaClient.multipartUpload.completeMultipartUpload.mutate).toHaveBeenCalled();
+      expect(result.path).toContain('mock-uuid.png');
+    });
+
+    it('should abort the S3 session when the upload is cancelled', async () => {
+      const onProgress = vi.fn();
+      const abortController = new AbortController();
+      abortController.abort();
+
+      await expect(
+        uploadService.uploadLargeFileToS3(mockFile, { abortController, onProgress }),
+      ).rejects.toThrow('Upload cancelled by user');
+
+      expect(lambdaClient.multipartUpload.abortMultipartUpload.mutate).toHaveBeenCalledWith({
+        key: expect.any(String),
+        uploadId,
+      });
+      expect(lambdaClient.multipartUpload.completeMultipartUpload.mutate).not.toHaveBeenCalled();
+      expect(onProgress).toHaveBeenCalledWith('cancelled', expect.anything());
+    });
+  });
+
+  describe('uploadFileToS3 routing', () => {
+    it('should route files over the threshold to multipart upload', async () => {
+      const largeFile = new File(['x'], 'big.bin', { type: 'application/octet-stream' });
+      Object.defineProperty(largeFile, 'size', { value: MULTIPART_UPLOAD_THRESHOLD + 1 });
+
+      const multipartSpy = vi
+        .spyOn(uploadService, 'uploadLargeFileToS3')
+        .mockResolvedValue({ date: '1', dirname: 'd', filename: 'f', path: 'p' });
+      const singleSpy = vi.spyOn(uploadService, 'uploadToServerS3');
+
+      const result = await uploadService.uploadFileToS3(largeFile, {});
+
+      expect(multipartSpy).toHaveBeenCalled();
+      expect(singleSpy).not.toHaveBeenCalled();
+      expect(result.success).toBe(true);
+
+      multipartSpy.mockRestore();
+      singleSpy.mockRestore();
     });
   });
 

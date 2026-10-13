@@ -1,11 +1,15 @@
 // @vitest-environment node
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
+  UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -534,6 +538,80 @@ describe('FileS3', () => {
         Body: '',
         Bucket: 'test-bucket',
         Key: 'empty.txt',
+      });
+    });
+  });
+
+  describe('multipart upload', () => {
+    it('should initiate a multipart upload and return the uploadId', async () => {
+      const s3 = new FileS3();
+      mockS3ClientSend.mockResolvedValue({ UploadId: 'test-upload-id' });
+
+      const uploadId = await s3.createMultipartUpload('large-file.bin', 'video/mp4');
+
+      expect(CreateMultipartUploadCommand).toHaveBeenCalledWith({
+        ACL: 'public-read',
+        Bucket: 'test-bucket',
+        ContentType: 'video/mp4',
+        Key: 'large-file.bin',
+      });
+      expect(uploadId).toBe('test-upload-id');
+    });
+
+    it('should throw when S3 returns no uploadId', async () => {
+      const s3 = new FileS3();
+      mockS3ClientSend.mockResolvedValue({});
+
+      await expect(s3.createMultipartUpload('large-file.bin')).rejects.toThrow(
+        'Failed to initiate multipart upload for large-file.bin',
+      );
+    });
+
+    it('should create a pre-signed URL for a part with 1-hour expiration', async () => {
+      const s3 = new FileS3();
+
+      const url = await s3.createPartUploadUrl('large-file.bin', 'test-upload-id', 2);
+
+      expect(UploadPartCommand).toHaveBeenCalledWith({
+        Bucket: 'test-bucket',
+        Key: 'large-file.bin',
+        PartNumber: 2,
+        UploadId: 'test-upload-id',
+      });
+      expect(mockGetSignedUrl).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+        expiresIn: 3600,
+      });
+      expect(url).toBe('https://presigned-url.example.com');
+    });
+
+    it('should complete a multipart upload with collected ETags', async () => {
+      const s3 = new FileS3();
+      mockS3ClientSend.mockResolvedValue({});
+
+      const parts = [
+        { ETag: '"etag-1"', PartNumber: 1 },
+        { ETag: '"etag-2"', PartNumber: 2 },
+      ];
+      await s3.completeMultipartUpload('large-file.bin', 'test-upload-id', parts);
+
+      expect(CompleteMultipartUploadCommand).toHaveBeenCalledWith({
+        Bucket: 'test-bucket',
+        Key: 'large-file.bin',
+        MultipartUpload: { Parts: parts },
+        UploadId: 'test-upload-id',
+      });
+    });
+
+    it('should abort a multipart upload', async () => {
+      const s3 = new FileS3();
+      mockS3ClientSend.mockResolvedValue({});
+
+      await s3.abortMultipartUpload('large-file.bin', 'test-upload-id');
+
+      expect(AbortMultipartUploadCommand).toHaveBeenCalledWith({
+        Bucket: 'test-bucket',
+        Key: 'large-file.bin',
+        UploadId: 'test-upload-id',
       });
     });
   });
