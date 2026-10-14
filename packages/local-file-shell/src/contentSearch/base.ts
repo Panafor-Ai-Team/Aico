@@ -5,8 +5,16 @@ import fg from 'fast-glob';
 import { createLogger } from '../logger';
 import type { ToolDetector } from '../toolDetector';
 import type { GrepContentParams, GrepContentResult } from '../types';
+import { streamGrepFile } from './streamGrep';
 
 const logger = createLogger('contentSearch:base');
+
+/**
+ * Files above this size are grepped line-by-line via streaming instead of
+ * being buffered into memory. The Read tool keeps its own (smaller) cap —
+ * returning full content to the agent is a different cost than scanning it.
+ */
+const STREAMING_THRESHOLD_BYTES = 10 * 1024 * 1024;
 
 /**
  * Content search tool type
@@ -176,11 +184,34 @@ export abstract class BaseContentSearch {
 
     const matches: string[] = [];
     let totalMatches = 0;
+    let failedFiles = 0;
+    let firstError: string | null = null;
 
     for (const filePath of filesToSearch) {
       try {
         const fileStats = await stat(filePath);
         if (!fileStats.isFile()) continue;
+
+        if ((fileStats.size ?? 0) > STREAMING_THRESHOLD_BYTES) {
+          const contextBefore = params['-B'] || params['-C'] || 0;
+          const contextAfter = params['-A'] || params['-C'] || 0;
+          const streamed = await streamGrepFile(filePath, pattern, flags, output_mode, {
+            after: contextAfter,
+            before: contextBefore,
+            lineNumbers: !!params['-n'],
+            stopOnFirstMatch: output_mode === 'files_with_matches',
+          });
+          if (output_mode === 'files_with_matches') {
+            if (streamed.totalMatches > 0) {
+              matches.push(filePath);
+              totalMatches++;
+            }
+          } else {
+            matches.push(...streamed.lines);
+            totalMatches += streamed.totalMatches;
+          }
+          continue;
+        }
 
         const content = await readFile(filePath, 'utf8');
         const lines = content.split('\n');
@@ -226,8 +257,22 @@ export abstract class BaseContentSearch {
           }
         }
       } catch (error) {
+        failedFiles++;
+        firstError ??= (error as Error).message;
         logger.debug(`${logPrefix} Skipping file ${filePath}:`, error);
       }
+    }
+
+    // A single-file search that read nothing searched nothing — surface the
+    // failure instead of reporting a clean zero-match success.
+    if (failedFiles > 0 && filesToSearch.length === 1) {
+      return {
+        engine: 'nodejs',
+        error: firstError ?? 'Unknown error',
+        matches: [],
+        success: false,
+        total_matches: 0,
+      };
     }
 
     logger.info(`${logPrefix} Search completed`, {

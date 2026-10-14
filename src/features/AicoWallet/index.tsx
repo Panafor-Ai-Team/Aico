@@ -34,6 +34,7 @@ import { type LooseTFunction } from '@/types/looseTranslation';
 
 import { resolveWalletDisplay } from './resolveWalletDisplay';
 import { resolveSourceKeyMessageKey } from './sourceKeyMessage';
+import { useAfterFirstPaint } from './useAfterFirstPaint';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   sourceActive: css`
@@ -74,6 +75,52 @@ const sourceTitle = (source: AicoBillingSource, t: LooseTFunction): string => {
   return source.organizationName || t('billing.organization');
 };
 
+// Wallet figures change on user action (top-up, switch, trial), not on a
+// timer — the dedupe window only collapses remount refetch storms. Manual
+// mutates (mutateWallet/mutateTrial) still revalidate on demand.
+const WALLET_SWR_DEDUPING_INTERVAL = 30_000;
+
+const WalletTransactions = ({ t }: { t: LooseTFunction }) => {
+  // Same mount as the page, but the null key keeps the transactions scan out
+  // of the initial batched request; it fires one task after first paint.
+  const txsReady = useAfterFirstPaint();
+  const { data: txs, isLoading } = useClientDataSWR(
+    txsReady ? 'aico-my-txs' : null,
+    () => lambdaClient.aicoBilling.getMyTransactions.query({ limit: 20 }),
+    { dedupingInterval: WALLET_SWR_DEDUPING_INTERVAL },
+  );
+
+  return (
+    <Block className={aicoPanelStyles.section} variant="outlined">
+      <Flexbox gap={12}>
+        <Text strong>{t('wallet.transactions')}</Text>
+        <div className={aicoPanelStyles.tableScroll}>
+          <Table
+            dataSource={txs || []}
+            loading={isLoading || !txsReady}
+            pagination={false}
+            rowKey="id"
+            scroll={AICO_TABLE_SCROLL}
+            columns={[
+              { dataIndex: 'type', title: t('wallet.columns.type') },
+              {
+                dataIndex: 'amountPi',
+                title: t('wallet.columns.pi'),
+                render: (v: number | string | null) => (v == null ? '—' : <PiAmount value={v} />),
+              },
+              {
+                dataIndex: 'createdAt',
+                title: t('wallet.columns.date'),
+                render: (v: Date | string) => new Date(v).toLocaleString(),
+              },
+            ]}
+          />
+        </div>
+      </Flexbox>
+    </Block>
+  );
+};
+
 export const AicoWallet = () => {
   const { t } = useTranslation('aico');
   const [busy, setBusy] = useState(false);
@@ -82,20 +129,25 @@ export const AicoWallet = () => {
     Boolean(userProfileSelectors.userProfile(s)?.phoneNumberVerified),
   );
 
-  const { data: wallet, mutate: mutateWallet } = useClientDataSWR(AICO_MY_WALLET_SWR_KEY, () =>
-    lambdaClient.aicoBilling.getMyWallet.query(),
+  const { data: wallet, mutate: mutateWallet } = useClientDataSWR(
+    AICO_MY_WALLET_SWR_KEY,
+    () => lambdaClient.aicoBilling.getMyWallet.query(),
+    { dedupingInterval: WALLET_SWR_DEDUPING_INTERVAL },
   );
-  const { data: fx } = useClientDataSWR('aico-fx', () =>
-    lambdaClient.aicoBilling.getFxRate.query(),
+  const { data: fx } = useClientDataSWR(
+    'aico-fx',
+    () => lambdaClient.aicoBilling.getFxRate.query(),
+    { dedupingInterval: WALLET_SWR_DEDUPING_INTERVAL },
   );
-  const { data: trial, mutate: mutateTrial } = useClientDataSWR('aico-my-trial', () =>
-    lambdaClient.aicoBilling.getMyTrial.query(),
+  const { data: trial, mutate: mutateTrial } = useClientDataSWR(
+    'aico-my-trial',
+    () => lambdaClient.aicoBilling.getMyTrial.query(),
+    { dedupingInterval: WALLET_SWR_DEDUPING_INTERVAL },
   );
-  const { data: txs } = useClientDataSWR('aico-my-txs', () =>
-    lambdaClient.aicoBilling.getMyTransactions.query({ limit: 20 }),
-  );
-  const { data: providerStatus } = useClientDataSWR('aico-provider-status', () =>
-    lambdaClient.aicoBilling.getManagedProviderStatus.query(),
+  const { data: providerStatus } = useClientDataSWR(
+    'aico-provider-status',
+    () => lambdaClient.aicoBilling.getManagedProviderStatus.query(),
+    { dedupingInterval: WALLET_SWR_DEDUPING_INTERVAL },
   );
 
   const { canSwitch, data: billingSources, isSelected, selectSource } = useAicoBillingSources();
@@ -297,32 +349,7 @@ export const AicoWallet = () => {
         </Flexbox>
       </Block>
 
-      <Block className={aicoPanelStyles.section} variant="outlined">
-        <Flexbox gap={12}>
-          <Text strong>{t('wallet.transactions')}</Text>
-          <div className={aicoPanelStyles.tableScroll}>
-            <Table
-              dataSource={txs || []}
-              pagination={false}
-              rowKey="id"
-              scroll={AICO_TABLE_SCROLL}
-              columns={[
-                { dataIndex: 'type', title: t('wallet.columns.type') },
-                {
-                  dataIndex: 'amountPi',
-                  title: t('wallet.columns.pi'),
-                  render: (v: number | string | null) => (v == null ? '—' : <PiAmount value={v} />),
-                },
-                {
-                  dataIndex: 'createdAt',
-                  title: t('wallet.columns.date'),
-                  render: (v: Date | string) => new Date(v).toLocaleString(),
-                },
-              ]}
-            />
-          </div>
-        </Flexbox>
-      </Block>
+      <WalletTransactions t={t} />
     </Flexbox>
   );
 };

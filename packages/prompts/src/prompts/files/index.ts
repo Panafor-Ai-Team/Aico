@@ -5,6 +5,7 @@ import { filePrompts } from './file';
 import { imagesPrompts } from './image';
 import { videosPrompts } from './video';
 
+export { FILE_PROMPT_CONTENT_BUDGET } from './file';
 export type { KnowledgeBaseInfo, PromptKnowledgeOptions } from './knowledgeBase';
 export { promptAgentKnowledge } from './knowledgeBase';
 
