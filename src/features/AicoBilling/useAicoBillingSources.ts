@@ -21,9 +21,13 @@ export const useAicoBillingSources = () => {
   const context = useAicoBillingStore((s) => s.context);
   const setContext = useAicoBillingStore((s) => s.setContext);
 
+  // Remounts (route change, tab switch) must not refire the billing fetch:
+  // each load kicks a slow gateway-backed live refresh. Source switches
+  // still refresh on demand via mutate() below.
   const { data, error, isLoading, mutate } = useClientDataSWR<AicoBillingSourcesResponse>(
     AICO_BILLING_SOURCES_SWR_KEY,
     loadBillingSources,
+    { dedupingInterval: 30_000 },
   );
 
   useEffect(() => {
