@@ -401,7 +401,7 @@ describe('filePrompts truncation', () => {
 
     expect(result).toContain('a'.repeat(FILE_PROMPT_CONTENT_BUDGET));
     expect(result).not.toContain('TAIL-MUST-NOT-APPEAR');
-    expect(result).toContain('[file content truncated');
+    expect(result).toContain('[truncated:');
   });
 
   it('leaves content within budget untouched', () => {
@@ -409,6 +409,6 @@ describe('filePrompts truncation', () => {
     const result = filesPrompts({ fileList: [small] });
 
     expect(result).toContain('id,name\n1,John\n');
-    expect(result).not.toContain('[file content truncated');
+    expect(result).not.toContain('[truncated:');
   });
 });
