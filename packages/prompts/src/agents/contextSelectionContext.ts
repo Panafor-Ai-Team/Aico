@@ -1,6 +1,7 @@
 import type { ContextSelection } from '@lobechat/types';
 
 import { escapeXmlAttr } from '../prompts/search/xmlEscape';
+import { truncatePromptContent } from './contentBudget';
 
 const formatLineRange = (selection: ContextSelection): string => {
   const range = selection.lineRange;
@@ -48,7 +49,10 @@ ${getSelectionBody(selection)}
     )
     .join('\n');
 
-  return `<user_context_selections count="${selections.length}">
+  return truncatePromptContent(
+    `<user_context_selections count="${selections.length}">
 ${formattedSelections}
-</user_context_selections>`;
+</user_selections>`,
+    'context selections',
+  );
 };
