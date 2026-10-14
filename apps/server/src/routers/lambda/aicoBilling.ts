@@ -504,10 +504,17 @@ export const aicoBillingRouter = router({
     ).some(Boolean);
 
     // Keyless wallets are normal under the shared key, so read the ledger instead.
+    // Held reading only: this is a UI hint riding the mount-time batch — a live
+    // gateway roundtrip here holds every co-batched query (including billing
+    // sources) hostage and freezes the chat input. Held errs toward showing
+    // credit; server placeHold remains the authoritative funds check.
     const hasPersonalCredit = isSharedInferenceKey()
       ? Boolean(wallet) &&
-        (await ctx.keyService.getUserRemaining(ctx.userId).catch(() => ({ remainingMicroUsd: 0 })))
-          .remainingMicroUsd > 0
+        (
+          await ctx.keyService
+            .getUserRemaining(ctx.userId, { live: false, persist: false })
+            .catch(() => ({ remainingMicroUsd: 0 }))
+        ).remainingMicroUsd > 0
       : Boolean(wallet?.openrouterKeyId);
 
     return {

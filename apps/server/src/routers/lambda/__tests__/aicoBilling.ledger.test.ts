@@ -140,6 +140,9 @@ describe('aicoBilling router under the shared inference key', () => {
       usageMicroUsd: usd(1),
     });
     await expect(caller.getManagedProviderStatus()).resolves.toMatchObject({ hasCredit: true });
+    // Status hint must never take the live gateway path: it rides the
+    // mount-time batch and would hold co-batched queries hostage.
+    expect(h.getUserRemaining).toHaveBeenCalledWith(userId, { live: false, persist: false });
   });
 
   it.each([
