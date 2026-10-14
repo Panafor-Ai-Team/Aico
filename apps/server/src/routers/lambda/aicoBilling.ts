@@ -1,5 +1,6 @@
 import { BRANDING_NAME } from '@lobechat/business-const';
 import { TRPCError } from '@trpc/server';
+import debug from 'debug';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 
@@ -26,6 +27,8 @@ import {
 } from '@/server/services/aico/piToken';
 import { isManagedKeyCapacityError } from '@/server/services/managedProvider/cheapvibecode';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
+
+const log = debug('lobe-server:aicoBilling');
 
 const billingProcedure = authedProcedure.use(serverDatabase).use(async ({ ctx, next }) => {
   return next({
@@ -126,6 +129,7 @@ export const aicoBillingRouter = router({
     .input(z.object({ syncLive: z.boolean().optional() }).optional())
     .query(async ({ ctx, input }) => {
       const syncLive = input?.syncLive ?? true;
+      const routeStart = Date.now();
       const [wallet, orgs, trialConfig, trialRow, trialActiveRaw, multiplierBp] = await Promise.all(
         [
           ctx.billingModel.getOrCreateUserWallet(ctx.userId),
@@ -135,6 +139,12 @@ export const aicoBillingRouter = router({
           ctx.billingModel.isTrialActive(ctx.userId),
           ctx.billingModel.getUsageMultiplierBp(),
         ],
+      );
+      log(
+        '[PERF] getMyBillingSources initial took=%dms orgs=%d syncLive=%s',
+        Date.now() - routeStart,
+        orgs.length,
+        syncLive,
       );
 
       // Same gate as getMyTrial / managed policy — never advertise a trial chat cannot use.
@@ -147,6 +157,7 @@ export const aicoBillingRouter = router({
       // settled usage. This catch is only for a failure in that path itself —
       // which must still be logged and reported as unknown, never as an unspent
       // wallet.
+      const personalStart = Date.now();
       const personalReading = await keyService
         .getUserRemaining(ctx.userId, { live: syncLive, persist: syncLive })
         .catch((error) => {
@@ -160,6 +171,11 @@ export const aicoBillingRouter = router({
             usageKnown: false,
           };
         });
+      log(
+        '[PERF] getMyBillingSources personal took=%dms syncLive=%s',
+        Date.now() - personalStart,
+        syncLive,
+      );
       const personalRemaining = personalReading.remainingMicroUsd;
       const personalRemainingPi = piFromBilledMicro({
         balanceMicroUsd: wallet.balanceMicroUsd,
@@ -188,6 +204,7 @@ export const aicoBillingRouter = router({
         usageKnown: personalReading.usageKnown,
       };
 
+      const orgStart = Date.now();
       const organizationSources = (
         await Promise.all(
           orgs.map(async (org) => {
@@ -282,6 +299,13 @@ export const aicoBillingRouter = router({
         source: 'organization';
       }>;
 
+      log(
+        '[PERF] getMyBillingSources orgs took=%dms count=%d syncLive=%s total=%dms',
+        Date.now() - orgStart,
+        orgs.length,
+        syncLive,
+        Date.now() - routeStart,
+      );
       return {
         preferredBillingSource: wallet.preferredBillingSource as 'personal' | 'organization',
         preferredOrganizationId: wallet.preferredOrganizationId,
