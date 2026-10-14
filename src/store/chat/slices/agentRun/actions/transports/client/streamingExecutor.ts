@@ -25,7 +25,11 @@ import {
 import { manualModeExcludeToolIds } from '@lobechat/builtin-tools';
 import { isDesktop, resolveSubAgentModel } from '@lobechat/const';
 import { type ToolsEngine } from '@lobechat/context-engine';
-import { buildTaskDetailPrompt, buildTaskListPrompt } from '@lobechat/prompts';
+import {
+  buildTaskDetailPrompt,
+  buildTaskListPrompt,
+  truncatePromptContent,
+} from '@lobechat/prompts';
 import {
   type ConversationContext,
   type MessageMetadata,
@@ -379,8 +383,10 @@ export class StreamingExecutorActionImpl {
 
         runtimeInitialContext = {
           pageEditor: {
-            markdown: pageContentContext.markdown || '',
-            xml: pageContentContext.xml || '',
+            // Cap at the source: the full page rides the runtime context
+            // (and can reach the wire uncapped even where formatters cap).
+            markdown: truncatePromptContent(pageContentContext.markdown || '', 'page markdown'),
+            xml: truncatePromptContent(pageContentContext.xml || '', 'page structure'),
             metadata: {
               title: pageContentContext.metadata.title,
               charCount: pageContentContext.metadata.charCount,
