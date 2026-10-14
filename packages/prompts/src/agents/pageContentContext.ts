@@ -1,3 +1,5 @@
+import { truncatePromptContent } from './contentBudget';
+
 export interface PageContentMetadata {
   /**
    * Total character count of the markdown content
@@ -63,11 +65,13 @@ export const formatPageContentContext = (context: PageContentContext): string =>
   const sections: string[] = [];
 
   if (markdown) {
-    sections.push(formatMarkdownSection(markdown, metadata));
+    sections.push(
+      formatMarkdownSection(truncatePromptContent(markdown, 'page markdown'), metadata),
+    );
   }
 
   if (xml) {
-    sections.push(formatXmlSection(xml));
+    sections.push(formatXmlSection(truncatePromptContent(xml, 'page structure')));
   }
 
   return `<current_page title="${metadata.title}">
