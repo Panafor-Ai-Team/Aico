@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { AICO_BILLING_SOURCES_SWR_KEY } from './cacheKeys';
 import { useAicoBillingStore } from './store';
 import type { AicoBillingSourcesResponse } from './types';
 
@@ -38,8 +39,13 @@ const data: AicoBillingSourcesResponse = {
   trialAvailable: false,
 };
 
+const swrCalls = vi.hoisted(() => [] as unknown[][]);
+
 vi.mock('@/libs/swr', () => ({
-  useClientDataSWR: () => ({ data, error: undefined, isLoading: false, mutate: swrMutate }),
+  useClientDataSWR: (...args: unknown[]) => {
+    swrCalls.push(args);
+    return { data, error: undefined, isLoading: false, mutate: swrMutate };
+  },
 }));
 vi.mock('@/libs/trpc/client', () => ({
   lambdaClient: {
@@ -57,7 +63,15 @@ describe('useAicoBillingSources.selectSource', () => {
   beforeEach(() => {
     setBillingPreference.mockReset().mockResolvedValue({});
     swrMutate.mockReset();
+    swrCalls.length = 0;
     useAicoBillingStore.setState({ context: { source: 'personal' }, hydrated: true });
+  });
+
+  it('dedupes billing-source fetches across rapid remounts', () => {
+    renderHook(() => useAicoBillingSources());
+
+    expect(swrCalls[0]?.[0]).toBe(AICO_BILLING_SOURCES_SWR_KEY);
+    expect(swrCalls[0]?.[2]).toEqual({ dedupingInterval: 30_000 });
   });
 
   it('settles once the preference is saved, without waiting for the balance reload', async () => {
