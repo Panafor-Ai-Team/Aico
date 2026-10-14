@@ -41,7 +41,11 @@ import {
 } from '@lobechat/context-engine';
 import type { LobeChatDatabase } from '@lobechat/database';
 import { isRemoteHeterogeneousType } from '@lobechat/heterogeneous-agents';
-import { buildTaskManagerDefaultsPrompt, resourcesTreePrompt } from '@lobechat/prompts';
+import {
+  buildTaskManagerDefaultsPrompt,
+  FILE_PROMPT_CONTENT_BUDGET,
+  resourcesTreePrompt,
+} from '@lobechat/prompts';
 import type {
   AgentModelOverride,
   ChatAudioItem,
@@ -943,6 +947,12 @@ export class AiAgentService {
             );
             warnings.push(
               `File "${file.name || 'unknown'}" was uploaded but its contents could not be extracted.`,
+            );
+          }
+
+          if (content && content.length > FILE_PROMPT_CONTENT_BUDGET) {
+            warnings.push(
+              `File "${file.name || 'unknown'}" is large; only the first ${FILE_PROMPT_CONTENT_BUDGET} characters were shown to the agent.`,
             );
           }
 

@@ -2,6 +2,7 @@ import { createVisualFileRef } from '@lobechat/const/visualRef';
 import type { ChatAudioItem, ChatFileItem, ChatImageItem, ChatVideoItem } from '@lobechat/types';
 import { describe, expect, it } from 'vitest';
 
+import { FILE_PROMPT_CONTENT_BUDGET } from './file';
 import { filesPrompts } from './index';
 
 describe('filesPrompts', () => {
@@ -382,5 +383,32 @@ describe('filesPrompts', () => {
 
       expect(result).toEqual('');
     });
+  });
+});
+
+describe('filePrompts truncation', () => {
+  const bigFile: ChatFileItem = {
+    content: `${'a'.repeat(FILE_PROMPT_CONTENT_BUDGET)}TAIL-MUST-NOT-APPEAR`,
+    fileType: 'text/csv',
+    id: 'file-big',
+    name: 'contacts100.csv',
+    size: FILE_PROMPT_CONTENT_BUDGET + 20,
+    url: 'https://example.com/contacts100.csv',
+  };
+
+  it('truncates file content past the budget with a note', () => {
+    const result = filesPrompts({ fileList: [bigFile] });
+
+    expect(result).toContain('a'.repeat(FILE_PROMPT_CONTENT_BUDGET));
+    expect(result).not.toContain('TAIL-MUST-NOT-APPEAR');
+    expect(result).toContain('[file content truncated');
+  });
+
+  it('leaves content within budget untouched', () => {
+    const small = { ...bigFile, content: 'id,name\n1,John\n', id: 'file-small' };
+    const result = filesPrompts({ fileList: [small] });
+
+    expect(result).toContain('id,name\n1,John\n');
+    expect(result).not.toContain('[file content truncated');
   });
 });

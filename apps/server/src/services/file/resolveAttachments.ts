@@ -1,4 +1,5 @@
 import type { LobeChatDatabase } from '@lobechat/database';
+import { FILE_PROMPT_CONTENT_BUDGET } from '@lobechat/prompts';
 import type { ChatAudioItem, ChatFileItem, ChatImageItem, ChatVideoItem } from '@lobechat/types';
 import debug from 'debug';
 
@@ -128,6 +129,11 @@ export const resolveAttachmentsByFileIds = async ({
       log('parseFile failed for %s (id=%s): %O', file.name, file.id, entry.parseError);
       result.warnings.push(
         `File "${file.name || 'unknown'}" was attached but its contents could not be extracted.`,
+      );
+    }
+    if ('content' in entry && entry.content && entry.content.length > FILE_PROMPT_CONTENT_BUDGET) {
+      result.warnings.push(
+        `File "${file.name || 'unknown'}" is large; only the first ${FILE_PROMPT_CONTENT_BUDGET} characters were shown to the agent.`,
       );
     }
     result.fileList.push({
