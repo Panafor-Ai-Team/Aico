@@ -185,7 +185,12 @@ services:
     container_name: ${PANACHAT_STACK:-panachat}-postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    command: ['postgres', '-c', 'shared_preload_libraries=pg_search']
+    command:
+      - 'postgres'
+      - '-c'
+      - 'shared_preload_libraries=pg_search'
+      - '-c'
+      - 'paradedb.enable_join_custom_scan=off'
     environment:
       - 'POSTGRES_DB=${PANACHAT_DB_NAME}'
       - 'POSTGRES_PASSWORD=${POSTGRES_PASSWORD}'
