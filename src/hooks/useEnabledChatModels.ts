@@ -116,11 +116,14 @@ export const useEnabledChatModelsState = (): EnabledChatModelsState => {
     { refreshInterval: ORG_MODEL_ACCESS_REFRESH_INTERVAL },
   );
 
+  // The catalog is org-independent (it enumerates everything the gateway can
+  // offer), so fetch it on mount instead of serializing it behind the billing
+  // round-trip that produces orgId. Refresh cycles are an org concern only.
   const { data: catalog, isLoading: isCatalogLoading } = useClientDataSWR(
-    orgId ? ['aico-managed-model-catalog', orgId] : null,
+    ['aico-managed-model-catalog'],
     () => aiModelService.getAiProviderModelList(DEFAULT_PROVIDER),
     // Same poll: an admin catalog disable must also drop the model promptly.
-    { refreshInterval: ORG_MODEL_ACCESS_REFRESH_INTERVAL },
+    { refreshInterval: orgId ? ORG_MODEL_ACCESS_REFRESH_INTERVAL : undefined },
   );
 
   const isPending =

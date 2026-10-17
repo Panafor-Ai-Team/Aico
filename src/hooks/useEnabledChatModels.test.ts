@@ -250,7 +250,7 @@ describe('useEnabledChatModels', () => {
       expect(ORG_MODEL_ACCESS_REFRESH_INTERVAL).toBeGreaterThan(0);
     });
 
-    it('does not poll in personal mode (no org queries issued)', async () => {
+    it('does not poll org access in personal mode (catalog fetch is one-shot)', async () => {
       useClientDataSWR.mockImplementation((key: unknown) => {
         if (key === 'aico-provider-status') return { data: { managed: true } };
         return { data: undefined };
@@ -259,13 +259,34 @@ describe('useEnabledChatModels', () => {
       const { useEnabledChatModels } = await import('./useEnabledChatModels');
       renderHook(() => useEnabledChatModels());
 
-      const orgKeys = useClientDataSWR.mock.calls.filter(
-        ([key]) =>
-          Array.isArray(key) &&
-          (key[0] === 'aico-my-allowed-models' || key[0] === 'aico-managed-model-catalog'),
+      const allowedKeys = useClientDataSWR.mock.calls.filter(
+        ([key]) => Array.isArray(key) && key[0] === 'aico-my-allowed-models',
       );
-      expect(orgKeys).toHaveLength(0);
+      expect(allowedKeys).toHaveLength(0);
+      const catalogConfig = useClientDataSWR.mock.calls.find(
+        (args) => Array.isArray(args[0]) && args[0][0] === 'aico-managed-model-catalog',
+      )?.[2];
+      expect(catalogConfig?.refreshInterval).toBeUndefined();
     });
+  });
+
+  it('starts fetching the managed catalog on mount, even before billing resolves', async () => {
+    useAicoBillingStore.mockImplementation((selector: any) => selector({ context: null }));
+    useClientDataSWR.mockImplementation(
+      (key: unknown, fetcher?: (...args: unknown[]) => unknown) => {
+        if (key === 'aico-provider-status') return { data: { managed: true } };
+        if (Array.isArray(key) && key[0] === 'aico-managed-model-catalog') {
+          fetcher?.();
+          return { data: undefined };
+        }
+        return { data: undefined };
+      },
+    );
+
+    const { useEnabledChatModelsState } = await import('./useEnabledChatModels');
+    renderHook(() => useEnabledChatModelsState());
+
+    expect(getAiProviderModelList).toHaveBeenCalledTimes(1);
   });
 
   describe('isPending', () => {
