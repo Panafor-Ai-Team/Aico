@@ -3,6 +3,7 @@ import { SUPPORTED_LANGUAGES, type SupportedLanguage } from '../splitter';
 import { type DocumentChunk, type FileLoaderType } from '../types';
 import { CodeLoader } from './code';
 import { CsVLoader } from './csv';
+import { DocLoader } from './doc';
 import { DocxLoader } from './docx';
 import { EPubLoader } from './epub';
 import { LatexLoader } from './latex';
@@ -48,8 +49,12 @@ export class ChunkingLoader {
           return await MarkdownLoader(txt);
         }
 
-        case 'doc': {
+        case 'docx': {
           return await DocxLoader(fileBlob);
+        }
+
+        case 'doc': {
+          return await DocLoader(content);
         }
 
         case 'text': {
@@ -80,7 +85,11 @@ export class ChunkingLoader {
       return 'ppt';
     }
 
-    if (filename.endsWith('docx') || filename.endsWith('doc')) {
+    if (filename.endsWith('docx')) {
+      return 'docx';
+    }
+
+    if (filename.endsWith('doc')) {
       return 'doc';
     }
 
