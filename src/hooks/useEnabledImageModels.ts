@@ -54,9 +54,12 @@ export const useEnabledImageModels = (): {
     lambdaClient.organization.getMyAllowedModels.query({ organizationId: orgId! }),
   );
 
-  const { data: catalog } = useClientDataSWR(
-    orgId ? ['aico-managed-model-catalog', orgId] : null,
-    () => aiModelService.getAiProviderModelList(DEFAULT_PROVIDER),
+  // The catalog is org-independent (it enumerates everything the gateway can
+  // offer), so fetch it on mount instead of serializing it behind the billing
+  // round-trip that produces orgId. Shared key mirrors the chat model list, so
+  // both surfaces reuse one request.
+  const { data: catalog } = useClientDataSWR(['aico-managed-model-catalog'], () =>
+    aiModelService.getAiProviderModelList(DEFAULT_PROVIDER),
   );
 
   const list = useMemo(() => {
