@@ -420,7 +420,13 @@ const styles = createStaticStyles(({ css }) => ({
   `,
 }));
 
-export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = {}) => {
+export const useControls = ({
+  closeDropdown,
+  open = true,
+}: {
+  closeDropdown?: () => void;
+  open?: boolean;
+} = {}) => {
   const { t } = useTranslation('setting');
   const agentId = useAgentId();
   const navigate = useWorkspaceAwareNavigate();
@@ -815,8 +821,9 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
   // Load user's Composio integrations via SWR (from database)
   useFetchUserComposioConnections(isComposioEnabledInEnv);
 
-  // Load user's LobeHub Skill connections via SWR
-  useFetchLobehubSkillConnections(isLobehubSkillEnabled);
+  // Load user's LobeHub Skill connections via SWR (gated on popover open to
+  // skip the market request at mount — the request can hang up to 10s upstream)
+  useFetchLobehubSkillConnections(isLobehubSkillEnabled && open);
 
   // Get connected server by identifier
   const getServerByName = useCallback(

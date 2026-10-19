@@ -1,5 +1,5 @@
 import { Blocks } from 'lucide-react';
-import { memo, Suspense, useCallback } from 'react';
+import { memo, Suspense, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { createSkillStoreModal } from '@/features/SkillStore';
@@ -13,7 +13,8 @@ import { useControls } from './useControls';
 
 const Tools = memo(() => {
   const { t } = useTranslation('setting');
-  const { marketItems, pinnedCount, autoCount, isPolicyMenuOpen } = useControls();
+  const [open, setOpen] = useState(false);
+  const { marketItems, pinnedCount, autoCount, isPolicyMenuOpen } = useControls({ open });
 
   const agentId = useAgentId();
   const { model, provider } = useEffectiveModel(agentId);
@@ -33,6 +34,7 @@ const Tools = memo(() => {
     <Suspense fallback={<ChatInputAction disabled icon={Blocks} title={t('tools.title')} />}>
       <ChatInputAction
         icon={Blocks}
+        open={open}
         showTooltip={false}
         title={t('tools.title')}
         popover={{
@@ -53,6 +55,7 @@ const Tools = memo(() => {
             },
           },
         }}
+        onOpenChange={setOpen}
       />
     </Suspense>
   );
