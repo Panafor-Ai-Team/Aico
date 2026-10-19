@@ -692,6 +692,17 @@ export class OrganizationModel {
     return (row?.role as OrgMemberRole) ?? null;
   };
 
+  /** Own-membership lookup by (_orgId, userId, active) — replaces listMembers() scans in callers. */
+  getMemberByUser = async (params: { orgId: string; userId: string }) => {
+    return this.db.query.organizationMembers.findFirst({
+      where: and(
+        eq(organizationMembers.orgId, params.orgId),
+        eq(organizationMembers.userId, params.userId),
+        eq(organizationMembers.status, 'active'),
+      ),
+    });
+  };
+
   /** Tenant-safe member lookup — always join resource id with org id. */
   getMemberInOrg = async (params: { orgId: string; orgMemberId: string }) => {
     return this.db.query.organizationMembers.findFirst({
@@ -1267,12 +1278,31 @@ export class OrganizationModel {
    * Allowed models for a member via their team.
    * Empty allow-list means no models (fail-closed on org wallet).
    * `null` means the member has no team — also deny on org wallet.
+   *
+   * Resolved in a single round-trip: this runs on the org-wallet model list and
+   * on every guarded chat request, so it must not fan out into the
+   * member → team → rules lookup chain. `organization_team_members_member_uidx`
+   * makes the member's team link unique, so flat-joining the three tables yields
+   * exactly the rows `getMemberTeam` + `getTeamModelAccess` would return.
    */
   getAllowedModelsForMember = async (orgMemberId: string): Promise<string[] | null> => {
-    const team = await this.getMemberTeam(orgMemberId);
-    if (!team) return null;
-    const rules = await this.getTeamModelAccess(team.id);
-    return rules.map((r) => r.modelId);
+    const rows = await this.db
+      .select({ modelId: modelAccessRules.modelId, teamId: organizationTeams.id })
+      .from(organizationTeamMembers)
+      .innerJoin(organizationTeams, eq(organizationTeams.id, organizationTeamMembers.teamId))
+      .leftJoin(
+        modelAccessRules,
+        and(eq(modelAccessRules.teamId, organizationTeams.id), eq(modelAccessRules.scope, 'team')),
+      )
+      .where(eq(organizationTeamMembers.orgMemberId, orgMemberId));
+
+    // No membership in any team → deny (never "all models").
+    if (rows.length === 0) return null;
+
+    // Team with no rules leaves a single NULL modelId row → empty allow-list.
+    return rows
+      .map((row) => row.modelId)
+      .filter((modelId): modelId is string => typeof modelId === 'string');
   };
 
   // ─── Member budgets / credit allocation ────────────────────────────

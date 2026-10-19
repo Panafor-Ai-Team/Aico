@@ -63,76 +63,6 @@ export class HomeRepository {
    * Get sidebar agent list with pinned, grouped, and ungrouped items
    */
   async getSidebarAgentList(): Promise<SidebarAgentListResponse> {
-    // 1. Query all agents (non-virtual) with their session info (if exists).
-    //    `visibility` is selected so we can later bucket public vs. the
-    //    current user's private rows; the WHERE already hides other members'
-    //    private rows via the workspace-aware predicate.
-    const agentList = await this.db
-      .select({
-        agencyConfig: agents.agencyConfig,
-        agentSessionGroupId: agents.sessionGroupId,
-        agentUserId: agents.userId,
-        avatar: agents.avatar,
-        backgroundColor: agents.backgroundColor,
-        description: agents.description,
-        id: agents.id,
-        pinned: agents.pinned,
-        sessionGroupId: sessions.groupId,
-        sessionId: sessions.id,
-        sessionPinned: sessions.pinned,
-        slug: agents.slug,
-        title: agents.title,
-        updatedAt: agents.updatedAt,
-        visibility: agents.visibility,
-      })
-      .from(agents)
-      .leftJoin(agentsToSessions, eq(agents.id, agentsToSessions.agentId))
-      .leftJoin(sessions, eq(agentsToSessions.sessionId, sessions.id))
-      .where(
-        and(
-          buildWorkspaceWhere(this.scope, {
-            userId: agents.userId,
-            workspaceId: agents.workspaceId,
-            visibility: agents.visibility,
-          }),
-          not(eq(agents.virtual, true)),
-        ),
-      )
-      .orderBy(desc(agents.updatedAt));
-
-    // 2. Query all chatGroups (group chats)
-    const chatGroupList = await this.db
-      .select({
-        avatar: chatGroups.avatar,
-        backgroundColor: chatGroups.backgroundColor,
-        description: chatGroups.description,
-        groupId: chatGroups.groupId,
-        groupUserId: chatGroups.userId,
-        id: chatGroups.id,
-        pinned: chatGroups.pinned,
-        title: chatGroups.title,
-        updatedAt: chatGroups.updatedAt,
-        visibility: chatGroups.visibility,
-      })
-      .from(chatGroups)
-      .where(
-        buildWorkspaceWhere(this.scope, {
-          userId: chatGroups.userId,
-          workspaceId: chatGroups.workspaceId,
-          visibility: chatGroups.visibility,
-        }),
-      )
-      .orderBy(desc(chatGroups.updatedAt));
-
-    // 2.1 Query member avatars for each chat group
-    const memberAvatarsMap = await this.getChatGroupMemberAvatars(chatGroupList.map((g) => g.id));
-
-    // 2.2 Unread completion counts per agent / group, derived from persisted
-    // `topics.status === 'unread'`. The list query covers all agents, so this is
-    // the source of truth for the sidebar badge even on agents the client hasn't
-    // loaded topics for.
-    const { agentUnread, groupUnread } = await this.getUnreadCounts();
-
     // 3. Query sessionGroups (user-defined folders). Folders are a per-member
     // concern in workspace mode: only the caller's own folders render —
     // another member's folder must never shape this caller's sidebar. Items
@@ -143,26 +73,108 @@ export class HomeRepository {
       workspaceId: sessionGroups.workspaceId,
       visibility: sessionGroups.visibility,
     });
-    const groupList = await this.db
-      .select({
-        id: sessionGroups.id,
-        name: sessionGroups.name,
-        sort: sessionGroups.sort,
-        userId: sessionGroups.userId,
-        visibility: sessionGroups.visibility,
-      })
-      .from(sessionGroups)
-      .where(
-        this.workspaceId ? and(folderWhere, eq(sessionGroups.userId, this.userId)) : folderWhere,
-      )
-      .orderBy(sessionGroups.sort);
 
-    // 3.5 Per-member folder assignments + pins: workspace members organize
-    // shared items without touching the shared `agents.sessionGroupId` /
-    // `pinned` columns (one member's drag or pin must not reshape another
-    // member's sidebar). These entries are the sole source in workspace mode
-    // — see processAgentList for the no-fallback rule.
-    const { assignmentOverrides, pinnedOverrides } = await this.getSidebarPreferenceOverrides();
+    // Every read below is independent (no read consumes another's rows), so the
+    // whole sidebar costs one round-trip wave instead of a chain of sequential
+    // ones. On a remote database the chain, not the rows, is what makes this
+    // surface slow.
+    const [agentList, chatGroupList, groupList, unreadCounts, preferenceOverrides] =
+      await Promise.all([
+        // 1. Query all agents (non-virtual) with their session info (if exists).
+        //    `visibility` is selected so we can later bucket public vs. the
+        //    current user's private rows; the WHERE already hides other members'
+        //    private rows via the workspace-aware predicate.
+        this.db
+          .select({
+            agencyConfig: agents.agencyConfig,
+            agentSessionGroupId: agents.sessionGroupId,
+            agentUserId: agents.userId,
+            avatar: agents.avatar,
+            backgroundColor: agents.backgroundColor,
+            description: agents.description,
+            id: agents.id,
+            pinned: agents.pinned,
+            sessionGroupId: sessions.groupId,
+            sessionId: sessions.id,
+            sessionPinned: sessions.pinned,
+            slug: agents.slug,
+            title: agents.title,
+            updatedAt: agents.updatedAt,
+            visibility: agents.visibility,
+          })
+          .from(agents)
+          .leftJoin(agentsToSessions, eq(agents.id, agentsToSessions.agentId))
+          .leftJoin(sessions, eq(agentsToSessions.sessionId, sessions.id))
+          .where(
+            and(
+              buildWorkspaceWhere(this.scope, {
+                userId: agents.userId,
+                workspaceId: agents.workspaceId,
+                visibility: agents.visibility,
+              }),
+              not(eq(agents.virtual, true)),
+            ),
+          )
+          .orderBy(desc(agents.updatedAt)),
+
+        // 2. Query all chatGroups (group chats)
+        this.db
+          .select({
+            avatar: chatGroups.avatar,
+            backgroundColor: chatGroups.backgroundColor,
+            description: chatGroups.description,
+            groupId: chatGroups.groupId,
+            groupUserId: chatGroups.userId,
+            id: chatGroups.id,
+            pinned: chatGroups.pinned,
+            title: chatGroups.title,
+            updatedAt: chatGroups.updatedAt,
+            visibility: chatGroups.visibility,
+          })
+          .from(chatGroups)
+          .where(
+            buildWorkspaceWhere(this.scope, {
+              userId: chatGroups.userId,
+              workspaceId: chatGroups.workspaceId,
+              visibility: chatGroups.visibility,
+            }),
+          )
+          .orderBy(desc(chatGroups.updatedAt)),
+
+        this.db
+          .select({
+            id: sessionGroups.id,
+            name: sessionGroups.name,
+            sort: sessionGroups.sort,
+            userId: sessionGroups.userId,
+            visibility: sessionGroups.visibility,
+          })
+          .from(sessionGroups)
+          .where(
+            this.workspaceId
+              ? and(folderWhere, eq(sessionGroups.userId, this.userId))
+              : folderWhere,
+          )
+          .orderBy(sessionGroups.sort),
+
+        // 2.2 Unread completion counts per agent / group, derived from persisted
+        // `topics.status === 'unread'`. The list query covers all agents, so this is
+        // the source of truth for the sidebar badge even on agents the client hasn't
+        // loaded topics for.
+        this.getUnreadCounts(),
+
+        // 3.5 Per-member folder assignments + pins: workspace members organize
+        // shared items without touching the shared `agents.sessionGroupId` /
+        // `pinned` columns (one member's drag or pin must not reshape another
+        // member's sidebar). These entries are the sole source in workspace mode
+        // — see processAgentList for the no-fallback rule.
+        this.getSidebarPreferenceOverrides(),
+      ]);
+
+    // 2.1 Query member avatars for each chat group (needs the group ids above).
+    const memberAvatarsMap = await this.getChatGroupMemberAvatars(chatGroupList.map((g) => g.id));
+    const { agentUnread, groupUnread } = unreadCounts;
+    const { assignmentOverrides, pinnedOverrides } = preferenceOverrides;
 
     // 4. Process and categorize
     return this.processAgentList(
