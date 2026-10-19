@@ -29,8 +29,10 @@ vi.mock('../../hooks/useUpdateAgentConfig', () => ({
 let serverConfigStore = initServerConfigStore({});
 
 const createWrapper = () => {
+  // `Provider` declares `children` as a required prop, so it must be passed in
+  // the props object (createElement's variadic-children overload does not apply).
   const Wrapper = ({ children }: { children: ReactNode }) =>
-    createElement(Provider, { createStore: () => serverConfigStore }, children);
+    createElement(Provider, { children, createStore: () => serverConfigStore });
 
   return Wrapper;
 };
