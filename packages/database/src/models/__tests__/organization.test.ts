@@ -92,6 +92,42 @@ describe('OrganizationModel', () => {
     expect(allowed?.slice().sort()).toEqual([...DEFAULT_TEAM_MODEL_IDS].sort());
   });
 
+  it('getMemberByUser returns the active membership row', async () => {
+    const org = await orgModel.createOrganization({ name: 'Lookup Org', ownerUserId: ownerId });
+    const members = await orgModel.listMembers(org.id);
+
+    const me = await orgModel.getMemberByUser({ orgId: org.id, userId: ownerId });
+    expect(me?.id).toBe(members[0].id);
+    expect(me?.status).toBe('active');
+    expect(
+      await orgModel.getMemberByUser({ orgId: org.id, userId: 'no-such-user' }),
+    ).toBeUndefined();
+  });
+
+  it('getAllowedModelsForMember denies (null) when the member has no team', async () => {
+    const org = await orgModel.createOrganization({ name: 'No Team Org', ownerUserId: ownerId });
+    const members = await orgModel.listMembers(org.id);
+
+    // Unlink the member from their team: "no team" must deny, not grant all models.
+    await serverDB
+      .delete(organizationTeamMembers)
+      .where(eq(organizationTeamMembers.orgMemberId, members[0].id));
+
+    expect(await orgModel.getAllowedModelsForMember(members[0].id)).toBeNull();
+  });
+
+  it('getAllowedModelsForMember returns an empty allow-list for a team with no rules', async () => {
+    const org = await orgModel.createOrganization({ name: 'Empty Team Org', ownerUserId: ownerId });
+    const members = await orgModel.listMembers(org.id);
+    const team = await orgModel.getMemberTeam(members[0].id);
+    expect(team).not.toBeNull();
+
+    await orgModel.setTeamModelAccess({ modelIds: [], orgId: org.id, teamId: team!.id });
+
+    // A team with no rules is an empty allow-list, distinct from "no team" (null).
+    expect(await orgModel.getAllowedModelsForMember(members[0].id)).toEqual([]);
+  });
+
   it('platform admin helpers', async () => {
     expect(await orgModel.isPlatformAdmin(ownerId)).toBe(false);
     await orgModel.addPlatformAdmin(ownerId);

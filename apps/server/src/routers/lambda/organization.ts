@@ -207,8 +207,13 @@ export const organizationRouter = router({
   getMyAllowedModels: orgProcedure
     .input(z.object({ organizationId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      const members = await ctx.organizationModel.listMembers(input.organizationId);
-      const me = members.find((m) => m.userId === ctx.userId && m.status === 'active');
+      // Indexed own-membership lookup, not a full member-list scan: this is the
+      // hottest query in the app (polled every minute on an open org session),
+      // and the caller only ever needs its own row.
+      const me = await ctx.organizationModel.getMemberByUser({
+        orgId: input.organizationId,
+        userId: ctx.userId,
+      });
       if (!me) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'ORG_MEMBERSHIP_REQUIRED' });
       }
