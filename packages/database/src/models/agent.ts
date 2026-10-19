@@ -653,15 +653,27 @@ export class AgentModel {
       knowledge.files;
 
     if (enabledFileIds.length > 0) {
-      const documentsData = await this.db.query.documents.findMany({
-        where: and(this.documentsOwnership(), inArray(documents.fileId, enabledFileIds)),
-      });
+      try {
+        const documentsData = await this.db.query.documents.findMany({
+          where: and(this.documentsOwnership(), inArray(documents.fileId, enabledFileIds)),
+        });
 
-      const documentMap = new Map(documentsData.map((doc) => [doc.fileId, doc.content]));
-      files = knowledge.files.map((file) => ({
-        ...file,
-        content: file.enabled && file.id ? documentMap.get(file.id) : undefined,
-      }));
+        const documentMap = new Map(documentsData.map((doc) => [doc.fileId, doc.content]));
+        files = knowledge.files.map((file) => ({
+          ...file,
+          content: file.enabled && file.id ? documentMap.get(file.id) : undefined,
+        }));
+      } catch (error) {
+        // Content hydration is best-effort: this read is the one that hit the
+        // pg_search join pathology (10s+ on a trivial join, see #637) and took
+        // the whole agent-config endpoint down with a 500. Degrade to the file
+        // rows without content instead — `contextEngineering` already skips
+        // content-less files — so a slow or failing documents read can never
+        // break chat configuration.
+        console.error('[AgentModel] document content hydration failed:', error, {
+          agentId: agent.id,
+        });
+      }
     }
 
     return { ...normalizedAgent, ...knowledge, files };

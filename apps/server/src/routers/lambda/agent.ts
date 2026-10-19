@@ -3,6 +3,7 @@ import { DEFAULT_AGENT_CONFIG, INBOX_SESSION_ID } from '@lobechat/const';
 import { CreateAgentSchema, type KnowledgeItem } from '@lobechat/types';
 import { KnowledgeType } from '@lobechat/types';
 import { TRPCError } from '@trpc/server';
+import debug from 'debug';
 import { z } from 'zod';
 
 import { withScopedPermission } from '@/business/server/trpc-middlewares/rbacPermission';
@@ -37,6 +38,8 @@ import { TransferErrorCode } from '@/types/transferError';
 
 import { isWorkspaceNonOwner } from './_helpers/assertWorkspaceRowManageable';
 import { getResourceConfigAccess, redactAgentConfig } from './_helpers/resourceConfigGuard';
+
+const log = debug('lobe-server:agent');
 
 const protectAgentConfig = async <T extends Record<string, any>>(
   ctx: {
@@ -570,8 +573,11 @@ export const agentRouter = router({
       }),
     )
     .query(async ({ input, ctx }) => {
+      const routeStart = Date.now();
       const config = await ctx.agentService.getAgentConfigById(input.agentId);
-      return protectAgentConfig(ctx, input.agentId, config);
+      const result = await protectAgentConfig(ctx, input.agentId, config);
+      log('[PERF] getAgentConfigById took=%dms agentId=%s', Date.now() - routeStart, input.agentId);
+      return result;
     }),
 
   /**

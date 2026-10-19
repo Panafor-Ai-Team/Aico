@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { DEFAULT_INBOX_AVATAR, DEFAULT_INBOX_TITLE, INBOX_SESSION_ID } from '@lobechat/const';
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getTestDB } from '../../core/getTestDB';
 import type { NewAgent } from '../../schemas';
@@ -130,6 +130,46 @@ describe('AgentModel', () => {
       expect(result!.files).toHaveLength(1);
       expect(result!.files[0].content).toBe('This is document content');
       expect(result!.files[0].enabled).toBe(true);
+    });
+
+    it('degrades gracefully when the document content read fails', async () => {
+      // Regression (#637): the documents content hydration hit the pg_search
+      // 0.25.9 join pathology (trivial join over `documents` took 10s+) and
+      // 500'd the whole config endpoint. A failing hydration must degrade to
+      // content-less files instead of taking agent config down with it.
+      const agentId = 'test-agent-docs-read-failure';
+      await serverDB.insert(agents).values({ id: agentId, userId });
+      await serverDB.insert(agentsFiles).values({ agentId, fileId: '1', userId, enabled: true });
+      await serverDB.insert(documents).values({
+        id: 'doc-read-failure',
+        fileId: '1',
+        userId,
+        content: 'Content behind the failing read',
+        fileType: 'application/pdf',
+        totalCharCount: 100,
+        totalLineCount: 10,
+        sourceType: 'file',
+        source: 'document.pdf',
+      });
+
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const findManySpy = vi
+        .spyOn(serverDB.query.documents, 'findMany')
+        .mockRejectedValueOnce(new Error('canceling statement due to statement timeout'));
+
+      try {
+        const result = await agentModel.getAgentConfigById(agentId);
+
+        expect(result).not.toBeNull();
+        expect(result!.files).toHaveLength(1);
+        expect(result!.files[0].enabled).toBe(true);
+        // No content, but the config itself must survive the failed read.
+        expect(result!.files[0].content).toBeUndefined();
+        expect(consoleErrorSpy).toHaveBeenCalled();
+      } finally {
+        findManySpy.mockRestore();
+        consoleErrorSpy.mockRestore();
+      }
     });
 
     it('should not include content for disabled files', async () => {
