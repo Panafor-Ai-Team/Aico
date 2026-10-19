@@ -1,5 +1,10 @@
 // @vitest-environment node
-import { DEFAULT_INBOX_AVATAR, DEFAULT_INBOX_TITLE, INBOX_SESSION_ID } from '@lobechat/const';
+import {
+  DEFAULT_INBOX_AVATAR,
+  DEFAULT_INBOX_TITLE,
+  INBOX_SESSION_ID,
+  PROMPT_CONTENT_BUDGET,
+} from '@lobechat/const';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -130,6 +135,31 @@ describe('AgentModel', () => {
       expect(result!.files).toHaveLength(1);
       expect(result!.files[0].content).toBe('This is document content');
       expect(result!.files[0].enabled).toBe(true);
+    });
+
+    it('caps oversized document content before it reaches the wire', async () => {
+      const agentId = 'test-agent-large-doc';
+      await serverDB.insert(agents).values({ id: agentId, userId });
+      await serverDB.insert(agentsFiles).values({ agentId, fileId: '1', userId, enabled: true });
+      const huge = 'a'.repeat(PROMPT_CONTENT_BUDGET + 1000);
+      await serverDB.insert(documents).values({
+        id: 'doc-large',
+        fileId: '1',
+        userId,
+        content: huge,
+        fileType: 'application/pdf',
+        totalCharCount: huge.length,
+        totalLineCount: 1,
+        sourceType: 'file',
+        source: 'document.pdf',
+      });
+
+      const result = await agentModel.getAgentConfigById(agentId);
+
+      const content = result!.files[0].content!;
+      expect(content.length).toBeLessThan(huge.length);
+      expect(content.slice(0, PROMPT_CONTENT_BUDGET)).toBe('a'.repeat(PROMPT_CONTENT_BUDGET));
+      expect(content).toContain('… [truncated:');
     });
 
     it('degrades gracefully when the document content read fails', async () => {

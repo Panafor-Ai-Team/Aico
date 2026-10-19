@@ -1,5 +1,9 @@
 import { BUILTIN_AGENT_SLUGS, getAgentPersistConfig } from '@lobechat/builtin-agents';
-import { INBOX_SESSION_ID, isHeterogeneousAgentModelId } from '@lobechat/const';
+import {
+  INBOX_SESSION_ID,
+  isHeterogeneousAgentModelId,
+  truncatePromptContent,
+} from '@lobechat/const';
 import type { AgentRankItem, LobeAgentAgencyConfig } from '@lobechat/types';
 import {
   DEFAULT_WORKSPACE_AGENT_SELECTION_POLICIES,
@@ -659,10 +663,18 @@ export class AgentModel {
         });
 
         const documentMap = new Map(documentsData.map((doc) => [doc.fileId, doc.content]));
-        files = knowledge.files.map((file) => ({
-          ...file,
-          content: file.enabled && file.id ? documentMap.get(file.id) : undefined,
-        }));
+        files = knowledge.files.map((file) => {
+          const content = file.enabled && file.id ? documentMap.get(file.id) : undefined;
+
+          return {
+            ...file,
+            // This field is the prompt copy, and the client re-sends it on every
+            // message: a full 62 MB document here became a 62 MB chat POST (413).
+            content: content
+              ? truncatePromptContent(content, `agent knowledge file "${file.name}"`)
+              : content,
+          };
+        });
       } catch (error) {
         // Content hydration is best-effort: this read is the one that hit the
         // pg_search join pathology (10s+ on a trivial join, see #637) and took
