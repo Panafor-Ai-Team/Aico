@@ -208,8 +208,10 @@ export const aicoBillingRouter = router({
       const organizationSources = (
         await Promise.all(
           orgs.map(async (org) => {
-            const members = await ctx.organizationModel.listMembers(org.id);
-            const me = members.find((m) => m.userId === ctx.userId && m.status === 'active');
+            const me = await ctx.organizationModel.getMemberByUser({
+              orgId: org.id,
+              userId: ctx.userId,
+            });
             if (!me) return null;
 
             let budget = await ctx.organizationModel.getMemberBudget(me.id);
@@ -493,8 +495,10 @@ export const aicoBillingRouter = router({
     const hasOrgCredit = (
       await Promise.all(
         orgs.map(async (org) => {
-          const members = await ctx.organizationModel.listMembers(org.id);
-          const me = members.find((m) => m.userId === ctx.userId && m.status === 'active');
+          const me = await ctx.organizationModel.getMemberByUser({
+            orgId: org.id,
+            userId: ctx.userId,
+          });
           if (!me) return false;
           const budget = await ctx.organizationModel.getMemberBudget(me.id);
           const held = Math.max(0, Number(budget?.heldMicroUsd ?? 0));

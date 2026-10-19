@@ -247,13 +247,10 @@ export class AicoManagedPolicy {
       throw new AicoManagedPolicyError('ORG_NOT_ACTIVE', ChatErrorType.Forbidden);
     }
 
-    const role = await this.orgModel.getMemberRole(params.userId, billing.organizationId);
-    if (!role) {
-      throw new AicoManagedPolicyError('ORG_MEMBERSHIP_REQUIRED', ChatErrorType.Forbidden);
-    }
-
-    const members = await this.orgModel.listMembers(billing.organizationId);
-    const me = members.find((m) => m.userId === params.userId && m.status === 'active');
+    const me = await this.orgModel.getMemberByUser({
+      orgId: billing.organizationId,
+      userId: params.userId,
+    });
     if (!me) {
       throw new AicoManagedPolicyError('ORG_MEMBERSHIP_REQUIRED', ChatErrorType.Forbidden);
     }
@@ -342,8 +339,10 @@ export class AicoManagedPolicy {
     if (catalogType === 'embedding') return;
 
     if (billing.source === 'organization') {
-      const members = await this.orgModel.listMembers(billing.organizationId);
-      const me = members.find((m) => m.userId === userId && m.status === 'active');
+      const me = await this.orgModel.getMemberByUser({
+        orgId: billing.organizationId,
+        userId,
+      });
       if (!me) {
         throw new AicoManagedPolicyError('ORG_MEMBERSHIP_REQUIRED', ChatErrorType.Forbidden);
       }
