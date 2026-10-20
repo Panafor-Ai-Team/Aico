@@ -1,5 +1,3 @@
-import { OPS_ASSETS_BASE_URL } from '@lobechat/const';
-
 export interface ChiefAgentArtwork {
   avatar: string;
   hero: string;
@@ -7,7 +5,9 @@ export interface ChiefAgentArtwork {
   tint: string;
 }
 
-const asset = (hash: string) => `${OPS_ASSETS_BASE_URL}/${hash}.webp`;
+// Served from /public: the home portrait must not depend on an external CDN
+// (chat-cloud.lobeobjects.space is unreachable from some regions).
+const asset = (hash: string) => `/ops-assets/${hash}.webp`;
 
 /**
  * Shared Chief Agent artwork catalog. The same avatar-to-hero pairing is used
