@@ -17,11 +17,13 @@ import {
   type ConnectorMetadata,
   ConnectorSourceType,
   ConnectorStatus,
+  ConnectorToolPermission,
 } from '@/database/schemas';
 import { getComposioClient } from '@/libs/composio';
 import { inferCrudType } from '@/libs/mcp/utils';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
+import { fetchCuratedComposioTools } from '@/server/services/composio/curate';
 
 import { assertWorkspaceRowManageable } from './_helpers/assertWorkspaceRowManageable';
 
@@ -157,12 +159,22 @@ async function upsertComposioConnector(
     if (params.tools.length > 0) {
       await connectorToolModel.upsertMany(
         connectorId,
-        params.tools.map((t) => ({
-          crudType: inferCrudType(t.name),
-          description: t.description,
-          inputSchema: t.inputSchema,
-          toolName: t.name,
-        })),
+        params.tools.map((t) => {
+          const crudType = inferCrudType(t.name);
+          return {
+            crudType,
+            // Read actions run unattended; anything that mutates the user's
+            // account needs a human approval. Only applied to newly-inserted
+            // rows — an explicit user choice is preserved on re-sync.
+            defaultPermission:
+              crudType === 'read'
+                ? ConnectorToolPermission.auto
+                : ConnectorToolPermission.needs_approval,
+            description: t.description,
+            inputSchema: t.inputSchema,
+            toolName: t.name,
+          };
+        }),
       );
     }
 
@@ -268,19 +280,16 @@ export const composioRouter = router({
         { callbackUrl, ...(agentId ? { allowMultiple: true } : {}) },
       );
 
-      let rawTools: any[] = [];
+      let rawTools: Awaited<ReturnType<typeof fetchCuratedComposioTools>> = [];
       try {
-        const toolsResp = await (ctx.composioClient.tools as any).getRawComposioTools({
-          toolkits: [appSlug],
-        });
-        rawTools = toolsResp?.items || toolsResp || [];
+        rawTools = await fetchCuratedComposioTools(ctx.composioClient, appSlug);
       } catch {
         // tools may not be available before auth
       }
 
       const manifest: ToolManifest = {
         api: Array.isArray(rawTools)
-          ? rawTools.map((tool: any) => ({
+          ? rawTools.map((tool) => ({
               description: tool.description || '',
               name: tool.slug || tool.name || '',
               parameters: tool.inputParameters ||
