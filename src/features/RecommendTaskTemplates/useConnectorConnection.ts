@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { LOBEHUB_SKILL_AUTH_SUCCESS_MESSAGE } from '@/const/skillConnection';
 import { useMarketAuth } from '@/layout/AuthProvider/MarketAuth';
+import { getServerConfigStoreState } from '@/store/serverConfig';
 import { useToolStore } from '@/store/tool';
 import { composioStoreSelectors } from '@/store/tool/slices/composioStore/selectors';
 import { ComposioServerStatus } from '@/store/tool/slices/composioStore/types';
@@ -12,7 +13,7 @@ import { LobehubSkillStatus } from '@/store/tool/slices/lobehubSkillStore/types'
 import { useUserStore } from '@/store/user';
 
 import type { ConnectorProviderMeta } from './providerMeta';
-import { findNextUnconnectedSpec } from './providerMeta';
+import { findNextUnconnectedSpec, resolveConnectorSource } from './providerMeta';
 
 // Re-exported for callers that prefer a single import surface for the hook +
 // its types/helpers. The pure helpers themselves live in `./providerMeta` so
@@ -54,6 +55,16 @@ const isMarketUnauthorizedError = (error: unknown): boolean => {
 
 type ConnectTarget = Pick<ConnectorProviderMeta, 'identifier' | 'source'>;
 
+/**
+ * Prefer Composio over LobeHub Market when this deployment runs Composio but
+ * has no Market credentials — otherwise Market-tagged specs (e.g. GitHub) still
+ * open the Market sign-in flow and fail with MARKET_AUTH_ERROR.
+ */
+const shouldPreferComposio = () => {
+  const config = getServerConfigStoreState()?.serverConfig;
+  return !!config?.enableComposio && !config?.enableLobehubSkill;
+};
+
 export interface UseConnectorConnectionResult {
   connect: () => Promise<void>;
   isAllConnected: boolean;
@@ -74,7 +85,8 @@ export const useIsConnectorConnected = () => {
 
   return useCallback(
     (spec: TaskTemplateConnectorReference): boolean => {
-      if (spec.source === 'lobehub') {
+      const source = resolveConnectorSource(spec, { preferComposio: shouldPreferComposio() });
+      if (source === 'lobehub') {
         return lobehubServers.some(
           (s) => s.identifier === spec.identifier && s.status === LobehubSkillStatus.CONNECTED,
         );
@@ -99,7 +111,10 @@ export const useConnectorConnection = (
   const isConnectedFor = useIsConnectorConnected();
 
   const nextUnconnected = useMemo(
-    () => findNextUnconnectedSpec(specs, isConnectedFor),
+    () =>
+      findNextUnconnectedSpec(specs, isConnectedFor, {
+        preferComposio: shouldPreferComposio(),
+      }),
     [specs, isConnectedFor],
   );
 
