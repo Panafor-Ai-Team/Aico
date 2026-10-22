@@ -1044,9 +1044,14 @@ export const platformAdminRouter = router({
       if (!key || key.status === 'ambiguous') {
         await ctx.serverDB
           .insert(aicoKeyOutbox)
-          .values({ action: 'sync_user_key', nextAttemptAt: new Date(), status: 'pending', userId })
+          .values({
+            action: 'shrink_user_key',
+            nextAttemptAt: new Date(),
+            status: 'pending',
+            userId,
+          })
           .catch((enqueueError) =>
-            console.error('[aico] failed to enqueue sync_user_key retry', enqueueError),
+            console.error('[aico] failed to enqueue shrink_user_key retry', enqueueError),
           );
       }
 

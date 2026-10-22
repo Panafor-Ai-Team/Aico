@@ -43,6 +43,18 @@ declare global {
        */
       AICO_CVC_TOKENS_PER_USD?: string;
       /**
+       * Kill switch for the 2026-10 reclaim fix (R1): a removed member's key is
+       * frozen first and settled through the freeze, because CheapVibeCode will
+       * not read a frozen key's balance. On unless set to `0`.
+       */
+      AICO_FIX_R1_FROZEN_RECLAIM?: string;
+      /**
+       * Kill switch for the 2026-10 renewal fix (R5): the renewal transaction
+       * locks each budget and abandons the batch if a budget changed while it
+       * was settling. On unless set to `0`.
+       */
+      AICO_FIX_R5_RENEWAL_LOCK?: string;
+      /**
        * When `1`, this process is the control plane (may hold `OPENROUTER_MANAGEMENT_API_KEY`).
        * Product servers must leave this unset.
        */
@@ -176,6 +188,8 @@ export const getAicoConfig = () => {
       AICO_MANAGED_PROVIDER: z.enum(['openrouter', 'cheapvibecode']).default('openrouter'),
       AICO_SHARED_INFERENCE_API_KEY: z.string().optional(),
       AICO_CVC_RESIZE_IN_PLACE: z.boolean().optional().default(false),
+      AICO_FIX_R1_FROZEN_RECLAIM: z.boolean().default(true),
+      AICO_FIX_R5_RENEWAL_LOCK: z.boolean().default(true),
       AICO_CVC_TOKENS_PER_USD: z.coerce.number().positive().int().default(25_000_000),
       AICO_OPENROUTER_MOCK: z.boolean().optional().default(false),
       CHEAPVIBECODE_BASE_URL: z.string().default('https://ru.cheapvibecode.ru'),
@@ -203,6 +217,8 @@ export const getAicoConfig = () => {
       AICO_MANAGED_PROVIDER: process.env.AICO_MANAGED_PROVIDER || 'openrouter',
       AICO_SHARED_INFERENCE_API_KEY: process.env.AICO_SHARED_INFERENCE_API_KEY || undefined,
       AICO_CVC_RESIZE_IN_PLACE: process.env.AICO_CVC_RESIZE_IN_PLACE === '1',
+      AICO_FIX_R1_FROZEN_RECLAIM: process.env.AICO_FIX_R1_FROZEN_RECLAIM !== '0',
+      AICO_FIX_R5_RENEWAL_LOCK: process.env.AICO_FIX_R5_RENEWAL_LOCK !== '0',
       AICO_CVC_TOKENS_PER_USD: process.env.AICO_CVC_TOKENS_PER_USD,
       AICO_OPENROUTER_MOCK: process.env.AICO_OPENROUTER_MOCK === '1',
       CHEAPVIBECODE_BASE_URL: process.env.CHEAPVIBECODE_BASE_URL || 'https://ru.cheapvibecode.ru',

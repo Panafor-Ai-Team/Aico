@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, lte, ne, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, lte, ne, notInArray, or, sql } from 'drizzle-orm';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { OrganizationModel } from '@/database/models/organization';
@@ -16,6 +16,7 @@ import {
   confirmedUnusedMicro,
   periodToOpenRouterLimitReset,
 } from '@/database/utils/aicoMoney';
+import { aicoEnv } from '@/envs/aico';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 
 import { isLedgerAuthoritative, isLedgerPaused } from './ledger/state';
@@ -104,6 +105,11 @@ export const processDueRenewals = async (
         ne(memberBudgets.period, 'total'),
         isNotNull(memberBudgets.nextRenewalAt),
         lte(memberBudgets.nextRenewalAt, now),
+        // R1: a member who is leaving or has left is reclaimed, never renewed —
+        // renewing them re-debits the org every cycle for someone who is gone.
+        aicoEnv.AICO_FIX_R1_FROZEN_RECLAIM
+          ? notInArray(organizationMembers.status, ['left', 'revocation_pending'])
+          : undefined,
         or(
           eq(memberBudgets.isActive, true),
           // Allow retry after insufficient-balance / settlement failure.
@@ -285,7 +291,18 @@ const renewOrg = async (params: {
   await db
     .update(memberBudgets)
     .set({ isActive: true, renewalStatus: 'renewal_pending' })
-    .where(inArray(memberBudgets.id, budgetIds));
+    .where(
+      and(
+        inArray(memberBudgets.id, budgetIds),
+        // R5: only budgets still in the state the due query selected. A revoke
+        // that settled one since must not be pulled back into renewal — the
+        // funding transaction then sees it is not pending and abandons the
+        // batch, and `failBatch` leaves it settled.
+        aicoEnv.AICO_FIX_R5_RENEWAL_LOCK
+          ? or(eq(memberBudgets.isActive, true), eq(memberBudgets.renewalStatus, 'renewal_failed'))
+          : undefined,
+      ),
+    );
 
   await Promise.all(
     budgets.map(async (b) => {
@@ -301,7 +318,17 @@ const renewOrg = async (params: {
     await db
       .update(memberBudgets)
       .set({ isActive: false, renewalStatus: 'renewal_failed' })
-      .where(inArray(memberBudgets.id, budgetIds));
+      .where(
+        and(
+          inArray(memberBudgets.id, budgetIds),
+          // R5: a budget revoked or re-allocated mid-renewal is no longer ours to
+          // fail — marking it `renewal_failed` would pull a settled budget back
+          // into the next renewal.
+          aicoEnv.AICO_FIX_R5_RENEWAL_LOCK
+            ? eq(memberBudgets.renewalStatus, 'renewal_pending')
+            : undefined,
+        ),
+      );
     await db.insert(aicoKeyOutbox).values(
       budgets.map((b) => ({
         action: 'disable_member_key',
@@ -397,6 +424,34 @@ const renewOrg = async (params: {
   // 2. Refund confirmed-unused credit, then CAS-debit only the unfunded next-cap slice.
   try {
     await db.transaction(async (tx) => {
+      // R5 (2026-10): refunds were computed from rows read before this
+      // transaction. A revoke, reclaim or re-allocation that committed since
+      // would be refunded a second time and its budget re-activated below, so
+      // lock every budget (budgets before the org row, the order the
+      // allocate and reclaim paths use) and abandon the batch if any changed.
+      // The next run re-reads them.
+      if (aicoEnv.AICO_FIX_R5_RENEWAL_LOCK) {
+        const locked = await tx
+          .select()
+          .from(memberBudgets)
+          .where(inArray(memberBudgets.id, budgetIds))
+          .for('update');
+        const read = new Map(budgets.map((b) => [b.budgetId, b]));
+        const unchanged = locked.filter((row) => {
+          const b = read.get(row.id);
+          return (
+            b !== undefined &&
+            row.renewalStatus === 'renewal_pending' &&
+            Number(row.periodAmountMicroUsd ?? 0) === b.currentPeriodAmountMicroUsd &&
+            Number(row.pendingPeriodAmountMicroUsd ?? 0) === b.prepaidMicroUsd &&
+            (row.pendingPeriod ?? row.period) === b.nextPeriod
+          );
+        });
+        if (unchanged.length !== budgetIds.length) {
+          throw new Error('BUDGETS_CHANGED_DURING_RENEWAL');
+        }
+      }
+
       const orgBefore = await tx.query.organizations.findFirst({
         where: eq(organizations.id, orgId),
       });
@@ -716,6 +771,17 @@ const runOutboxAction = async (params: {
       return 'done';
     }
 
+    // W2 (2026-10): an admin debit commits before the key is cut down to the
+    // new balance. When that cut fails or its outcome is unknown, the retry has
+    // to cut too — `ensureUserKey` only ever raises a key, so retrying with it
+    // left the pre-debit limit spendable for good.
+    case 'shrink_user_key': {
+      if (!row.userId) throw new Error('USER_ID_REQUIRED');
+      const outcome = await keyService.shrinkUserKey(row.userId);
+      if (outcome.status === 'ambiguous') throw new Error('SHRINK_OUTCOME_UNKNOWN');
+      return 'done';
+    }
+
     case 'reclaim_member': {
       if (!row.orgMemberId || !row.orgId) throw new Error('ORG_MEMBER_ID_REQUIRED');
       const reclaimed = await keyService.reclaimMemberKey({
@@ -726,6 +792,7 @@ const runOutboxAction = async (params: {
         typeof row.payload?.createdByUserId === 'string' ? row.payload.createdByUserId : null;
       await orgModel.reclaimMemberRemainingCredit({
         createdByUserId,
+        metadata: reclaimed?.estimated ? { estimatedReclaim: reclaimed.estimated } : undefined,
         orgId: row.orgId,
         orgMemberId: row.orgMemberId,
         remainingMicroUsd: reclaimed?.remainingMicroUsd ?? 0,
