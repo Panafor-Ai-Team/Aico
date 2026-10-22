@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { OrganizationModel } from '@/database/models/organization';
-import { users } from '@/database/schemas';
+import { aicoSecurityAlertState, users } from '@/database/schemas';
 import {
   aicoKeyOutbox,
   aicoRenewalBatches,
@@ -160,7 +160,11 @@ class RevocableImmutableProvider extends ImmutableProvider {
     this.keys.delete(this.hashOf(credential.apiKey));
   };
 
+  /** When set, every key edit fails with this error (a gateway refusing it). */
+  editRejects: Error | null = null;
+
   updateKey: NonNullable<ManagedProviderClient['updateKey']> = async (params) => {
+    if (this.editRejects) throw this.editRejects;
     const hash = this.hashOf(params.apiKey);
     if (params.disabled) this.frozen.add(hash);
     else this.frozen.delete(hash);
@@ -710,6 +714,116 @@ describe('immutable-limit provider — member budgets', () => {
     }
   });
 
+  describe('R1 fallback when the frozen key cannot be read', () => {
+    /** A removed member whose $3 raw ($3.60 billed) was synced before removal. */
+    const removedAfterSync = async () => {
+      const provider = new RevocableImmutableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      const { member, org, orgModel } = await setupMember();
+      const created = await keys.ensureMemberKey(member.id);
+      provider.spend(created.keyId!, 3);
+      await keys.syncMemberCycleUsage(member.id);
+      await keys.disableMemberKey(member.id);
+      return { created, keys, member, org, orgModel, provider };
+    };
+
+    const reclaimJob = (orgId: string, orgMemberId: string) =>
+      db.insert(aicoKeyOutbox).values({
+        action: 'reclaim_member',
+        nextAttemptAt: new Date(Date.now() - 1000),
+        orgId,
+        orgMemberId,
+        status: 'pending',
+      });
+
+    it('settles from the last synced usage once, marked estimated, with an alert', async () => {
+      const { keys, member, org, orgModel, provider } = await removedAfterSync();
+      provider.editRejects = new CheapVibeCodeApiError(400, 'Bad Request', 'key_inactive');
+      const before = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd);
+
+      await reclaimJob(org.id, member.id);
+      await processKeyOutbox(db, { keyService: keys });
+
+      // $12 cap − $3.60 synced usage.
+      const after = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd);
+      expect(after).toBe(before + usd(8.4));
+      expect((await orgModel.getMemberBudget(member.id))?.renewalStatus).toBe('settled');
+      const ledgerRow = await db.query.walletTransactions.findFirst({
+        where: eq(walletTransactions.orgMemberId, member.id),
+        orderBy: (t, { desc }) => [desc(t.createdAt)],
+      });
+      expect(ledgerRow?.type).toBe('reclaim');
+      expect(ledgerRow?.metadata).toMatchObject({
+        estimatedReclaim: {
+          capMicroUsd: usd(12),
+          pendingMicroUsd: 0,
+          refundedMicroUsd: usd(8.4),
+          settledUsageMicroUsd: usd(3.6),
+        },
+      });
+      const alert = await db.query.aicoSecurityAlertState.findFirst({
+        where: eq(aicoSecurityAlertState.id, `reclaim.estimated:${member.id}`),
+      });
+      expect(alert).toBeDefined();
+
+      // A second job for the same member cannot credit it again.
+      await reclaimJob(org.id, member.id);
+      await processKeyOutbox(db, { keyService: keys });
+      expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(after);
+    });
+
+    it('refuses to guess when the usage was never synced', async () => {
+      const provider = new RevocableImmutableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      const { member, org } = await setupMember();
+      await keys.ensureMemberKey(member.id);
+      await keys.disableMemberKey(member.id);
+      provider.editRejects = new CheapVibeCodeApiError(400, 'Bad Request', 'key_inactive');
+
+      await expect(
+        keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id }),
+      ).rejects.toThrow('RECLAIM_USAGE_NEVER_SYNCED');
+      const alert = await db.query.aicoSecurityAlertState.findFirst({
+        where: eq(aicoSecurityAlertState.id, `reclaim.manual_settlement:${member.id}`),
+      });
+      expect(alert).toBeDefined();
+    });
+
+    it('accepts a CVC refusal relayed by the control-plane proxy', async () => {
+      const { keys, member, org, provider } = await removedAfterSync();
+      provider.editRejects = Object.assign(
+        new Error('Control plane CheapVibeCode proxy 400: Bad Request'),
+        { gatewayCode: 'cheapvibecode_rejected', status: 400 },
+      );
+
+      const reclaimed = await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
+
+      expect(reclaimed?.remainingMicroUsd).toBe(usd(8.4));
+      expect(reclaimed?.estimated?.refundedMicroUsd).toBe(usd(8.4));
+    });
+
+    it.each([
+      ['an edit with an unknown outcome', () => new CheapVibeCodeAmbiguousEditError(502)],
+      [
+        'the control plane refusing our service token',
+        () =>
+          Object.assign(new Error('Control plane CheapVibeCode proxy 401: Unauthorized'), {
+            gatewayCode: 'unauthorized',
+            status: 401,
+          }),
+      ],
+      ['a CVC outage', () => new CheapVibeCodeApiError(503, 'Service Unavailable', null)],
+    ])('does not estimate on %s', async (_, makeError) => {
+      const { keys, member, org, provider } = await removedAfterSync();
+      const error = makeError();
+      provider.editRejects = error;
+
+      await expect(keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id })).rejects.toBe(
+        error,
+      );
+    });
+  });
+
   it('a reclaim_member outbox job settles the removed member and credits the org', async () => {
     const provider = new RevocableImmutableProvider();
     const keys = new AicoOpenRouterKeyService(db, provider);
@@ -814,6 +928,64 @@ describe('immutable-limit provider — member budgets', () => {
     expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(before + usd(8.4));
   });
 
+  it('a revoke that commits before renewal marks the batch pending keeps the budget settled', async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    const { member, org, orgModel } = await setupMember();
+    await keys.ensureMemberKey(member.id);
+    await db
+      .update(memberBudgets)
+      .set({ nextRenewalAt: new Date(Date.now() - 60_000) })
+      .where(eq(memberBudgets.orgMemberId, member.id));
+    const before = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd);
+
+    // Runs after the due budgets are read and before they are marked
+    // `renewal_pending`: claiming the batch sits between the two.
+    let revoked = false;
+    const racingDb = new Proxy(db, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver);
+        if (prop !== 'insert') return typeof value === 'function' ? value.bind(target) : value;
+        return (table: unknown) => {
+          if (table === aicoRenewalBatches && !revoked) {
+            revoked = true;
+            const insert = target.insert(table as typeof aicoRenewalBatches);
+            return {
+              values: (values: typeof aicoRenewalBatches.$inferInsert) => {
+                const chain = insert.values(values);
+                return {
+                  onConflictDoNothing: (
+                    config: Parameters<typeof chain.onConflictDoNothing>[0],
+                  ) => ({
+                    returning: async () => {
+                      await orgModel.reclaimMemberRemainingCredit({
+                        orgId: org.id,
+                        orgMemberId: member.id,
+                        remainingMicroUsd: usd(12),
+                      });
+                      return chain.onConflictDoNothing(config).returning();
+                    },
+                  }),
+                };
+              },
+            };
+          }
+          return target.insert(table as never);
+        };
+      },
+    }) as LobeChatDatabase;
+
+    await processDueRenewals(racingDb, { keyService: keys });
+    expect(revoked).toBe(true);
+
+    const budget = await orgModel.getMemberBudget(member.id);
+    expect(budget?.renewalStatus).toBe('settled');
+    expect(budget?.isActive).toBe(false);
+    expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(before + usd(12));
+    // Settled stays settled: the next run does not pick it up again.
+    expect(await processDueRenewals(db, { keyService: keys })).toEqual([]);
+  });
+
   it('AICO_FIX_R5_RENEWAL_LOCK=0 restores the unlocked renewal transaction', async () => {
     const flags = aicoEnv as { AICO_FIX_R5_RENEWAL_LOCK: boolean };
     flags.AICO_FIX_R5_RENEWAL_LOCK = false;
@@ -843,6 +1015,40 @@ describe('immutable-limit provider — member budgets', () => {
     } finally {
       flags.AICO_FIX_R5_RENEWAL_LOCK = true;
     }
+  });
+
+  it('a member revoked after spending gets a key for the full re-allocated cap', async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    const { member, org, orgModel } = await setupMember();
+    const first = await keys.ensureMemberKey(member.id);
+    // $9 raw of the $10 raw key: $10.80 billed of the $12 cap, synced and then
+    // revoked — the settled budget keeps that usage.
+    provider.spend(first.keyId!, 9);
+    await keys.syncMemberCycleUsage(member.id);
+    await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
+    await orgModel.reclaimMemberRemainingCredit({
+      orgId: org.id,
+      orgMemberId: member.id,
+      remainingMicroUsd: usd(1.2),
+    });
+    expect(Number((await orgModel.getMemberBudget(member.id))?.settledUsageMicroUsd)).toBe(
+      usd(10.8),
+    );
+
+    // Less than the closed cycle already spent: before R7 this minted nothing.
+    await orgModel.allocateMemberCredit({
+      createdByUserId: userId,
+      orgId: org.id,
+      orgMemberId: member.id,
+      period: 'daily',
+      periodAmountMicroUsd: usd(6),
+    });
+    const created = await keys.ensureMemberKey(member.id);
+
+    expect(created.created).toBe(true);
+    // $6 at 1.2x is $5 raw, all of it spendable on the new key.
+    expect(provider.keys.get(created.keyId!)!.limitUsd).toBe(5);
   });
 
   it('never renews a member who is being removed', async () => {

@@ -13,6 +13,7 @@ import type { ManagedProviderClient } from './types';
 
 export {
   CheapVibeCodeAmbiguousEditError,
+  CheapVibeCodeApiError,
   cvcTokensToUsd,
   HttpCheapVibeCodeClient,
   isManagedKeyCapacityError,

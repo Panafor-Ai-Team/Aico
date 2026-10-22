@@ -482,6 +482,7 @@ export const organizationRouter = router({
 
       const result = await ctx.organizationModel.reclaimMemberRemainingCredit({
         createdByUserId: ctx.userId,
+        metadata: reclaimed.estimated ? { estimatedReclaim: reclaimed.estimated } : undefined,
         orgId: input.orgId,
         orgMemberId: input.orgMemberId,
         remainingMicroUsd: reclaimed.remainingMicroUsd,
@@ -492,7 +493,10 @@ export const organizationRouter = router({
         action: 'org.key.reclaim_member',
         actorUserId: ctx.userId,
         ipAddress: ctx.clientIp,
-        metadata: { remainingMicroUsd: reclaimed.remainingMicroUsd },
+        metadata: {
+          estimatedReclaim: reclaimed.estimated ?? null,
+          remainingMicroUsd: reclaimed.remainingMicroUsd,
+        },
         organizationId: input.orgId,
         targetId: input.orgMemberId,
         targetType: 'organization_member',

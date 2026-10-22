@@ -291,7 +291,18 @@ const renewOrg = async (params: {
   await db
     .update(memberBudgets)
     .set({ isActive: true, renewalStatus: 'renewal_pending' })
-    .where(inArray(memberBudgets.id, budgetIds));
+    .where(
+      and(
+        inArray(memberBudgets.id, budgetIds),
+        // R5: only budgets still in the state the due query selected. A revoke
+        // that settled one since must not be pulled back into renewal — the
+        // funding transaction then sees it is not pending and abandons the
+        // batch, and `failBatch` leaves it settled.
+        aicoEnv.AICO_FIX_R5_RENEWAL_LOCK
+          ? or(eq(memberBudgets.isActive, true), eq(memberBudgets.renewalStatus, 'renewal_failed'))
+          : undefined,
+      ),
+    );
 
   await Promise.all(
     budgets.map(async (b) => {
@@ -781,6 +792,7 @@ const runOutboxAction = async (params: {
         typeof row.payload?.createdByUserId === 'string' ? row.payload.createdByUserId : null;
       await orgModel.reclaimMemberRemainingCredit({
         createdByUserId,
+        metadata: reclaimed?.estimated ? { estimatedReclaim: reclaimed.estimated } : undefined,
         orgId: row.orgId,
         orgMemberId: row.orgMemberId,
         remainingMicroUsd: reclaimed?.remainingMicroUsd ?? 0,

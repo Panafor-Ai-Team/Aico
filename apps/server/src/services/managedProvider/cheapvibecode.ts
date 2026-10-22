@@ -57,6 +57,16 @@ export const isManagedKeyCapacityError = (error: unknown): error is ManagedKeyCa
  * that `managedErrorStatus` parses; `code` is CVC's machine-readable
  * `error.code` when the body had one. The body itself is never carried.
  */
+/** The `error` field of a control-plane proxy error body, if it has one. */
+const parseProxyErrorCode = (body: string): string | null => {
+  try {
+    const code = (JSON.parse(body) as { error?: unknown }).error;
+    return typeof code === 'string' ? code : null;
+  } catch {
+    return null;
+  }
+};
+
 export class CheapVibeCodeApiError extends Error {
   constructor(
     readonly status: number,
@@ -565,7 +575,11 @@ export class RemoteCheapVibeCodeClient implements ManagedProviderClient {
       if (body.includes(EDIT_OUTCOME_UNKNOWN)) throw new CheapVibeCodeAmbiguousEditError(null);
       throw Object.assign(
         new Error(`Control plane CheapVibeCode proxy ${res.status}: ${res.statusText}`),
-        { status: res.status },
+        // `gatewayCode` is the proxy's `error` field: CheapVibeCode's own code
+        // (or `cheapvibecode_rejected`) when CVC refused, `unauthorized` when the
+        // control plane refused us. Callers that act on a CVC refusal need to
+        // tell the two apart; the status alone cannot.
+        { gatewayCode: parseProxyErrorCode(body), status: res.status },
       );
     }
 

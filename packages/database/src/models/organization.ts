@@ -1445,6 +1445,49 @@ export class OrganizationModel {
             reservedMicroUsd: params.periodAmountMicroUsd,
           })
           .returning();
+      } else if (existing.renewalStatus === 'settled') {
+        // R7 (2026-10): a revoke or reclaim settled this budget and refunded what
+        // the closed cycle left. Re-allocating starts a clean cycle: the closed
+        // cycle's usage, checkpoint and holds stay with it (holds placed then
+        // carry the old epoch, so their settle cannot charge this cycle), and
+        // the stale window would otherwise collide with a funded renewal batch.
+        // Carrying the old usage forward debited the org for it a second time
+        // and could leave the member with no spendable headroom at all.
+        const previousPending = Number(existing.pendingPeriodAmountMicroUsd ?? 0);
+        if (previousPending > 0) {
+          await applyWalletCredit(previousPending);
+        }
+        const previousCap = Math.max(0, Number(existing.periodAmountMicroUsd ?? 0));
+        const delta = params.periodAmountMicroUsd - previousCap;
+        if (delta > 0) {
+          await applyWalletDebit(delta);
+        } else if (delta < 0) {
+          await applyWalletCredit(-delta);
+        }
+
+        [budget] = await tx
+          .update(memberBudgets)
+          .set({
+            billedUsageBeforeBaselineMicroUsd: 0,
+            currentPeriodEnd: window.end,
+            currentPeriodStart: window.start,
+            heldMicroUsd: 0,
+            isActive: true,
+            ledgerEpoch: sql`${memberBudgets.ledgerEpoch} + 1`,
+            nextRenewalAt: window.nextRenewalAt,
+            openHolds: 0,
+            openrouterLimitReset,
+            pendingPeriod: null,
+            pendingPeriodAmountMicroUsd: null,
+            period: params.period,
+            periodAmountMicroUsd: params.periodAmountMicroUsd,
+            renewalStatus: 'active',
+            reservedMicroUsd: params.periodAmountMicroUsd,
+            settledUsageMicroUsd: 0,
+            usageBaselineMicroUsd: 0,
+          })
+          .where(eq(memberBudgets.id, existing.id))
+          .returning();
       } else if (existing.period === params.period) {
         // Same period: set/replace cap. Clear any queued period change first.
         const previousPending = Number(existing.pendingPeriodAmountMicroUsd ?? 0);
@@ -1614,6 +1657,11 @@ export class OrganizationModel {
     createdByUserId?: string | null;
     /** Overrides the default ledger description — the bulk sweep stamps its batch id here. */
     description?: string;
+    /**
+     * Stamped on the ledger row. The key service sets it when the refund was
+     * estimated from the last synced usage because the key could not be read.
+     */
+    metadata?: Record<string, unknown>;
     orgId: string;
     orgMemberId: string;
     remainingMicroUsd: number;
@@ -1720,7 +1768,7 @@ export class OrganizationModel {
               description:
                 params.description ??
                 'Forfeited remaining member credit because the organization was deleted',
-              metadata: { forfeitedMicroUsd: remaining, reason: 'org_deleted' },
+              metadata: { ...params.metadata, forfeitedMicroUsd: remaining, reason: 'org_deleted' },
               orgId: params.orgId,
               orgMemberId: params.orgMemberId,
               type: 'adjustment',
@@ -1751,6 +1799,7 @@ export class OrganizationModel {
           createdByUserId: params.createdByUserId ?? null,
           description:
             params.description ?? `Reclaim remaining credit from member ${params.orgMemberId}`,
+          ...(params.metadata ? { metadata: params.metadata } : {}),
           orgId: params.orgId,
           orgMemberId: params.orgMemberId,
           type: 'reclaim',

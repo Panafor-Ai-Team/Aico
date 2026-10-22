@@ -276,6 +276,7 @@ export const executeOrgBudgetSweep = async ({
     }
 
     let remainingMicroUsd = walletSideRemainingMicroUsd(budget);
+    let reclaimMetadata: Record<string, unknown> | undefined;
 
     if (hasValidManagedKeyId(budget.openrouterKeyId)) {
       try {
@@ -283,6 +284,7 @@ export const executeOrgBudgetSweep = async ({
         // `null` means the key vanished between load and call — the wallet-side
         // figure is then the only truth available, so fall through with it.
         if (reclaimed) remainingMicroUsd = reclaimed.remainingMicroUsd;
+        if (reclaimed?.estimated) reclaimMetadata = { estimatedReclaim: reclaimed.estimated };
       } catch (error) {
         // Never guess an amount against a key we could not read or disable:
         // hand the whole reclaim to the durable outbox, which retries with
@@ -312,6 +314,7 @@ export const executeOrgBudgetSweep = async ({
       const result = await model.reclaimMemberRemainingCredit({
         createdByUserId: actorUserId ?? null,
         description: `Sweep ${batchId}: reclaim remaining credit from member ${member.id}`,
+        metadata: reclaimMetadata,
         orgId,
         orgMemberId: member.id,
         remainingMicroUsd,
