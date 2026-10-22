@@ -211,13 +211,19 @@ export class AicoManagedPolicy {
         throw keyUnavailableError(repairError);
       }
       // `balance_micro_usd` counts deposits only; under the ledger the spendable
-      // amount is raw capacity minus settled usage and open holds.
+      // amount is raw capacity minus settled usage and open holds. Without it,
+      // the last known usage is the floor (W1): deposits alone stay positive
+      // after an admin debit takes everything that was left. The persisted
+      // usage lags real spend, so this can only err towards letting a request
+      // through — the shadow ledger's own funds check uses the same figure.
       const exhausted = authoritative
         ? Number(wallet.rawCapacityMicroUsd ?? 0) -
             Number(wallet.rawUsedMicroUsd ?? 0) -
             Number(wallet.rawHeldMicroUsd ?? 0) <=
           0
-        : (wallet.balanceMicroUsd ?? 0) <= 0;
+        : Number(wallet.balanceMicroUsd ?? 0) -
+            Math.max(0, Number(wallet.settledUsageMicroUsd ?? 0)) <=
+          0;
       if (exhausted && !(await this.billingModel.isTrialActive(params.userId))) {
         throw new AicoManagedPolicyError(
           'PERSONAL_FUNDS_UNAVAILABLE',

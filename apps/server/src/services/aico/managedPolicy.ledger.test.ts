@@ -153,6 +153,39 @@ describe('AicoManagedPolicy under the usage ledger', () => {
     expect((outcome as { code?: string }).code).not.toBe('PERSONAL_FUNDS_UNAVAILABLE');
   });
 
+  it('without an authoritative ledger, refuses a wallet whose known usage has caught up with its deposits', async () => {
+    // What an admin debit of the whole available balance leaves: deposits
+    // still positive, every remaining dollar already spent.
+    await db.insert(userWallets).values({
+      balanceMicroUsd: 2_400_000,
+      openrouterKeyCiphertext: 'cipher',
+      openrouterKeyId: 'key_1',
+      rawCapacityMicroUsd: 2_000_000,
+      settledUsageMicroUsd: 2_400_000,
+      userId,
+    });
+    const policy = new AicoManagedPolicy(db, async () => 'decrypted');
+
+    await expect(policy.authorize(personal)).rejects.toMatchObject({
+      code: 'PERSONAL_FUNDS_UNAVAILABLE',
+    });
+  });
+
+  it('without an authoritative ledger, still authorizes a wallet with money left after known usage', async () => {
+    await db.insert(userWallets).values({
+      balanceMicroUsd: 2_400_000,
+      openrouterKeyCiphertext: 'cipher',
+      openrouterKeyId: 'key_1',
+      rawCapacityMicroUsd: 2_000_000,
+      settledUsageMicroUsd: 1_000_000,
+      userId,
+    });
+    const policy = new AicoManagedPolicy(db, async () => 'decrypted');
+
+    const outcome = await policy.authorize(personal).catch((error: { code?: string }) => error);
+    expect((outcome as { code?: string }).code).not.toBe('PERSONAL_FUNDS_UNAVAILABLE');
+  });
+
   it('authorizes an organization member without a budget key under the shared key', async () => {
     const params = await seedOrgBudget({});
     const ensureMemberKey = vi.fn();

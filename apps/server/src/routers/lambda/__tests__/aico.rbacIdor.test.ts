@@ -41,6 +41,7 @@ const {
   ensureUserKeyMock,
   getUserRemainingMock,
   reclaimMemberKeyMock,
+  shrinkUserKeyMock,
   syncMemberCycleUsageMock,
 } = vi.hoisted(() => ({
   disableAllOrgMemberKeysMock: vi.fn().mockResolvedValue([]),
@@ -51,6 +52,7 @@ const {
     .fn()
     .mockResolvedValue({ remainingMicroUsd: 0, usageKnown: true, usageMicroUsd: 0 }),
   reclaimMemberKeyMock: vi.fn().mockResolvedValue(null),
+  shrinkUserKeyMock: vi.fn().mockResolvedValue({ keyId: null, status: 'resized' }),
   syncMemberCycleUsageMock: vi.fn().mockResolvedValue(null),
 }));
 
@@ -63,6 +65,7 @@ vi.mock('@/server/services/openrouter/keyService', () => ({
     disableAllOrgMemberKeys = disableAllOrgMemberKeysMock;
     getUserRemaining = getUserRemainingMock;
     reclaimMemberKey = reclaimMemberKeyMock;
+    shrinkUserKey = shrinkUserKeyMock;
     syncMemberCycleUsage = syncMemberCycleUsageMock;
     syncMemberUsage = syncMemberCycleUsageMock;
   },
@@ -415,6 +418,34 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
       expect(queued).toHaveLength(1);
       expect(queued[0]).toMatchObject({
         action: 'sync_user_key',
+        status: 'pending',
+        userId: strangerId,
+      });
+    });
+
+    it('W2: a debit whose key shrink fails queues a shrink retry, not a raise', async () => {
+      const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+      await platformCaller.addManualUserCredit({
+        amountToman: 30_000,
+        description: 'fund before debit',
+        idempotencyKey: 'w2-fund-before-debit',
+        userId: strangerId,
+      });
+      const { aicoKeyOutbox } = await import('@/database/schemas/aicoOrganization');
+      await testDB.delete(aicoKeyOutbox);
+      shrinkUserKeyMock.mockRejectedValueOnce(new Error('CheapVibeCode API 503'));
+
+      await platformCaller.addManualUserDebit({
+        amountUsd: '0.01',
+        description: 'take back',
+        idempotencyKey: 'w2-debit-shrink-fails',
+        userId: strangerId,
+      });
+
+      const queued = await testDB.select().from(aicoKeyOutbox);
+      expect(queued).toHaveLength(1);
+      expect(queued[0]).toMatchObject({
+        action: 'shrink_user_key',
         status: 'pending',
         userId: strangerId,
       });
