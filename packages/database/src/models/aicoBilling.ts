@@ -571,6 +571,14 @@ export class AicoBillingModel {
      * only on a rotation; omitting it leaves the running total alone.
      */
     rawUsageBeforeKeyMicroUsd?: number;
+    /**
+     * C7: the key id the caller saw when it decided to mint (`null` for none).
+     * When given, the write only lands if the wallet still holds that key —
+     * another instance may have persisted its own since, and last-write-wins
+     * would orphan one of the two keys while both can spend. Returns undefined
+     * when it lost.
+     */
+    expectedKeyId?: string | null;
     userId: string;
   }) => {
     await this.getOrCreateUserWallet(params.userId);
@@ -591,7 +599,14 @@ export class AicoBillingModel {
               rawUsageBeforeKeyMicroUsd: Math.max(0, Math.trunc(params.rawUsageBeforeKeyMicroUsd)),
             }),
       })
-      .where(eq(userWallets.userId, params.userId))
+      .where(
+        and(
+          eq(userWallets.userId, params.userId),
+          params.expectedKeyId === undefined
+            ? undefined
+            : sql`${userWallets.openrouterKeyId} IS NOT DISTINCT FROM ${params.expectedKeyId}`,
+        ),
+      )
       .returning();
     return row;
   };

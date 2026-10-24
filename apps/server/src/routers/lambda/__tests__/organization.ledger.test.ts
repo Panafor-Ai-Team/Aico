@@ -1,11 +1,13 @@
 // @vitest-environment node
 import type { LobeChatDatabase } from '@lobechat/database';
 import { getTestDB } from '@lobechat/database/test-utils';
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { cleanupAicoTables, seedUsers } from '@/database/models/__tests__/aico.phase2.helpers';
 import { OrganizationModel } from '@/database/models/organization';
 import {
+  aicoKeyOutbox,
   memberBudgets,
   platformAdminUsers,
   userWallets,
@@ -139,6 +141,45 @@ describe('organization router under the usage ledger', () => {
     // The quota landed despite the key failure — no silent double-allocate trap.
     const budget = await orgModel.getMemberBudgetForOrg({ orgId: org.id, orgMemberId: me.id });
     expect(Number(budget?.periodAmountMicroUsd)).toBe(usd(5));
+  });
+
+  it('D3: a key push that failed or could not be verified is queued for retry', async () => {
+    const orgModel = new OrganizationModel(testDB);
+    const org = await orgModel.createOrganization({ name: 'Retry Co', ownerUserId: ownerId });
+    await orgModel.addManualCredit({
+      amountMicroUsd: usd(20),
+      amountToman: 1_000_000,
+      createdByUserId: ownerId,
+      description: 'fund',
+      fxRateTomanPerUsd: 50_000,
+      orgId: org.id,
+      type: 'topup',
+    });
+    const me = (await orgModel.listMembers(org.id)).find((m) => m.userId === ownerId)!;
+    const caller = organizationRouter.createCaller(createTestContext(ownerId));
+    const allocate = (amountUsd: number) =>
+      caller.allocateMemberCredit({
+        amountMicroUsd: String(usd(amountUsd)),
+        orgId: org.id,
+        orgMemberId: me.id,
+        period: 'monthly',
+      });
+    const queued = () =>
+      testDB.query.aicoKeyOutbox.findMany({ where: eq(aicoKeyOutbox.orgMemberId, me.id) });
+
+    h.ensureMemberKey.mockResolvedValueOnce({ created: false, keyId: 'k1' });
+    await allocate(5);
+    expect(await queued()).toHaveLength(0);
+
+    h.ensureMemberKey.mockRejectedValueOnce(new Error('Control plane proxy 500'));
+    await allocate(6);
+    h.ensureMemberKey.mockResolvedValueOnce({ created: false, keyId: 'k1', unverified: true });
+    await allocate(7);
+
+    const rows = await queued();
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.action === 'sync_member_key' && r.status === 'pending')).toBe(true);
+    expect(rows[0].orgId).toBe(org.id);
   });
 });
 

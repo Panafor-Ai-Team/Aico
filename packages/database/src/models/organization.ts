@@ -1891,6 +1891,8 @@ export class OrganizationModel {
     managedKeyProviderId?: string;
     orgMemberId: string;
     usageBaselineMicroUsd?: number;
+    /** C7: as on `updateUserOpenRouterKey` — lands only if the budget still holds this key. */
+    expectedKeyId?: string | null;
   }) => {
     const existing = await this.getMemberBudget(params.orgMemberId);
     if (!existing) throw new Error('BUDGET_NOT_FOUND');
@@ -1918,7 +1920,14 @@ export class OrganizationModel {
           ? {}
           : { usageBaselineMicroUsd: Math.max(0, Math.trunc(params.usageBaselineMicroUsd)) }),
       })
-      .where(eq(memberBudgets.id, existing.id))
+      .where(
+        and(
+          eq(memberBudgets.id, existing.id),
+          params.expectedKeyId === undefined
+            ? undefined
+            : sql`${memberBudgets.openrouterKeyId} IS NOT DISTINCT FROM ${params.expectedKeyId}`,
+        ),
+      )
       .returning();
     return row;
   };

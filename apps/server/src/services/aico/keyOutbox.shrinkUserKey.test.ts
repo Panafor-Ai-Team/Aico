@@ -65,4 +65,37 @@ describe('W2 processKeyOutbox shrink_user_key', () => {
     expect(job?.status).toBe('pending');
     expect(job?.attempts).toBe(1);
   });
+
+  it('keeps retrying while the shrink could not be verified', async () => {
+    await enqueue();
+    const shrinkUserKey = vi.fn(async () => ({ keyId: 'k1', status: 'kept', unverified: true }));
+    const keyService = { shrinkUserKey } as unknown as AicoOpenRouterKeyService;
+
+    await processKeyOutbox(db, { keyService });
+
+    const job = await readJob();
+    expect(job?.status).toBe('pending');
+    expect(job?.lastError).toBe('SHRINK_UNVERIFIED');
+  });
+
+  it('keeps retrying a key sync that could not be verified, and completes once it can', async () => {
+    await db.insert(aicoKeyOutbox).values({
+      action: 'sync_user_key',
+      nextAttemptAt: new Date(Date.now() - 1000),
+      status: 'pending',
+      userId,
+    });
+    const ensureUserKey = vi
+      .fn()
+      .mockResolvedValueOnce({ created: false, keyId: 'k1', unverified: true })
+      .mockResolvedValue({ created: false, keyId: 'k1' });
+    const keyService = { ensureUserKey } as unknown as AicoOpenRouterKeyService;
+
+    await processKeyOutbox(db, { keyService });
+    expect((await readJob())?.status).toBe('pending');
+    expect((await readJob())?.lastError).toBe('KEY_SYNC_UNVERIFIED');
+
+    await processKeyOutbox(db, { keyService, now: new Date(Date.now() + 10 * 60_000) });
+    expect((await readJob())?.status).toBe('succeeded');
+  });
 });

@@ -938,10 +938,13 @@ export const organizationRouter = router({
         // allocate/reclaim retry mess). Report it so the admin sees quota
         // landed but unusable yet.
         let keyProvisionError: 'PROVIDER_CAPACITY' | 'PROVIDER_UNAVAILABLE' | null = null;
+        let keyNeedsRetry = false;
         try {
           const keyService = new AicoOpenRouterKeyService(ctx.serverDB);
-          await keyService.ensureMemberKey(input.orgMemberId);
+          const ensured = await keyService.ensureMemberKey(input.orgMemberId);
+          keyNeedsRetry = Boolean(ensured?.unverified);
         } catch (error) {
+          keyNeedsRetry = true;
           console.warn('[organization] allocate-time member key provisioning failed', {
             orgId: input.orgId,
             orgMemberId: input.orgMemberId,
@@ -950,6 +953,23 @@ export const organizationRouter = router({
           keyProvisionError = isManagedKeyCapacityError(error)
             ? 'PROVIDER_CAPACITY'
             : 'PROVIDER_UNAVAILABLE';
+        }
+        // D3: the quota is committed; a key that could not be pushed (or follow a
+        // cut) is retried by the outbox instead of waiting for the member's next
+        // renewal or a manager to notice.
+        if (keyNeedsRetry) {
+          await ctx.serverDB
+            .insert(aicoKeyOutbox)
+            .values({
+              action: 'sync_member_key',
+              nextAttemptAt: new Date(),
+              orgId: input.orgId,
+              orgMemberId: input.orgMemberId,
+              status: 'pending',
+            })
+            .catch((enqueueError) =>
+              console.error('[organization] failed to enqueue sync_member_key retry', enqueueError),
+            );
         }
         const refreshed = await ctx.organizationModel.getMemberBudgetForOrg({
           orgId: input.orgId,

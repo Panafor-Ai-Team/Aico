@@ -123,6 +123,13 @@ const managedErrorStatus = (error: unknown): number | null => {
   return match ? Number(match[1]) : null;
 };
 
+/** What ensuring a subject's key did. `unverified`: see {@link ReissueOutcome.unverified}. */
+export interface EnsuredKey {
+  created: boolean;
+  keyId: string | null;
+  unverified?: true;
+}
+
 /** What an admin key operation did to one subject — ids only, never secrets. */
 export interface ReissueOutcome {
   keyId: string | null;
@@ -135,6 +142,11 @@ export interface ReissueOutcome {
     | 'resized'
     | 'shared'
     | 'unsupported';
+  /**
+   * The key could not be read or its edit's outcome is unknown, so the limit
+   * upstream is not known to match the wallet. The caller queues a retry.
+   */
+  unverified?: boolean;
 }
 
 /**
@@ -745,10 +757,24 @@ export class AicoOpenRouterKeyService {
       openrouterKeyId: string;
       rawUsageBeforeKeyMicroUsd?: number | null;
     };
-  }) => {
+  }): Promise<{ created: boolean; keyId: string | null; unverified?: true }> => {
     const keep = { created: false, keyId: params.wallet.openrouterKeyId };
     const read = await this.readManagedKey(params.wallet);
-    if (!read) return keep;
+    if (!read) {
+      // W2 gap: a forced reissue after a debit that left no capacity needs no
+      // reading — nothing is spendable, so the key is frozen on the spot. Left
+      // live and unread it would carry its pre-debit limit upstream.
+      if (params.force && params.rawCapacityMicro <= 0) {
+        await this.disableManagedKey(
+          params.wallet.openrouterKeyId,
+          this.managed.providerId,
+          params.wallet.openrouterKeyCiphertext,
+        );
+        return keep;
+      }
+      // Not read, so not changed — and not vouched for either (N7).
+      return { ...keep, unverified: true as const };
+    }
 
     const usedBeforeMicro = Math.max(0, Number(params.wallet.rawUsageBeforeKeyMicroUsd ?? 0));
     const unspentMicro = Math.max(
@@ -783,8 +809,11 @@ export class AicoOpenRouterKeyService {
       managedKeyLimitMicroUsd: unspentMicro,
       name: `aico-user-${params.userId}`,
       rawUsageBeforeKeyMicroUsd: usedBeforeMicro + read.rawUsedMicro,
+      replacing: params.wallet.openrouterKeyId,
       userId: params.userId,
     });
+    // C7: lost the race — the other instance's rotation already retired it.
+    if (!created.created) return created;
     await this.retireStoredKey(params.wallet);
     return created;
   };
@@ -893,10 +922,16 @@ export class AicoOpenRouterKeyService {
     };
     cycleCapMicro: number;
     orgMemberId: string;
-  }) => {
+    /**
+     * R8: also replace a key that holds noticeably more than the cycle needs.
+     * Set where the limit could not be cut in place, so a lowered cap would
+     * otherwise leave refunded headroom spendable upstream.
+     */
+    shrinkOversized?: boolean;
+  }): Promise<{ created: boolean; keyId: string | null; unverified?: true }> => {
     const keep = { created: false, keyId: params.budget.openrouterKeyId };
     const read = await this.readManagedKey(params.budget);
-    if (!read) return keep;
+    if (!read) return { ...keep, unverified: true as const };
 
     const rotated = rotateCheckpointToNewKey({
       checkpoint: params.budget,
@@ -915,7 +950,13 @@ export class AicoOpenRouterKeyService {
     // The key still covers the rest of the cycle — including an exhausted cycle,
     // where the headroom is zero and a new key would buy nothing (forced or not).
     if (nextLimitMicro <= 0) return keep;
-    if (!params.force && read.remainingMicro >= nextLimitMicro) return keep;
+    // More than a percent over what the cycle needs (integer comparison): the
+    // difference was refunded to the org and must not stay spendable.
+    const oversized =
+      aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY &&
+      Boolean(params.shrinkOversized) &&
+      read.remainingMicro * 100 > nextLimitMicro * 101;
+    if (!params.force && !oversized && read.remainingMicro >= nextLimitMicro) return keep;
 
     // As on the wallet path, the old key is retired only once its replacement
     // is persisted.
@@ -930,15 +971,24 @@ export class AicoOpenRouterKeyService {
 
     try {
       const encrypted = await this.encryptKey(created.key);
-      await this.orgModel.updateMemberOpenRouterKey({
+      const row = await this.orgModel.updateMemberOpenRouterKey({
         billedUsageBeforeBaselineMicroUsd: rotated.billedUsageBeforeBaselineMicroUsd,
         ciphertext: encrypted,
+        ...(aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY
+          ? { expectedKeyId: params.budget.openrouterKeyId }
+          : {}),
         keyId: created.hash,
         managedKeyLimitMicroUsd: nextLimitMicro,
         managedKeyProviderId: this.managed.providerId,
         orgMemberId: params.orgMemberId,
         usageBaselineMicroUsd: rotated.usageBaselineMicroUsd,
       });
+      if (!row && aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY) {
+        // C7: another instance rotated this key first.
+        await this.retireManagedKey({ apiKey: created.key, hash: created.hash });
+        const current = await this.orgModel.getMemberBudget(params.orgMemberId);
+        return { created: false, keyId: current?.openrouterKeyId ?? null };
+      }
     } catch (error) {
       // OR-002: the key exists upstream and can spend; it must not outlive a
       // failed persist.
@@ -975,7 +1025,7 @@ export class AicoOpenRouterKeyService {
     if (isSharedInferenceKey()) throw new Error('SHARED_INFERENCE_KEY_MODE');
   }
 
-  ensureUserKey = async (userId: string) => {
+  ensureUserKey = async (userId: string): Promise<EnsuredKey> => {
     if (isSharedInferenceKey()) return { created: false, keyId: null };
     return runExclusive(`user-key:${userId}`, async () => {
       const wallet = await this.billingModel.getOrCreateUserWallet(userId);
@@ -1032,7 +1082,14 @@ export class AicoOpenRouterKeyService {
             targetMicro: keyTargetMicro,
           });
           if (outcome !== 'unavailable') {
-            return { created: false, keyId: wallet.openrouterKeyId };
+            // An unknown outcome may have left the key short of the wallet (N7).
+            return {
+              created: false,
+              keyId: wallet.openrouterKeyId,
+              ...(outcome === 'ambiguous' && aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY
+                ? { unverified: true as const }
+                : {}),
+            };
           }
         }
         // A funded wallet must not be left behind a key frozen while it was empty.
@@ -1047,7 +1104,7 @@ export class AicoOpenRouterKeyService {
         }
         // The key's limit is fixed at mint, so a top-up is served by minting a
         // replacement rather than raising this one.
-        return this.rotateUserKeyIfUnderfunded({
+        const rotated = await this.rotateUserKeyIfUnderfunded({
           rawCapacityMicro: limitMicro,
           userId,
           wallet: {
@@ -1057,6 +1114,12 @@ export class AicoOpenRouterKeyService {
             rawUsageBeforeKeyMicroUsd: wallet.rawUsageBeforeKeyMicroUsd,
           },
         });
+        // An unfunded wallet's key is frozen and cannot be read: not a failure
+        // to follow any money, so nothing to retry.
+        if (rotated.unverified && (balanceMicro <= 0 || !aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY)) {
+          return { created: rotated.created, keyId: rotated.keyId };
+        }
+        return rotated;
       }
 
       if (hasLiveKey && this.managed.updateKey) {
@@ -1089,6 +1152,7 @@ export class AicoOpenRouterKeyService {
         // usage; the OpenRouter path leaves the column alone.
         managedKeyLimitMicroUsd: this.managed.capabilities.readKeyBySecret ? limitMicro : undefined,
         name: `aico-user-${userId}`,
+        replacing: wallet.openrouterKeyId ?? null,
         userId,
       });
     });
@@ -1107,9 +1171,10 @@ export class AicoOpenRouterKeyService {
     if (isSharedInferenceKey()) return { keyId: null, status: 'shared' };
     const wallet = await this.billingModel.getUserWallet(userId);
     if (!wallet?.openrouterKeyId || !this.isCurrentProviderKey(wallet.managedKeyProviderId)) {
-      return this.ensureUserKey(userId).then(({ created, keyId }) => ({
+      return this.ensureUserKey(userId).then(({ created, keyId, ...rest }) => ({
         keyId,
         status: created ? 'migrated' : 'kept',
+        ...('unverified' in rest ? { unverified: true } : {}),
       }));
     }
 
@@ -1177,7 +1242,7 @@ export class AicoOpenRouterKeyService {
       if (!row?.openrouterKeyId || !row.openrouterKeyCiphertext) {
         return { keyId: null, status: 'no_key' } as const;
       }
-      const { created, keyId } = await this.rotateUserKeyIfUnderfunded({
+      const { created, keyId, unverified } = await this.rotateUserKeyIfUnderfunded({
         force: true,
         rawCapacityMicro: Number(row.rawCapacityMicroUsd ?? 0),
         userId,
@@ -1188,7 +1253,11 @@ export class AicoOpenRouterKeyService {
           rawUsageBeforeKeyMicroUsd: row.rawUsageBeforeKeyMicroUsd,
         },
       });
-      return { keyId, status: created ? 'reissued' : 'kept' };
+      return {
+        keyId,
+        status: created ? 'reissued' : 'kept',
+        ...(unverified && aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY ? { unverified: true } : {}),
+      };
     });
   };
 
@@ -1274,6 +1343,7 @@ export class AicoOpenRouterKeyService {
         limitUsd: microToOpenRouterLimitUsd(limitMicro),
         managedKeyLimitMicroUsd: this.managed.capabilities.readKeyBySecret ? limitMicro : undefined,
         name: `aico-trial-${userId}`,
+        replacing: wallet.openrouterKeyId ?? null,
         userId,
       });
     });
@@ -1283,7 +1353,7 @@ export class AicoOpenRouterKeyService {
    * Ensure member OpenRouter key matches funded period amount + limit_reset.
    * Never creates a key when reserved/period amount ≤ 0.
    */
-  ensureMemberKey = async (orgMemberId: string) => {
+  ensureMemberKey = async (orgMemberId: string): Promise<EnsuredKey> => {
     if (isSharedInferenceKey()) return { created: false, keyId: null };
     return runExclusive(`member-key:${orgMemberId}`, async () => {
       const budget = await this.orgModel.getMemberBudget(orgMemberId);
@@ -1363,9 +1433,17 @@ export class AicoOpenRouterKeyService {
             targetMicro: limitMicro,
           },
         );
-        if (outcome !== 'unavailable') return { created: false, keyId: budget.openrouterKeyId };
+        if (outcome !== 'unavailable') {
+          return {
+            created: false,
+            keyId: budget.openrouterKeyId,
+            ...(outcome === 'ambiguous' && aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY
+              ? { unverified: true as const }
+              : {}),
+          };
+        }
 
-        return this.rotateMemberKeyIfUnderfunded({
+        const rotatedMember = await this.rotateMemberKeyIfUnderfunded({
           bp,
           budget: {
             billedUsageBeforeBaselineMicroUsd: budget.billedUsageBeforeBaselineMicroUsd,
@@ -1377,7 +1455,11 @@ export class AicoOpenRouterKeyService {
           },
           cycleCapMicro,
           orgMemberId,
+          shrinkOversized: true,
         });
+        return aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY
+          ? rotatedMember
+          : { created: rotatedMember.created, keyId: rotatedMember.keyId };
       }
 
       if (hasLiveKey && this.managed.updateKey) {
@@ -1440,9 +1522,12 @@ export class AicoOpenRouterKeyService {
       });
       try {
         const encrypted = await this.encryptKey(created.key);
-        await this.orgModel.updateMemberOpenRouterKey({
+        const row = await this.orgModel.updateMemberOpenRouterKey({
           ...freshCheckpoint,
           ciphertext: encrypted,
+          ...(aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY
+            ? { expectedKeyId: budget.openrouterKeyId ?? null }
+            : {}),
           keyId: created.hash,
           managedKeyLimitMicroUsd: this.managed.capabilities.readKeyBySecret
             ? mintLimitMicro
@@ -1450,6 +1535,12 @@ export class AicoOpenRouterKeyService {
           managedKeyProviderId: this.managed.providerId,
           orgMemberId,
         });
+        if (!row && aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY) {
+          // C7: another instance minted for this budget first.
+          await this.retireManagedKey({ apiKey: created.key, hash: created.hash });
+          const current = await this.orgModel.getMemberBudget(orgMemberId);
+          return { created: false, keyId: current?.openrouterKeyId ?? null };
+        }
       } catch (error) {
         // OR-002: OR create succeeded but DB persist failed — retire orphan spendable key.
         console.error('[aico] member OpenRouter key persist failed; retiring orphan key', error);
@@ -1537,6 +1628,7 @@ export class AicoOpenRouterKeyService {
         : undefined,
       name: isTrialOnly ? `aico-trial-${params.userId}` : `aico-user-${params.userId}`,
       rawUsageBeforeKeyMicroUsd: rawUsedMicro,
+      replacing: params.wallet.openrouterKeyId ?? null,
       userId: params.userId,
     });
   };
@@ -1552,8 +1644,14 @@ export class AicoOpenRouterKeyService {
     name: string;
     /** Raw spend carried over from the key this one replaces. */
     rawUsageBeforeKeyMicroUsd?: number;
+    /**
+     * C7: the key id the wallet held when the decision to mint was made (`null`
+     * for none). The new key is only persisted if the wallet still holds it;
+     * otherwise another instance minted first and this one's key is retired.
+     */
+    replacing?: string | null;
     userId: string;
-  }): Promise<{ created: true; keyId: string }> {
+  }): Promise<{ created: boolean; keyId: string | null }> {
     this.assertMintAllowed();
     const created = await this.managed.createKey({
       limitReset: null,
@@ -1562,8 +1660,10 @@ export class AicoOpenRouterKeyService {
     });
     try {
       const encrypted = await this.encryptKey(created.key);
-      await this.billingModel.updateUserOpenRouterKey({
+      const compare = aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY && params.replacing !== undefined;
+      const row = await this.billingModel.updateUserOpenRouterKey({
         ciphertext: encrypted,
+        ...(compare ? { expectedKeyId: params.replacing } : {}),
         keyId: created.hash,
         // One statement on `user_wallets`: the new key id, the limit it was
         // minted with and the spend carried over from its predecessor all land
@@ -1576,6 +1676,11 @@ export class AicoOpenRouterKeyService {
           : { rawUsageBeforeKeyMicroUsd: params.rawUsageBeforeKeyMicroUsd }),
         userId: params.userId,
       });
+      if (!row && compare) {
+        await this.retireManagedKey({ apiKey: created.key, hash: created.hash });
+        const current = await this.billingModel.getUserWallet(params.userId);
+        return { created: false, keyId: current?.openrouterKeyId ?? null };
+      }
     } catch (error) {
       console.error('[aico] user OpenRouter key persist failed; retiring orphan key', error);
       await this.retireManagedKey({ apiKey: created.key, hash: created.hash });
