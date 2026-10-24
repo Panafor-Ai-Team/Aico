@@ -352,7 +352,8 @@ describe('immutable-limit provider — personal wallet', () => {
     provider.readFails = true;
     const again = await keys.ensureUserKey(userId);
 
-    expect(again).toEqual({ created: false, keyId: first.keyId });
+    // Not rotated, and reported (N7): the wallet is funded behind an unread key.
+    expect(again).toEqual({ created: false, keyId: first.keyId, unverified: true });
     expect(provider.keys.size).toBe(1);
   });
 
@@ -525,7 +526,8 @@ describe('resize in place (AICO_CVC_RESIZE_IN_PLACE) — personal wallet', () =>
 
     const again = await keys.ensureUserKey(userId);
 
-    expect(again).toEqual({ created: false, keyId: first.keyId });
+    // Healed from a live read, but still reported so the caller re-checks (N7).
+    expect(again).toEqual({ created: false, keyId: first.keyId, unverified: true });
     expect(provider.resizes).toHaveLength(1);
     expect(provider.keys.size).toBe(1);
     // The raise did land upstream; the stored limit now says so.
@@ -1504,6 +1506,263 @@ describe('admin key operations — personal wallet', () => {
       expect([...provider.keys.keys()]).toEqual([outcome.keyId]);
       // $5 raw left, $2 already spent on the retired key.
       expect(provider.keys.get(outcome.keyId!)!.limitUsd).toBe(3);
+    });
+  });
+});
+
+describe('Stage C: a key follows the money', () => {
+  const debit = (amountUsd: number) =>
+    new AicoBillingModel(db).manualDebitUser({
+      amountMicroUsd: usd(amountUsd),
+      description: 'take back grant',
+      idempotencyKey: `stage-c-debit-${amountUsd}-${Math.random()}`,
+      userId,
+    });
+
+  afterEach(() => {
+    resizeFlag.AICO_CVC_RESIZE_IN_PLACE = false;
+  });
+
+  describe('N7: a personal credit the key could not follow is reported', () => {
+    it('flags a raise whose outcome is unknown', async () => {
+      resizeFlag.AICO_CVC_RESIZE_IN_PLACE = true;
+      const provider = new ResizableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      await creditUser(10);
+      await keys.ensureUserKey(userId);
+      provider.resizeMode = 'ambiguous';
+      await creditUser(10);
+
+      const result = await keys.ensureUserKey(userId);
+
+      expect(result.unverified).toBe(true);
+    });
+
+    it('flags a funded wallet whose key cannot be read', async () => {
+      const provider = new ImmutableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      await creditUser(10);
+      const first = await keys.ensureUserKey(userId);
+      await creditUser(10);
+      provider.readFails = true;
+
+      const result = await keys.ensureUserKey(userId);
+
+      // The wallet is funded behind a key that was not raised, and nothing was
+      // minted on a guess.
+      expect(result).toEqual({ created: false, keyId: first.keyId, unverified: true });
+      expect(provider.keys.size).toBe(1);
+    });
+
+    it('does not flag a clean top-up or an untouched key', async () => {
+      const provider = new ImmutableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      await creditUser(10);
+      await keys.ensureUserKey(userId);
+
+      expect((await keys.ensureUserKey(userId)).unverified).toBeUndefined();
+      await creditUser(10);
+      expect((await keys.ensureUserKey(userId)).unverified).toBeUndefined();
+    });
+  });
+
+  describe('W2 gap: a shrink the key could not be read for', () => {
+    it('freezes the key when the debit left no capacity, whether or not it can be read', async () => {
+      const provider = new RevocableImmutableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      await creditUser(12);
+      const first = await keys.ensureUserKey(userId);
+      await debit(12);
+      provider.readFails = true;
+
+      const outcome = await keys.shrinkUserKey(userId);
+
+      expect(provider.frozen.has(first.keyId!)).toBe(true);
+      expect(outcome.unverified).toBeUndefined();
+    });
+
+    it('reports a partial debit it could not apply, so the caller retries', async () => {
+      const provider = new RevocableImmutableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      await creditUser(12);
+      const first = await keys.ensureUserKey(userId);
+      await debit(6);
+      provider.readFails = true;
+
+      const outcome = await keys.shrinkUserKey(userId);
+
+      expect(outcome).toEqual({ keyId: first.keyId, status: 'kept', unverified: true });
+    });
+  });
+
+  describe('R8: a cut cap the key could not follow', () => {
+    const setupMember = async () => {
+      const orgModel = new OrganizationModel(db);
+      const org = await orgModel.createOrganization({ name: 'C Org', ownerUserId: userId });
+      await orgModel.addManualCredit({
+        amountMicroUsd: usd(100),
+        amountToman: 5_000_000,
+        createdByUserId: userId,
+        fxRateTomanPerUsd: 50_000,
+        orgId: org.id,
+      });
+      const invite = await orgModel.createInvite({
+        identifierType: 'email',
+        identifierValue: 'imm-member@example.com',
+        invitedByUserId: userId,
+        orgId: org.id,
+        role: 'member',
+      });
+      const { member } = await orgModel.acceptInvite({
+        email: 'imm-member@example.com',
+        token: invite.token,
+        userId: memberUserId,
+      });
+      const allocate = (amountUsd: number) =>
+        orgModel.allocateMemberCredit({
+          createdByUserId: userId,
+          orgId: org.id,
+          orgMemberId: member.id,
+          period: 'daily',
+          periodAmountMicroUsd: usd(amountUsd),
+        });
+      await allocate(12);
+      return { allocate, member, org, orgModel };
+    };
+
+    it('replaces a key that kept refunded headroom when the limit cannot move', async () => {
+      const provider = new RevocableImmutableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      const { allocate, member, orgModel } = await setupMember();
+      const first = await keys.ensureMemberKey(member.id);
+      await allocate(6);
+
+      const again = await keys.ensureMemberKey(member.id);
+
+      // $6 at 1.2x is $5 raw; the old key still carried $10 the org was refunded.
+      expect(again.created).toBe(true);
+      expect(again.keyId).not.toBe(first.keyId);
+      expect([...provider.keys.keys()]).toEqual([again.keyId]);
+      expect(provider.keys.get(again.keyId!)!.limitUsd).toBe(5);
+      expect(Number((await orgModel.getMemberBudget(member.id))?.managedKeyLimitMicroUsd)).toBe(
+        usd(5),
+      );
+    });
+
+    it('leaves a key alone while it is within a percent of what the cycle needs', async () => {
+      const provider = new RevocableImmutableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      const { member } = await setupMember();
+      const first = await keys.ensureMemberKey(member.id);
+
+      const again = await keys.ensureMemberKey(member.id);
+
+      expect(again).toEqual({ created: false, keyId: first.keyId });
+      expect(provider.keys.size).toBe(1);
+    });
+
+    it('flags a reduction whose outcome is unknown', async () => {
+      resizeFlag.AICO_CVC_RESIZE_IN_PLACE = true;
+      const provider = new ResizableProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      const { allocate, member } = await setupMember();
+      await keys.ensureMemberKey(member.id);
+      await allocate(6);
+      provider.resizeMode = 'ambiguous';
+
+      const result = await keys.ensureMemberKey(member.id);
+
+      expect(result.unverified).toBe(true);
+    });
+  });
+
+  describe('C7: two instances minting a key for the same subject', () => {
+    /** The other instance persists its own key while this one is mid-mint. */
+    class RacingProvider extends RevocableImmutableProvider {
+      onCreate: () => Promise<void> = async () => {};
+
+      constructor() {
+        super();
+        const mint = this.createKey;
+        this.createKey = async (params) => {
+          const created = await mint(params);
+          await this.onCreate();
+          return created;
+        };
+      }
+    }
+
+    it('keeps the key that was persisted first and retires the loser', async () => {
+      const provider = new RacingProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      await creditUser(10);
+      provider.onCreate = async () => {
+        await db
+          .update(userWallets)
+          .set({
+            managedKeyProviderId: 'cheapvibecode',
+            openrouterKeyCiphertext: 'winner-cipher',
+            openrouterKeyId: 'winner-key',
+          })
+          .where(eq(userWallets.userId, userId));
+        provider.onCreate = async () => {};
+      };
+
+      const result = await keys.ensureUserKey(userId);
+
+      expect(result).toEqual({ created: false, keyId: 'winner-key' });
+      expect((await readWallet())?.openrouterKeyId).toBe('winner-key');
+      // The key this instance minted is deleted, not left spending unmetered.
+      expect(provider.keys.size).toBe(0);
+    });
+
+    it('does the same for a member budget', async () => {
+      const provider = new RacingProvider();
+      const keys = new AicoOpenRouterKeyService(db, provider);
+      const orgModel = new OrganizationModel(db);
+      const org = await orgModel.createOrganization({ name: 'Race Org', ownerUserId: userId });
+      await orgModel.addManualCredit({
+        amountMicroUsd: usd(100),
+        amountToman: 5_000_000,
+        createdByUserId: userId,
+        fxRateTomanPerUsd: 50_000,
+        orgId: org.id,
+      });
+      const invite = await orgModel.createInvite({
+        identifierType: 'email',
+        identifierValue: 'imm-member@example.com',
+        invitedByUserId: userId,
+        orgId: org.id,
+        role: 'member',
+      });
+      const { member } = await orgModel.acceptInvite({
+        email: 'imm-member@example.com',
+        token: invite.token,
+        userId: memberUserId,
+      });
+      await orgModel.allocateMemberCredit({
+        createdByUserId: userId,
+        orgId: org.id,
+        orgMemberId: member.id,
+        period: 'daily',
+        periodAmountMicroUsd: usd(12),
+      });
+      provider.onCreate = async () => {
+        await db
+          .update(memberBudgets)
+          .set({
+            managedKeyProviderId: 'cheapvibecode',
+            openrouterKeyCiphertext: 'winner-cipher',
+            openrouterKeyId: 'winner-key',
+          })
+          .where(eq(memberBudgets.orgMemberId, member.id));
+        provider.onCreate = async () => {};
+      };
+
+      const result = await keys.ensureMemberKey(member.id);
+
+      expect(result).toEqual({ created: false, keyId: 'winner-key' });
+      expect(provider.keys.size).toBe(0);
     });
   });
 });
