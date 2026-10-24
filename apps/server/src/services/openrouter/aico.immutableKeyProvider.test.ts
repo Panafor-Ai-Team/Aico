@@ -163,8 +163,14 @@ class RevocableImmutableProvider extends ImmutableProvider {
   /** When set, every key edit fails with this error (a gateway refusing it). */
   editRejects: Error | null = null;
 
+  /** With `editRejects`: how many edits still land before the refusals start. */
+  editsAllowed = 0;
+
   updateKey: NonNullable<ManagedProviderClient['updateKey']> = async (params) => {
-    if (this.editRejects) throw this.editRejects;
+    if (this.editRejects) {
+      if (this.editsAllowed > 0) this.editsAllowed -= 1;
+      else throw this.editRejects;
+    }
     const hash = this.hashOf(params.apiKey);
     if (params.disabled) this.frozen.add(hash);
     else this.frozen.delete(hash);
@@ -738,7 +744,9 @@ describe('immutable-limit provider — member budgets', () => {
 
     it('settles from the last synced usage once, marked estimated, with an alert', async () => {
       const { keys, member, org, orgModel, provider } = await removedAfterSync();
+      // The freeze lands; the read through it is refused.
       provider.editRejects = new CheapVibeCodeApiError(400, 'Bad Request', 'key_inactive');
+      provider.editsAllowed = 1;
       const before = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd);
 
       await reclaimJob(org.id, member.id);
@@ -779,6 +787,7 @@ describe('immutable-limit provider — member budgets', () => {
       await keys.ensureMemberKey(member.id);
       await keys.disableMemberKey(member.id);
       provider.editRejects = new CheapVibeCodeApiError(400, 'Bad Request', 'key_inactive');
+      provider.editsAllowed = 1;
 
       await expect(
         keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id }),
@@ -795,6 +804,7 @@ describe('immutable-limit provider — member budgets', () => {
         new Error('Control plane CheapVibeCode proxy 400: Bad Request'),
         { gatewayCode: 'cheapvibecode_rejected', status: 400 },
       );
+      provider.editsAllowed = 1;
 
       const reclaimed = await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
 
@@ -821,6 +831,63 @@ describe('immutable-limit provider — member budgets', () => {
       await expect(keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id })).rejects.toBe(
         error,
       );
+    });
+
+    describe('N2: the freeze itself is refused', () => {
+      it.each([
+        ['CheapVibeCode', () => new CheapVibeCodeApiError(400, 'Bad Request', 'key_inactive')],
+        [
+          'the control-plane proxy',
+          () =>
+            Object.assign(new Error('Control plane CheapVibeCode proxy 400: Bad Request'), {
+              gatewayCode: 'cheapvibecode_rejected',
+              status: 400,
+            }),
+        ],
+      ])('credits nothing and keeps the key when %s refuses the freeze', async (_, makeError) => {
+        const { keys, member, org, orgModel, provider } = await removedAfterSync();
+        const before = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd);
+        const budgetBefore = await orgModel.getMemberBudget(member.id);
+        provider.editRejects = makeError();
+
+        await reclaimJob(org.id, member.id);
+        await processKeyOutbox(db, { keyService: keys });
+
+        // The key may still be live: an estimate here would refund money the
+        // member can go on spending, and drop the secret needed to freeze it.
+        expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(before);
+        const budget = await orgModel.getMemberBudget(member.id);
+        expect(budget?.renewalStatus).not.toBe('settled');
+        expect(budget?.openrouterKeyCiphertext).toBe(budgetBefore?.openrouterKeyCiphertext);
+        const job = await db.query.aicoKeyOutbox.findFirst({
+          where: eq(aicoKeyOutbox.orgMemberId, member.id),
+        });
+        expect(job?.status).toBe('pending');
+      });
+
+      it('settles from the last synced usage when the key is already gone upstream', async () => {
+        const { keys, member, org, provider } = await removedAfterSync();
+        provider.editRejects = new CheapVibeCodeApiError(404, 'Not Found', null);
+
+        const reclaimed = await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
+
+        expect(reclaimed?.estimated?.refundedMicroUsd).toBe(usd(8.4));
+      });
+
+      it('AICO_FIX_SA_RECLAIM_GUARD=0 restores the estimate on a refused freeze', async () => {
+        const flags = aicoEnv as { AICO_FIX_SA_RECLAIM_GUARD: boolean };
+        flags.AICO_FIX_SA_RECLAIM_GUARD = false;
+        try {
+          const { keys, member, org, provider } = await removedAfterSync();
+          provider.editRejects = new CheapVibeCodeApiError(400, 'Bad Request', 'key_inactive');
+
+          const reclaimed = await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
+
+          expect(reclaimed?.estimated?.refundedMicroUsd).toBe(usd(8.4));
+        } finally {
+          flags.AICO_FIX_SA_RECLAIM_GUARD = true;
+        }
+      });
     });
   });
 

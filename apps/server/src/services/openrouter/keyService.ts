@@ -59,8 +59,10 @@ const FROZEN_READ_NO_REMAINING =
   'managed key freeze returned no remaining; cannot settle the period';
 
 /**
- * The gateway refused the freeze edit or answered it without a remaining
- * figure — the only failures R1's reclaim settles from the last synced usage.
+ * The gateway refused the read through the freeze or answered it without a
+ * remaining figure — the only failures R1's reclaim settles from the last
+ * synced usage. (With `AICO_FIX_SA_RECLAIM_GUARD` off, a refused freeze edit
+ * itself also counts — see `isKeyGoneUpstream`.)
  * Directly from CheapVibeCode this is a 4xx `CheapVibeCodeApiError`; through the
  * control-plane proxy it is a 4xx carrying CVC's code, never the proxy's own
  * `unauthorized` (a misconfigured service token must fail, not estimate).
@@ -77,6 +79,17 @@ const isFreezeReadFailure = (error: unknown): boolean => {
     typeof gatewayCode === 'string' &&
     gatewayCode !== 'unauthorized'
   );
+};
+
+/**
+ * N2: the freeze edit failed because the key no longer exists upstream (a CVC
+ * 404, directly or relayed by the control plane). Nothing can be spent on a key
+ * that is gone, so reclaim may settle it as it would a frozen one.
+ */
+const isKeyGoneUpstream = (error: unknown): boolean => {
+  if (error instanceof CheapVibeCodeApiError) return error.status === 404;
+  const { gatewayCode, status } = (error ?? {}) as { gatewayCode?: unknown; status?: unknown };
+  return status === 404 && typeof gatewayCode === 'string' && gatewayCode !== 'unauthorized';
 };
 
 /** What an estimated reclaim refunded, and from which figures. */
@@ -1734,14 +1747,28 @@ export class AicoOpenRouterKeyService {
       if (!budget?.openrouterKeyId) return null;
       const keyed = { ...budget, openrouterKeyId: budget.openrouterKeyId };
 
-      let info: ManagedKeyInfo;
-      let readFailure: string | null = null;
-      try {
-        await this.disableManagedKey(
-          budget.openrouterKeyId,
+      const freeze = () =>
+        this.disableManagedKey(
+          budget.openrouterKeyId!,
           budget.managedKeyProviderId ?? null,
           this.managed.capabilities.readKeyBySecret ? budget.openrouterKeyCiphertext : undefined,
         );
+      // N2: a refused freeze proves nothing about the key — it may still be
+      // live. Estimating then refunds money the member can go on spending, and
+      // settling drops the secret needed to freeze it later, so the refusal
+      // goes back to the outbox. Only a key gone upstream is settled anyway.
+      if (aicoEnv.AICO_FIX_SA_RECLAIM_GUARD) {
+        try {
+          await freeze();
+        } catch (error) {
+          if (!isKeyGoneUpstream(error)) throw error;
+        }
+      }
+
+      let info: ManagedKeyInfo;
+      let readFailure: string | null = null;
+      try {
+        if (!aicoEnv.AICO_FIX_SA_RECLAIM_GUARD) await freeze();
         info = await this.readFrozenMemberKeyInfo({
           managedKeyLimitMicroUsd: budget.managedKeyLimitMicroUsd,
           managedKeyProviderId: budget.managedKeyProviderId,

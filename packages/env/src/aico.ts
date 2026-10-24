@@ -55,6 +55,13 @@ declare global {
        */
       AICO_FIX_R5_RENEWAL_LOCK?: string;
       /**
+       * Kill switch for the 2026-10 reclaim guards (N2, N3, N4): a refused
+       * freeze is retried instead of estimated, a reclaim refund is capped at
+       * what the cycle funded, and a budget that changed since its key was read
+       * is not settled. On unless set to `0`.
+       */
+      AICO_FIX_SA_RECLAIM_GUARD?: string;
+      /**
        * When `1`, this process is the control plane (may hold `OPENROUTER_MANAGEMENT_API_KEY`).
        * Product servers must leave this unset.
        */
@@ -190,6 +197,7 @@ export const getAicoConfig = () => {
       AICO_CVC_RESIZE_IN_PLACE: z.boolean().optional().default(false),
       AICO_FIX_R1_FROZEN_RECLAIM: z.boolean().default(true),
       AICO_FIX_R5_RENEWAL_LOCK: z.boolean().default(true),
+      AICO_FIX_SA_RECLAIM_GUARD: z.boolean().default(true),
       AICO_CVC_TOKENS_PER_USD: z.coerce.number().positive().int().default(25_000_000),
       AICO_OPENROUTER_MOCK: z.boolean().optional().default(false),
       CHEAPVIBECODE_BASE_URL: z.string().default('https://ru.cheapvibecode.ru'),
@@ -219,6 +227,7 @@ export const getAicoConfig = () => {
       AICO_CVC_RESIZE_IN_PLACE: process.env.AICO_CVC_RESIZE_IN_PLACE === '1',
       AICO_FIX_R1_FROZEN_RECLAIM: process.env.AICO_FIX_R1_FROZEN_RECLAIM !== '0',
       AICO_FIX_R5_RENEWAL_LOCK: process.env.AICO_FIX_R5_RENEWAL_LOCK !== '0',
+      AICO_FIX_SA_RECLAIM_GUARD: process.env.AICO_FIX_SA_RECLAIM_GUARD !== '0',
       AICO_CVC_TOKENS_PER_USD: process.env.AICO_CVC_TOKENS_PER_USD,
       AICO_OPENROUTER_MOCK: process.env.AICO_OPENROUTER_MOCK === '1',
       CHEAPVIBECODE_BASE_URL: process.env.CHEAPVIBECODE_BASE_URL || 'https://ru.cheapvibecode.ru',
