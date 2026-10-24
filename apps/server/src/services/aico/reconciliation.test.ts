@@ -7,8 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrganizationModel } from '@/database/models/organization';
 import { users } from '@/database/schemas';
 import {
+  aicoKeyOutbox,
   type AicoReconciliationCheck,
   aicoReconciliationRuns,
+  aicoRenewalBatches,
   memberBudgets,
   organizationMembers,
   organizations,
@@ -52,6 +54,8 @@ const deps = (opts: { floatUsd: number; remainingUsd: number }) => ({
 });
 
 const clean = async (db: LobeChatDatabase) => {
+  await db.delete(aicoKeyOutbox);
+  await db.delete(aicoRenewalBatches);
   await db.delete(aicoReconciliationRuns);
   await db.delete(walletTransactions);
   await db.delete(memberBudgets);
@@ -282,6 +286,40 @@ describe('runReconciliation', () => {
     expect(hygiene.details).toEqual([
       expect.stringMatching(/renewal failed and the budget is off$/),
     ]);
+  });
+
+  it('reports an outbox job stuck in processing and a renewal batch stuck pending', async () => {
+    const orgModel = new OrganizationModel(db);
+    const org = await orgModel.createOrganization({ name: 'Stuck Org', ownerUserId: userId });
+    const longAgo = new Date(Date.now() - 2 * 60 * 60_000);
+    await db.insert(aicoKeyOutbox).values({
+      action: 'reclaim_member',
+      nextAttemptAt: longAgo,
+      orgId: org.id,
+      status: 'processing',
+      updatedAt: longAgo,
+    });
+    await db.insert(aicoRenewalBatches).values({
+      batchKey: `${org.id}:stuck`,
+      orgId: org.id,
+      status: 'pending',
+      updatedAt: longAgo,
+    });
+
+    const run = await runReconciliation(
+      db,
+      { trigger: 'cron' },
+      deps({ floatUsd: 20, remainingUsd: 4 }),
+    );
+
+    const hygiene = checkOf(run, 'key_hygiene');
+    expect(hygiene.status).toBe('warn');
+    expect(hygiene.details).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/outbox .*: reclaim_member stuck in processing/),
+        expect.stringMatching(/renewal batch .*: pending for more than 30 minutes/),
+      ]),
+    );
   });
 
   it('flags enabled OpenRouter keys that nothing points at', async () => {
