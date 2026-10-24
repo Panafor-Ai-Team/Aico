@@ -227,7 +227,8 @@ describe('processDueRenewals (AICO-140)', () => {
       settledUsageUsd: 5,
     });
     const keyService = mockKeyService({ remainingMicroUsd: 0, usageMicroUsd: usd(5) });
-    let results = await processDueRenewals(serverDB, { keyService });
+    const firstRun = new Date();
+    let results = await processDueRenewals(serverDB, { keyService, now: firstRun });
     expect(results[0].status).toBe('failed');
 
     let budget = await orgModel.getMemberBudget(member.id);
@@ -243,7 +244,17 @@ describe('processDueRenewals (AICO-140)', () => {
       orgId: org.id,
     });
 
-    results = await processDueRenewals(serverDB, { keyService });
+    // A failed batch is retried after a 15 minute backoff, not on the next tick.
+    results = await processDueRenewals(serverDB, {
+      keyService,
+      now: new Date(firstRun.getTime() + 60_000),
+    });
+    expect(results[0].status).toBe('skipped');
+
+    results = await processDueRenewals(serverDB, {
+      keyService,
+      now: new Date(firstRun.getTime() + 16 * 60_000),
+    });
     expect(results[0].status).toBe('funded');
     budget = await orgModel.getMemberBudget(member.id);
     expect(budget?.renewalStatus).toBe('active');

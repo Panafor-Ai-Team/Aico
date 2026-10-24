@@ -29,6 +29,7 @@ import {
   type AicoReconciliationRunItem,
   aicoReconciliationRuns,
   type AicoReconciliationStatus,
+  aicoRenewalBatches,
   memberBudgets,
   organizations,
   usageHolds,
@@ -532,6 +533,34 @@ const keyHygieneCheck = async (
     );
   for (const job of failingJobs) {
     details.push(`outbox ${job.id}: ${job.action} still failing after ${job.attempts} attempts`);
+  }
+
+  // N6 / R4: work a dead worker left half-claimed. Nothing else would report it.
+  const stuckJobs = await db
+    .select({ action: aicoKeyOutbox.action, id: aicoKeyOutbox.id })
+    .from(aicoKeyOutbox)
+    .where(
+      and(
+        eq(aicoKeyOutbox.status, 'processing'),
+        lt(aicoKeyOutbox.updatedAt, new Date(now.getTime() - 15 * 60_000)),
+      ),
+    );
+  for (const job of stuckJobs) {
+    details.push(`outbox ${job.id}: ${job.action} stuck in processing for more than 15 minutes`);
+  }
+  const stuckBatches = await db
+    .select({ id: aicoRenewalBatches.id, orgId: aicoRenewalBatches.orgId })
+    .from(aicoRenewalBatches)
+    .where(
+      and(
+        eq(aicoRenewalBatches.status, 'pending'),
+        lt(aicoRenewalBatches.updatedAt, new Date(now.getTime() - 30 * 60_000)),
+      ),
+    );
+  for (const batch of stuckBatches) {
+    details.push(
+      `renewal batch ${batch.id} (org ${batch.orgId}): pending for more than 30 minutes`,
+    );
   }
 
   const [overdue] = await db
