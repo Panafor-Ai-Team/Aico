@@ -448,7 +448,16 @@ export class AicoBillingModel {
           createdByAdminId: params.createdByAdminId ?? null,
           createdByUserId: params.createdByUserId ?? null,
           description: params.description ?? 'Personal balance frozen',
-          metadata: { frozenRawCapacityMicroUsd: rawCapacityMicroUsd },
+          // C1: `balance_micro_usd` counts deposits; what the user can still
+          // spend is that minus the usage already settled. Both figures are kept so
+          // a later refund decision does not have to reconstruct the second.
+          metadata: {
+            frozenRawCapacityMicroUsd: rawCapacityMicroUsd,
+            unspentMicroUsd: Math.max(
+              0,
+              balanceMicroUsd - Math.max(0, Number(before.settledUsageMicroUsd ?? 0)),
+            ),
+          },
           type: 'personal_freeze',
           userId: params.userId,
         })
