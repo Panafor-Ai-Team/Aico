@@ -39,6 +39,14 @@ export type OrgMemberStatus = 'invited' | 'active' | 'disabled' | 'revocation_pe
 export type OrgStatus = 'active' | 'suspended' | 'deleted';
 export type InviteIdentifierType = 'email' | 'phone' | 'public_user_id';
 
+/** The member budget a reclaim figure was read against (N4). */
+export interface ReclaimBudgetSnapshot {
+  ledgerEpoch: number;
+  openrouterKeyId: string | null;
+  pendingPeriodAmountMicroUsd: number;
+  periodAmountMicroUsd: number;
+}
+
 const INVITE_TTL_MS = 72 * 60 * 60 * 1000;
 export const DEFAULT_TEAM_NAME = 'Unspecified';
 export const DEFAULT_TEAM_SLUG = 'unspecified';
@@ -1658,6 +1666,13 @@ export class OrganizationModel {
     /** Overrides the default ledger description — the bulk sweep stamps its batch id here. */
     description?: string;
     /**
+     * N4: the budget `remainingMicroUsd` was read against. When given, a budget
+     * that has changed since (new cycle, new cap, new key) is not settled: the
+     * figure belongs to a state that no longer exists, and settling would
+     * refund a cycle twice or drop an allocation. The caller retries.
+     */
+    expected?: ReclaimBudgetSnapshot;
+    /**
      * Stamped on the ledger row. The key service sets it when the refund was
      * estimated from the last synced usage because the key could not be read.
      */
@@ -1706,6 +1721,21 @@ export class OrganizationModel {
               Math.max(0, Number(existingBudget.settledUsageMicroUsd ?? 0)) -
               Math.max(0, Number(existingBudget.heldMicroUsd ?? 0)),
           ) + Math.max(0, Number(existingBudget.pendingPeriodAmountMicroUsd ?? 0));
+      }
+
+      const { expected } = params;
+      if (
+        expected &&
+        !params.useLedgerRemaining &&
+        existingBudget &&
+        existingBudget.renewalStatus !== 'settled' &&
+        (Number(existingBudget.ledgerEpoch ?? 0) !== expected.ledgerEpoch ||
+          (existingBudget.openrouterKeyId ?? null) !== expected.openrouterKeyId ||
+          Number(existingBudget.periodAmountMicroUsd ?? 0) !== expected.periodAmountMicroUsd ||
+          Number(existingBudget.pendingPeriodAmountMicroUsd ?? 0) !==
+            expected.pendingPeriodAmountMicroUsd)
+      ) {
+        throw new Error('BUDGET_CHANGED_DURING_RECLAIM');
       }
 
       let budget: MemberBudgetItem | null = existingBudget ?? null;

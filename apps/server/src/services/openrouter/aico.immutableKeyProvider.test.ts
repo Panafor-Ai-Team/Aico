@@ -10,7 +10,7 @@
 // @vitest-environment node
 import type { LobeChatDatabase } from '@lobechat/database';
 import { getTestDB } from '@lobechat/database/test-utils';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
@@ -870,6 +870,66 @@ describe('immutable-limit provider — member budgets', () => {
         } finally {
           flags.AICO_FIX_SA_RECLAIM_GUARD = true;
         }
+      });
+    });
+
+    describe('N4: the budget changes between the key read and the refund', () => {
+      it('does not settle a budget a renewal moved on since its key was read', async () => {
+        const { keys, member, org, orgModel } = await removedAfterSync();
+        const reclaimed = await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
+        // A renewal commits in between: refund paid, new cycle funded.
+        await db
+          .update(memberBudgets)
+          .set({ ledgerEpoch: sql`${memberBudgets.ledgerEpoch} + 1`, settledUsageMicroUsd: 0 })
+          .where(eq(memberBudgets.orgMemberId, member.id));
+        const before = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd);
+
+        await expect(
+          orgModel.reclaimMemberRemainingCredit({
+            expected: reclaimed?.expected,
+            orgId: org.id,
+            orgMemberId: member.id,
+            remainingMicroUsd: reclaimed?.remainingMicroUsd ?? 0,
+          }),
+        ).rejects.toThrow('BUDGET_CHANGED_DURING_RECLAIM');
+
+        expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(before);
+        expect((await orgModel.getMemberBudget(member.id))?.renewalStatus).not.toBe('settled');
+      });
+
+      it('does not drop an allocation raised since the key was read', async () => {
+        const { keys, member, org, orgModel } = await removedAfterSync();
+        const reclaimed = await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
+        await db
+          .update(memberBudgets)
+          .set({ periodAmountMicroUsd: usd(20), reservedMicroUsd: usd(20) })
+          .where(eq(memberBudgets.orgMemberId, member.id));
+
+        await expect(
+          orgModel.reclaimMemberRemainingCredit({
+            expected: reclaimed?.expected,
+            orgId: org.id,
+            orgMemberId: member.id,
+            remainingMicroUsd: reclaimed?.remainingMicroUsd ?? 0,
+          }),
+        ).rejects.toThrow('BUDGET_CHANGED_DURING_RECLAIM');
+      });
+
+      it('settles normally when nothing changed', async () => {
+        const { keys, member, org, orgModel } = await removedAfterSync();
+        const before = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd);
+        const reclaimed = await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
+
+        await orgModel.reclaimMemberRemainingCredit({
+          expected: reclaimed?.expected,
+          orgId: org.id,
+          orgMemberId: member.id,
+          remainingMicroUsd: reclaimed?.remainingMicroUsd ?? 0,
+        });
+
+        expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(
+          before + usd(8.4),
+        );
       });
     });
 

@@ -792,6 +792,7 @@ const runOutboxAction = async (params: {
         typeof row.payload?.createdByUserId === 'string' ? row.payload.createdByUserId : null;
       await orgModel.reclaimMemberRemainingCredit({
         createdByUserId,
+        expected: reclaimed?.expected,
         metadata: reclaimed?.estimated ? { estimatedReclaim: reclaimed.estimated } : undefined,
         orgId: row.orgId,
         orgMemberId: row.orgMemberId,

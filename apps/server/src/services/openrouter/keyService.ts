@@ -1,5 +1,5 @@
 import { AicoBillingModel } from '@/database/models/aicoBilling';
-import { OrganizationModel } from '@/database/models/organization';
+import { OrganizationModel, type ReclaimBudgetSnapshot } from '@/database/models/organization';
 import { aicoKeyOutbox } from '@/database/schemas/aicoOrganization';
 import type { LobeChatDatabase } from '@/database/type';
 import {
@@ -1768,6 +1768,12 @@ export class AicoOpenRouterKeyService {
   }): Promise<{
     /** Set when the refund was estimated because the frozen key could not be read. */
     estimated?: ReclaimEstimate;
+    /**
+     * N4: the budget these figures were read against. Pass it to
+     * `reclaimMemberRemainingCredit`, which refuses to settle a budget that has
+     * changed since (a renewal or allocation committed in between).
+     */
+    expected?: ReclaimBudgetSnapshot;
     remainingMicroUsd: number;
     usageMicroUsd: number;
   } | null> => {
@@ -1780,6 +1786,14 @@ export class AicoOpenRouterKeyService {
       const budget = await this.orgModel.getMemberBudgetForOrg(params);
       if (!budget?.openrouterKeyId) return null;
       const keyed = { ...budget, openrouterKeyId: budget.openrouterKeyId };
+      const expected: ReclaimBudgetSnapshot | undefined = aicoEnv.AICO_FIX_SA_RECLAIM_GUARD
+        ? {
+            ledgerEpoch: Number(budget.ledgerEpoch ?? 0),
+            openrouterKeyId: budget.openrouterKeyId,
+            pendingPeriodAmountMicroUsd: Number(budget.pendingPeriodAmountMicroUsd ?? 0),
+            periodAmountMicroUsd: Number(budget.periodAmountMicroUsd ?? 0),
+          }
+        : undefined;
 
       const freeze = () =>
         this.disableManagedKey(
@@ -1832,6 +1846,7 @@ export class AicoOpenRouterKeyService {
       const figures = await this.memberRemainingFromInfo(keyed, info, params);
       if (readFailure === null) {
         return {
+          expected,
           remainingMicroUsd: figures.remainingMicroUsd,
           usageMicroUsd: figures.usageMicroUsd,
         };
@@ -1857,6 +1872,7 @@ export class AicoOpenRouterKeyService {
       });
       return {
         estimated: estimate,
+        expected,
         remainingMicroUsd: figures.remainingMicroUsd,
         usageMicroUsd: figures.usageMicroUsd,
       };

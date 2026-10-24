@@ -1,4 +1,4 @@
-import { OrganizationModel } from '@/database/models/organization';
+import { OrganizationModel, type ReclaimBudgetSnapshot } from '@/database/models/organization';
 import { aicoKeyOutbox } from '@/database/schemas';
 import type { LobeChatDatabase } from '@/database/type';
 import {
@@ -277,6 +277,7 @@ export const executeOrgBudgetSweep = async ({
 
     let remainingMicroUsd = walletSideRemainingMicroUsd(budget);
     let reclaimMetadata: Record<string, unknown> | undefined;
+    let reclaimExpected: ReclaimBudgetSnapshot | undefined;
 
     if (hasValidManagedKeyId(budget.openrouterKeyId)) {
       try {
@@ -285,6 +286,7 @@ export const executeOrgBudgetSweep = async ({
         // figure is then the only truth available, so fall through with it.
         if (reclaimed) remainingMicroUsd = reclaimed.remainingMicroUsd;
         if (reclaimed?.estimated) reclaimMetadata = { estimatedReclaim: reclaimed.estimated };
+        reclaimExpected = reclaimed?.expected;
       } catch (error) {
         // Never guess an amount against a key we could not read or disable:
         // hand the whole reclaim to the durable outbox, which retries with
@@ -314,6 +316,7 @@ export const executeOrgBudgetSweep = async ({
       const result = await model.reclaimMemberRemainingCredit({
         createdByUserId: actorUserId ?? null,
         description: `Sweep ${batchId}: reclaim remaining credit from member ${member.id}`,
+        expected: reclaimExpected,
         metadata: reclaimMetadata,
         orgId,
         orgMemberId: member.id,

@@ -482,6 +482,7 @@ export const organizationRouter = router({
 
       const result = await ctx.organizationModel.reclaimMemberRemainingCredit({
         createdByUserId: ctx.userId,
+        expected: reclaimed.expected,
         metadata: reclaimed.estimated ? { estimatedReclaim: reclaimed.estimated } : undefined,
         orgId: input.orgId,
         orgMemberId: input.orgMemberId,
