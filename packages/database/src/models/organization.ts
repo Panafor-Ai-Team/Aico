@@ -18,6 +18,7 @@ import {
   organizationTeamMembers,
   organizationTeams,
   platformAdmins,
+  usageHolds,
   usageLogs,
   walletTransactions,
 } from '../schemas/aicoOrganization';
@@ -32,6 +33,7 @@ import {
   periodToOpenRouterLimitReset,
 } from '../utils/aicoMoney';
 import { randomSlug } from '../utils/idGenerator';
+import { measuredCostSql } from './aicoUsageLedger';
 
 export type OrgMemberRole = 'owner' | 'admin' | 'member';
 export type OrgInviteRole = 'admin' | 'member';
@@ -2268,11 +2270,13 @@ export class OrganizationModel {
 
     const rows = await this.db
       .select({
-        costMicroUsd: sql<number>`COALESCE(SUM(${usageLogs.costMicroUsd}), 0)`,
+        // N10: measured spend; a shadow call with no usage figure is only an upper bound.
+        costMicroUsd: sql<number>`COALESCE(SUM(${measuredCostSql()}), 0)`,
         date: sql<string>`to_char(date_trunc('day', ${usageLogs.createdAt} AT TIME ZONE 'UTC'), 'YYYY-MM-DD')`,
         totalTokens: sql<number>`COALESCE(SUM(${usageLogs.totalTokens}), 0)`,
       })
       .from(usageLogs)
+      .leftJoin(usageHolds, eq(usageHolds.id, usageLogs.holdId))
       .where(and(...conditions))
       .groupBy(sql`date_trunc('day', ${usageLogs.createdAt} AT TIME ZONE 'UTC')`)
       .orderBy(sql`date_trunc('day', ${usageLogs.createdAt} AT TIME ZONE 'UTC')`);
