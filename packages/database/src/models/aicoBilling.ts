@@ -1152,6 +1152,39 @@ export class AicoBillingModel {
     return rows.map((row) => row.reason);
   };
 
+  /**
+   * C6: totals over every personal wallet. The platform panel summed
+   * `listAllWallets()` in memory, which is capped at 200 rows — with a 201st
+   * wallet every figure on the page was silently wrong.
+   */
+  sumWalletBalances = async (): Promise<{ balanceMicroUsd: number; count: number }> => {
+    const [row] = await this.db
+      .select({
+        balance: sql<number>`COALESCE(SUM(${userWallets.balanceMicroUsd}), 0)`,
+        count: sql<number>`COUNT(*)::int`,
+      })
+      .from(userWallets);
+    return { balanceMicroUsd: Number(row?.balance ?? 0), count: Number(row?.count ?? 0) };
+  };
+
+  /**
+   * C6: everything ever paid in (and taken back by admin debits), over the whole
+   * ledger rather than its newest 200 rows.
+   */
+  sumPaidInTotals = async (): Promise<{ creditedMicroUsd: number; revenueToman: number }> => {
+    const [row] = await this.db
+      .select({
+        credited: sql<number>`COALESCE(SUM(${walletTransactions.amountMicroUsd}), 0)`,
+        revenue: sql<number>`COALESCE(SUM(${walletTransactions.amountToman}), 0)`,
+      })
+      .from(walletTransactions)
+      .where(inArray(walletTransactions.type, ['topup', 'manual_credit', 'manual_debit']));
+    return {
+      creditedMicroUsd: Number(row?.credited ?? 0),
+      revenueToman: Number(row?.revenue ?? 0),
+    };
+  };
+
   /** Sum of `usage_logs.cost_micro_usd` across all B2C + B2B traffic — real OpenRouter spend. */
   sumUsageCostMicroUsd = async (): Promise<number> => {
     const [row] = await this.db
