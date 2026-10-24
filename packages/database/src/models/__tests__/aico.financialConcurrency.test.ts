@@ -736,3 +736,62 @@ describe('usage ledger holds on member budgets', () => {
     },
   );
 });
+
+describe('D1 / N9: org wallet writes against a concurrent delete or credit', () => {
+  const credit = (orgId: string, amount: number) =>
+    orgModel.addManualCredit({
+      amountMicroUsd: usd(amount),
+      amountToman: amount * 5000,
+      createdByUserId: ownerId,
+      fxRateTomanPerUsd: 5000,
+      orgId,
+    });
+
+  it('N9: refuses to credit a deleted organization', async () => {
+    const { org } = await setupOrgWithUsd(10);
+    await orgModel.softDeleteOrganization({ confirmName: org.name, orgId: org.id });
+
+    await expect(credit(org.id, 5)).rejects.toThrow('ORG_DELETED');
+    const after = await orgModel.getById(org.id);
+    expect(Number(after?.walletBalanceMicroUsd)).toBe(0);
+  });
+
+  it.skipIf(!isServerDb())(
+    'D1 (server-db): a credit racing a delete is either forfeited on the books or refused',
+    async () => {
+      const { org } = await setupOrgWithUsd(10);
+
+      const results = await Promise.allSettled([
+        orgModel.softDeleteOrganization({ confirmName: org.name, orgId: org.id }),
+        credit(org.id, 5),
+      ]);
+      expect(results[0].status).toBe('fulfilled');
+
+      const after = await orgModel.getById(org.id);
+      expect(Number(after?.walletBalanceMicroUsd)).toBe(0);
+      const [forfeit] = await serverDB
+        .select()
+        .from(walletTransactions)
+        .where(eq(walletTransactions.description, 'Balance forfeited on organization deletion'));
+      // Credited first: the forfeit covers it. Refused: only the original $10.
+      const expected = results[1].status === 'fulfilled' ? usd(15) : usd(10);
+      expect(-Number(forfeit.amountMicroUsd)).toBe(expected);
+    },
+  );
+
+  it.skipIf(!isServerDb())(
+    'D1 (server-db): concurrent credits chain their before/after balances',
+    async () => {
+      const { org } = await setupOrgWithUsd(0);
+
+      await Promise.all(Array.from({ length: 10 }, () => credit(org.id, 1)));
+
+      const rows = await serverDB
+        .select()
+        .from(walletTransactions)
+        .where(eq(walletTransactions.orgId, org.id));
+      const befores = rows.map((r) => Number(r.balanceBeforeMicroUsd)).sort((a, b) => a - b);
+      expect(befores).toEqual(Array.from({ length: 10 }, (_, i) => usd(i)));
+    },
+  );
+});

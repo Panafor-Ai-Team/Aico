@@ -193,9 +193,14 @@ export class AicoBillingModel {
           target: userWallets.userId,
         });
 
-        const before = await tx.query.userWallets.findFirst({
-          where: eq(userWallets.userId, params.userId),
-        });
+        // D1: locked so the ledger row's balance_before is the real one and the
+        // isActive check cannot miss a freeze committing alongside.
+        const [before] = await tx
+          .select()
+          .from(userWallets)
+          .where(eq(userWallets.userId, params.userId))
+          .limit(1)
+          .for('update');
         // FIN-015: crediting used to flip `isActive` back on, silently
         // resurrecting a soft-deleted or deactivated wallet — and, before the
         // capacity fix, handing back its pre-freeze spend limit for free.

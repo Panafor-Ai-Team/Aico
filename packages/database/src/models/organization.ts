@@ -413,9 +413,15 @@ export class OrganizationModel {
     organization: OrganizationItem;
   }> => {
     return this.db.transaction(async (tx) => {
-      const org = await tx.query.organizations.findFirst({
-        where: eq(organizations.id, params.orgId),
-      });
+      // D1: lock the org row. The balance read here is forfeited and then set
+      // to 0; unlocked, a credit committed in between was zeroed with no ledger
+      // row, and two deletes could both pass the status check.
+      const [org] = await tx
+        .select()
+        .from(organizations)
+        .where(eq(organizations.id, params.orgId))
+        .limit(1)
+        .for('update');
       if (!org) throw new Error('ORG_NOT_FOUND');
       if (org.status === 'deleted') throw new Error('ORG_ALREADY_DELETED');
       if (org.name !== params.confirmName) throw new Error('ORG_NAME_MISMATCH');
@@ -626,10 +632,18 @@ export class OrganizationModel {
 
     const applyCredit = () =>
       this.db.transaction(async (tx) => {
-        const before = await tx.query.organizations.findFirst({
-          where: eq(organizations.id, params.orgId),
-        });
+        // D1: locked, so the ledger row's before/after figures are the real ones
+        // and a concurrent delete is seen (N9) rather than raced.
+        const [before] = await tx
+          .select()
+          .from(organizations)
+          .where(eq(organizations.id, params.orgId))
+          .limit(1)
+          .for('update');
         if (!before) throw new Error('ORG_NOT_FOUND');
+        // N9: deletion forfeited the wallet; credit landing on the tombstone can
+        // never be allocated. A suspended org may still be paid up.
+        if (before.status === 'deleted') throw new Error('ORG_DELETED');
         const balanceBeforeMicroUsd = Number(before.walletBalanceMicroUsd ?? 0);
         const balanceBeforeToman = Number(before.walletBalanceToman ?? 0);
 
@@ -1772,9 +1786,14 @@ export class OrganizationModel {
         budget = casBudget;
       }
 
-      const orgBefore = await tx.query.organizations.findFirst({
-        where: eq(organizations.id, params.orgId),
-      });
+      // D1: locked after the budget (the order renewal and allocate use), so a
+      // delete committing now is seen below instead of credited over.
+      const [orgBefore] = await tx
+        .select()
+        .from(organizations)
+        .where(eq(organizations.id, params.orgId))
+        .limit(1)
+        .for('update');
       if (!orgBefore) throw new Error('ORG_NOT_FOUND');
 
       const balanceBeforeMicroUsd = Number(orgBefore.walletBalanceMicroUsd ?? 0);
