@@ -8,6 +8,7 @@ import {
   billedUsageFromRaw,
   blendedMultiplierBp,
   type BudgetPeriod,
+  confirmedUnusedMicro,
   currentCycleLimitMicroUsd,
   DEFAULT_USAGE_MULTIPLIER_BP,
   hasValidManagedKeyId,
@@ -1685,6 +1686,8 @@ export class AicoOpenRouterKeyService {
       openrouterKeyId: string;
     },
     info: ManagedKeyInfo,
+    /** Set when the figure is about to be refunded: a clamp then raises an alert. */
+    settling?: { orgId: string; orgMemberId: string },
   ) => {
     // AICO-180: OpenRouter reports raw spend; the org wallet this refunds into
     // is denominated in billed micro-USD, so convert before returning. Read the
@@ -1713,12 +1716,43 @@ export class AicoOpenRouterKeyService {
             Number(budget.checkpointMultiplierBp ?? bp),
           );
 
+    // N3: never refund more than this cycle funded and has not spent — the
+    // cap renewal already applies. A key left bigger than its cycle (a shrink
+    // that never landed) reports headroom the org was already refunded. Its
+    // limit-minus-remaining usage is then wrong too, so the last synced usage
+    // is the floor of what was spent.
+    const knownUsageMicro = Math.max(
+      0,
+      usageMicro,
+      Math.max(0, Number(budget.settledUsageMicroUsd ?? 0)),
+    );
+    const unusedMicro = Number(confirmedUnusedMicro(BigInt(currentCycle), BigInt(knownUsageMicro)));
+    let refundableMicro = Math.max(0, remainingFromOr);
+    if (aicoEnv.AICO_FIX_SA_RECLAIM_GUARD && refundableMicro > unusedMicro) {
+      if (settling) {
+        await sendSecurityAlert(this.db, {
+          dedupeKey: `reclaim.refund_over_cap:${settling.orgMemberId}`,
+          details: {
+            capMicroUsd: unusedMicro,
+            keyId: budget.openrouterKeyId,
+            orgId: settling.orgId,
+            orgMemberId: settling.orgMemberId,
+            reportedMicroUsd: refundableMicro,
+          },
+          severity: 'warning',
+          summary: `Reclaim of member ${settling.orgMemberId} clamped a refund above the funded cycle cap`,
+          type: 'reclaim.refund_over_cap',
+        });
+      }
+      refundableMicro = unusedMicro;
+    }
+
     // Pending next-period reservation was never spendable on the OR key (FIN-001) —
     // reclaim it from the wallet reservation in full.
     return {
       keyId: budget.openrouterKeyId,
       keyProviderId: budget.managedKeyProviderId ?? null,
-      remainingMicroUsd: Math.max(0, remainingFromOr) + pendingHeld,
+      remainingMicroUsd: refundableMicro + pendingHeld,
       usageMicroUsd: usageMicro,
     };
   };
@@ -1795,7 +1829,7 @@ export class AicoOpenRouterKeyService {
         info = this.unreadableKeyInfo(budget.openrouterKeyId);
       }
 
-      const figures = await this.memberRemainingFromInfo(keyed, info);
+      const figures = await this.memberRemainingFromInfo(keyed, info, params);
       if (readFailure === null) {
         return {
           remainingMicroUsd: figures.remainingMicroUsd,

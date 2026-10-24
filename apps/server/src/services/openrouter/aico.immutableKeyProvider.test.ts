@@ -833,6 +833,46 @@ describe('immutable-limit provider — member budgets', () => {
       );
     });
 
+    describe('N3: a key left bigger than the cycle', () => {
+      /** A shrink that never landed: the key still holds $100 raw against a $12 cap. */
+      const oversizedKey = async () => {
+        const ctx = await removedAfterSync();
+        ctx.provider.keys.get(ctx.created.keyId!)!.limitUsd = 100;
+        return ctx;
+      };
+
+      it('refunds at most what the cycle funded, with an alert', async () => {
+        const { keys, member, org, orgModel } = await oversizedKey();
+        const before = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd);
+
+        await reclaimJob(org.id, member.id);
+        await processKeyOutbox(db, { keyService: keys });
+
+        // $12 cap − $3.60 used — never the $116.40 the key still reports.
+        expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(
+          before + usd(8.4),
+        );
+        const alert = await db.query.aicoSecurityAlertState.findFirst({
+          where: eq(aicoSecurityAlertState.id, `reclaim.refund_over_cap:${member.id}`),
+        });
+        expect(alert).toBeDefined();
+      });
+
+      it('AICO_FIX_SA_RECLAIM_GUARD=0 restores the uncapped refund', async () => {
+        const flags = aicoEnv as { AICO_FIX_SA_RECLAIM_GUARD: boolean };
+        flags.AICO_FIX_SA_RECLAIM_GUARD = false;
+        try {
+          const { keys, member, org } = await oversizedKey();
+
+          const reclaimed = await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
+
+          expect(reclaimed?.remainingMicroUsd).toBe(usd(116.4));
+        } finally {
+          flags.AICO_FIX_SA_RECLAIM_GUARD = true;
+        }
+      });
+    });
+
     describe('N2: the freeze itself is refused', () => {
       it.each([
         ['CheapVibeCode', () => new CheapVibeCodeApiError(400, 'Bad Request', 'key_inactive')],
