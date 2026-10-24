@@ -1,4 +1,6 @@
-import { and, asc, eq, inArray, isNotNull, lte, ne, notInArray, or, sql } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
+
+import { and, asc, eq, inArray, isNotNull, lt, lte, ne, notInArray, or, sql } from 'drizzle-orm';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { OrganizationModel } from '@/database/models/organization';
@@ -34,6 +36,18 @@ const OUTBOX_DEFAULT_BATCH = 25;
  * count and its place in the queue rather than burning retries towards an alert.
  */
 const OUTBOX_DEFER_MS = 24 * 60 * 60 * 1000;
+/** A `processing` row older than this was claimed by a worker that died. */
+const OUTBOX_STALE_PROCESSING_MS = 15 * 60 * 1000;
+/** How long a failed renewal batch waits before the next attempt (R11). */
+const FAILED_RETRY_MS = 15 * 60 * 1000;
+/**
+ * A `pending` batch this old belongs to a worker that died (R4). The money move
+ * is a single transaction that also sets `funded`, so a `pending` batch never
+ * committed money and is safe to take over.
+ */
+const STALE_PENDING_MS = 30 * 60 * 1000;
+/** Delay before the backstop key sync that follows a funded renewal (R10). */
+const KEY_SYNC_BACKSTOP_MS = 5 * 60 * 1000;
 
 export interface RenewalOptions {
   keyService?: AicoOpenRouterKeyService;
@@ -99,8 +113,12 @@ export const processDueRenewals = async (
     .select({ budget: memberBudgets, member: organizationMembers })
     .from(memberBudgets)
     .innerJoin(organizationMembers, eq(organizationMembers.id, memberBudgets.orgMemberId))
+    .innerJoin(organizations, eq(organizations.id, organizationMembers.orgId))
     .where(
       and(
+        // N5: a suspended or deleted org moves no money and has no key unfrozen.
+        // Its budgets stay due and renew once it is active again.
+        aicoEnv.AICO_FIX_S2_RENEWAL_BATCH ? eq(organizations.status, 'active') : undefined,
         // `total` budgets never reset — they are settled manually on revoke/remove.
         ne(memberBudgets.period, 'total'),
         isNotNull(memberBudgets.nextRenewalAt),
@@ -201,14 +219,26 @@ export const retryRenewalKeySync = async (
   return { failed, synced };
 };
 
+type RenewalBatchRow = typeof aicoRenewalBatches.$inferSelect;
+
+/**
+ * Takes the batch for this run, or returns why it could not.
+ *
+ * With the stage-B fix the claim is a compare-and-swap under a lease: the
+ * worker writes its own `lease` (a millisecond-precision date) as the batch's
+ * `updated_at`, and every later write of the run is conditional on that value,
+ * so a worker whose batch was taken over cannot move money or fail it.
+ */
 const claimRenewalBatch = async (params: {
   batchKey: string;
   budgetIds: string[];
   db: LobeChatDatabase;
   grossRequiredMicroUsd: number;
+  lease: Date;
   orgId: string;
-}) => {
-  const { batchKey, budgetIds, db, grossRequiredMicroUsd, orgId } = params;
+}): Promise<RenewalBatchRow | 'funded' | null> => {
+  const { batchKey, budgetIds, db, grossRequiredMicroUsd, lease, orgId } = params;
+  const staged = aicoEnv.AICO_FIX_S2_RENEWAL_BATCH;
 
   const tryInsert = async () => {
     const [row] = await db
@@ -219,25 +249,78 @@ const claimRenewalBatch = async (params: {
         memberBudgetIds: budgetIds,
         orgId,
         status: 'pending',
+        // Written explicitly: the database default has microseconds, which a
+        // millisecond lease could never match.
+        ...(staged ? { updatedAt: lease } : {}),
       })
       .onConflictDoNothing({ target: aicoRenewalBatches.batchKey })
       .returning();
     return row ?? null;
   };
 
-  let batch = await tryInsert();
-  if (batch) return batch;
+  const inserted = await tryInsert();
+  if (inserted) return inserted;
 
   const existing = await db.query.aicoRenewalBatches.findFirst({
     where: eq(aicoRenewalBatches.batchKey, batchKey),
   });
   if (!existing) return null;
-  if (existing.status !== 'failed') return null;
 
-  // Prior attempt failed (e.g. shortfall). Drop the unique key so a funded retry can proceed.
-  await db.delete(aicoRenewalBatches).where(eq(aicoRenewalBatches.id, existing.id));
-  batch = await tryInsert();
-  return batch;
+  if (!staged) {
+    if (existing.status !== 'failed') return null;
+    // Prior attempt failed (e.g. shortfall). Drop the unique key so a funded retry can proceed.
+    await db.delete(aicoRenewalBatches).where(eq(aicoRenewalBatches.id, existing.id));
+    return tryInsert();
+  }
+
+  if (existing.status === 'funded') return 'funded';
+
+  // FIN-028 / R4 / R11: one conditional UPDATE keeps the row (and its history),
+  // lets exactly one of two racing workers win, and enforces the waits.
+  const [claimed] = await db
+    .update(aicoRenewalBatches)
+    .set({
+      error: null,
+      grossRequiredMicroUsd,
+      memberBudgetIds: budgetIds,
+      refundedMicroUsd: 0,
+      shortfallMicroUsd: 0,
+      status: 'pending',
+      updatedAt: lease,
+    })
+    .where(
+      and(
+        eq(aicoRenewalBatches.id, existing.id),
+        or(
+          and(
+            eq(aicoRenewalBatches.status, 'failed'),
+            lte(aicoRenewalBatches.updatedAt, new Date(lease.getTime() - FAILED_RETRY_MS)),
+          ),
+          and(
+            eq(aicoRenewalBatches.status, 'pending'),
+            lte(aicoRenewalBatches.updatedAt, new Date(lease.getTime() - STALE_PENDING_MS)),
+          ),
+        ),
+      ),
+    )
+    .returning();
+  return claimed ?? null;
+};
+
+/**
+ * Names the batch by the exact set of budgets it renews. A stale budget that
+ * joins an org's due set changes the key, so it can never collide with a batch
+ * that already funded the others (R3), while a retry of the same set keeps its
+ * key and re-claims its own row.
+ */
+const batchKeyFor = (orgId: string, boundary: number, budgetIds: string[]): string => {
+  const base = `${orgId}:${new Date(boundary).toISOString()}`;
+  if (!aicoEnv.AICO_FIX_S2_RENEWAL_BATCH || !aicoEnv.AICO_FIX_R5_RENEWAL_LOCK) return base;
+  const fingerprint = createHash('sha256')
+    .update([...budgetIds].sort().join(','))
+    .digest('hex')
+    .slice(0, 16);
+  return `${base}:${fingerprint}`;
 };
 
 const renewOrg = async (params: {
@@ -252,7 +335,11 @@ const renewOrg = async (params: {
   const boundary = budgets
     .map((b) => b.nextRenewalAt.getTime())
     .reduce((min, t) => Math.min(min, t), Number.POSITIVE_INFINITY);
-  const batchKey = `${orgId}:${new Date(boundary).toISOString()}`;
+  const budgetIds = budgets.map((b) => b.budgetId);
+  const batchKey = batchKeyFor(orgId, boundary, budgetIds);
+  // The claim's lease: a whole-millisecond date this worker stamps on the batch
+  // and conditions every later write on (see `claimRenewalBatch`).
+  const lease = new Date(now.getTime());
   // Wallet debit excludes amounts already prepaid when queuing a period change.
   const walletDebitByMember = new Map<string, number>();
   for (const b of budgets) {
@@ -266,25 +353,53 @@ const renewOrg = async (params: {
   // now, so stamp it here rather than leaving a stale rate to trigger a rebase.
   const currentMultiplierBp = await new AicoBillingModel(db).getUsageMultiplierBp();
 
-  const budgetIds = budgets.map((b) => b.budgetId);
+  const skippedResult = () => ({
+    batchKey,
+    grossRequiredMicroUsd,
+    memberCount: budgets.length,
+    orgId,
+    refundedMicroUsd: 0,
+    shortfallMicroUsd: 0,
+    status: 'skipped' as const,
+  });
+
   const batch = await claimRenewalBatch({
     batchKey,
     budgetIds,
     db,
     grossRequiredMicroUsd,
+    lease,
     orgId,
   });
 
-  if (!batch) {
-    return {
-      batchKey,
-      grossRequiredMicroUsd,
-      memberCount: budgets.length,
-      orgId,
-      refundedMicroUsd: 0,
-      shortfallMicroUsd: 0,
-      status: 'skipped',
-    };
+  if (batch === 'funded') {
+    // The fingerprint names this exact set, so it was funded yet is due again:
+    // the books and the budget windows disagree. Nothing is moved; say so.
+    await sendSecurityAlert(db, {
+      dedupeKey: `renewal.inconsistent_due:${batchKey}`,
+      details: { batchKey, budgetIds, orgId },
+      severity: 'warning',
+      summary: `Org ${orgId} has budgets due that an already-funded renewal batch covers`,
+      type: 'renewal.inconsistent_due',
+    });
+  }
+
+  if (!batch || batch === 'funded') return skippedResult();
+
+  // R11: a budget already `renewal_failed` was frozen by the run that failed it;
+  // freezing it and queueing another disable on every retry only adds traffic.
+  const alreadyFailed = new Set<string>();
+  if (aicoEnv.AICO_FIX_S2_RENEWAL_BATCH) {
+    const rows = await db
+      .select({ id: memberBudgets.id })
+      .from(memberBudgets)
+      .where(
+        and(
+          inArray(memberBudgets.id, budgetIds),
+          eq(memberBudgets.renewalStatus, 'renewal_failed'),
+        ),
+      );
+    for (const row of rows) alreadyFailed.add(row.id);
   }
 
   // Deny chat + disable OR keys while the boundary settles.
@@ -306,6 +421,7 @@ const renewOrg = async (params: {
 
   await Promise.all(
     budgets.map(async (b) => {
+      if (alreadyFailed.has(b.budgetId)) return;
       try {
         await keyService.disableMemberKey(b.memberId);
       } catch (error) {
@@ -314,7 +430,68 @@ const renewOrg = async (params: {
     }),
   );
 
+  const failResult = (shortfallMicroUsd: number) => ({
+    batchKey,
+    grossRequiredMicroUsd,
+    memberCount: budgets.length,
+    orgId,
+    refundedMicroUsd: 0,
+    shortfallMicroUsd,
+    status: 'failed' as const,
+  });
+
   const failBatch = async (error: string, shortfallMicroUsd = 0) => {
+    if (aicoEnv.AICO_FIX_S2_RENEWAL_BATCH) {
+      // Fail the batch first, and only while this worker still holds its lease:
+      // when another worker has taken the batch over, this run owns nothing.
+      const [owned] = await db
+        .update(aicoRenewalBatches)
+        .set({ error, shortfallMicroUsd, status: 'failed', updatedAt: lease })
+        .where(
+          and(
+            eq(aicoRenewalBatches.id, batch.id),
+            eq(aicoRenewalBatches.status, 'pending'),
+            eq(aicoRenewalBatches.updatedAt, lease),
+          ),
+        )
+        .returning({ id: aicoRenewalBatches.id });
+      if (!owned) return skippedResult();
+
+      const failed = await db
+        .update(memberBudgets)
+        .set({ isActive: false, renewalStatus: 'renewal_failed' })
+        .where(
+          and(
+            inArray(memberBudgets.id, budgetIds),
+            // R5: a budget revoked or re-allocated mid-renewal is no longer ours to
+            // fail — marking it `renewal_failed` would pull a settled budget back
+            // into the next renewal.
+            aicoEnv.AICO_FIX_R5_RENEWAL_LOCK
+              ? eq(memberBudgets.renewalStatus, 'renewal_pending')
+              : undefined,
+          ),
+        )
+        .returning({ id: memberBudgets.id });
+      // R9 / R11: queue a disable only for budgets this run actually failed and
+      // that were not already frozen by an earlier failed run.
+      const toDisable = new Set(failed.map((row) => row.id));
+      for (const id of alreadyFailed) toDisable.delete(id);
+      const disableRows = budgets.filter((b) => toDisable.has(b.budgetId));
+      if (disableRows.length > 0) {
+        await db.insert(aicoKeyOutbox).values(
+          disableRows.map((b) => ({
+            action: 'disable_member_key',
+            nextAttemptAt: now,
+            orgId,
+            orgMemberId: b.memberId,
+            payload: { batchKey, reason: error },
+            status: 'pending',
+          })),
+        );
+      }
+      return failResult(shortfallMicroUsd);
+    }
+
     await db
       .update(memberBudgets)
       .set({ isActive: false, renewalStatus: 'renewal_failed' })
@@ -344,15 +521,7 @@ const renewOrg = async (params: {
       .set({ error, shortfallMicroUsd, status: 'failed' })
       .where(eq(aicoRenewalBatches.id, batch.id));
 
-    return {
-      batchKey,
-      grossRequiredMicroUsd,
-      memberCount: budgets.length,
-      orgId,
-      refundedMicroUsd: 0,
-      shortfallMicroUsd,
-      status: 'failed' as const,
-    };
+    return failResult(shortfallMicroUsd);
   };
 
   // 1. Authoritative settlement of the closing period (OpenRouter is the source
@@ -424,6 +593,25 @@ const renewOrg = async (params: {
   // 2. Refund confirmed-unused credit, then CAS-debit only the unfunded next-cap slice.
   try {
     await db.transaction(async (tx) => {
+      // The funding transaction starts by marking the batch funded under this
+      // worker's lease. A worker whose batch was taken over finds no row and
+      // moves nothing; the row stays locked until commit, so the takeover
+      // worker waits here instead of double-funding.
+      if (aicoEnv.AICO_FIX_S2_RENEWAL_BATCH) {
+        const [owned] = await tx
+          .update(aicoRenewalBatches)
+          .set({ status: 'funded', updatedAt: lease })
+          .where(
+            and(
+              eq(aicoRenewalBatches.id, batch.id),
+              eq(aicoRenewalBatches.status, 'pending'),
+              eq(aicoRenewalBatches.updatedAt, lease),
+            ),
+          )
+          .returning({ id: aicoRenewalBatches.id });
+        if (!owned) throw new Error('BATCH_CLAIM_LOST');
+      }
+
       // R5 (2026-10): refunds were computed from rows read before this
       // transaction. A revoke, reclaim or re-allocation that committed since
       // would be refunded a second time and its budget re-activated below, so
@@ -461,6 +649,10 @@ const renewOrg = async (params: {
         .limit(1)
         .for('update');
       if (!orgBefore) throw new Error('ORG_NOT_FOUND');
+      // N5: suspended after the due query ran — move nothing.
+      if (aicoEnv.AICO_FIX_S2_RENEWAL_BATCH && orgBefore.status !== 'active') {
+        throw new Error('ORG_NOT_ACTIVE');
+      }
       let runningBalanceMicroUsd = Number(orgBefore.walletBalanceMicroUsd ?? 0);
 
       if (refundedMicroUsd > 0) {
@@ -573,11 +765,32 @@ const renewOrg = async (params: {
 
       await tx
         .update(aicoRenewalBatches)
-        .set({ refundedMicroUsd, status: 'funded' })
+        .set({
+          refundedMicroUsd,
+          status: 'funded',
+          ...(aicoEnv.AICO_FIX_S2_RENEWAL_BATCH ? { updatedAt: lease } : {}),
+        })
         .where(eq(aicoRenewalBatches.id, batch.id));
+
+      // R10: a backstop for step 3. If the process dies between this commit and
+      // the key sync, the member is paid up but their key is still frozen, and
+      // nothing else revisits them. The row is an idempotent `ensureMemberKey`.
+      if (aicoEnv.AICO_FIX_S2_RENEWAL_BATCH) {
+        await tx.insert(aicoKeyOutbox).values(
+          budgets.map((b) => ({
+            action: 'sync_member_key',
+            nextAttemptAt: new Date(now.getTime() + KEY_SYNC_BACKSTOP_MS),
+            orgId,
+            orgMemberId: b.memberId,
+            payload: { batchKey },
+            status: 'pending',
+          })),
+        );
+      }
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (message === 'BATCH_CLAIM_LOST') return skippedResult();
     if (message === 'INSUFFICIENT_ORG_BALANCE') {
       const org = await db.query.organizations.findFirst({ where: eq(organizations.id, orgId) });
       const balance = Number(org?.walletBalanceMicroUsd ?? 0);
@@ -642,10 +855,24 @@ export const processKeyOutbox = async (
   const keyService = options.keyService ?? new AicoOpenRouterKeyService(db);
   const orgModel = new OrganizationModel(db);
 
+  // N6: a worker that died after claiming a row leaves it `processing` for
+  // good. Once it is old enough that no live worker can still be on it, it is
+  // claimable again — until its attempts run out, like any other row.
+  const staleCutoff = new Date(now.getTime() - OUTBOX_STALE_PROCESSING_MS);
+  const stale = aicoEnv.AICO_FIX_S2_RENEWAL_BATCH
+    ? and(
+        eq(aicoKeyOutbox.status, 'processing'),
+        lte(aicoKeyOutbox.updatedAt, staleCutoff),
+        lt(aicoKeyOutbox.attempts, OUTBOX_MAX_ATTEMPTS),
+      )
+    : undefined;
+
   const candidates = await db
     .select({ id: aicoKeyOutbox.id })
     .from(aicoKeyOutbox)
-    .where(and(eq(aicoKeyOutbox.status, 'pending'), lte(aicoKeyOutbox.nextAttemptAt, now)))
+    .where(
+      or(and(eq(aicoKeyOutbox.status, 'pending'), lte(aicoKeyOutbox.nextAttemptAt, now)), stale),
+    )
     .orderBy(asc(aicoKeyOutbox.nextAttemptAt))
     .limit(options.limit ?? OUTBOX_DEFAULT_BATCH);
 
@@ -658,8 +885,14 @@ export const processKeyOutbox = async (
     // Claim with a compare-and-swap so parallel workers never double-process.
     const [row] = await db
       .update(aicoKeyOutbox)
-      .set({ attempts: sql`${aicoKeyOutbox.attempts} + 1`, status: 'processing' })
-      .where(and(eq(aicoKeyOutbox.id, candidate.id), eq(aicoKeyOutbox.status, 'pending')))
+      .set({
+        attempts: sql`${aicoKeyOutbox.attempts} + 1`,
+        status: 'processing',
+        ...(stale ? { updatedAt: now } : {}),
+      })
+      .where(
+        and(eq(aicoKeyOutbox.id, candidate.id), or(eq(aicoKeyOutbox.status, 'pending'), stale)),
+      )
       .returning();
     if (!row) continue;
 
@@ -745,7 +978,21 @@ const runOutboxAction = async (params: {
   switch (row.action) {
     case 'disable_member_key': {
       if (!row.orgMemberId) throw new Error('ORG_MEMBER_ID_REQUIRED');
+      // R9: a renewal queues this when it fails, and it can run long after the
+      // budget was funded again — freezing a key the org has just paid for. Rows
+      // written by removal carry no batch key and always run.
+      if (aicoEnv.AICO_FIX_S2_RENEWAL_BATCH && row.payload?.batchKey) {
+        const budget = await orgModel.getMemberBudget(row.orgMemberId);
+        if (budget?.isActive && budget.renewalStatus === 'active') return 'done';
+      }
       await keyService.disableMemberKey(row.orgMemberId);
+      return 'done';
+    }
+
+    /** Backstop for a renewal that funded the cycle (R10): idempotent. */
+    case 'sync_member_key': {
+      if (!row.orgMemberId) throw new Error('ORG_MEMBER_ID_REQUIRED');
+      await keyService.ensureMemberKey(row.orgMemberId);
       return 'done';
     }
 

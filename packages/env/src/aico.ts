@@ -55,6 +55,17 @@ declare global {
        */
       AICO_FIX_R5_RENEWAL_LOCK?: string;
       /**
+       * Kill switch for the 2026-10 renewal-batch fixes (R3, R4, R9, R10, R11,
+       * FIN-028, N5, N6): batch keys carry a fingerprint of their budget set, a
+       * batch is claimed by compare-and-swap under a lease, a failed or stale
+       * batch is retried after a backoff, suspended orgs do not renew. Read from
+       * the environment, so it only changes on a restart; a worker finishes the
+       * run it started on the path it started with. Needs
+       * `AICO_FIX_R5_RENEWAL_LOCK`, which protects budgets two workers share.
+       * On unless set to `0`.
+       */
+      AICO_FIX_S2_RENEWAL_BATCH?: string;
+      /**
        * Kill switch for the 2026-10 reclaim guards (N2, N3, N4): a refused
        * freeze is retried instead of estimated, a reclaim refund is capped at
        * what the cycle funded, and a budget that changed since its key was read
@@ -198,6 +209,7 @@ export const getAicoConfig = () => {
       AICO_FIX_R1_FROZEN_RECLAIM: z.boolean().default(true),
       AICO_FIX_R5_RENEWAL_LOCK: z.boolean().default(true),
       AICO_FIX_SA_RECLAIM_GUARD: z.boolean().default(true),
+      AICO_FIX_S2_RENEWAL_BATCH: z.boolean().default(true),
       AICO_CVC_TOKENS_PER_USD: z.coerce.number().positive().int().default(25_000_000),
       AICO_OPENROUTER_MOCK: z.boolean().optional().default(false),
       CHEAPVIBECODE_BASE_URL: z.string().default('https://ru.cheapvibecode.ru'),
@@ -228,6 +240,7 @@ export const getAicoConfig = () => {
       AICO_FIX_R1_FROZEN_RECLAIM: process.env.AICO_FIX_R1_FROZEN_RECLAIM !== '0',
       AICO_FIX_R5_RENEWAL_LOCK: process.env.AICO_FIX_R5_RENEWAL_LOCK !== '0',
       AICO_FIX_SA_RECLAIM_GUARD: process.env.AICO_FIX_SA_RECLAIM_GUARD !== '0',
+      AICO_FIX_S2_RENEWAL_BATCH: process.env.AICO_FIX_S2_RENEWAL_BATCH !== '0',
       AICO_CVC_TOKENS_PER_USD: process.env.AICO_CVC_TOKENS_PER_USD,
       AICO_OPENROUTER_MOCK: process.env.AICO_OPENROUTER_MOCK === '1',
       CHEAPVIBECODE_BASE_URL: process.env.CHEAPVIBECODE_BASE_URL || 'https://ru.cheapvibecode.ru',
