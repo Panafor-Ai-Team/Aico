@@ -429,7 +429,10 @@ export class OrganizationModel {
       const pendingBatch = await tx.query.aicoRenewalBatches.findFirst({
         where: and(
           eq(aicoRenewalBatches.orgId, params.orgId),
-          inArray(aicoRenewalBatches.status, ['pending', 'funded']),
+          // R2: only a batch still in flight blocks deletion. `funded` is
+          // terminal — nothing leaves it — so counting it made an org that had
+          // ever renewed successfully impossible to delete.
+          eq(aicoRenewalBatches.status, 'pending'),
         ),
       });
       if (pendingBatch) throw new Error('ORG_HAS_PENDING_RENEWAL');
