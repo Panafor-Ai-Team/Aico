@@ -201,6 +201,22 @@ describe('platform admin router under the shared key', () => {
     expect((await row())?.hasManagedKey).toBe(true);
   });
 
+  it('N12: a placeholder key id is not listed as a provisioned key', async () => {
+    await testDB.insert(platformAdminUsers).values({
+      email: 'operator-n12@ledger.test',
+      id: operatorId,
+      passwordHash: 'unusable:test',
+    });
+    await testDB
+      .insert(userWallets)
+      .values({ balanceMicroUsd: usd(1), openrouterKeyId: 'mock_placeholder_1', userId: ownerId });
+    const caller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+
+    const row = (await caller.listUserWallets()).find((r) => r.userId === ownerId);
+
+    expect(row?.hasManagedKey).toBe(false);
+  });
+
   it('C6: platform totals cover every wallet and transaction, not the newest 200', async () => {
     await testDB.insert(platformAdminUsers).values({
       email: 'operator-totals@ledger.test',

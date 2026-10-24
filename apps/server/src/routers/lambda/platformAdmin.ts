@@ -13,6 +13,7 @@ import { PlatformAdminUserModel } from '@/database/models/platformAdminUser';
 import { aicoKeyOutbox, memberBudgets, session, users, userWallets } from '@/database/schemas';
 import {
   DEFAULT_USAGE_MULTIPLIER_BP,
+  hasValidManagedKeyId,
   MAX_USAGE_MULTIPLIER_BP,
   microUsdToDecimalString,
   MIN_USAGE_MULTIPLIER_BP,
@@ -896,7 +897,7 @@ export const platformAdminRouter = router({
         banReason: identity?.banReason ?? null,
         banned: Boolean(identity?.banned),
         email: identity?.email ?? null,
-        hasManagedKey: isSharedInferenceKey() || Boolean(w.openrouterKeyId),
+        hasManagedKey: isSharedInferenceKey() || hasValidManagedKeyId(w.openrouterKeyId),
         isActive: w.isActive,
         publicCode: publicCodes.get(w.userId) ?? null,
         userId: w.userId,

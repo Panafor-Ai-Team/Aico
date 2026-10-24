@@ -915,6 +915,43 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
     expect(ensureMemberKeyMock).toHaveBeenCalledWith(me!.id);
   });
 
+  it('N12: getMyBillingSources repairs a funded personal wallet that has no usable key', async () => {
+    ensureUserKeyMock.mockClear();
+    const { AicoBillingModel } = await import('@/database/models/aicoBilling');
+    const billingCaller = aicoBillingRouter.createCaller(createTestContext(strangerId));
+    await new AicoBillingModel(testDB).manualCreditUser({
+      amountMicroUsd: 5_000_000,
+      amountToman: 250_000,
+      createdByUserId: strangerId,
+      fxRateTomanPerUsd: 50_000,
+      idempotencyKey: 'n12-fund-personal',
+      userId: strangerId,
+    });
+
+    await billingCaller.getMyBillingSources();
+    expect(ensureUserKeyMock).toHaveBeenCalledWith(strangerId);
+
+    // The allow-gate path (`syncLive: false`) stays fast and never mints.
+    ensureUserKeyMock.mockClear();
+    await billingCaller.getMyBillingSources({ syncLive: false });
+    expect(ensureUserKeyMock).not.toHaveBeenCalled();
+  });
+
+  it('N12: a placeholder key id is not reported as a provisioned key', async () => {
+    const { AicoBillingModel } = await import('@/database/models/aicoBilling');
+    const { userWallets } = await import('@/database/schemas/aicoOrganization');
+    const billingCaller = aicoBillingRouter.createCaller(createTestContext(strangerId));
+    await new AicoBillingModel(testDB).getOrCreateUserWallet(strangerId);
+    await testDB
+      .update(userWallets)
+      .set({ openrouterKeyId: 'mock_placeholder_1' })
+      .where(eq(userWallets.userId, strangerId));
+
+    const wallet = await billingCaller.getMyWallet();
+
+    expect(wallet.hasManagedKey).toBe(false);
+  });
+
   it('convertToManagement requires a verified phone and rejects a second organization', async () => {
     const strangerCaller = organizationRouter.createCaller(createTestContext(strangerId));
     await expect(strangerCaller.convertToManagement({ name: 'No Phone Co' })).rejects.toMatchObject(
