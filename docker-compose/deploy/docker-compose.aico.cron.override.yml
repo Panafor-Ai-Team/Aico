@@ -1,5 +1,10 @@
 # Optional model catalog sync (every 6h, keeps CVC multipliers fresh) for self-hosted Aico.
 #
+# chat.panafor.com does NOT use this file: its jobs (renewals, key outbox,
+# ledger maintenance, reconcile, model sync) run from the `panachat` user's host
+# crontab — see docs/aico/RENEWAL_SETTLEMENT_RUNBOOK.md. Enabling it there would
+# run each job twice.
+#
 # Requires CRON_SECRET (same value as the app) and APP_URL / internal URL.
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.aico.override.yml \

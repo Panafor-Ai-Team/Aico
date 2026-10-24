@@ -452,9 +452,14 @@ const renewOrg = async (params: {
         }
       }
 
-      const orgBefore = await tx.query.organizations.findFirst({
-        where: eq(organizations.id, orgId),
-      });
+      // D1: locked (after the budgets) so the period_refund rows chain from the
+      // balance this transaction actually moves.
+      const [orgBefore] = await tx
+        .select()
+        .from(organizations)
+        .where(eq(organizations.id, orgId))
+        .limit(1)
+        .for('update');
       if (!orgBefore) throw new Error('ORG_NOT_FOUND');
       let runningBalanceMicroUsd = Number(orgBefore.walletBalanceMicroUsd ?? 0);
 
@@ -792,6 +797,7 @@ const runOutboxAction = async (params: {
         typeof row.payload?.createdByUserId === 'string' ? row.payload.createdByUserId : null;
       await orgModel.reclaimMemberRemainingCredit({
         createdByUserId,
+        expected: reclaimed?.expected,
         metadata: reclaimed?.estimated ? { estimatedReclaim: reclaimed.estimated } : undefined,
         orgId: row.orgId,
         orgMemberId: row.orgMemberId,

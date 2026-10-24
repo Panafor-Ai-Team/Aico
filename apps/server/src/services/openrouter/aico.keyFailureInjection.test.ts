@@ -321,7 +321,7 @@ describe('Aico OpenRouter failure injection (Phase 2)', () => {
       orgId: org.id,
       orgMemberId: ownerMember.id,
     });
-    expect(reclaimed).toEqual({ remainingMicroUsd: 10_400_000, usageMicroUsd: 9_600_000 });
+    expect(reclaimed).toMatchObject({ remainingMicroUsd: 10_400_000, usageMicroUsd: 9_600_000 });
     expect(client.keys.get(keyHash).disabled).toBe(true);
 
     // Reclaiming again after disable must not throw or double-count.

@@ -10,7 +10,7 @@
 // @vitest-environment node
 import type { LobeChatDatabase } from '@lobechat/database';
 import { getTestDB } from '@lobechat/database/test-utils';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
@@ -163,8 +163,14 @@ class RevocableImmutableProvider extends ImmutableProvider {
   /** When set, every key edit fails with this error (a gateway refusing it). */
   editRejects: Error | null = null;
 
+  /** With `editRejects`: how many edits still land before the refusals start. */
+  editsAllowed = 0;
+
   updateKey: NonNullable<ManagedProviderClient['updateKey']> = async (params) => {
-    if (this.editRejects) throw this.editRejects;
+    if (this.editRejects) {
+      if (this.editsAllowed > 0) this.editsAllowed -= 1;
+      else throw this.editRejects;
+    }
     const hash = this.hashOf(params.apiKey);
     if (params.disabled) this.frozen.add(hash);
     else this.frozen.delete(hash);
@@ -738,7 +744,9 @@ describe('immutable-limit provider — member budgets', () => {
 
     it('settles from the last synced usage once, marked estimated, with an alert', async () => {
       const { keys, member, org, orgModel, provider } = await removedAfterSync();
+      // The freeze lands; the read through it is refused.
       provider.editRejects = new CheapVibeCodeApiError(400, 'Bad Request', 'key_inactive');
+      provider.editsAllowed = 1;
       const before = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd);
 
       await reclaimJob(org.id, member.id);
@@ -779,6 +787,7 @@ describe('immutable-limit provider — member budgets', () => {
       await keys.ensureMemberKey(member.id);
       await keys.disableMemberKey(member.id);
       provider.editRejects = new CheapVibeCodeApiError(400, 'Bad Request', 'key_inactive');
+      provider.editsAllowed = 1;
 
       await expect(
         keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id }),
@@ -795,6 +804,7 @@ describe('immutable-limit provider — member budgets', () => {
         new Error('Control plane CheapVibeCode proxy 400: Bad Request'),
         { gatewayCode: 'cheapvibecode_rejected', status: 400 },
       );
+      provider.editsAllowed = 1;
 
       const reclaimed = await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
 
@@ -821,6 +831,163 @@ describe('immutable-limit provider — member budgets', () => {
       await expect(keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id })).rejects.toBe(
         error,
       );
+    });
+
+    describe('N3: a key left bigger than the cycle', () => {
+      /** A shrink that never landed: the key still holds $100 raw against a $12 cap. */
+      const oversizedKey = async () => {
+        const ctx = await removedAfterSync();
+        ctx.provider.keys.get(ctx.created.keyId!)!.limitUsd = 100;
+        return ctx;
+      };
+
+      it('refunds at most what the cycle funded, with an alert', async () => {
+        const { keys, member, org, orgModel } = await oversizedKey();
+        const before = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd);
+
+        await reclaimJob(org.id, member.id);
+        await processKeyOutbox(db, { keyService: keys });
+
+        // $12 cap − $3.60 used — never the $116.40 the key still reports.
+        expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(
+          before + usd(8.4),
+        );
+        const alert = await db.query.aicoSecurityAlertState.findFirst({
+          where: eq(aicoSecurityAlertState.id, `reclaim.refund_over_cap:${member.id}`),
+        });
+        expect(alert).toBeDefined();
+      });
+
+      it('AICO_FIX_SA_RECLAIM_GUARD=0 restores the uncapped refund', async () => {
+        const flags = aicoEnv as { AICO_FIX_SA_RECLAIM_GUARD: boolean };
+        flags.AICO_FIX_SA_RECLAIM_GUARD = false;
+        try {
+          const { keys, member, org } = await oversizedKey();
+
+          const reclaimed = await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
+
+          expect(reclaimed?.remainingMicroUsd).toBe(usd(116.4));
+        } finally {
+          flags.AICO_FIX_SA_RECLAIM_GUARD = true;
+        }
+      });
+    });
+
+    describe('N4: the budget changes between the key read and the refund', () => {
+      it('does not settle a budget a renewal moved on since its key was read', async () => {
+        const { keys, member, org, orgModel } = await removedAfterSync();
+        const reclaimed = await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
+        // A renewal commits in between: refund paid, new cycle funded.
+        await db
+          .update(memberBudgets)
+          .set({ ledgerEpoch: sql`${memberBudgets.ledgerEpoch} + 1`, settledUsageMicroUsd: 0 })
+          .where(eq(memberBudgets.orgMemberId, member.id));
+        const before = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd);
+
+        await expect(
+          orgModel.reclaimMemberRemainingCredit({
+            expected: reclaimed?.expected,
+            orgId: org.id,
+            orgMemberId: member.id,
+            remainingMicroUsd: reclaimed?.remainingMicroUsd ?? 0,
+          }),
+        ).rejects.toThrow('BUDGET_CHANGED_DURING_RECLAIM');
+
+        expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(before);
+        expect((await orgModel.getMemberBudget(member.id))?.renewalStatus).not.toBe('settled');
+      });
+
+      it('does not drop an allocation raised since the key was read', async () => {
+        const { keys, member, org, orgModel } = await removedAfterSync();
+        const reclaimed = await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
+        await db
+          .update(memberBudgets)
+          .set({ periodAmountMicroUsd: usd(20), reservedMicroUsd: usd(20) })
+          .where(eq(memberBudgets.orgMemberId, member.id));
+
+        await expect(
+          orgModel.reclaimMemberRemainingCredit({
+            expected: reclaimed?.expected,
+            orgId: org.id,
+            orgMemberId: member.id,
+            remainingMicroUsd: reclaimed?.remainingMicroUsd ?? 0,
+          }),
+        ).rejects.toThrow('BUDGET_CHANGED_DURING_RECLAIM');
+      });
+
+      it('settles normally when nothing changed', async () => {
+        const { keys, member, org, orgModel } = await removedAfterSync();
+        const before = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd);
+        const reclaimed = await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
+
+        await orgModel.reclaimMemberRemainingCredit({
+          expected: reclaimed?.expected,
+          orgId: org.id,
+          orgMemberId: member.id,
+          remainingMicroUsd: reclaimed?.remainingMicroUsd ?? 0,
+        });
+
+        expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(
+          before + usd(8.4),
+        );
+      });
+    });
+
+    describe('N2: the freeze itself is refused', () => {
+      it.each([
+        ['CheapVibeCode', () => new CheapVibeCodeApiError(400, 'Bad Request', 'key_inactive')],
+        [
+          'the control-plane proxy',
+          () =>
+            Object.assign(new Error('Control plane CheapVibeCode proxy 400: Bad Request'), {
+              gatewayCode: 'cheapvibecode_rejected',
+              status: 400,
+            }),
+        ],
+      ])('credits nothing and keeps the key when %s refuses the freeze', async (_, makeError) => {
+        const { keys, member, org, orgModel, provider } = await removedAfterSync();
+        const before = Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd);
+        const budgetBefore = await orgModel.getMemberBudget(member.id);
+        provider.editRejects = makeError();
+
+        await reclaimJob(org.id, member.id);
+        await processKeyOutbox(db, { keyService: keys });
+
+        // The key may still be live: an estimate here would refund money the
+        // member can go on spending, and drop the secret needed to freeze it.
+        expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(before);
+        const budget = await orgModel.getMemberBudget(member.id);
+        expect(budget?.renewalStatus).not.toBe('settled');
+        expect(budget?.openrouterKeyCiphertext).toBe(budgetBefore?.openrouterKeyCiphertext);
+        const job = await db.query.aicoKeyOutbox.findFirst({
+          where: eq(aicoKeyOutbox.orgMemberId, member.id),
+        });
+        expect(job?.status).toBe('pending');
+      });
+
+      it('settles from the last synced usage when the key is already gone upstream', async () => {
+        const { keys, member, org, provider } = await removedAfterSync();
+        provider.editRejects = new CheapVibeCodeApiError(404, 'Not Found', null);
+
+        const reclaimed = await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
+
+        expect(reclaimed?.estimated?.refundedMicroUsd).toBe(usd(8.4));
+      });
+
+      it('AICO_FIX_SA_RECLAIM_GUARD=0 restores the estimate on a refused freeze', async () => {
+        const flags = aicoEnv as { AICO_FIX_SA_RECLAIM_GUARD: boolean };
+        flags.AICO_FIX_SA_RECLAIM_GUARD = false;
+        try {
+          const { keys, member, org, provider } = await removedAfterSync();
+          provider.editRejects = new CheapVibeCodeApiError(400, 'Bad Request', 'key_inactive');
+
+          const reclaimed = await keys.reclaimMemberKey({ orgId: org.id, orgMemberId: member.id });
+
+          expect(reclaimed?.estimated?.refundedMicroUsd).toBe(usd(8.4));
+        } finally {
+          flags.AICO_FIX_SA_RECLAIM_GUARD = true;
+        }
+      });
     });
   });
 

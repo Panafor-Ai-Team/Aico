@@ -193,9 +193,14 @@ export class AicoBillingModel {
           target: userWallets.userId,
         });
 
-        const before = await tx.query.userWallets.findFirst({
-          where: eq(userWallets.userId, params.userId),
-        });
+        // D1: locked so the ledger row's balance_before is the real one and the
+        // isActive check cannot miss a freeze committing alongside.
+        const [before] = await tx
+          .select()
+          .from(userWallets)
+          .where(eq(userWallets.userId, params.userId))
+          .limit(1)
+          .for('update');
         // FIN-015: crediting used to flip `isActive` back on, silently
         // resurrecting a soft-deleted or deactivated wallet — and, before the
         // capacity fix, handing back its pre-freeze spend limit for free.
@@ -398,25 +403,34 @@ export class AicoBillingModel {
     userId: string;
   }) => {
     return this.db.transaction(async (tx) => {
-      const before = await tx.query.userWallets.findFirst({
-        where: eq(userWallets.userId, params.userId),
-      });
+      // N1: lock the row, and park what the row holds when it is written — not
+      // a figure read earlier. An unlocked read let a concurrent credit vanish
+      // (balance set to 0 over it) and a concurrent debit be parked a second time.
+      const [before] = await tx
+        .select()
+        .from(userWallets)
+        .where(eq(userWallets.userId, params.userId))
+        .limit(1)
+        .for('update');
       if (!before) return null;
-
-      const balanceMicroUsd = Number(before.balanceMicroUsd ?? 0);
-      const rawCapacityMicroUsd = Number(before.rawCapacityMicroUsd ?? 0);
 
       const [wallet] = await tx
         .update(userWallets)
         .set({
           balanceMicroUsd: 0,
-          frozenMicroUsd: sql`${userWallets.frozenMicroUsd} + ${balanceMicroUsd}`,
-          frozenRawCapacityMicroUsd: sql`${userWallets.frozenRawCapacityMicroUsd} + ${rawCapacityMicroUsd}`,
+          frozenMicroUsd: sql`${userWallets.frozenMicroUsd} + ${userWallets.balanceMicroUsd}`,
+          frozenRawCapacityMicroUsd: sql`${userWallets.frozenRawCapacityMicroUsd} + ${userWallets.rawCapacityMicroUsd}`,
           isActive: false,
           rawCapacityMicroUsd: 0,
         })
         .where(eq(userWallets.userId, params.userId))
         .returning();
+
+      const balanceMicroUsd =
+        Number(wallet?.frozenMicroUsd ?? 0) - Number(before.frozenMicroUsd ?? 0);
+      const rawCapacityMicroUsd =
+        Number(wallet?.frozenRawCapacityMicroUsd ?? 0) -
+        Number(before.frozenRawCapacityMicroUsd ?? 0);
 
       if (balanceMicroUsd === 0) return { transaction: null, wallet };
 
@@ -451,9 +465,15 @@ export class AicoBillingModel {
     userId: string;
   }) => {
     return this.db.transaction(async (tx) => {
-      const before = await tx.query.userWallets.findFirst({
-        where: eq(userWallets.userId, params.userId),
-      });
+      // N1: lock the row, and restore only the parked figures still there when
+      // writing. Two unlocked unfreezes (an admin double-click) both read the
+      // same frozen amount and each paid it out.
+      const [before] = await tx
+        .select()
+        .from(userWallets)
+        .where(eq(userWallets.userId, params.userId))
+        .limit(1)
+        .for('update');
       if (!before) return null;
 
       const frozenMicroUsd = Number(before.frozenMicroUsd ?? 0);
@@ -469,8 +489,24 @@ export class AicoBillingModel {
           isActive: true,
           rawCapacityMicroUsd: sql`${userWallets.rawCapacityMicroUsd} + ${frozenRawCapacityMicroUsd}`,
         })
-        .where(eq(userWallets.userId, params.userId))
+        .where(
+          and(
+            eq(userWallets.userId, params.userId),
+            eq(userWallets.frozenMicroUsd, frozenMicroUsd),
+            eq(userWallets.frozenRawCapacityMicroUsd, frozenRawCapacityMicroUsd),
+          ),
+        )
         .returning();
+
+      // Someone else restored it first: nothing is left to restore.
+      if (!wallet) {
+        const [current] = await tx
+          .select()
+          .from(userWallets)
+          .where(eq(userWallets.userId, params.userId))
+          .limit(1);
+        return { transaction: null, wallet: current };
+      }
 
       if (frozenMicroUsd === 0) return { transaction: null, wallet };
 

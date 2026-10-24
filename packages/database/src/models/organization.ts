@@ -39,6 +39,14 @@ export type OrgMemberStatus = 'invited' | 'active' | 'disabled' | 'revocation_pe
 export type OrgStatus = 'active' | 'suspended' | 'deleted';
 export type InviteIdentifierType = 'email' | 'phone' | 'public_user_id';
 
+/** The member budget a reclaim figure was read against (N4). */
+export interface ReclaimBudgetSnapshot {
+  ledgerEpoch: number;
+  openrouterKeyId: string | null;
+  pendingPeriodAmountMicroUsd: number;
+  periodAmountMicroUsd: number;
+}
+
 const INVITE_TTL_MS = 72 * 60 * 60 * 1000;
 export const DEFAULT_TEAM_NAME = 'Unspecified';
 export const DEFAULT_TEAM_SLUG = 'unspecified';
@@ -405,9 +413,15 @@ export class OrganizationModel {
     organization: OrganizationItem;
   }> => {
     return this.db.transaction(async (tx) => {
-      const org = await tx.query.organizations.findFirst({
-        where: eq(organizations.id, params.orgId),
-      });
+      // D1: lock the org row. The balance read here is forfeited and then set
+      // to 0; unlocked, a credit committed in between was zeroed with no ledger
+      // row, and two deletes could both pass the status check.
+      const [org] = await tx
+        .select()
+        .from(organizations)
+        .where(eq(organizations.id, params.orgId))
+        .limit(1)
+        .for('update');
       if (!org) throw new Error('ORG_NOT_FOUND');
       if (org.status === 'deleted') throw new Error('ORG_ALREADY_DELETED');
       if (org.name !== params.confirmName) throw new Error('ORG_NAME_MISMATCH');
@@ -618,10 +632,18 @@ export class OrganizationModel {
 
     const applyCredit = () =>
       this.db.transaction(async (tx) => {
-        const before = await tx.query.organizations.findFirst({
-          where: eq(organizations.id, params.orgId),
-        });
+        // D1: locked, so the ledger row's before/after figures are the real ones
+        // and a concurrent delete is seen (N9) rather than raced.
+        const [before] = await tx
+          .select()
+          .from(organizations)
+          .where(eq(organizations.id, params.orgId))
+          .limit(1)
+          .for('update');
         if (!before) throw new Error('ORG_NOT_FOUND');
+        // N9: deletion forfeited the wallet; credit landing on the tombstone can
+        // never be allocated. A suspended org may still be paid up.
+        if (before.status === 'deleted') throw new Error('ORG_DELETED');
         const balanceBeforeMicroUsd = Number(before.walletBalanceMicroUsd ?? 0);
         const balanceBeforeToman = Number(before.walletBalanceToman ?? 0);
 
@@ -1658,6 +1680,13 @@ export class OrganizationModel {
     /** Overrides the default ledger description — the bulk sweep stamps its batch id here. */
     description?: string;
     /**
+     * N4: the budget `remainingMicroUsd` was read against. When given, a budget
+     * that has changed since (new cycle, new cap, new key) is not settled: the
+     * figure belongs to a state that no longer exists, and settling would
+     * refund a cycle twice or drop an allocation. The caller retries.
+     */
+    expected?: ReclaimBudgetSnapshot;
+    /**
      * Stamped on the ledger row. The key service sets it when the refund was
      * estimated from the last synced usage because the key could not be read.
      */
@@ -1708,6 +1737,21 @@ export class OrganizationModel {
           ) + Math.max(0, Number(existingBudget.pendingPeriodAmountMicroUsd ?? 0));
       }
 
+      const { expected } = params;
+      if (
+        expected &&
+        !params.useLedgerRemaining &&
+        existingBudget &&
+        existingBudget.renewalStatus !== 'settled' &&
+        (Number(existingBudget.ledgerEpoch ?? 0) !== expected.ledgerEpoch ||
+          (existingBudget.openrouterKeyId ?? null) !== expected.openrouterKeyId ||
+          Number(existingBudget.periodAmountMicroUsd ?? 0) !== expected.periodAmountMicroUsd ||
+          Number(existingBudget.pendingPeriodAmountMicroUsd ?? 0) !==
+            expected.pendingPeriodAmountMicroUsd)
+      ) {
+        throw new Error('BUDGET_CHANGED_DURING_RECLAIM');
+      }
+
       let budget: MemberBudgetItem | null = existingBudget ?? null;
       if (existingBudget) {
         const [casBudget] = await tx
@@ -1742,9 +1786,14 @@ export class OrganizationModel {
         budget = casBudget;
       }
 
-      const orgBefore = await tx.query.organizations.findFirst({
-        where: eq(organizations.id, params.orgId),
-      });
+      // D1: locked after the budget (the order renewal and allocate use), so a
+      // delete committing now is seen below instead of credited over.
+      const [orgBefore] = await tx
+        .select()
+        .from(organizations)
+        .where(eq(organizations.id, params.orgId))
+        .limit(1)
+        .for('update');
       if (!orgBefore) throw new Error('ORG_NOT_FOUND');
 
       const balanceBeforeMicroUsd = Number(orgBefore.walletBalanceMicroUsd ?? 0);
