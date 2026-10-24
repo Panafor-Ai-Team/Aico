@@ -1,5 +1,6 @@
-import { eq } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { SQL } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getTestDB } from '../../core/getTestDB';
 import { userWallets, walletTransactions } from '../../schemas/aicoOrganization';
@@ -27,6 +28,38 @@ const credit = (amountMicroUsd: number, idempotencyKey: string) =>
     userId,
   });
 
+/**
+ * Runs `competing` inside the model's next transaction, after its reads and
+ * just before its first wallet UPDATE — the order a concurrent commit lands in
+ * under READ COMMITTED when the read takes no lock. PGlite has one connection,
+ * so this is how a race is replayed deterministically.
+ */
+const interleaveBeforeWalletUpdate = (competing: SQL) => {
+  const original = serverDB.transaction.bind(serverDB);
+  return vi.spyOn(serverDB, 'transaction').mockImplementationOnce(((cb: any, config: any) =>
+    original(async (tx: any) => {
+      const update = tx.update.bind(tx);
+      let fired = false;
+      tx.update = (table: unknown) => {
+        const builder = update(table);
+        if (table !== userWallets || fired) return builder;
+        fired = true;
+        const set = builder.set.bind(builder);
+        builder.set = (values: unknown) => {
+          const query = set(values);
+          const execute = query.execute.bind(query);
+          query.execute = async (...args: unknown[]) => {
+            await tx.execute(competing);
+            return execute(...args);
+          };
+          return query;
+        };
+        return builder;
+      };
+      return cb(tx);
+    }, config)) as any);
+};
+
 beforeEach(async () => {
   await serverDB.delete(walletTransactions);
   await serverDB.delete(userWallets);
@@ -35,6 +68,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await serverDB.delete(walletTransactions);
   await serverDB.delete(userWallets);
   await serverDB.delete(users);
@@ -134,5 +168,62 @@ describe('FIN-015 personal wallet freeze / unfreeze', () => {
     const rows = await serverDB.select().from(walletTransactions);
     expect(rows).toHaveLength(0);
     expect((await readWallet()).isActive).toBe(false);
+  });
+
+  describe('N1: a concurrent write between the read and the update', () => {
+    it('a second unfreeze committing first does not pay the frozen amount twice', async () => {
+      await credit(6_000_000, 'n1-double-seed');
+      await billingModel.freezePersonalWallet({ userId });
+      const frozen = await readWallet();
+
+      // What the other admin click commits while this one is between read and write.
+      interleaveBeforeWalletUpdate(sql`
+        UPDATE user_wallets SET
+          balance_micro_usd = balance_micro_usd + frozen_micro_usd,
+          raw_capacity_micro_usd = raw_capacity_micro_usd + frozen_raw_capacity_micro_usd,
+          frozen_micro_usd = 0,
+          frozen_raw_capacity_micro_usd = 0,
+          is_active = true
+        WHERE user_id = ${userId}`);
+      await billingModel.unfreezePersonalWallet({ userId });
+
+      const wallet = await readWallet();
+      expect(Number(wallet.balanceMicroUsd)).toBe(6_000_000);
+      expect(Number(wallet.rawCapacityMicroUsd)).toBe(Number(frozen.frozenRawCapacityMicroUsd));
+      expect(Number(wallet.frozenMicroUsd)).toBe(0);
+    });
+
+    it('a credit committing during a freeze is parked, not lost', async () => {
+      await credit(6_000_000, 'n1-credit-seed');
+      const before = await readWallet();
+
+      interleaveBeforeWalletUpdate(sql`
+        UPDATE user_wallets SET
+          balance_micro_usd = balance_micro_usd + 1000000,
+          raw_capacity_micro_usd = raw_capacity_micro_usd + 1000000
+        WHERE user_id = ${userId}`);
+      await billingModel.freezePersonalWallet({ userId });
+
+      const wallet = await readWallet();
+      expect(Number(wallet.balanceMicroUsd)).toBe(0);
+      expect(Number(wallet.rawCapacityMicroUsd)).toBe(0);
+      expect(Number(wallet.frozenMicroUsd)).toBe(7_000_000);
+      expect(Number(wallet.frozenRawCapacityMicroUsd)).toBe(
+        Number(before.rawCapacityMicroUsd) + 1_000_000,
+      );
+    });
+
+    it('a debit committing during a freeze is not parked again', async () => {
+      await credit(6_000_000, 'n1-debit-seed');
+
+      interleaveBeforeWalletUpdate(sql`
+        UPDATE user_wallets SET balance_micro_usd = balance_micro_usd - 2000000
+        WHERE user_id = ${userId}`);
+      await billingModel.freezePersonalWallet({ userId });
+
+      const wallet = await readWallet();
+      expect(Number(wallet.balanceMicroUsd)).toBe(0);
+      expect(Number(wallet.frozenMicroUsd)).toBe(4_000_000);
+    });
   });
 });
