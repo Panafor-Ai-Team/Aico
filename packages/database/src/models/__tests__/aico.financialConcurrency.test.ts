@@ -4,10 +4,15 @@
  * Plus AICO-105: FIN-001 (pending period), FIN-002 (reclaim CAS), FIN-003 (idempotency)
  */
 import { eq, sql } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getTestDB } from '../../core/getTestDB';
-import { memberBudgets, organizations, walletTransactions } from '../../schemas/aicoOrganization';
+import {
+  memberBudgets,
+  organizationMembers,
+  organizations,
+  walletTransactions,
+} from '../../schemas/aicoOrganization';
 import type { LobeChatDatabase } from '../../type';
 import { AicoUsageLedgerModel } from '../aicoUsageLedger';
 import { OrganizationModel } from '../organization';
@@ -794,4 +799,77 @@ describe('D1 / N9: org wallet writes against a concurrent delete or credit', () 
       expect(befores).toEqual(Array.from({ length: 10 }, (_, i) => usd(i)));
     },
   );
+});
+
+describe('Stage D: allocate', () => {
+  const allocate = (
+    orgId: string,
+    orgMemberId: string,
+    amountUsd: number,
+    idempotencyKey?: string,
+  ) =>
+    orgModel.allocateMemberCredit({
+      createdByUserId: ownerId,
+      idempotencyKey,
+      orgId,
+      orgMemberId,
+      period: 'daily',
+      periodAmountMicroUsd: usd(amountUsd),
+    });
+
+  describe('N8: members who have left', () => {
+    it.each(['left', 'revocation_pending'] as const)(
+      'refuses to fund a %s member and leaves the org wallet alone',
+      async (status) => {
+        const { memberA, org } = await setupOrgWithUsd(100);
+        await serverDB
+          .update(organizationMembers)
+          .set({ status })
+          .where(eq(organizationMembers.id, memberA.id));
+
+        await expect(allocate(org.id, memberA.id, 50)).rejects.toThrow('MEMBER_NOT_ACTIVE');
+
+        expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(usd(100));
+        expect(await orgModel.getMemberBudget(memberA.id)).toBeFalsy();
+      },
+    );
+
+    it('still funds an active member', async () => {
+      const { memberA, org } = await setupOrgWithUsd(100);
+
+      await allocate(org.id, memberA.id, 50);
+
+      expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(usd(50));
+    });
+  });
+
+  describe('D2: idempotency keys', () => {
+    it('refuses a key already used for a different member, debiting nothing', async () => {
+      const { memberA, memberB, org } = await setupOrgWithUsd(100);
+      await allocate(org.id, memberA.id, 10, 'stage-d-key-1');
+
+      await expect(allocate(org.id, memberB.id, 10, 'stage-d-key-1')).rejects.toThrow(
+        'IDEMPOTENCY_KEY_CONFLICT',
+      );
+
+      expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(usd(90));
+      expect(await orgModel.getMemberBudget(memberB.id)).toBeFalsy();
+    });
+
+    it('a request that lost the race for its key gets the winner back, not an error', async () => {
+      const { memberA, org } = await setupOrgWithUsd(100);
+      const first = await allocate(org.id, memberA.id, 10, 'stage-d-key-2');
+      // The retry's pre-check missed (the winner committed after it looked), so
+      // the insert is what meets the unique key.
+      vi.spyOn(serverDB.query.walletTransactions, 'findFirst').mockResolvedValueOnce(undefined);
+
+      // A different amount stands in for the racing request's own debit, so the
+      // insert (and not the "same cap, nothing to do" shortcut) is what runs.
+      const second = await allocate(org.id, memberA.id, 12, 'stage-d-key-2');
+
+      expect(second.transaction?.id).toBe(first.transaction?.id);
+      expect(Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd)).toBe(usd(90));
+      vi.restoreAllMocks();
+    });
+  });
 });
