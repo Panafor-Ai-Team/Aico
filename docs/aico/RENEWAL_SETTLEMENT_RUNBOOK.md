@@ -12,7 +12,23 @@
 
 Auth for Aico crons: `Authorization: Bearer $CRON_SECRET`.
 
-## Self-hosted scheduling
+## Production scheduling (chat.panafor.com, verified 2026-10-24)
+
+Production runs every Aico job from the **`panachat` user's crontab** on the app host, not from root's crontab, systemd or compose. Each line calls the wrapper `/home/panachat/bin/aico-cron <job>`. It passes `CRON_SECRET` to curl on stdin, so the secret is in neither `ps` nor the crontab. Its exit code follows the HTTP status (2xx = success).
+
+```cron
+*/5 * * * *  aico-cron process-renewals
+*   * * * *  aico-cron process-key-outbox
+*/5 * * * *  aico-cron ledger-maintenance
+*/15 * * * * aico-cron reconcile
+0 */6 * * *  aico-cron sync-openrouter-models
+```
+
+Check it with `crontab -l -u panachat`. `crontab -l` as root shows nothing, so don't read an empty root crontab as "not scheduled".
+
+**Do not also enable these jobs in `docker-compose.aico.cron.override.yml`**: every job would run twice. Renewal batches and outbox claims tolerate a second worker, but it doubles gateway edits, and a duplicated reconcile run is noise.
+
+## Self-hosted scheduling (other deployments)
 
 Production is **self-hosted** (not Vercel Cron). Ops must hit the HTTP routes on a timer (crontab, systemd timers, k8s CronJob, etc.).
 
