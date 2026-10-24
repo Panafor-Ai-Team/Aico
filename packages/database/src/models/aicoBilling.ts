@@ -24,6 +24,7 @@ import {
   assertValidMultiplierBp,
   defaultMultiplierBpForProvider,
   FALLBACK_MULTIPLIER_CONFIG_ID,
+  mulDivFloor,
   rawCapacityFromDeposit,
 } from '../utils/aicoMoney';
 
@@ -328,8 +329,8 @@ export class AicoBillingModel {
         const balanceToman = Number(before.balanceToman ?? 0);
         // Same fraction off every figure the balance was bought with. Floor the
         // removed capacity so rounding can only ever leave the user a hair more.
-        const rawRemoved = Math.floor((rawCapacity * params.amountMicroUsd) / balance);
-        const tomanRemoved = Math.floor((balanceToman * params.amountMicroUsd) / balance);
+        const rawRemoved = mulDivFloor(rawCapacity, params.amountMicroUsd, balance);
+        const tomanRemoved = mulDivFloor(balanceToman, params.amountMicroUsd, balance);
 
         // The key limit is `rawCapacity − rawUsageBeforeKey`, and enforce holds
         // count against capacity too — neither may be pushed below zero.
