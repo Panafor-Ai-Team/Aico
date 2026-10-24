@@ -52,6 +52,35 @@ beforeEach(async () => {
 
 afterEach(clean);
 
+describe('N13: a debit on a wallet too big for float products', () => {
+  it('removes exactly the proportional capacity, not one micro-USD more', async () => {
+    // balance == capacity == toman, so the share removed must equal the amount.
+    // The float formula floor((N * A) / N) returns A - 1 for these, which
+    // leaves the user a micro-USD of capacity the debit took the money for.
+    const N = 897_111_012_395;
+    const A = 184_907_931_804;
+    await seedWallet({
+      balanceMicroUsd: N,
+      balanceToman: N,
+      rawCapacityMicroUsd: N,
+      rawUsageBeforeKeyMicroUsd: 0,
+      settledUsageMicroUsd: 0,
+    });
+
+    const { wallet } = await billingModel.manualDebitUser({
+      amountMicroUsd: A,
+      createdByAdminId: operatorId,
+      description: 'big debit',
+      idempotencyKey: 'debit-key-big-1',
+      userId,
+    });
+
+    expect(Number(wallet.balanceMicroUsd)).toBe(N - A);
+    expect(Number(wallet.rawCapacityMicroUsd)).toBe(N - A);
+    expect(Number(wallet.balanceToman)).toBe(N - A);
+  });
+});
+
 describe('AicoBillingModel.manualDebitUser', () => {
   it('takes unspent money back with a traceable negative ledger row', async () => {
     await seedWallet();

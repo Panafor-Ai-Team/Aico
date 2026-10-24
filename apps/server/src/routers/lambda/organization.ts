@@ -1030,7 +1030,7 @@ export const organizationRouter = router({
       return {
         currentPeriodEnd: budget.currentPeriodEnd?.toISOString() ?? null,
         currentPeriodStart: budget.currentPeriodStart?.toISOString() ?? null,
-        hasManagedKey: isSharedInferenceKey() || Boolean(budget.openrouterKeyId),
+        hasManagedKey: isSharedInferenceKey() || hasValidManagedKeyId(budget.openrouterKeyId),
         isActive: budget.isActive,
         nextRenewalAt: budget.nextRenewalAt?.toISOString() ?? null,
         openrouterLimitReset: budget.openrouterLimitReset,

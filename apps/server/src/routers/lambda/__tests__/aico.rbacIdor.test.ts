@@ -8,6 +8,7 @@ import path from 'node:path';
 
 import type { LobeChatDatabase } from '@lobechat/database';
 import { getTestDB } from '@lobechat/database/test-utils';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { aicoBillingRouter } from '../aicoBilling';
@@ -464,6 +465,40 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
       expect(queued[0]).toMatchObject({ action: 'shrink_user_key', userId: strangerId });
     });
 
+    it('C2: a debit is checked against usage refreshed from the key, not the last sync', async () => {
+      const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+      await platformCaller.addManualUserCredit({
+        amountToman: 30_000,
+        description: 'fund before debit',
+        idempotencyKey: 'c2-fund-before-debit',
+        userId: strangerId,
+      });
+      const { userWallets } = await import('@/database/schemas/aicoOrganization');
+      const [funded] = await testDB
+        .select()
+        .from(userWallets)
+        .where(eq(userWallets.userId, strangerId));
+      // The key has really spent everything, though the persisted figure is stale.
+      getUserRemainingMock.mockImplementationOnce(async (_id: string, options?: unknown) => {
+        if ((options as { persist?: boolean } | undefined)?.persist) {
+          await testDB
+            .update(userWallets)
+            .set({ settledUsageMicroUsd: Number(funded.balanceMicroUsd) })
+            .where(eq(userWallets.userId, strangerId));
+        }
+        return { remainingMicroUsd: 0, usageKnown: true, usageMicroUsd: 0 };
+      });
+
+      await expect(
+        platformCaller.addManualUserDebit({
+          amountUsd: '0.01',
+          description: 'take back',
+          idempotencyKey: 'c2-debit-stale-usage',
+          userId: strangerId,
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'DEBIT_EXCEEDS_AVAILABLE' });
+    });
+
     it('W2: a debit whose key shrink fails queues a shrink retry, not a raise', async () => {
       const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
       await platformCaller.addManualUserCredit({
@@ -878,6 +913,43 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
 
     await billingCaller.getMyBillingSources();
     expect(ensureMemberKeyMock).toHaveBeenCalledWith(me!.id);
+  });
+
+  it('N12: getMyBillingSources repairs a funded personal wallet that has no usable key', async () => {
+    ensureUserKeyMock.mockClear();
+    const { AicoBillingModel } = await import('@/database/models/aicoBilling');
+    const billingCaller = aicoBillingRouter.createCaller(createTestContext(strangerId));
+    await new AicoBillingModel(testDB).manualCreditUser({
+      amountMicroUsd: 5_000_000,
+      amountToman: 250_000,
+      createdByUserId: strangerId,
+      fxRateTomanPerUsd: 50_000,
+      idempotencyKey: 'n12-fund-personal',
+      userId: strangerId,
+    });
+
+    await billingCaller.getMyBillingSources();
+    expect(ensureUserKeyMock).toHaveBeenCalledWith(strangerId);
+
+    // The allow-gate path (`syncLive: false`) stays fast and never mints.
+    ensureUserKeyMock.mockClear();
+    await billingCaller.getMyBillingSources({ syncLive: false });
+    expect(ensureUserKeyMock).not.toHaveBeenCalled();
+  });
+
+  it('N12: a placeholder key id is not reported as a provisioned key', async () => {
+    const { AicoBillingModel } = await import('@/database/models/aicoBilling');
+    const { userWallets } = await import('@/database/schemas/aicoOrganization');
+    const billingCaller = aicoBillingRouter.createCaller(createTestContext(strangerId));
+    await new AicoBillingModel(testDB).getOrCreateUserWallet(strangerId);
+    await testDB
+      .update(userWallets)
+      .set({ openrouterKeyId: 'mock_placeholder_1' })
+      .where(eq(userWallets.userId, strangerId));
+
+    const wallet = await billingCaller.getMyWallet();
+
+    expect(wallet.hasManagedKey).toBe(false);
   });
 
   it('convertToManagement requires a verified phone and rejects a second organization', async () => {

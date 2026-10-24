@@ -309,18 +309,32 @@ const safeBp = (bp: number | null | undefined): number => {
   return value;
 };
 
+/**
+ * `floor(a * b / c)` for non-negative integers, exact. A plain `a * b / c`
+ * passes 2^53 once both factors reach about $95 of micro-USD, and the quotient
+ * is then off by one micro-USD at an integer boundary (N13).
+ */
+export const mulDivFloor = (a: number, b: number, c: number): number =>
+  Number((BigInt(Math.trunc(a)) * BigInt(Math.trunc(b))) / BigInt(Math.trunc(c)));
+
+/** `ceil(a * b / c)` for non-negative integers, exact. */
+export const mulDivCeil = (a: number, b: number, c: number): number => {
+  const divisor = BigInt(Math.trunc(c));
+  return Number((BigInt(Math.trunc(a)) * BigInt(Math.trunc(b)) + divisor - 1n) / divisor);
+};
+
 /** Raw OpenRouter micro-USD → billed micro-USD. Ceil: never under-charge. */
 export const applyMultiplierMicroUsd = (micro: number, bp: number | null | undefined): number => {
   const value = Math.trunc(Number(micro ?? 0));
   if (!Number.isFinite(value) || value <= 0) return 0;
-  return Math.ceil((value * safeBp(bp)) / MULTIPLIER_BP_SCALE);
+  return mulDivCeil(value, safeBp(bp), MULTIPLIER_BP_SCALE);
 };
 
 /** Billed micro-USD → raw micro-USD. Floor: never hand out more headroom than paid for. */
 export const removeMultiplierMicroUsd = (micro: number, bp: number | null | undefined): number => {
   const value = Math.trunc(Number(micro ?? 0));
   if (!Number.isFinite(value) || value <= 0) return 0;
-  return Math.floor((value * MULTIPLIER_BP_SCALE) / safeBp(bp));
+  return mulDivFloor(value, MULTIPLIER_BP_SCALE, safeBp(bp));
 };
 
 /**

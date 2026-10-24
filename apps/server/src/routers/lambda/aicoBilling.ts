@@ -102,7 +102,7 @@ export const aicoBillingRouter = router({
       balanceToman: String(wallet.balanceToman ?? 0),
       balanceUsd: microUsdToDecimalString(balanceMicroUsd),
       // Under the shared inference key no subject needs its own key.
-      hasManagedKey: isSharedInferenceKey() || Boolean(wallet.openrouterKeyId),
+      hasManagedKey: isSharedInferenceKey() || hasValidManagedKeyId(wallet.openrouterKeyId),
       isActive: wallet.isActive,
       paidInPi: String(piFromRawMicro(rawCapacityMicroUsd)),
       preferredBillingSource: wallet.preferredBillingSource as 'personal' | 'organization',
@@ -184,8 +184,29 @@ export const aicoBillingRouter = router({
         rawCapacityMicroUsd: wallet.rawCapacityMicroUsd,
       });
 
+      // N12: the org source repairs a funded budget that has no key (below); the
+      // personal source did not, so a funded wallet whose key failed to mint was
+      // blocked client-side and the server-side repair was never reached.
+      let personalKeyId = wallet.openrouterKeyId;
+      if (
+        syncLive &&
+        !isSharedInferenceKey() &&
+        wallet.isActive &&
+        personalRemaining > 0 &&
+        !hasValidManagedKeyId(personalKeyId)
+      ) {
+        await keyService.ensureUserKey(ctx.userId).catch((error) => {
+          console.warn('[aicoBilling] lazy personal key repair failed', {
+            error,
+            userId: ctx.userId,
+          });
+          return null;
+        });
+        personalKeyId = (await ctx.billingModel.getUserWallet(ctx.userId))?.openrouterKeyId ?? null;
+      }
+
       const personal = {
-        hasManagedKey: isSharedInferenceKey() || hasValidManagedKeyId(wallet.openrouterKeyId),
+        hasManagedKey: isSharedInferenceKey() || hasValidManagedKeyId(personalKeyId),
         isActive: Boolean(wallet.isActive),
         remainingMicroUsd: String(personalRemaining),
         remainingPi: String(personalRemainingPi),

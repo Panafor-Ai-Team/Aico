@@ -37,11 +37,19 @@ const applyOptimisticDebit = (
 
       const nextRemainingMicroUsd = Math.max(0, remainingMicroUsd - costMicroUsd);
       const nextRemainingUsd = nextRemainingMicroUsd / 1_000_000;
+      // C9: π per micro-USD is the source's own ratio (a wallet bought at a higher
+      // blended multiplier is worth more π per USD). The fixed default made the
+      // figure jump, then snap back at the next revalidation.
+      const currentPi = Number(source.remainingPi);
+      const piPerMicroUsd =
+        remainingMicroUsd > 0 && Number.isFinite(currentPi) && currentPi > 0
+          ? currentPi / remainingMicroUsd
+          : DEFAULT_PI_PER_USD / 1_000_000;
 
       return {
         ...source,
         remainingMicroUsd: String(nextRemainingMicroUsd),
-        remainingPi: String(Math.round(nextRemainingUsd * DEFAULT_PI_PER_USD)),
+        remainingPi: String(Math.round(nextRemainingMicroUsd * piPerMicroUsd)),
         remainingUsd: nextRemainingUsd.toFixed(6),
       };
     }),

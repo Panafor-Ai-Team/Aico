@@ -6,11 +6,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { cleanupAicoTables, seedUsers } from '@/database/models/__tests__/aico.phase2.helpers';
 import { OrganizationModel } from '@/database/models/organization';
+import { users } from '@/database/schemas';
 import {
   aicoKeyOutbox,
   memberBudgets,
   platformAdminUsers,
   userWallets,
+  walletTransactions,
 } from '@/database/schemas/aicoOrganization';
 
 import { organizationRouter } from '../organization';
@@ -197,5 +199,57 @@ describe('platform admin router under the shared key', () => {
     expect((await row())?.hasManagedKey).toBe(false);
     h.shared = true;
     expect((await row())?.hasManagedKey).toBe(true);
+  });
+
+  it('N12: a placeholder key id is not listed as a provisioned key', async () => {
+    await testDB.insert(platformAdminUsers).values({
+      email: 'operator-n12@ledger.test',
+      id: operatorId,
+      passwordHash: 'unusable:test',
+    });
+    await testDB
+      .insert(userWallets)
+      .values({ balanceMicroUsd: usd(1), openrouterKeyId: 'mock_placeholder_1', userId: ownerId });
+    const caller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+
+    const row = (await caller.listUserWallets()).find((r) => r.userId === ownerId);
+
+    expect(row?.hasManagedKey).toBe(false);
+  });
+
+  it('C6: platform totals cover every wallet and transaction, not the newest 200', async () => {
+    await testDB.insert(platformAdminUsers).values({
+      email: 'operator-totals@ledger.test',
+      id: operatorId,
+      passwordHash: 'unusable:test',
+    });
+    const count = 205;
+    const ids = Array.from({ length: count }, (_, i) => `c6-user-${i}`);
+    await testDB.insert(users).values(ids.map((id) => ({ email: `${id}@c6.test`, id })));
+    await testDB.insert(userWallets).values(ids.map((userId) => ({ balanceMicroUsd: 2, userId })));
+    await testDB.insert(walletTransactions).values(
+      ids.map((userId) => ({
+        amountMicroUsd: 3,
+        amountToman: 5,
+        type: 'topup',
+        userId,
+      })),
+    );
+    const caller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+
+    try {
+      const totals = await caller.getPlatformFinancials();
+
+      expect(totals.b2cWalletCount).toBe(count);
+      expect(totals.b2cBalanceMicroUsd).toBe(String(count * 2));
+      expect(totals.totalRevenueToman).toBe(String(count * 5));
+      expect(totals.recentTransactions.length).toBeLessThanOrEqual(50);
+    } finally {
+      // Other files share this database; a failed assertion must not leave 205
+      // wallets behind for them.
+      await testDB.delete(walletTransactions);
+      await testDB.delete(userWallets);
+      await testDB.delete(users);
+    }
   });
 });

@@ -60,15 +60,20 @@ export class AicoSoftDeleteService {
     }
 
     const wallet = await this.billingModel.getUserWallet(params.userId);
-    const personalMicro = Number(wallet?.balanceMicroUsd ?? 0);
+    // C1: the tomb records what is parked on the wallet *after* the freeze, not
+    // the balance read before it. A retry of a run that froze the wallet and then
+    // failed before the tomb was written reads a zero balance, and used to write a
+    // zero tomb for money that is in fact parked.
+    let personalMicro = 0;
     if (wallet) {
       // Parks the balance *and* the capacity it bought, and writes the
       // `personal_freeze` ledger row this move never used to leave behind.
-      await this.billingModel.freezePersonalWallet({
+      const frozen = await this.billingModel.freezePersonalWallet({
         createdByUserId: params.deletedByUserId ?? null,
         description: 'Frozen on account deletion',
         userId: params.userId,
       });
+      personalMicro = Number(frozen?.wallet?.frozenMicroUsd ?? 0);
     }
 
     await this.db.insert(aicoKeyOutbox).values({

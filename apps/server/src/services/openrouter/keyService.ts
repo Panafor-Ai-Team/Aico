@@ -569,6 +569,8 @@ export class AicoOpenRouterKeyService {
    */
   private syncMemberCheckpoint = async (params: {
     checkpoint: UsageMultiplierCheckpoint;
+    /** D5: the epoch the checkpoint was read at; the write only lands in that cycle. */
+    expectedLedgerEpoch?: number;
     orgMemberId: string;
     rawUsage: number | null;
   }): Promise<{ bp: number; checkpoint: UsageMultiplierCheckpoint; degraded: boolean }> => {
@@ -596,6 +598,7 @@ export class AicoOpenRouterKeyService {
     await this.orgModel.updateMemberBudgetCheckpoint({
       billedUsageBeforeBaselineMicroUsd: rebased.billedUsageBeforeBaselineMicroUsd,
       checkpointMultiplierBp: bp,
+      expectedLedgerEpoch: params.expectedLedgerEpoch,
       orgMemberId: params.orgMemberId,
       usageBaselineMicroUsd: rebased.usageBaselineMicroUsd,
     });
@@ -2213,6 +2216,7 @@ export class AicoOpenRouterKeyService {
     const rawUsage = this.rawMeteredUsageMicro(budget, info);
     const { bp, checkpoint, degraded } = await this.syncMemberCheckpoint({
       checkpoint: budget,
+      expectedLedgerEpoch: Number(budget.ledgerEpoch ?? 0),
       orgMemberId,
       rawUsage,
     });
@@ -2223,6 +2227,7 @@ export class AicoOpenRouterKeyService {
     );
 
     await this.orgModel.syncMemberBudgetUsage({
+      expectedLedgerEpoch: Number(budget.ledgerEpoch ?? 0),
       orgMemberId,
       settledUsageMicroUsd: usageMicroUsd,
       syncError: degraded ? MISSING_PERIOD_COUNTER : null,
@@ -2495,6 +2500,7 @@ export class AicoOpenRouterKeyService {
     });
     const { bp, checkpoint, degraded } = await this.syncMemberCheckpoint({
       checkpoint: budget,
+      expectedLedgerEpoch: Number(budget.ledgerEpoch ?? 0),
       orgMemberId,
       rawUsage: this.rawMeteredUsageMicro(budget, info),
     });
@@ -2504,6 +2510,7 @@ export class AicoOpenRouterKeyService {
       bp,
     );
     return this.orgModel.syncMemberBudgetUsage({
+      expectedLedgerEpoch: Number(budget.ledgerEpoch ?? 0),
       orgMemberId,
       settledUsageMicroUsd: usageMicroUsd,
       syncError: degraded ? MISSING_PERIOD_COUNTER : null,

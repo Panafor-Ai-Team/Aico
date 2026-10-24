@@ -13,6 +13,7 @@ import { PlatformAdminUserModel } from '@/database/models/platformAdminUser';
 import { aicoKeyOutbox, memberBudgets, session, users, userWallets } from '@/database/schemas';
 import {
   DEFAULT_USAGE_MULTIPLIER_BP,
+  hasValidManagedKeyId,
   MAX_USAGE_MULTIPLIER_BP,
   microUsdToDecimalString,
   MIN_USAGE_MULTIPLIER_BP,
@@ -805,26 +806,23 @@ export const platformAdminRouter = router({
         .optional(),
     )
     .query(async ({ ctx }) => {
-      const [txs, wallets, orgBalanceMicroUsd, totalOpenRouterCostMicroUsd, fxConfig] =
+      // C6: totals come from SQL aggregates over everything. They used to be
+      // summed in memory over the newest 200 rows of each table, so past 200
+      // wallets or transactions every figure here was silently wrong.
+      const [txs, walletTotals, paidIn, orgBalanceMicroUsd, totalOpenRouterCostMicroUsd, fxConfig] =
         await Promise.all([
-          ctx.billingModel.listRecentTransactions(200),
-          ctx.billingModel.listAllWallets(),
+          ctx.billingModel.listRecentTransactions(50),
+          ctx.billingModel.sumWalletBalances(),
+          ctx.billingModel.sumPaidInTotals(),
           ctx.organizationModel.getTotalWalletBalanceMicroUsd(),
           ctx.billingModel.sumUsageCostMicroUsd(),
           ctx.billingModel.getFxConfig(),
         ]);
       const fx = await getTomanPerUsd(fxConfig.tomanPerUsd);
       // Admin debits net out the grants they take back.
-      const topups = txs.filter(
-        (t) => t.type === 'topup' || t.type === 'manual_credit' || t.type === 'manual_debit',
-      );
-      const totalRevenueToman = topups.reduce((sum, t) => sum + Number(t.amountToman || 0), 0);
-      const totalMicroCredited = Math.trunc(
-        topups.reduce((sum, t) => sum + Number(t.amountMicroUsd || 0), 0),
-      );
-      const b2cBalanceMicroUsd = Math.trunc(
-        wallets.reduce((sum, w) => sum + Number(w.balanceMicroUsd || 0), 0),
-      );
+      const totalRevenueToman = paidIn.revenueToman;
+      const totalMicroCredited = Math.trunc(paidIn.creditedMicroUsd);
+      const b2cBalanceMicroUsd = Math.trunc(walletTotals.balanceMicroUsd);
       // SUM/driver may yield a float; FX is integer toman/USD from getTomanPerUsd.
       const costMicroUsd = Math.trunc(Number(totalOpenRouterCostMicroUsd) || 0);
       const fxRate = Math.round(fx.rate);
@@ -837,7 +835,7 @@ export const platformAdminRouter = router({
         b2bBalanceUsd: microUsdToDecimalString(Math.trunc(Number(orgBalanceMicroUsd) || 0)),
         b2cBalanceMicroUsd: String(b2cBalanceMicroUsd),
         b2cBalanceUsd: microUsdToDecimalString(b2cBalanceMicroUsd),
-        b2cWalletCount: wallets.length,
+        b2cWalletCount: walletTotals.count,
         from: null as string | null,
         marginToman: String(Math.trunc(marginToman)),
         recentTransactions: txs.slice(0, 50).map((t) => ({
@@ -899,7 +897,7 @@ export const platformAdminRouter = router({
         banReason: identity?.banReason ?? null,
         banned: Boolean(identity?.banned),
         email: identity?.email ?? null,
-        hasManagedKey: isSharedInferenceKey() || Boolean(w.openrouterKeyId),
+        hasManagedKey: isSharedInferenceKey() || hasValidManagedKeyId(w.openrouterKeyId),
         isActive: w.isActive,
         publicCode: publicCodes.get(w.userId) ?? null,
         userId: w.userId,
@@ -1047,6 +1045,19 @@ export const platformAdminRouter = router({
       const amountMicroUsd = Number(usdDecimalStringToMicro(input.amountUsd));
       if (amountMicroUsd <= 0) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'AMOUNT_MUST_BE_POSITIVE' });
+      }
+
+      // C2: the debit is limited to balance minus the *persisted* usage, which
+      // lags the key — chat only syncs it after a response. Refresh it first, so
+      // an admin cannot take back money the user has in fact already spent (that
+      // leaves unspent capacity negative). A key that cannot be read leaves the
+      // last figure standing: an outage must not stop an admin recovering a grant.
+      try {
+        await new AicoOpenRouterKeyService(ctx.serverDB).getUserRemaining(userId, {
+          persist: true,
+        });
+      } catch (error) {
+        console.warn('[aico] usage refresh before a user debit failed; using the last sync', error);
       }
 
       let result: Awaited<ReturnType<typeof ctx.billingModel.manualDebitUser>>;

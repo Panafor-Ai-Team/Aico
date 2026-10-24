@@ -1369,267 +1369,282 @@ export class OrganizationModel {
       throw new Error('AMOUNT_TOO_LARGE');
     }
 
-    if (params.idempotencyKey) {
+    // The transaction already committed under this key (a retry, or the winner
+    // of a race): return what it produced. A key belongs to one member of one
+    // org — reusing it for another is a client bug, never a replay.
+    const replay = async () => {
+      if (!params.idempotencyKey) return null;
       const existingTx = await this.db.query.walletTransactions.findFirst({
         where: eq(walletTransactions.gatewayRefId, params.idempotencyKey),
       });
-      if (existingTx) {
-        if (existingTx.type !== 'allocate' || existingTx.orgId !== params.orgId) {
-          throw new Error('IDEMPOTENCY_KEY_CONFLICT');
-        }
-        const organization = await this.getById(params.orgId);
-        if (!organization) throw new Error('ORG_NOT_FOUND');
-        const budget = await this.getMemberBudgetForOrg({
-          orgId: params.orgId,
-          orgMemberId: params.orgMemberId,
-        });
-        if (!budget) throw new Error('BUDGET_NOT_FOUND');
-        return { budget, organization, transaction: existingTx };
+      if (!existingTx) return null;
+      if (
+        existingTx.type !== 'allocate' ||
+        existingTx.orgId !== params.orgId ||
+        existingTx.orgMemberId !== params.orgMemberId
+      ) {
+        throw new Error('IDEMPOTENCY_KEY_CONFLICT');
       }
-    }
-
-    return this.db.transaction(async (tx) => {
-      const org = await tx.query.organizations.findFirst({
-        where: eq(organizations.id, params.orgId),
+      const organization = await this.getById(params.orgId);
+      if (!organization) throw new Error('ORG_NOT_FOUND');
+      const budget = await this.getMemberBudgetForOrg({
+        orgId: params.orgId,
+        orgMemberId: params.orgMemberId,
       });
-      if (!org) throw new Error('ORG_NOT_FOUND');
-      if (org.status !== 'active') throw new Error('ORG_NOT_ACTIVE');
+      if (!budget) throw new Error('BUDGET_NOT_FOUND');
+      return { budget, organization, transaction: existingTx };
+    };
 
-      const member = await tx.query.organizationMembers.findFirst({
-        where: and(
-          eq(organizationMembers.id, params.orgMemberId),
-          eq(organizationMembers.orgId, params.orgId),
-        ),
-      });
-      if (!member) throw new Error('MEMBER_NOT_FOUND');
+    const replayed = await replay();
+    if (replayed) return replayed;
 
-      const window = computePeriodWindow(params.period);
-      const openrouterLimitReset = periodToOpenRouterLimitReset(params.period);
-      // Row lock: the usage ledger places holds on this row, so the consumed
-      // figure below must not move while the cap is being recomputed.
-      const [existing] = await tx
-        .select()
-        .from(memberBudgets)
-        .where(
-          and(
-            eq(memberBudgets.orgMemberId, params.orgMemberId),
-            eq(memberBudgets.orgId, params.orgId),
+    const apply = () =>
+      this.db.transaction(async (tx) => {
+        const org = await tx.query.organizations.findFirst({
+          where: eq(organizations.id, params.orgId),
+        });
+        if (!org) throw new Error('ORG_NOT_FOUND');
+        if (org.status !== 'active') throw new Error('ORG_NOT_ACTIVE');
+
+        const member = await tx.query.organizationMembers.findFirst({
+          where: and(
+            eq(organizationMembers.id, params.orgMemberId),
+            eq(organizationMembers.orgId, params.orgId),
           ),
-        )
-        .for('update')
-        .limit(1);
+        });
+        if (!member) throw new Error('MEMBER_NOT_FOUND');
+        // N8: a member who has left (or is being removed) is never renewed, swept or
+        // able to chat. Funding them debits the org for money nobody can spend.
+        if (member.status === 'left' || member.status === 'revocation_pending') {
+          throw new Error('MEMBER_NOT_ACTIVE');
+        }
 
-      let budget: MemberBudgetItem;
-      /** Net wallet debit (>0) or credit via negative tracked separately for ledger. */
-      let walletDebitMicroUsd = 0;
-      let walletCreditMicroUsd = 0;
-
-      const applyWalletDebit = async (amount: number) => {
-        if (amount <= 0) return;
-        const [updatedOrg] = await tx
-          .update(organizations)
-          .set({
-            walletBalanceMicroUsd: sql`${organizations.walletBalanceMicroUsd} - ${amount}`,
-          })
+        const window = computePeriodWindow(params.period);
+        const openrouterLimitReset = periodToOpenRouterLimitReset(params.period);
+        // Row lock: the usage ledger places holds on this row, so the consumed
+        // figure below must not move while the cap is being recomputed.
+        const [existing] = await tx
+          .select()
+          .from(memberBudgets)
           .where(
             and(
-              eq(organizations.id, params.orgId),
-              sql`${organizations.walletBalanceMicroUsd} >= ${amount}`,
+              eq(memberBudgets.orgMemberId, params.orgMemberId),
+              eq(memberBudgets.orgId, params.orgId),
             ),
           )
-          .returning();
-        if (!updatedOrg) throw new Error('INSUFFICIENT_ORG_BALANCE');
-        walletDebitMicroUsd += amount;
-      };
+          .for('update')
+          .limit(1);
 
-      const applyWalletCredit = async (amount: number) => {
-        if (amount <= 0) return;
-        await tx
-          .update(organizations)
-          .set({
-            walletBalanceMicroUsd: sql`${organizations.walletBalanceMicroUsd} + ${amount}`,
-          })
-          .where(eq(organizations.id, params.orgId));
-        walletCreditMicroUsd += amount;
-      };
+        let budget: MemberBudgetItem;
+        /** Net wallet debit (>0) or credit via negative tracked separately for ledger. */
+        let walletDebitMicroUsd = 0;
+        let walletCreditMicroUsd = 0;
 
-      if (!existing) {
-        await applyWalletDebit(params.periodAmountMicroUsd);
-        [budget] = await tx
-          .insert(memberBudgets)
-          .values({
-            currentPeriodEnd: window.end,
-            currentPeriodStart: window.start,
-            nextRenewalAt: window.nextRenewalAt,
-            openrouterLimitReset,
-            orgId: params.orgId,
-            orgMemberId: params.orgMemberId,
-            period: params.period,
-            periodAmountMicroUsd: params.periodAmountMicroUsd,
-            renewalStatus: 'active',
-            reservedMicroUsd: params.periodAmountMicroUsd,
-          })
-          .returning();
-      } else if (existing.renewalStatus === 'settled') {
-        // R7 (2026-10): a revoke or reclaim settled this budget and refunded what
-        // the closed cycle left. Re-allocating starts a clean cycle: the closed
-        // cycle's usage, checkpoint and holds stay with it (holds placed then
-        // carry the old epoch, so their settle cannot charge this cycle), and
-        // the stale window would otherwise collide with a funded renewal batch.
-        // Carrying the old usage forward debited the org for it a second time
-        // and could leave the member with no spendable headroom at all.
-        const previousPending = Number(existing.pendingPeriodAmountMicroUsd ?? 0);
-        if (previousPending > 0) {
-          await applyWalletCredit(previousPending);
+        const applyWalletDebit = async (amount: number) => {
+          if (amount <= 0) return;
+          const [updatedOrg] = await tx
+            .update(organizations)
+            .set({
+              walletBalanceMicroUsd: sql`${organizations.walletBalanceMicroUsd} - ${amount}`,
+            })
+            .where(
+              and(
+                eq(organizations.id, params.orgId),
+                sql`${organizations.walletBalanceMicroUsd} >= ${amount}`,
+              ),
+            )
+            .returning();
+          if (!updatedOrg) throw new Error('INSUFFICIENT_ORG_BALANCE');
+          walletDebitMicroUsd += amount;
+        };
+
+        const applyWalletCredit = async (amount: number) => {
+          if (amount <= 0) return;
+          await tx
+            .update(organizations)
+            .set({
+              walletBalanceMicroUsd: sql`${organizations.walletBalanceMicroUsd} + ${amount}`,
+            })
+            .where(eq(organizations.id, params.orgId));
+          walletCreditMicroUsd += amount;
+        };
+
+        if (!existing) {
+          await applyWalletDebit(params.periodAmountMicroUsd);
+          [budget] = await tx
+            .insert(memberBudgets)
+            .values({
+              currentPeriodEnd: window.end,
+              currentPeriodStart: window.start,
+              nextRenewalAt: window.nextRenewalAt,
+              openrouterLimitReset,
+              orgId: params.orgId,
+              orgMemberId: params.orgMemberId,
+              period: params.period,
+              periodAmountMicroUsd: params.periodAmountMicroUsd,
+              renewalStatus: 'active',
+              reservedMicroUsd: params.periodAmountMicroUsd,
+            })
+            .returning();
+        } else if (existing.renewalStatus === 'settled') {
+          // R7 (2026-10): a revoke or reclaim settled this budget and refunded what
+          // the closed cycle left. Re-allocating starts a clean cycle: the closed
+          // cycle's usage, checkpoint and holds stay with it (holds placed then
+          // carry the old epoch, so their settle cannot charge this cycle), and
+          // the stale window would otherwise collide with a funded renewal batch.
+          // Carrying the old usage forward debited the org for it a second time
+          // and could leave the member with no spendable headroom at all.
+          const previousPending = Number(existing.pendingPeriodAmountMicroUsd ?? 0);
+          if (previousPending > 0) {
+            await applyWalletCredit(previousPending);
+          }
+          const previousCap = Math.max(0, Number(existing.periodAmountMicroUsd ?? 0));
+          const delta = params.periodAmountMicroUsd - previousCap;
+          if (delta > 0) {
+            await applyWalletDebit(delta);
+          } else if (delta < 0) {
+            await applyWalletCredit(-delta);
+          }
+
+          [budget] = await tx
+            .update(memberBudgets)
+            .set({
+              billedUsageBeforeBaselineMicroUsd: 0,
+              currentPeriodEnd: window.end,
+              currentPeriodStart: window.start,
+              heldMicroUsd: 0,
+              isActive: true,
+              ledgerEpoch: sql`${memberBudgets.ledgerEpoch} + 1`,
+              nextRenewalAt: window.nextRenewalAt,
+              openHolds: 0,
+              openrouterLimitReset,
+              pendingPeriod: null,
+              pendingPeriodAmountMicroUsd: null,
+              period: params.period,
+              periodAmountMicroUsd: params.periodAmountMicroUsd,
+              renewalStatus: 'active',
+              reservedMicroUsd: params.periodAmountMicroUsd,
+              settledUsageMicroUsd: 0,
+              usageBaselineMicroUsd: 0,
+            })
+            .where(eq(memberBudgets.id, existing.id))
+            .returning();
+        } else if (existing.period === params.period) {
+          // Same period: set/replace cap. Clear any queued period change first.
+          const previousPending = Number(existing.pendingPeriodAmountMicroUsd ?? 0);
+          if (previousPending > 0) {
+            await applyWalletCredit(previousPending);
+          }
+
+          const oldCap = Number(existing.periodAmountMicroUsd ?? 0);
+          // Open ledger holds count as consumed: they may still be spent.
+          const consumed =
+            Math.max(0, Number(existing.settledUsageMicroUsd ?? 0)) +
+            Math.max(0, Number(existing.heldMicroUsd ?? 0));
+          // Decrease cannot go below already-consumed spend this cycle.
+          const effectiveCap = Math.max(params.periodAmountMicroUsd, consumed);
+          const delta = effectiveCap - oldCap;
+
+          if (delta > 0) {
+            await applyWalletDebit(delta);
+          } else if (delta < 0) {
+            await applyWalletCredit(-delta);
+          }
+
+          [budget] = await tx
+            .update(memberBudgets)
+            .set({
+              currentPeriodEnd: existing.currentPeriodEnd ?? window.end,
+              currentPeriodStart: existing.currentPeriodStart ?? window.start,
+              isActive: true,
+              nextRenewalAt: existing.nextRenewalAt ?? window.nextRenewalAt,
+              openrouterLimitReset,
+              pendingPeriod: null,
+              pendingPeriodAmountMicroUsd: null,
+              periodAmountMicroUsd: effectiveCap,
+              renewalStatus: 'active',
+              // reserved = current cap only once pending is cleared
+              reservedMicroUsd: effectiveCap,
+            })
+            .where(eq(memberBudgets.id, existing.id))
+            .returning();
+        } else if (existing.period === 'total' && isProductBudgetPeriod(params.period)) {
+          // Legacy total → product period: apply immediately (renewal never selects total).
+          const previousPending = Number(existing.pendingPeriodAmountMicroUsd ?? 0);
+          if (previousPending > 0) {
+            await applyWalletCredit(previousPending);
+          }
+
+          const oldCap = Number(existing.periodAmountMicroUsd ?? 0);
+          const consumed =
+            Math.max(0, Number(existing.settledUsageMicroUsd ?? 0)) +
+            Math.max(0, Number(existing.heldMicroUsd ?? 0));
+          const effectiveCap = Math.max(params.periodAmountMicroUsd, consumed);
+          const delta = effectiveCap - oldCap;
+
+          if (delta > 0) {
+            await applyWalletDebit(delta);
+          } else if (delta < 0) {
+            await applyWalletCredit(-delta);
+          }
+
+          [budget] = await tx
+            .update(memberBudgets)
+            .set({
+              currentPeriodEnd: window.end,
+              currentPeriodStart: window.start,
+              isActive: true,
+              nextRenewalAt: window.nextRenewalAt,
+              openrouterLimitReset,
+              pendingPeriod: null,
+              pendingPeriodAmountMicroUsd: null,
+              period: params.period,
+              periodAmountMicroUsd: effectiveCap,
+              renewalStatus: 'active',
+              reservedMicroUsd: effectiveCap,
+            })
+            .where(eq(memberBudgets.id, existing.id))
+            .returning();
+        } else {
+          // Different product period: queue pending (prepaid once). Active cycle unchanged.
+          const previousPending = Number(existing.pendingPeriodAmountMicroUsd ?? 0);
+          if (previousPending > 0) {
+            await applyWalletCredit(previousPending);
+          }
+          await applyWalletDebit(params.periodAmountMicroUsd);
+
+          const currentCap = Number(existing.periodAmountMicroUsd ?? 0);
+          [budget] = await tx
+            .update(memberBudgets)
+            .set({
+              isActive: true,
+              pendingPeriod: params.period,
+              pendingPeriodAmountMicroUsd: params.periodAmountMicroUsd,
+              // reserved = current cycle + pending next-period hold (FIN-001: OR uses periodAmount only)
+              reservedMicroUsd: currentCap + params.periodAmountMicroUsd,
+              renewalStatus: 'active',
+            })
+            .where(eq(memberBudgets.id, existing.id))
+            .returning();
         }
-        const previousCap = Math.max(0, Number(existing.periodAmountMicroUsd ?? 0));
-        const delta = params.periodAmountMicroUsd - previousCap;
-        if (delta > 0) {
-          await applyWalletDebit(delta);
-        } else if (delta < 0) {
-          await applyWalletCredit(-delta);
+
+        const [freshOrg] = await tx
+          .select()
+          .from(organizations)
+          .where(eq(organizations.id, params.orgId))
+          .limit(1);
+        if (!freshOrg) throw new Error('ORG_NOT_FOUND');
+
+        const balanceAfterMicroUsd = Number(freshOrg.walletBalanceMicroUsd ?? 0);
+        const netDebit = walletDebitMicroUsd - walletCreditMicroUsd;
+        const balanceBeforeMicroUsd = balanceAfterMicroUsd + netDebit;
+        const ledgerAmount = Math.abs(netDebit);
+
+        // Idempotent re-set of the same cap with no pending clear — no ledger row.
+        if (ledgerAmount === 0) {
+          return { budget, organization: freshOrg, transaction: null };
         }
 
-        [budget] = await tx
-          .update(memberBudgets)
-          .set({
-            billedUsageBeforeBaselineMicroUsd: 0,
-            currentPeriodEnd: window.end,
-            currentPeriodStart: window.start,
-            heldMicroUsd: 0,
-            isActive: true,
-            ledgerEpoch: sql`${memberBudgets.ledgerEpoch} + 1`,
-            nextRenewalAt: window.nextRenewalAt,
-            openHolds: 0,
-            openrouterLimitReset,
-            pendingPeriod: null,
-            pendingPeriodAmountMicroUsd: null,
-            period: params.period,
-            periodAmountMicroUsd: params.periodAmountMicroUsd,
-            renewalStatus: 'active',
-            reservedMicroUsd: params.periodAmountMicroUsd,
-            settledUsageMicroUsd: 0,
-            usageBaselineMicroUsd: 0,
-          })
-          .where(eq(memberBudgets.id, existing.id))
-          .returning();
-      } else if (existing.period === params.period) {
-        // Same period: set/replace cap. Clear any queued period change first.
-        const previousPending = Number(existing.pendingPeriodAmountMicroUsd ?? 0);
-        if (previousPending > 0) {
-          await applyWalletCredit(previousPending);
-        }
-
-        const oldCap = Number(existing.periodAmountMicroUsd ?? 0);
-        // Open ledger holds count as consumed: they may still be spent.
-        const consumed =
-          Math.max(0, Number(existing.settledUsageMicroUsd ?? 0)) +
-          Math.max(0, Number(existing.heldMicroUsd ?? 0));
-        // Decrease cannot go below already-consumed spend this cycle.
-        const effectiveCap = Math.max(params.periodAmountMicroUsd, consumed);
-        const delta = effectiveCap - oldCap;
-
-        if (delta > 0) {
-          await applyWalletDebit(delta);
-        } else if (delta < 0) {
-          await applyWalletCredit(-delta);
-        }
-
-        [budget] = await tx
-          .update(memberBudgets)
-          .set({
-            currentPeriodEnd: existing.currentPeriodEnd ?? window.end,
-            currentPeriodStart: existing.currentPeriodStart ?? window.start,
-            isActive: true,
-            nextRenewalAt: existing.nextRenewalAt ?? window.nextRenewalAt,
-            openrouterLimitReset,
-            pendingPeriod: null,
-            pendingPeriodAmountMicroUsd: null,
-            periodAmountMicroUsd: effectiveCap,
-            renewalStatus: 'active',
-            // reserved = current cap only once pending is cleared
-            reservedMicroUsd: effectiveCap,
-          })
-          .where(eq(memberBudgets.id, existing.id))
-          .returning();
-      } else if (existing.period === 'total' && isProductBudgetPeriod(params.period)) {
-        // Legacy total → product period: apply immediately (renewal never selects total).
-        const previousPending = Number(existing.pendingPeriodAmountMicroUsd ?? 0);
-        if (previousPending > 0) {
-          await applyWalletCredit(previousPending);
-        }
-
-        const oldCap = Number(existing.periodAmountMicroUsd ?? 0);
-        const consumed =
-          Math.max(0, Number(existing.settledUsageMicroUsd ?? 0)) +
-          Math.max(0, Number(existing.heldMicroUsd ?? 0));
-        const effectiveCap = Math.max(params.periodAmountMicroUsd, consumed);
-        const delta = effectiveCap - oldCap;
-
-        if (delta > 0) {
-          await applyWalletDebit(delta);
-        } else if (delta < 0) {
-          await applyWalletCredit(-delta);
-        }
-
-        [budget] = await tx
-          .update(memberBudgets)
-          .set({
-            currentPeriodEnd: window.end,
-            currentPeriodStart: window.start,
-            isActive: true,
-            nextRenewalAt: window.nextRenewalAt,
-            openrouterLimitReset,
-            pendingPeriod: null,
-            pendingPeriodAmountMicroUsd: null,
-            period: params.period,
-            periodAmountMicroUsd: effectiveCap,
-            renewalStatus: 'active',
-            reservedMicroUsd: effectiveCap,
-          })
-          .where(eq(memberBudgets.id, existing.id))
-          .returning();
-      } else {
-        // Different product period: queue pending (prepaid once). Active cycle unchanged.
-        const previousPending = Number(existing.pendingPeriodAmountMicroUsd ?? 0);
-        if (previousPending > 0) {
-          await applyWalletCredit(previousPending);
-        }
-        await applyWalletDebit(params.periodAmountMicroUsd);
-
-        const currentCap = Number(existing.periodAmountMicroUsd ?? 0);
-        [budget] = await tx
-          .update(memberBudgets)
-          .set({
-            isActive: true,
-            pendingPeriod: params.period,
-            pendingPeriodAmountMicroUsd: params.periodAmountMicroUsd,
-            // reserved = current cycle + pending next-period hold (FIN-001: OR uses periodAmount only)
-            reservedMicroUsd: currentCap + params.periodAmountMicroUsd,
-            renewalStatus: 'active',
-          })
-          .where(eq(memberBudgets.id, existing.id))
-          .returning();
-      }
-
-      const [freshOrg] = await tx
-        .select()
-        .from(organizations)
-        .where(eq(organizations.id, params.orgId))
-        .limit(1);
-      if (!freshOrg) throw new Error('ORG_NOT_FOUND');
-
-      const balanceAfterMicroUsd = Number(freshOrg.walletBalanceMicroUsd ?? 0);
-      const netDebit = walletDebitMicroUsd - walletCreditMicroUsd;
-      const balanceBeforeMicroUsd = balanceAfterMicroUsd + netDebit;
-      const ledgerAmount = Math.abs(netDebit);
-
-      // Idempotent re-set of the same cap with no pending clear — no ledger row.
-      if (ledgerAmount === 0) {
-        return { budget, organization: freshOrg, transaction: null };
-      }
-
-      try {
         const [txRow] = await tx
           .insert(walletTransactions)
           .values({
@@ -1651,14 +1666,21 @@ export class OrganizationModel {
           .returning();
 
         return { budget, organization: freshOrg, transaction: txRow };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (params.idempotencyKey && /gateway_ref|unique|duplicate/i.test(message)) {
-          throw new Error('IDEMPOTENCY_KEY_CONFLICT', { cause: error });
-        }
-        throw error;
-      }
-    });
+      });
+
+    if (!params.idempotencyKey) return apply();
+    try {
+      return await apply();
+    } catch (error) {
+      // A concurrent request with the same key committed first (its insert met
+      // the unique `gateway_ref_id`, which also rolled this transaction back).
+      // The caller asked for exactly that allocation: hand back the winner's,
+      // rather than an error the client would retry into confusion (D2).
+      if (!isUniqueConstraintViolation(error)) throw error;
+      const winner = await replay();
+      if (!winner) throw error;
+      return winner;
+    }
   };
 
   /**
@@ -1938,6 +1960,13 @@ export class OrganizationModel {
     /** Why the figure is not fully trusted, when `syncStatus` is `degraded`. */
     syncError?: string | null;
     syncStatus?: 'synced' | 'degraded';
+    /**
+     * D5: the `ledger_epoch` the figure was computed against. Renewal and a
+     * revived budget bump it, and a sync that read the key before that would
+     * otherwise write the closed cycle's usage into the new one. Returns
+     * undefined when the budget has moved on; the next sync starts fresh.
+     */
+    expectedLedgerEpoch?: number;
   }) => {
     const [row] = await this.db
       .update(memberBudgets)
@@ -1947,7 +1976,14 @@ export class OrganizationModel {
         lastSyncedAt: new Date(),
         settledUsageMicroUsd: params.settledUsageMicroUsd,
       })
-      .where(eq(memberBudgets.orgMemberId, params.orgMemberId))
+      .where(
+        and(
+          eq(memberBudgets.orgMemberId, params.orgMemberId),
+          params.expectedLedgerEpoch === undefined
+            ? undefined
+            : eq(memberBudgets.ledgerEpoch, params.expectedLedgerEpoch),
+        ),
+      )
       .returning();
     return row;
   };
@@ -1960,6 +1996,8 @@ export class OrganizationModel {
   updateMemberBudgetCheckpoint = async (params: {
     billedUsageBeforeBaselineMicroUsd: number;
     checkpointMultiplierBp: number;
+    /** D5: as on `syncMemberBudgetUsage` — only lands in the cycle it was computed for. */
+    expectedLedgerEpoch?: number;
     orgMemberId: string;
     usageBaselineMicroUsd: number;
   }) => {
@@ -1970,7 +2008,14 @@ export class OrganizationModel {
         checkpointMultiplierBp: params.checkpointMultiplierBp,
         usageBaselineMicroUsd: params.usageBaselineMicroUsd,
       })
-      .where(eq(memberBudgets.orgMemberId, params.orgMemberId))
+      .where(
+        and(
+          eq(memberBudgets.orgMemberId, params.orgMemberId),
+          params.expectedLedgerEpoch === undefined
+            ? undefined
+            : eq(memberBudgets.ledgerEpoch, params.expectedLedgerEpoch),
+        ),
+      )
       .returning();
     return row;
   };

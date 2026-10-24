@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   __resetFxCacheForTests,
@@ -40,6 +40,33 @@ describe('getTomanPerUsd', () => {
     // Cache hit still integer.
     const second = await getTomanPerUsd();
     expect(second).toEqual({ rate: 126_510, source: 'live' });
+  });
+
+  it('C8: says so when it falls back to the env rate', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    __setFxLiveFetchImplForTests(async () => {
+      throw new Error('network down');
+    });
+
+    const result = await getTomanPerUsd();
+
+    expect(result.source).toBe('env');
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('FX live rate unavailable'),
+      expect.any(Error),
+    );
+    warn.mockRestore();
+  });
+
+  it('does not warn when an admin rate is set or the live rate is available', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    __setFxLiveFetchImplForTests(async () => 120_000);
+
+    await getTomanPerUsd(150_000);
+    await getTomanPerUsd();
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('falls back to env integer rate when live fetch fails', async () => {

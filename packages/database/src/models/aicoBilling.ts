@@ -24,6 +24,7 @@ import {
   assertValidMultiplierBp,
   defaultMultiplierBpForProvider,
   FALLBACK_MULTIPLIER_CONFIG_ID,
+  mulDivFloor,
   rawCapacityFromDeposit,
 } from '../utils/aicoMoney';
 
@@ -328,8 +329,8 @@ export class AicoBillingModel {
         const balanceToman = Number(before.balanceToman ?? 0);
         // Same fraction off every figure the balance was bought with. Floor the
         // removed capacity so rounding can only ever leave the user a hair more.
-        const rawRemoved = Math.floor((rawCapacity * params.amountMicroUsd) / balance);
-        const tomanRemoved = Math.floor((balanceToman * params.amountMicroUsd) / balance);
+        const rawRemoved = mulDivFloor(rawCapacity, params.amountMicroUsd, balance);
+        const tomanRemoved = mulDivFloor(balanceToman, params.amountMicroUsd, balance);
 
         // The key limit is `rawCapacity − rawUsageBeforeKey`, and enforce holds
         // count against capacity too — neither may be pushed below zero.
@@ -447,7 +448,16 @@ export class AicoBillingModel {
           createdByAdminId: params.createdByAdminId ?? null,
           createdByUserId: params.createdByUserId ?? null,
           description: params.description ?? 'Personal balance frozen',
-          metadata: { frozenRawCapacityMicroUsd: rawCapacityMicroUsd },
+          // C1: `balance_micro_usd` counts deposits; what the user can still
+          // spend is that minus the usage already settled. Both figures are kept so
+          // a later refund decision does not have to reconstruct the second.
+          metadata: {
+            frozenRawCapacityMicroUsd: rawCapacityMicroUsd,
+            unspentMicroUsd: Math.max(
+              0,
+              balanceMicroUsd - Math.max(0, Number(before.settledUsageMicroUsd ?? 0)),
+            ),
+          },
           type: 'personal_freeze',
           userId: params.userId,
         })
@@ -1150,6 +1160,39 @@ export class AicoBillingModel {
       .orderBy(desc(sql`max(${walletTransactions.createdAt})`))
       .limit(limit);
     return rows.map((row) => row.reason);
+  };
+
+  /**
+   * C6: totals over every personal wallet. The platform panel summed
+   * `listAllWallets()` in memory, which is capped at 200 rows — with a 201st
+   * wallet every figure on the page was silently wrong.
+   */
+  sumWalletBalances = async (): Promise<{ balanceMicroUsd: number; count: number }> => {
+    const [row] = await this.db
+      .select({
+        balance: sql<number>`COALESCE(SUM(${userWallets.balanceMicroUsd}), 0)`,
+        count: sql<number>`COUNT(*)::int`,
+      })
+      .from(userWallets);
+    return { balanceMicroUsd: Number(row?.balance ?? 0), count: Number(row?.count ?? 0) };
+  };
+
+  /**
+   * C6: everything ever paid in (and taken back by admin debits), over the whole
+   * ledger rather than its newest 200 rows.
+   */
+  sumPaidInTotals = async (): Promise<{ creditedMicroUsd: number; revenueToman: number }> => {
+    const [row] = await this.db
+      .select({
+        credited: sql<number>`COALESCE(SUM(${walletTransactions.amountMicroUsd}), 0)`,
+        revenue: sql<number>`COALESCE(SUM(${walletTransactions.amountToman}), 0)`,
+      })
+      .from(walletTransactions)
+      .where(inArray(walletTransactions.type, ['topup', 'manual_credit', 'manual_debit']));
+    return {
+      creditedMicroUsd: Number(row?.credited ?? 0),
+      revenueToman: Number(row?.revenue ?? 0),
+    };
   };
 
   /** Sum of `usage_logs.cost_micro_usd` across all B2C + B2B traffic — real OpenRouter spend. */

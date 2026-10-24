@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyMultiplierMicroUsd,
   confirmedUnusedMicro,
   currentCycleLimitMicroUsd,
   cycleRemainingMicroUsd,
   isProductBudgetPeriod,
   isStaleManagedKeyId,
   microUsdToDecimalString,
+  mulDivCeil,
+  mulDivFloor,
   openRouterUsdToMicroFloor,
   periodToOpenRouterLimitReset,
   remainingTomanFromBalance,
+  removeMultiplierMicroUsd,
   tomanToMicroUsd,
   usdDecimalStringToMicro,
 } from '../aicoMoney';
@@ -129,5 +133,29 @@ describe('aicoMoney (final remediation)', () => {
       expect(first).toBe(second);
       expect(first).toBe(300_000);
     });
+  });
+});
+
+describe('N13: exact products above 2^53', () => {
+  // Found by search: the float formula floor((N * A) / N) loses one unit here.
+  const N = 897_111_012_395;
+  const A = 184_907_931_804;
+
+  it('mulDivFloor is exact where the float formula is off by one', () => {
+    expect(Math.floor((N * A) / N)).toBe(A - 1); // the old behaviour
+    expect(mulDivFloor(N, A, N)).toBe(A);
+  });
+
+  it('mulDivCeil rounds up exactly and leaves exact quotients alone', () => {
+    expect(mulDivCeil(7, 3, 2)).toBe(11);
+    expect(mulDivCeil(8, 3, 2)).toBe(12);
+    expect(mulDivCeil(N, A, N)).toBe(A);
+  });
+
+  it('the multiplier helpers stay exact for very large wallets', () => {
+    // 10,000 bp is 1x: nothing may be added or lost.
+    expect(applyMultiplierMicroUsd(N, 10_000)).toBe(N);
+    expect(removeMultiplierMicroUsd(N, 10_000)).toBe(N);
+    expect(removeMultiplierMicroUsd(12_000_000, 12_000)).toBe(10_000_000);
   });
 });
