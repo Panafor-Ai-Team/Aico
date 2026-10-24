@@ -45,8 +45,11 @@ export default {
     "This model's price is not available right now, so it can't be used. Choose another model.",
   'errors.MANAGED_OPERATION_NOT_METERED': 'This feature is temporarily unavailable.',
   'errors.MEMBER_NOT_FOUND': 'Member not found.',
+  'errors.MEMBER_NOT_ACTIVE':
+    'This member has left the organization, so budget cannot be allocated to them.',
   'errors.MODEL_NOT_ALLOWED': 'You do not have access to this model.',
   'errors.ORG_ALREADY_DELETED': 'This organization has already been deleted.',
+  'errors.ORG_DELETED': 'This organization has been deleted.',
   'errors.ORG_HAS_PENDING_RENEWAL':
     'Cannot delete the organization while a budget renewal is in progress.',
   'errors.ORG_NAME_MISMATCH': 'The organization name does not match your confirmation.',
