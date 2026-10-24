@@ -69,7 +69,10 @@ export const getTomanPerUsd = async (adminRate?: number | null): Promise<TomanPe
     const rate = toIntegerTomanPerUsd(await fetchLiveRateImpl());
     cached = { expiresAt: now + CACHE_TTL_MS, rate };
     return { rate, source: 'live' };
-  } catch {
+  } catch (error) {
+    // C8: with no admin rate and no live feed the env constant prices every top-up
+    // and display. That should never happen unnoticed.
+    console.warn('[aico] FX live rate unavailable; falling back to AICO_TOMAN_PER_USD', error);
     return { rate: toIntegerTomanPerUsd(aicoEnv.AICO_TOMAN_PER_USD), source: 'env' };
   }
 };

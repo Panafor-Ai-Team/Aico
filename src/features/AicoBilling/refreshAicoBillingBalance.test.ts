@@ -54,6 +54,43 @@ describe('refreshAicoBillingBalance', () => {
     vi.useRealTimers();
   });
 
+  it("C9: keeps the source's own π rate instead of assuming the default one", async () => {
+    vi.useFakeTimers();
+    // A wallet bought at a higher blended multiplier: 2 USD is 48,000 π, not 40,000.
+    const blended: AicoBillingSourcesResponse = {
+      ...billingSources,
+      sources: [{ ...billingSources.sources[0], remainingPi: '48000' }, billingSources.sources[1]],
+    };
+
+    await refreshAicoBillingBalance({ billingContext: { source: 'personal' }, costUsd: 0.25 });
+
+    const optimisticUpdater = vi.mocked(mutate).mock.calls[0][1] as (
+      data: AicoBillingSourcesResponse,
+    ) => AicoBillingSourcesResponse;
+    const next = optimisticUpdater(blended);
+    expect(next.sources[0].remainingMicroUsd).toBe('1750000');
+    // 1.75 USD at 24,000 π/USD — the old constant gave 35,000, which the next
+    // revalidation then snapped back.
+    expect(next.sources[0].remainingPi).toBe('42000');
+    await vi.runAllTimersAsync();
+  });
+
+  it('C9: falls back to the default rate when the source has no usable π figure', async () => {
+    vi.useFakeTimers();
+    const empty: AicoBillingSourcesResponse = {
+      ...billingSources,
+      sources: [{ ...billingSources.sources[0], remainingPi: '0' }, billingSources.sources[1]],
+    };
+
+    await refreshAicoBillingBalance({ billingContext: { source: 'personal' }, costUsd: 0.25 });
+
+    const optimisticUpdater = vi.mocked(mutate).mock.calls[0][1] as (
+      data: AicoBillingSourcesResponse,
+    ) => AicoBillingSourcesResponse;
+    expect(optimisticUpdater(empty).sources[0].remainingPi).toBe('35000');
+    await vi.runAllTimersAsync();
+  });
+
   it('updates the selected source immediately before authoritative revalidation', async () => {
     vi.useFakeTimers();
 

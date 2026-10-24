@@ -3,6 +3,7 @@ import { ChatErrorType, type ErrorType } from '@lobechat/types';
 import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { OrganizationModel } from '@/database/models/organization';
 import type { LobeChatDatabase } from '@/database/type';
+import { hasValidManagedKeyId } from '@/database/utils/aicoMoney';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 
 import { AicoManagedPolicy } from './managedPolicy';
@@ -142,7 +143,8 @@ export class AicoChatGuard {
         const me = members.find((m) => m.userId === userId && m.status === 'active');
         if (!me) continue;
         const budget = await this.orgModel.getMemberBudget(me.id);
-        if (budget?.openrouterKeyId) {
+        // C10: a `mock_` / previous-gateway id is not a key; truthiness said it was.
+        if (hasValidManagedKeyId(budget?.openrouterKeyId)) {
           orgId = org.id;
           orgMemberId = me.id;
           billingSource = 'organization';
