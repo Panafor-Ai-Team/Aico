@@ -109,6 +109,28 @@ const intOrNull = (value: unknown): number | null =>
 /** A cost measured by a shadow hold; the subject's balance was not touched by it. */
 export const SHADOW_SETTLEMENT_STATUS = 'shadow';
 
+/**
+ * N10 (these are functions, not constants: a module-level `sql` template would run
+ * at import time and break any test that mocks `drizzle-orm`).
+ *
+ * A shadow call settled without a measured figure (aborted, errored, no
+ * usage chunk, expired) is logged at the full hold — an upper bound nothing was
+ * debited for, since the real spend of a shadow call is the key counter. Reports
+ * that add up `usage_logs.cost_micro_usd` must not present that as spend.
+ * Enforce rows are real charges whatever the reason, so only shadow rows count
+ * as unmeasured. Needs `usage_logs` left-joined to `usage_holds` on `hold_id`.
+ */
+export const unmeasuredShadowSql = () =>
+  sql`(${usageLogs.settlementStatus} = ${SHADOW_SETTLEMENT_STATUS} AND ${usageHolds.settleReason} IS DISTINCT FROM 'usage')`;
+
+/** The logged cost, or 0 for a row that is only an estimate (see {@link unmeasuredShadowSql}). */
+export const measuredCostSql = () =>
+  sql<number>`CASE WHEN ${unmeasuredShadowSql()} THEN 0 ELSE ${usageLogs.costMicroUsd} END`;
+
+/** The logged cost of rows that are only an estimate: the upper bound, kept apart. */
+export const unmeasuredCostSql = () =>
+  sql<number>`CASE WHEN ${unmeasuredShadowSql()} THEN ${usageLogs.costMicroUsd} ELSE 0 END`;
+
 const settlementStatusFor = (reason: SettleReason): string => {
   if (reason === 'usage') return 'synchronized';
   if (reason === 'released_rejected' || reason === 'not_metered') return 'released';

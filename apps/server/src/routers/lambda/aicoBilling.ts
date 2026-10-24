@@ -348,8 +348,11 @@ export const aicoBillingRouter = router({
       const rows = await ctx.billingModel.listUserUsage(ctx.userId, input?.limit ?? 50);
       return rows.map((row) => ({
         completionTokens: row.completionTokens,
-        costMicroUsd: String(row.costMicroUsd),
-        costUsd: microUsdToDecimalString(row.costMicroUsd),
+        // N10: a shadow call with no usage figure is logged at its hold, an upper
+        // bound that nothing was charged for. Show what was metered (0) and say so.
+        costEstimated: !row.costMeasured,
+        costMicroUsd: String(row.costMeasured ? row.costMicroUsd : 0),
+        costUsd: microUsdToDecimalString(row.costMeasured ? row.costMicroUsd : 0),
         createdAt: row.createdAt,
         id: row.id,
         modelId: row.modelId,
