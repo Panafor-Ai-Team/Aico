@@ -1960,6 +1960,13 @@ export class OrganizationModel {
     /** Why the figure is not fully trusted, when `syncStatus` is `degraded`. */
     syncError?: string | null;
     syncStatus?: 'synced' | 'degraded';
+    /**
+     * D5: the `ledger_epoch` the figure was computed against. Renewal and a
+     * revived budget bump it, and a sync that read the key before that would
+     * otherwise write the closed cycle's usage into the new one. Returns
+     * undefined when the budget has moved on; the next sync starts fresh.
+     */
+    expectedLedgerEpoch?: number;
   }) => {
     const [row] = await this.db
       .update(memberBudgets)
@@ -1969,7 +1976,14 @@ export class OrganizationModel {
         lastSyncedAt: new Date(),
         settledUsageMicroUsd: params.settledUsageMicroUsd,
       })
-      .where(eq(memberBudgets.orgMemberId, params.orgMemberId))
+      .where(
+        and(
+          eq(memberBudgets.orgMemberId, params.orgMemberId),
+          params.expectedLedgerEpoch === undefined
+            ? undefined
+            : eq(memberBudgets.ledgerEpoch, params.expectedLedgerEpoch),
+        ),
+      )
       .returning();
     return row;
   };
@@ -1982,6 +1996,8 @@ export class OrganizationModel {
   updateMemberBudgetCheckpoint = async (params: {
     billedUsageBeforeBaselineMicroUsd: number;
     checkpointMultiplierBp: number;
+    /** D5: as on `syncMemberBudgetUsage` — only lands in the cycle it was computed for. */
+    expectedLedgerEpoch?: number;
     orgMemberId: string;
     usageBaselineMicroUsd: number;
   }) => {
@@ -1992,7 +2008,14 @@ export class OrganizationModel {
         checkpointMultiplierBp: params.checkpointMultiplierBp,
         usageBaselineMicroUsd: params.usageBaselineMicroUsd,
       })
-      .where(eq(memberBudgets.orgMemberId, params.orgMemberId))
+      .where(
+        and(
+          eq(memberBudgets.orgMemberId, params.orgMemberId),
+          params.expectedLedgerEpoch === undefined
+            ? undefined
+            : eq(memberBudgets.ledgerEpoch, params.expectedLedgerEpoch),
+        ),
+      )
       .returning();
     return row;
   };

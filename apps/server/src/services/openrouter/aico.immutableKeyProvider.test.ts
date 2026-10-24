@@ -1766,3 +1766,92 @@ describe('Stage C: a key follows the money', () => {
     });
   });
 });
+
+describe('Stage D: usage sync against a budget that moved on', () => {
+  /** A provider whose key read lands while something else changes the budget. */
+  class BusyProvider extends RevocableImmutableProvider {
+    duringRead: () => Promise<void> = async () => {};
+
+    constructor() {
+      super();
+      const read = this.getKey;
+      this.getKey = async (credential) => {
+        const info = await read(credential);
+        await this.duringRead();
+        return info;
+      };
+    }
+  }
+
+  const setupMember = async () => {
+    const orgModel = new OrganizationModel(db);
+    const org = await orgModel.createOrganization({ name: 'Sync Org', ownerUserId: userId });
+    await orgModel.addManualCredit({
+      amountMicroUsd: usd(100),
+      amountToman: 5_000_000,
+      createdByUserId: userId,
+      fxRateTomanPerUsd: 50_000,
+      orgId: org.id,
+    });
+    const invite = await orgModel.createInvite({
+      identifierType: 'email',
+      identifierValue: 'imm-member@example.com',
+      invitedByUserId: userId,
+      orgId: org.id,
+      role: 'member',
+    });
+    const { member } = await orgModel.acceptInvite({
+      email: 'imm-member@example.com',
+      token: invite.token,
+      userId: memberUserId,
+    });
+    await orgModel.allocateMemberCredit({
+      createdByUserId: userId,
+      orgId: org.id,
+      orgMemberId: member.id,
+      period: 'daily',
+      periodAmountMicroUsd: usd(12),
+    });
+    return { member, orgModel };
+  };
+
+  it('D5: a sync that read the key before a renewal does not write the old cycle into the new one', async () => {
+    const provider = new BusyProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    const { member, orgModel } = await setupMember();
+    const created = await keys.ensureMemberKey(member.id);
+    provider.spend(created.keyId!, 3);
+    // What renewal commits: a fresh cycle (usage zeroed) and a new epoch.
+    provider.duringRead = async () => {
+      await db
+        .update(memberBudgets)
+        .set({
+          ledgerEpoch: sql`${memberBudgets.ledgerEpoch} + 1`,
+          settledUsageMicroUsd: 0,
+          usageBaselineMicroUsd: usd(3),
+        })
+        .where(eq(memberBudgets.orgMemberId, member.id));
+      provider.duringRead = async () => {};
+    };
+
+    await keys.syncMemberCycleUsage(member.id);
+
+    const budget = await orgModel.getMemberBudget(member.id);
+    expect(Number(budget?.settledUsageMicroUsd)).toBe(0);
+    expect(Number(budget?.usageBaselineMicroUsd)).toBe(usd(3));
+  });
+
+  it('D5: a sync with nothing in between still records usage', async () => {
+    const provider = new BusyProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    const { member, orgModel } = await setupMember();
+    const created = await keys.ensureMemberKey(member.id);
+    provider.spend(created.keyId!, 3);
+
+    await keys.syncMemberCycleUsage(member.id);
+
+    expect(Number((await orgModel.getMemberBudget(member.id))?.settledUsageMicroUsd)).toBe(
+      usd(3.6),
+    );
+  });
+});
