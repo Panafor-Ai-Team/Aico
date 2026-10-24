@@ -652,11 +652,18 @@ export const platformAdminRouter = router({
       // FIN-013: the money has moved. Nothing below may turn this into a reported
       // failure — an admin who sees "credit failed" over a committed credit
       // retries, and the retry credits the wallet a second time.
+      let keyNeedsRetry: boolean;
       try {
         // Push the new balance to the managed key so the user can spend it.
-        await new AicoOpenRouterKeyService(ctx.serverDB).ensureUserKey(userId);
+        const ensured = await new AicoOpenRouterKeyService(ctx.serverDB).ensureUserKey(userId);
+        // N7: the key could not be read or raised for sure — the wallet may be
+        // funded behind a stale limit. Not an error, but not done either.
+        keyNeedsRetry = Boolean(ensured?.unverified);
       } catch (error) {
         console.error('[aico] user credit committed but OpenRouter key push failed', error);
+        keyNeedsRetry = true;
+      }
+      if (keyNeedsRetry) {
         // Without a retry the wallet stays funded behind a stale key limit until
         // an operator re-runs the credit by hand.
         await ctx.serverDB
@@ -968,8 +975,32 @@ export const platformAdminRouter = router({
         userId: input.userId,
       });
 
-      const keyService = new AicoOpenRouterKeyService(ctx.serverDB);
-      await keyService.ensureUserKey(input.userId);
+      // D3: the money is already back. A key push that throws here must not turn
+      // that into a reported failure (the admin would retry a restore that
+      // already happened) — it goes to the outbox, as a credit's does.
+      let keyNeedsRetry: boolean;
+      try {
+        const ensured = await new AicoOpenRouterKeyService(ctx.serverDB).ensureUserKey(
+          input.userId,
+        );
+        keyNeedsRetry = Boolean(ensured?.unverified);
+      } catch (error) {
+        console.error('[aico] user reactivated but OpenRouter key push failed', error);
+        keyNeedsRetry = true;
+      }
+      if (keyNeedsRetry) {
+        await ctx.serverDB
+          .insert(aicoKeyOutbox)
+          .values({
+            action: 'sync_user_key',
+            nextAttemptAt: new Date(),
+            status: 'pending',
+            userId: input.userId,
+          })
+          .catch((enqueueError) =>
+            console.error('[aico] failed to enqueue sync_user_key retry', enqueueError),
+          );
+      }
 
       return {
         ok: true as const,
@@ -1041,7 +1072,7 @@ export const platformAdminRouter = router({
       } catch (error) {
         console.error('[aico] user debit committed but managed key shrink failed', error);
       }
-      if (!key || key.status === 'ambiguous') {
+      if (!key || key.status === 'ambiguous' || key.unverified) {
         await ctx.serverDB
           .insert(aicoKeyOutbox)
           .values({

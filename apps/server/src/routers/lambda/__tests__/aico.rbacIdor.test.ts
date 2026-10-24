@@ -423,6 +423,47 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
       });
     });
 
+    it('N7: a credit whose key could not be verified queues a key retry too', async () => {
+      ensureUserKeyMock.mockResolvedValueOnce({ created: false, keyId: 'k1', unverified: true });
+      const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+
+      await platformCaller.addManualUserCredit({
+        amountToman: 30_000,
+        description: 'key unverified',
+        idempotencyKey: 'n7-key-unverified',
+        userId: strangerId,
+      });
+
+      const { aicoKeyOutbox } = await import('@/database/schemas/aicoOrganization');
+      const queued = await testDB.select().from(aicoKeyOutbox);
+      expect(queued).toHaveLength(1);
+      expect(queued[0]).toMatchObject({ action: 'sync_user_key', userId: strangerId });
+    });
+
+    it('W2 gap: a debit whose shrink was not verified queues a shrink retry', async () => {
+      const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+      await platformCaller.addManualUserCredit({
+        amountToman: 30_000,
+        description: 'fund before debit',
+        idempotencyKey: 'w2gap-fund',
+        userId: strangerId,
+      });
+      const { aicoKeyOutbox } = await import('@/database/schemas/aicoOrganization');
+      await testDB.delete(aicoKeyOutbox);
+      shrinkUserKeyMock.mockResolvedValueOnce({ keyId: 'k1', status: 'kept', unverified: true });
+
+      await platformCaller.addManualUserDebit({
+        amountUsd: '0.01',
+        description: 'take back',
+        idempotencyKey: 'w2gap-debit',
+        userId: strangerId,
+      });
+
+      const queued = await testDB.select().from(aicoKeyOutbox);
+      expect(queued).toHaveLength(1);
+      expect(queued[0]).toMatchObject({ action: 'shrink_user_key', userId: strangerId });
+    });
+
     it('W2: a debit whose key shrink fails queues a shrink retry, not a raise', async () => {
       const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
       await platformCaller.addManualUserCredit({
@@ -519,6 +560,27 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
     ensureUserKeyMock.mockClear();
     await platformCaller.reactivateUser({ userId: strangerId });
     expect(ensureUserKeyMock).toHaveBeenCalledWith(strangerId);
+  });
+
+  it('D3: reactivateUser reports success and queues a retry when the key push throws', async () => {
+    const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+    await platformCaller.deactivateUser({ reason: 'abuse', userId: strangerId });
+    const { aicoKeyOutbox } = await import('@/database/schemas/aicoOrganization');
+    await testDB.delete(aicoKeyOutbox);
+    ensureUserKeyMock.mockRejectedValueOnce(new Error('CheapVibeCode API 503'));
+
+    // The restore is already committed; this used to throw over it.
+    await expect(platformCaller.reactivateUser({ userId: strangerId })).resolves.toMatchObject({
+      ok: true,
+    });
+
+    const queued = await testDB.select().from(aicoKeyOutbox);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).toMatchObject({
+      action: 'sync_user_key',
+      status: 'pending',
+      userId: strangerId,
+    });
   });
 
   it('platform admin can suspend; member procedures still reachable on model (enforcement gap covered elsewhere)', async () => {

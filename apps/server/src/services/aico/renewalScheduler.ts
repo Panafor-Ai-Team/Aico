@@ -992,7 +992,9 @@ const runOutboxAction = async (params: {
     /** Backstop for a renewal that funded the cycle (R10): idempotent. */
     case 'sync_member_key': {
       if (!row.orgMemberId) throw new Error('ORG_MEMBER_ID_REQUIRED');
-      await keyService.ensureMemberKey(row.orgMemberId);
+      const ensured = await keyService.ensureMemberKey(row.orgMemberId);
+      // N7 / R8: the key was not read or its edit's outcome is unknown — retry.
+      if (ensured?.unverified) throw new Error('KEY_SYNC_UNVERIFIED');
       return 'done';
     }
 
@@ -1019,7 +1021,8 @@ const runOutboxAction = async (params: {
     // rather than being reported to the admin as a failed credit.
     case 'sync_user_key': {
       if (!row.userId) throw new Error('USER_ID_REQUIRED');
-      await keyService.ensureUserKey(row.userId);
+      const ensured = await keyService.ensureUserKey(row.userId);
+      if (ensured?.unverified) throw new Error('KEY_SYNC_UNVERIFIED');
       return 'done';
     }
 
@@ -1031,6 +1034,7 @@ const runOutboxAction = async (params: {
       if (!row.userId) throw new Error('USER_ID_REQUIRED');
       const outcome = await keyService.shrinkUserKey(row.userId);
       if (outcome.status === 'ambiguous') throw new Error('SHRINK_OUTCOME_UNKNOWN');
+      if (outcome.unverified) throw new Error('SHRINK_UNVERIFIED');
       return 'done';
     }
 
