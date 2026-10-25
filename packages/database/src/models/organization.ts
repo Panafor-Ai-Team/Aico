@@ -49,6 +49,47 @@ export interface ReclaimBudgetSnapshot {
   periodAmountMicroUsd: number;
 }
 
+type ReclaimBudgetFields = {
+  ledgerEpoch?: number | null;
+  openrouterKeyId?: string | null;
+  pendingPeriodAmountMicroUsd?: number | null;
+  periodAmountMicroUsd?: number | null;
+};
+
+/** The reclaim-relevant view of a member budget (N4). */
+export const reclaimSnapshotOf = (budget: ReclaimBudgetFields): ReclaimBudgetSnapshot => ({
+  ledgerEpoch: Number(budget.ledgerEpoch ?? 0),
+  openrouterKeyId: budget.openrouterKeyId ?? null,
+  pendingPeriodAmountMicroUsd: Number(budget.pendingPeriodAmountMicroUsd ?? 0),
+  periodAmountMicroUsd: Number(budget.periodAmountMicroUsd ?? 0),
+});
+
+/** Reads a snapshot back from an outbox payload; anything malformed is `undefined`. */
+export const parseReclaimSnapshot = (value: unknown): ReclaimBudgetSnapshot | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const v = value as Record<string, unknown>;
+  if (
+    typeof v.ledgerEpoch !== 'number' ||
+    typeof v.periodAmountMicroUsd !== 'number' ||
+    typeof v.pendingPeriodAmountMicroUsd !== 'number' ||
+    (v.openrouterKeyId !== null && typeof v.openrouterKeyId !== 'string')
+  ) {
+    return undefined;
+  }
+  return {
+    ledgerEpoch: v.ledgerEpoch,
+    openrouterKeyId: v.openrouterKeyId,
+    pendingPeriodAmountMicroUsd: v.pendingPeriodAmountMicroUsd,
+    periodAmountMicroUsd: v.periodAmountMicroUsd,
+  };
+};
+
+export const reclaimSnapshotsEqual = (a: ReclaimBudgetSnapshot, b: ReclaimBudgetSnapshot) =>
+  a.ledgerEpoch === b.ledgerEpoch &&
+  a.openrouterKeyId === b.openrouterKeyId &&
+  a.periodAmountMicroUsd === b.periodAmountMicroUsd &&
+  a.pendingPeriodAmountMicroUsd === b.pendingPeriodAmountMicroUsd;
+
 const INVITE_TTL_MS = 72 * 60 * 60 * 1000;
 export const DEFAULT_TEAM_NAME = 'Unspecified';
 export const DEFAULT_TEAM_SLUG = 'unspecified';
@@ -545,6 +586,25 @@ export class OrganizationModel {
     const role = params.role ?? 'admin';
 
     return this.db.transaction(async (tx) => {
+      // Lock the membership row first: a removal that is still being settled
+      // (revocation_pending) has a queued reclaim that would settle whatever
+      // budget the revived membership gets, so re-activating it now would
+      // leave an active member with a dead allocation.
+      const [existing] = await tx
+        .select()
+        .from(organizationMembers)
+        .where(
+          and(
+            eq(organizationMembers.orgId, params.orgId),
+            eq(organizationMembers.userId, params.userId),
+          ),
+        )
+        .limit(1)
+        .for('update');
+      if (existing?.status === 'revocation_pending') {
+        throw new Error('MEMBER_REMOVAL_IN_PROGRESS');
+      }
+
       if (role === 'owner') {
         await tx
           .update(organizations)
@@ -563,13 +623,6 @@ export class OrganizationModel {
             ),
           );
       }
-
-      const existing = await tx.query.organizationMembers.findFirst({
-        where: and(
-          eq(organizationMembers.orgId, params.orgId),
-          eq(organizationMembers.userId, params.userId),
-        ),
-      });
 
       if (existing) {
         const [updated] = await tx
@@ -1031,17 +1084,29 @@ export class OrganizationModel {
 
     try {
       return await this.db.transaction(async (tx) => {
+        // Lock the membership row before touching the invite: while a removal
+        // is unsettled (revocation_pending) its queued reclaim would settle
+        // the budget of a re-activated membership. The throw rolls back, so
+        // the invite stays pending and can be accepted once the removal ends.
+        const [existing] = await tx
+          .select()
+          .from(organizationMembers)
+          .where(
+            and(
+              eq(organizationMembers.orgId, invite.orgId),
+              eq(organizationMembers.userId, params.userId),
+            ),
+          )
+          .limit(1)
+          .for('update');
+        if (existing?.status === 'revocation_pending') {
+          throw new Error('MEMBER_REMOVAL_IN_PROGRESS');
+        }
+
         await tx
           .update(organizationInvites)
           .set({ status: 'accepted' })
           .where(eq(organizationInvites.id, invite.id));
-
-        const existing = await tx.query.organizationMembers.findFirst({
-          where: and(
-            eq(organizationMembers.orgId, invite.orgId),
-            eq(organizationMembers.userId, params.userId),
-          ),
-        });
 
         let member: OrganizationMemberItem;
         if (existing) {

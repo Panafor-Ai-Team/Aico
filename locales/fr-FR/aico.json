@@ -32,6 +32,7 @@
   "errors.MEMBER_BUDGET_UNFUNDED": "Le budget d'organisation sélectionné n'a plus de crédit.",
   "errors.MEMBER_NOT_ACTIVE": "Ce membre a quitté l'organisation : aucun budget ne peut lui être alloué.",
   "errors.MEMBER_NOT_FOUND": "Membre introuvable.",
+  "errors.MEMBER_REMOVAL_IN_PROGRESS": "Le retrait de cette personne de l'organisation est encore en cours de traitement. Réessayez plus tard ou contactez un administrateur de la plateforme si le blocage persiste.",
   "errors.MODEL_NOT_ALLOWED": "Vous n'avez pas accès à ce modèle.",
   "errors.MODEL_PRICING_UNAVAILABLE": "Le prix de ce modèle n'est pas disponible pour le moment, il ne peut donc pas être utilisé. Choisissez un autre modèle.",
   "errors.OPERATOR_EMAIL_EXISTS": "Un opérateur avec cet e-mail existe déjà.",

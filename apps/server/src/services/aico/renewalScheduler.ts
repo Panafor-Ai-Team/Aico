@@ -3,7 +3,12 @@ import { createHash } from 'node:crypto';
 import { and, asc, eq, inArray, isNotNull, lt, lte, ne, notInArray, or, sql } from 'drizzle-orm';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
-import { OrganizationModel } from '@/database/models/organization';
+import {
+  OrganizationModel,
+  parseReclaimSnapshot,
+  reclaimSnapshotOf,
+  reclaimSnapshotsEqual,
+} from '@/database/models/organization';
 import {
   aicoKeyOutbox,
   aicoRenewalBatches,
@@ -1040,6 +1045,20 @@ const runOutboxAction = async (params: {
 
     case 'reclaim_member': {
       if (!row.orgMemberId || !row.orgId) throw new Error('ORG_MEMBER_ID_REQUIRED');
+      // A sweep that deferred its reclaim recorded the budget it saw. If the
+      // budget has been re-allocated, renewed or settled since, the job is
+      // stale and would reclaim a newer allocation.
+      const sweepExpected = parseReclaimSnapshot(row.payload?.expected);
+      if (sweepExpected) {
+        const current = await orgModel.getMemberBudgetForOrg({
+          orgId: row.orgId,
+          orgMemberId: row.orgMemberId,
+        });
+        if (!current || !reclaimSnapshotsEqual(sweepExpected, reclaimSnapshotOf(current))) {
+          console.warn('[aico] sweep reclaim superseded by a later change', row.orgMemberId);
+          return 'done';
+        }
+      }
       const reclaimed = await keyService.reclaimMemberKey({
         orgId: row.orgId,
         orgMemberId: row.orgMemberId,

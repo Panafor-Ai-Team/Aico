@@ -47,6 +47,8 @@ export default {
   'errors.MEMBER_NOT_FOUND': 'Member not found.',
   'errors.MEMBER_NOT_ACTIVE':
     'This member has left the organization, so budget cannot be allocated to them.',
+  'errors.MEMBER_REMOVAL_IN_PROGRESS':
+    "This person's removal from the organization is still being settled. Try again later, or ask a platform admin if it does not clear.",
   'errors.MODEL_NOT_ALLOWED': 'You do not have access to this model.',
   'errors.ORG_ALREADY_DELETED': 'This organization has already been deleted.',
   'errors.ORG_DELETED': 'This organization has been deleted.',
