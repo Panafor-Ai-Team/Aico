@@ -6,7 +6,6 @@
  */
 
 import { uuid } from '@lobechat/utils';
-// eslint-disable-next-line no-restricted-imports -- Text/Tag not in base-ui yet
 import { Block, Flexbox, Tag, Text } from '@lobehub/ui';
 import { Button, Select, Switch, Tabs, toast } from '@lobehub/ui/base-ui';
 import { Form, Input, InputNumber, Table } from 'antd';
@@ -299,7 +298,7 @@ export const PlatformAdminPanel = () => {
                 columns={[
                   { dataIndex: 'type', title: t('wallet.columns.type') },
                   {
-                    dataIndex: 'amountUsd',
+                    dataIndex: 'walletChangeUsd',
                     title: t('wallet.columns.usd'),
                     render: (v) => (v == null ? '—' : Number(v).toFixed(4)),
                   },

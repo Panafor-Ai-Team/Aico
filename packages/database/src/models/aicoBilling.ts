@@ -9,6 +9,7 @@ import {
   getTableColumns,
   inArray,
   isNotNull,
+  isNull,
   ne,
   notInArray,
   sql,
@@ -673,7 +674,9 @@ export class AicoBillingModel {
    */
   listUserTransactions = async (userId: string, limit = 50) => {
     return this.db.query.walletTransactions.findMany({
-      where: eq(walletTransactions.userId, userId),
+      // Personal wallet only: org rows written for this member (allocations,
+      // reclaims) are the organization's ledger, not this wallet's.
+      where: and(eq(walletTransactions.userId, userId), isNull(walletTransactions.orgId)),
       orderBy: [desc(walletTransactions.createdAt)],
       limit,
     });
@@ -1140,6 +1143,8 @@ export class AicoBillingModel {
         actorUserEmail: actorUser.email,
         amountMicroUsd: walletTransactions.amountMicroUsd,
         amountToman: walletTransactions.amountToman,
+        balanceAfterMicroUsd: walletTransactions.balanceAfterMicroUsd,
+        balanceBeforeMicroUsd: walletTransactions.balanceBeforeMicroUsd,
         createdAt: walletTransactions.createdAt,
         createdByAdminId: walletTransactions.createdByAdminId,
         createdByUserId: walletTransactions.createdByUserId,

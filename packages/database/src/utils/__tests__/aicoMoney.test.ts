@@ -16,6 +16,7 @@ import {
   removeMultiplierMicroUsd,
   tomanToMicroUsd,
   usdDecimalStringToMicro,
+  walletChangeMicroUsd,
 } from '../aicoMoney';
 
 describe('aicoMoney (final remediation)', () => {
@@ -157,5 +158,42 @@ describe('N13: exact products above 2^53', () => {
     expect(applyMultiplierMicroUsd(N, 10_000)).toBe(N);
     expect(removeMultiplierMicroUsd(N, 10_000)).toBe(N);
     expect(removeMultiplierMicroUsd(12_000_000, 12_000)).toBe(10_000_000);
+  });
+});
+
+describe('walletChangeMicroUsd (N11)', () => {
+  it('is the balance after minus the balance before, whatever amount was stored', () => {
+    // An org `allocate` row for a reduction: stored positive, wallet went up.
+    expect(
+      walletChangeMicroUsd({
+        amountMicroUsd: 3_000_000,
+        balanceAfterMicroUsd: 18_000_000,
+        balanceBeforeMicroUsd: 15_000_000,
+      }),
+    ).toBe(3_000_000);
+    // An allocation: stored positive, wallet went down.
+    expect(
+      walletChangeMicroUsd({
+        amountMicroUsd: 5_000_000,
+        balanceAfterMicroUsd: 15_000_000,
+        balanceBeforeMicroUsd: 20_000_000,
+      }),
+    ).toBe(-5_000_000);
+  });
+
+  it('falls back to the stored amount when either balance is missing', () => {
+    expect(walletChangeMicroUsd({ amountMicroUsd: -7, balanceAfterMicroUsd: 1 })).toBe(-7);
+    expect(walletChangeMicroUsd({ amountMicroUsd: 4, balanceBeforeMicroUsd: 1 })).toBe(4);
+    expect(walletChangeMicroUsd({})).toBe(0);
+  });
+
+  it('keeps a personal row as it was: after minus before equals the amount', () => {
+    expect(
+      walletChangeMicroUsd({
+        amountMicroUsd: -2_000_000,
+        balanceAfterMicroUsd: 3_000_000,
+        balanceBeforeMicroUsd: 5_000_000,
+      }),
+    ).toBe(-2_000_000);
   });
 });
