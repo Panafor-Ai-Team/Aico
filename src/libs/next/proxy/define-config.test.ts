@@ -14,9 +14,11 @@ vi.mock('@/auth', () => ({
 
 const { middleware } = defineConfig();
 
-const run = async (url: string, userAgent?: string) => {
+const run = async (url: string, userAgent?: string, headers: Record<string, string> = {}) => {
   const res = await middleware(
-    new NextRequest(url, userAgent ? { headers: { 'user-agent': userAgent } } : undefined),
+    new NextRequest(url, {
+      headers: { ...(userAgent ? { 'user-agent': userAgent } : {}), ...headers },
+    }),
   );
   return res?.headers.get('x-middleware-rewrite');
 };
@@ -50,6 +52,39 @@ describe('defineConfig locale path-traversal hardening', () => {
     );
     expect(new URL(rewrite!).pathname).toMatch(
       /^\/spa\/[^/]+\/oauth-preview-e2e-20260716\/settings\/oauth-apps$/,
+    );
+  });
+});
+
+describe('defineConfig locale resolution', () => {
+  const localeOf = async (headers: Record<string, string>) => {
+    const rewrite = await run('http://localhost:3010/signin', undefined, headers);
+    return new URL(rewrite!).pathname.split('/')[2];
+  };
+
+  it('defaults a visitor with no cookie to Persian even when the browser prefers English', async () => {
+    expect(await localeOf({ 'accept-language': 'en-US,en;q=0.9' })).toBe('fa-IR');
+  });
+
+  it('follows Accept-Language when the cookie is `auto` (System Language)', async () => {
+    expect(
+      await localeOf({ 'accept-language': 'en-US,en;q=0.9', 'cookie': 'LOBE_LOCALE=auto' }),
+    ).toBe('en-US');
+    expect(
+      await localeOf({ 'accept-language': 'fr-FR,fr;q=0.9', 'cookie': 'LOBE_LOCALE=auto' }),
+    ).toBe('fr-FR');
+  });
+
+  it('falls back to Persian when the cookie is `auto` and the language is unsupported', async () => {
+    expect(await localeOf({ 'accept-language': 'xx-YY', 'cookie': 'LOBE_LOCALE=auto' })).toBe(
+      'fa-IR',
+    );
+    expect(await localeOf({ cookie: 'LOBE_LOCALE=auto' })).toBe('fa-IR');
+  });
+
+  it('keeps an explicit cookie choice over Accept-Language', async () => {
+    expect(await localeOf({ 'accept-language': 'fr-FR', 'cookie': 'LOBE_LOCALE=en-US' })).toBe(
+      'en-US',
     );
   });
 });

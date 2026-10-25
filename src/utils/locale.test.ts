@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { normalizeLocale } from '@/locales/resources';
 
-import { parseBrowserLanguage } from './locale';
+import { parseBrowserLanguage, resolveAutoLanguage } from './locale';
 
 describe('normalizeLocale', () => {
   it('should normalize simplified Chinese script locales to zh-CN', () => {
@@ -88,5 +88,28 @@ describe('parseBrowserLanguage', () => {
       const headers = new Headers();
       expect(parseBrowserLanguage(headers)).toBe('fa-IR');
     });
+  });
+});
+
+describe('resolveAutoLanguage', () => {
+  const createHeaders = (acceptLanguage?: string) => {
+    const headers = new Headers();
+    if (acceptLanguage) headers.set('accept-language', acceptLanguage);
+    return headers;
+  };
+
+  it('should follow Accept-Language even though the default language is fa-IR', () => {
+    expect(resolveAutoLanguage(createHeaders('en-US,en;q=0.9'))).toBe('en-US');
+    expect(resolveAutoLanguage(createHeaders('fr-FR,fr;q=0.9'))).toBe('fr-FR');
+    expect(resolveAutoLanguage(createHeaders('ar-SA,ar;q=0.9'))).toBe('ar');
+  });
+
+  it('should fall back to fa-IR when Accept-Language is missing or unsupported', () => {
+    expect(resolveAutoLanguage(createHeaders())).toBe('fa-IR');
+    expect(resolveAutoLanguage(createHeaders('xx-YY'))).toBe('fa-IR');
+  });
+
+  it('should leave the no-choice default untouched (parseBrowserLanguage stays fa-IR)', () => {
+    expect(parseBrowserLanguage(createHeaders('en-US,en;q=0.9'))).toBe('fa-IR');
   });
 });

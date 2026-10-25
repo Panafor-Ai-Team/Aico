@@ -5,3 +5,14 @@
  */
 export const getSystemLanguage = (): string =>
   (typeof window !== 'undefined' && window.lobeEnv?.systemLanguage) || navigator.language;
+
+/** The ordered language preference list; desktop reports a single OS language. */
+export const getSystemLanguages = (): string[] => {
+  if (typeof window !== 'undefined' && window.lobeEnv?.systemLanguage) {
+    return [window.lobeEnv.systemLanguage];
+  }
+  if (typeof navigator === 'undefined') return [];
+
+  const languages = navigator.languages?.length ? navigator.languages : [navigator.language];
+  return languages.filter(Boolean);
+};
