@@ -163,7 +163,10 @@ describe('toastAicoError', () => {
 describe('Aico usage ledger error codes', () => {
   const LEDGER_CODES = [
     'MANAGED_OPERATION_NOT_METERED',
+    'MEMBER_NOT_ACTIVE',
+    'MEMBER_REMOVAL_IN_PROGRESS',
     'MODEL_PRICING_UNAVAILABLE',
+    'ORG_DELETED',
     'PLATFORM_CAPACITY_EXHAUSTED',
     'USAGE_CONCURRENCY_LIMIT',
   ] as const;
