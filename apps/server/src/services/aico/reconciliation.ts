@@ -124,6 +124,65 @@ interface ChainRow {
 }
 
 /**
+ * Puts the rows of one transaction in an order that continues the chain from
+ * `start`, or returns null when no such order exists (a row is really missing).
+ *
+ * Each row is an edge from its balance-before to its balance-after, so a valid
+ * order is an Eulerian trail. That matters: a weekly renewal takes the balance
+ * up through its refunds and back down through its debits, so the same balance
+ * appears twice and a step-by-step "next row that starts here" can take the
+ * wrong branch and strand the rest (it reported a $15 gap on a wallet that was
+ * exactly right). Hierholzer's algorithm splices those loops back in.
+ */
+const trailThrough = <T extends ChainRow>(group: T[], start: number | null): T[] | null => {
+  const out = new Map<number, T[]>();
+  const balance = new Map<number, number>();
+  for (const r of group) {
+    if (r.balanceBeforeMicroUsd == null || r.balanceAfterMicroUsd == null) return null;
+    const from = Number(r.balanceBeforeMicroUsd);
+    const to = Number(r.balanceAfterMicroUsd);
+    const list = out.get(from);
+    if (list) list.push(r);
+    else out.set(from, [r]);
+    balance.set(from, (balance.get(from) ?? 0) + 1);
+    balance.set(to, (balance.get(to) ?? 0) - 1);
+  }
+
+  // Start where the previous row ended; failing that, at the one balance that
+  // leaves more often than it is reached.
+  let startNode: number | undefined = start != null && out.has(start) ? start : undefined;
+  if (startNode === undefined) {
+    startNode = [...balance.entries()].find(([, d]) => d === 1)?.[0] ?? [...out.keys()][0];
+  }
+  if (startNode === undefined) return null;
+
+  const nodes: number[] = [startNode];
+  const via: (T | null)[] = [null];
+  const reversed: T[] = [];
+  while (nodes.length > 0) {
+    const node = nodes.at(-1)!;
+    const next = out.get(node)?.shift();
+    if (next) {
+      nodes.push(Number(next.balanceAfterMicroUsd));
+      via.push(next);
+    } else {
+      nodes.pop();
+      const edge = via.pop();
+      if (edge) reversed.push(edge);
+    }
+  }
+  const trail = reversed.reverse();
+
+  if (trail.length !== group.length) return null;
+  for (let i = 1; i < trail.length; i += 1) {
+    if (Number(trail[i - 1].balanceAfterMicroUsd) !== Number(trail[i].balanceBeforeMicroUsd)) {
+      return null;
+    }
+  }
+  return trail;
+};
+
+/**
  * Oldest first, with rows written at the same instant (one database
  * transaction, e.g. a period refund and the renewal that follows it) put in
  * the order that continues the chain. Their ids are random, so sorting ties by
@@ -140,20 +199,36 @@ export const orderChain = <T extends ChainRow>(rows: T[]): T[] => {
     while (j < sorted.length && sorted[j].createdAt.getTime() === sorted[i].createdAt.getTime())
       j++;
     const group = sorted.slice(i, j);
-    while (group.length > 0) {
-      const next = group.findIndex(
-        (r) =>
-          prevAfter != null &&
-          r.balanceBeforeMicroUsd != null &&
-          Number(r.balanceBeforeMicroUsd) === prevAfter,
-      );
-      const [row] = group.splice(Math.max(next, 0), 1);
+    // Rows that cannot form one continuous trail (a row really is missing) keep
+    // the old best-effort order, so the break is still reported.
+    const trail: T[] | null = group.length > 1 ? trailThrough(group, prevAfter) : null;
+    const ordered: T[] = trail ?? greedyOrder(group, prevAfter);
+    for (const row of ordered) {
       out.push(row);
       if (row.balanceAfterMicroUsd != null) prevAfter = Number(row.balanceAfterMicroUsd);
     }
     i = j;
   }
   return out;
+};
+
+/** The earlier best-effort order: repeatedly take a row that starts where the last ended. */
+const greedyOrder = <T extends ChainRow>(rows: T[], start: number | null): T[] => {
+  const group = [...rows];
+  const ordered: T[] = [];
+  let prevAfter = start;
+  while (group.length > 0) {
+    const next = group.findIndex(
+      (r) =>
+        prevAfter != null &&
+        r.balanceBeforeMicroUsd != null &&
+        Number(r.balanceBeforeMicroUsd) === prevAfter,
+    );
+    const [row] = group.splice(Math.max(next, 0), 1);
+    ordered.push(row);
+    if (row.balanceAfterMicroUsd != null) prevAfter = Number(row.balanceAfterMicroUsd);
+  }
+  return ordered;
 };
 
 /** Chain breaks within one subject's rows, oldest first. */
