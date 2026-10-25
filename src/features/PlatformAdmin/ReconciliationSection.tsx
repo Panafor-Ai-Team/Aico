@@ -187,13 +187,23 @@ export const ReconciliationSection = () => {
             ]}
             expandable={{
               expandedRowRender: (row) => (
-                <ul className={styles.details}>
-                  {row.details.map((d) => (
-                    <li key={d}>{d}</li>
-                  ))}
-                </ul>
+                <>
+                  {typeof row.values.historyCutoff === 'string' && (
+                    <Text type="secondary">
+                      {t('platform.reconciliation.historyCutoff', {
+                        time: new Date(row.values.historyCutoff).toLocaleString(),
+                      })}
+                    </Text>
+                  )}
+                  <ul className={styles.details}>
+                    {row.details.map((d) => (
+                      <li key={d}>{d}</li>
+                    ))}
+                  </ul>
+                </>
               ),
-              rowExpandable: (row) => row.details.length > 0,
+              rowExpandable: (row) =>
+                row.details.length > 0 || typeof row.values.historyCutoff === 'string',
             }}
           />
         </div>
