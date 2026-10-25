@@ -141,7 +141,9 @@ const mapInviteError = (error: unknown): never => {
   const code =
     message === 'INVITE_NOT_FOUND' || message === 'INVITE_EXPIRED'
       ? 'NOT_FOUND'
-      : message === 'USER_ALREADY_IN_ORGANIZATION' || message === 'ORG_NOT_ACTIVE'
+      : message === 'USER_ALREADY_IN_ORGANIZATION' ||
+          message === 'ORG_NOT_ACTIVE' ||
+          message === 'MEMBER_REMOVAL_IN_PROGRESS'
         ? 'CONFLICT'
         : message === 'INVITE_IDENTIFIER_MISMATCH' || message === 'INVITE_NOT_PENDING'
           ? 'BAD_REQUEST'

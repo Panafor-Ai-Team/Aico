@@ -23,7 +23,7 @@ import {
   executeOrgBudgetSweep,
   previewOrgBudgetSweep,
 } from '@/server/services/aico/orgBudgetSweep';
-import { processDueRenewals } from '@/server/services/aico/renewalScheduler';
+import { processDueRenewals, processKeyOutbox } from '@/server/services/aico/renewalScheduler';
 import type { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 
 const usd = (n: number) => Math.round(n * 1_000_000);
@@ -359,6 +359,48 @@ describe('org budget sweep', () => {
       // The budget is untouched until the outbox settles it.
       const budget = await orgModel.getMemberBudget(members[0].id);
       expect(budget!.renewalStatus).not.toBe('settled');
+    });
+
+    it('does not let a deferred reclaim wipe an allocation made after the sweep (SW)', async () => {
+      const { members, org } = await setupOrg({
+        members: [{ capUsd: 5, email: 'member-a@example.com', userId: memberAId }],
+        orgWalletUsd: 20,
+      });
+      await executeOrgBudgetSweep({
+        actorUserId: ownerId,
+        batchId: 'sweep-batch-sw',
+        db: serverDB,
+        keyService: mockKeyService({
+          reclaimMemberKey: vi.fn(async () => {
+            throw new Error('OPENROUTER_DOWN');
+          }),
+        }),
+        orgId: org.id,
+      });
+
+      // The owner gives the member a new allowance while the reclaim is queued.
+      await orgModel.allocateMemberCredit({
+        createdByUserId: ownerId,
+        orgId: org.id,
+        orgMemberId: members[0].id,
+        period: 'daily',
+        periodAmountMicroUsd: usd(8),
+      });
+      const walletBefore = Number((await orgModel.getById(org.id))!.walletBalanceMicroUsd);
+      const rowsBefore = await serverDB.query.walletTransactions.findMany();
+
+      const keyService = mockKeyService();
+      const run = await processKeyOutbox(serverDB, { keyService });
+
+      expect(run.succeeded).toBe(1);
+      expect(keyService.reclaimMemberKey).not.toHaveBeenCalled();
+      const budget = await orgModel.getMemberBudget(members[0].id);
+      expect(budget!.renewalStatus).not.toBe('settled');
+      expect(Number(budget!.periodAmountMicroUsd)).toBe(usd(8));
+      expect(Number((await orgModel.getById(org.id))!.walletBalanceMicroUsd)).toBe(walletBefore);
+      expect(await serverDB.query.walletTransactions.findMany()).toHaveLength(rowsBefore.length);
+      const [outbox] = await serverDB.query.aicoKeyOutbox.findMany();
+      expect(outbox.status).toBe('succeeded');
     });
 
     it('reclaims wallet-side for a budget whose managed key is already gone', async () => {

@@ -32,6 +32,7 @@
   "errors.MEMBER_BUDGET_UNFUNDED": "所选组织额度已无剩余。",
   "errors.MEMBER_NOT_ACTIVE": "该成员已离开组织，无法为其分配预算。",
   "errors.MEMBER_NOT_FOUND": "未找到成员。",
+  "errors.MEMBER_REMOVAL_IN_PROGRESS": "该成员移出组织的处理仍在进行中。请稍后重试；若长时间未恢复，请联系平台管理员。",
   "errors.MODEL_NOT_ALLOWED": "你无权使用此模型。",
   "errors.MODEL_PRICING_UNAVAILABLE": "该模型当前没有可用的价格信息，暂时无法使用。请选择其他模型。",
   "errors.OPERATOR_EMAIL_EXISTS": "该邮箱已存在操作员账号。",

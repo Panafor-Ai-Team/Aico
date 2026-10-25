@@ -32,6 +32,7 @@
   "errors.MEMBER_BUDGET_UNFUNDED": "The selected organization budget has no remaining credit.",
   "errors.MEMBER_NOT_ACTIVE": "This member has left the organization, so budget cannot be allocated to them.",
   "errors.MEMBER_NOT_FOUND": "Member not found.",
+  "errors.MEMBER_REMOVAL_IN_PROGRESS": "This person's removal from the organization is still being settled. Try again later, or ask a platform admin if it does not clear.",
   "errors.MODEL_NOT_ALLOWED": "You do not have access to this model.",
   "errors.MODEL_PRICING_UNAVAILABLE": "This model's price is not available right now, so it can't be used. Choose another model.",
   "errors.OPERATOR_EMAIL_EXISTS": "An operator with this email already exists.",
