@@ -21,6 +21,18 @@ export const resolveCostModelId = (
   return typeof resolved === 'string' && resolved ? resolved : model;
 };
 
+/**
+ * Whether the reply came from a router alias: the provider reported a model
+ * other than the one the user picked.
+ */
+export const isRoutedModel = (
+  model: string | null | undefined,
+  metadata: object | null | undefined,
+): boolean => {
+  const resolved = resolveCostModelId(model, metadata);
+  return !!model && !!resolved && resolved !== model;
+};
+
 interface MessageModelNameInput {
   /** `displayName` of the resolved model card, when the model is known locally. */
   displayName?: string;

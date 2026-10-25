@@ -34,7 +34,9 @@ export {
  * which is why `baseURL` is configurable per deployment rather than pinned.
  */
 export const params = {
-  baseURL: 'https://ru.cheapvibecode.ru/v1',
+  // `ru.` is CVC's fallback origin: the primary stalls from the Iran servers.
+  // Overridable so a latency comparison between origins needs no code change.
+  baseURL: process.env.CHEAPVIBECODE_CHAT_BASE_URL || 'https://ru.cheapvibecode.ru/v1',
   chatCompletion: {
     handlePayload: (payload) => {
       const {

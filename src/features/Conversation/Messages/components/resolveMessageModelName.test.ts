@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveCostModelId, resolveMessageModelName } from './resolveMessageModelName';
+import {
+  isRoutedModel,
+  resolveCostModelId,
+  resolveMessageModelName,
+} from './resolveMessageModelName';
 
 describe('resolveCostModelId', () => {
   it('names the model the Auto router picked, not the alias', () => {
@@ -19,6 +23,22 @@ describe('resolveCostModelId', () => {
 
   it('tolerates missing metadata', () => {
     expect(resolveCostModelId('openrouter/auto', null)).toBe('openrouter/auto');
+  });
+});
+
+describe('isRoutedModel', () => {
+  it('is true when the provider reported a different model than the one picked', () => {
+    expect(isRoutedModel('openrouter/auto', { resolvedModel: 'glm-5.3-flash' })).toBe(true);
+  });
+
+  it('is false for a directly chosen model, with or without an echoed id', () => {
+    expect(isRoutedModel('gpt-5', { cost: 0.002 })).toBe(false);
+    expect(isRoutedModel('gpt-5', { resolvedModel: 'gpt-5' })).toBe(false);
+  });
+
+  it('is false without a model or metadata', () => {
+    expect(isRoutedModel(undefined, { resolvedModel: 'glm-5.3-flash' })).toBe(false);
+    expect(isRoutedModel('openrouter/auto', null)).toBe(false);
   });
 });
 

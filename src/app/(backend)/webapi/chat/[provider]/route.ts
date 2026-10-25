@@ -1,6 +1,7 @@
 import { type ChatCompletionErrorPayload } from '@lobechat/model-runtime';
 import { AGENT_RUNTIME_ERROR_SET } from '@lobechat/model-runtime';
 import { ChatErrorType } from '@lobechat/types';
+import debug from 'debug';
 
 import { checkAuth } from '@/app/(backend)/middleware/auth';
 import { AicoBillingModel } from '@/database/models/aicoBilling';
@@ -14,7 +15,7 @@ import {
   parseAicoBillingContext,
 } from '@/server/services/aico/billingContext';
 import { getLedgerConfig } from '@/server/services/aico/ledger/config';
-import { getManagedChatPricing } from '@/server/services/aico/ledger/pricing';
+import { getManagedChatPricingForPayload } from '@/server/services/aico/ledger/pricing';
 import { AicoManagedPolicy, AicoManagedPolicyError } from '@/server/services/aico/managedPolicy';
 import { resolveManagedPricingContext } from '@/server/services/aico/usageMultiplier';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
@@ -36,6 +37,19 @@ const SETUP_TIMEOUT_MS = 20_000;
 // Cap for waiting on upstream headers (time to first byte). Cleared once the
 // stream starts, so long generations are never cut mid-stream.
 const CHAT_START_TIMEOUT_MS = 60_000;
+
+// Per-request phase timings, one line per chat. Enable with
+// DEBUG=lobe-server:chat:timing to tell setup, billing hold, upstream first
+// byte and generation time apart when replies feel slow.
+const timingLog = debug('lobe-server:chat:timing');
+
+interface ChatTiming {
+  chatCallMs: number;
+  initMs: number;
+  model?: string;
+  pricingMs: number;
+  provider: string;
+}
 
 const withSetupTimeout = <T>(promise: Promise<T>, label: string): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -65,9 +79,31 @@ const withStreamInactivityGuard = (
   response: Response,
   provider: string,
   model?: string,
+  timing?: ChatTiming,
 ): Response => {
   const body = response.body;
   if (!body) return response;
+  const streamStartedAt = Date.now();
+  let firstChunkMs: number | undefined;
+  let chunks = 0;
+  let bytes = 0;
+  const logTiming = (outcome: 'done' | 'error' | 'cancelled') => {
+    if (!timing || !timingLog.enabled) return;
+    const streamMs = Date.now() - streamStartedAt;
+    timingLog(
+      JSON.stringify({
+        ...timing,
+        bytes,
+        chunks,
+        // Time from stream start to the first body chunk, and the remainder
+        // spent generating; bytes/s over genMs is a provider-agnostic throughput.
+        firstChunkMs,
+        genMs: firstChunkMs === undefined ? undefined : streamMs - firstChunkMs,
+        outcome,
+        streamMs,
+      }),
+    );
+  };
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let carry = '';
@@ -90,6 +126,9 @@ const withStreamInactivityGuard = (
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
+          firstChunkMs ??= Date.now() - streamStartedAt;
+          chunks += 1;
+          bytes += value?.byteLength ?? 0;
           controller.enqueue(value);
           carry += decoder.decode(value, { stream: true });
           const lines = carry.split('\n');
@@ -103,14 +142,17 @@ const withStreamInactivityGuard = (
           }
         }
         controller.close();
+        logTiming('done');
       } catch (error) {
         controller.error(error);
+        logTiming('error');
       } finally {
         clearTimeout(timer);
       }
     },
     cancel() {
       clearTimeout(timer);
+      logTiming('cancelled');
       reader.cancel().catch(() => {});
     },
   });
@@ -229,6 +271,7 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
       }),
       'init-runtime',
     );
+    const initMs = Date.now() - chatSetupStartedAt;
 
     // ============  2. create chat completion   ============ //
 
@@ -263,12 +306,13 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
     // Catalog-resolved pricing so dynamic model ids (missing from the static
     // bank) still stream a usage.cost. Best-effort: lookup failure falls back
     // to today's static-bank behavior.
-    const managedPricing = await getManagedChatPricing(serverDB, data.model || '').catch(
-      (error) => {
-        console.warn('[aico] managed chat pricing lookup failed', error?.message);
-        return undefined;
-      },
-    );
+    const pricingStartedAt = Date.now();
+    const managedPricing = await getManagedChatPricingForPayload(serverDB, data).catch((error) => {
+      console.warn('[aico] managed chat pricing lookup failed', error?.message);
+      return undefined;
+    });
+    const pricingMs = Date.now() - pricingStartedAt;
+    const chatCallStartedAt = Date.now();
     try {
       response = await Promise.race([
         modelRuntime.chat(data, {
@@ -297,7 +341,15 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
 
     const guardedResponse =
       response instanceof Response
-        ? withStreamInactivityGuard(response, provider, data.model)
+        ? withStreamInactivityGuard(response, provider, data.model, {
+            // modelRuntime.chat resolves at response headers, so this covers
+            // billing hold + upstream time to first byte.
+            chatCallMs: Date.now() - chatCallStartedAt,
+            initMs,
+            model: data.model,
+            pricingMs,
+            provider,
+          })
         : response;
 
     // Under ledger enforce, `usage_logs` is written when the hold settles and the
