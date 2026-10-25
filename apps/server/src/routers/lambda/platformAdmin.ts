@@ -809,15 +809,25 @@ export const platformAdminRouter = router({
       // C6: totals come from SQL aggregates over everything. They used to be
       // summed in memory over the newest 200 rows of each table, so past 200
       // wallets or transactions every figure here was silently wrong.
-      const [txs, walletTotals, paidIn, orgBalanceMicroUsd, totalOpenRouterCostMicroUsd, fxConfig] =
-        await Promise.all([
-          ctx.billingModel.listRecentTransactions(50),
-          ctx.billingModel.sumWalletBalances(),
-          ctx.billingModel.sumPaidInTotals(),
-          ctx.organizationModel.getTotalWalletBalanceMicroUsd(),
-          ctx.billingModel.sumUsageCostMicroUsd(),
-          ctx.billingModel.getFxConfig(),
-        ]);
+      const [
+        txs,
+        walletTotals,
+        paidIn,
+        orgBalanceMicroUsd,
+        totalOpenRouterCostMicroUsd,
+        unmeasuredCostMicroUsd,
+        fxConfig,
+      ] = await Promise.all([
+        ctx.billingModel.listRecentTransactions(50),
+        ctx.billingModel.sumWalletBalances(),
+        ctx.billingModel.sumPaidInTotals(),
+        ctx.organizationModel.getTotalWalletBalanceMicroUsd(),
+        // N10: measured spend. Shadow calls with no usage figure are logged at
+        // their hold (an upper bound) and are reported apart below.
+        ctx.billingModel.sumUsageCostMicroUsd(),
+        ctx.billingModel.sumUnmeasuredUsageCostMicroUsd(),
+        ctx.billingModel.getFxConfig(),
+      ]);
       const fx = await getTomanPerUsd(fxConfig.tomanPerUsd);
       // Admin debits net out the grants they take back.
       const totalRevenueToman = paidIn.revenueToman;
@@ -855,13 +865,22 @@ export const platformAdminRouter = router({
         to: null as string | null,
         totalOpenRouterCostMicroUsd: String(costMicroUsd),
         totalOpenRouterCostUsd: microUsdToDecimalString(costMicroUsd),
+        unmeasuredCostMicroUsd: String(Math.trunc(Number(unmeasuredCostMicroUsd) || 0)),
+        unmeasuredCostUsd: microUsdToDecimalString(Math.trunc(Number(unmeasuredCostMicroUsd) || 0)),
         totalRevenueToman: String(Math.trunc(totalRevenueToman)),
         totalUsdCredited: microUsdToDecimalString(totalMicroCredited),
       };
     }),
 
   getMasterAccountStatus: platformProcedure.query(async ({ ctx }) => {
-    const usageMicro = await ctx.billingModel.sumUsageCostMicroUsd();
+    // Deliberately the upper bound: measured spend plus what unmeasured shadow
+    // calls were logged at. This feeds a low-balance warning, where over-counting
+    // spend errs on the safe side; margins and charts use measured spend only.
+    const [measuredMicro, unmeasuredMicro] = await Promise.all([
+      ctx.billingModel.sumUsageCostMicroUsd(),
+      ctx.billingModel.sumUnmeasuredUsageCostMicroUsd(),
+    ]);
+    const usageMicro = measuredMicro + unmeasuredMicro;
     const status = await refreshAicoMasterMonitorState(ctx.serverDB, usageMicro);
     return {
       balanceUsd: null as string | null,
