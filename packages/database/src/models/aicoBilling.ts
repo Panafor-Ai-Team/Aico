@@ -1,7 +1,18 @@
 import { createHash } from 'node:crypto';
 
 import { MANAGED_PROVIDER_ID } from '@lobechat/business-const';
-import { and, asc, desc, eq, inArray, isNotNull, ne, notInArray, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  inArray,
+  isNotNull,
+  ne,
+  notInArray,
+  sql,
+} from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import {
@@ -12,6 +23,7 @@ import {
   platformTrialConfig,
   platformUsageMultiplierConfig,
   trialAbuseBlocklist,
+  usageHolds,
   usageLogs,
   userTrials,
   userWallets,
@@ -27,6 +39,7 @@ import {
   mulDivFloor,
   rawCapacityFromDeposit,
 } from '../utils/aicoMoney';
+import { measuredCostSql, unmeasuredCostSql, unmeasuredShadowSql } from './aicoUsageLedger';
 
 /**
  * Iranian mobile → E.164 normalization, duplicated (not imported) from
@@ -666,12 +679,21 @@ export class AicoBillingModel {
     });
   };
 
+  /**
+   * `costMeasured` is false for a shadow call settled without a usage figure:
+   * its `costMicroUsd` is the hold, an upper bound, not something spent (N10).
+   */
   listUserUsage = async (userId: string, limit = 50) => {
-    return this.db.query.usageLogs.findMany({
-      where: eq(usageLogs.userId, userId),
-      orderBy: [desc(usageLogs.createdAt)],
-      limit,
-    });
+    return this.db
+      .select({
+        ...getTableColumns(usageLogs),
+        costMeasured: sql<boolean>`NOT ${unmeasuredShadowSql()}`,
+      })
+      .from(usageLogs)
+      .leftJoin(usageHolds, eq(usageHolds.id, usageLogs.holdId))
+      .where(eq(usageLogs.userId, userId))
+      .orderBy(desc(usageLogs.createdAt))
+      .limit(limit);
   };
 
   recordUsage = async (params: {
@@ -1195,11 +1217,28 @@ export class AicoBillingModel {
     };
   };
 
-  /** Sum of `usage_logs.cost_micro_usd` across all B2C + B2B traffic — real OpenRouter spend. */
+  /**
+   * Measured spend across all B2C + B2B traffic. Shadow calls settled without a
+   * usage figure are left out (N10) — see {@link sumUnmeasuredUsageCostMicroUsd}.
+   */
   sumUsageCostMicroUsd = async (): Promise<number> => {
     const [row] = await this.db
-      .select({ total: sql<number>`COALESCE(SUM(${usageLogs.costMicroUsd}), 0)` })
-      .from(usageLogs);
+      .select({ total: sql<number>`COALESCE(SUM(${measuredCostSql()}), 0)` })
+      .from(usageLogs)
+      .leftJoin(usageHolds, eq(usageHolds.id, usageLogs.holdId));
+    return Number(row?.total ?? 0);
+  };
+
+  /**
+   * What shadow calls without a usage figure were logged at: an upper bound, not
+   * spend. Add it to {@link sumUsageCostMicroUsd} for a deliberately conservative
+   * figure (the low-balance monitor), never for a margin or a chart.
+   */
+  sumUnmeasuredUsageCostMicroUsd = async (): Promise<number> => {
+    const [row] = await this.db
+      .select({ total: sql<number>`COALESCE(SUM(${unmeasuredCostSql()}), 0)` })
+      .from(usageLogs)
+      .leftJoin(usageHolds, eq(usageHolds.id, usageLogs.holdId));
     return Number(row?.total ?? 0);
   };
 }
