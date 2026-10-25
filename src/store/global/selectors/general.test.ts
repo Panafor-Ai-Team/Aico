@@ -15,5 +15,33 @@ describe('settingsSelectors', () => {
 
       expect(result).toBe('fr');
     });
+
+    it('should resolve `auto` to the first supported browser language', () => {
+      vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['xx-YY', 'fr-CA']);
+      const s: GlobalState = merge(initialState, { status: { language: 'auto' } });
+
+      expect(globalGeneralSelectors.currentLanguage(s)).toBe('fr-FR');
+    });
+
+    it('should resolve `auto` to Persian when the browser language is unsupported', () => {
+      vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['xx-YY']);
+      const s: GlobalState = merge(initialState, { status: { language: 'auto' } });
+
+      expect(globalGeneralSelectors.currentLanguage(s)).toBe('fa-IR');
+    });
+  });
+
+  describe('language', () => {
+    it('should default to Persian on web until the user picks a language', () => {
+      const s: GlobalState = merge(initialState, { status: { language: undefined } });
+
+      expect(globalGeneralSelectors.language(s)).toBe('fa-IR');
+    });
+
+    it('should keep an explicit `auto` choice', () => {
+      const s: GlobalState = merge(initialState, { status: { language: 'auto' } });
+
+      expect(globalGeneralSelectors.language(s)).toBe('auto');
+    });
   });
 });

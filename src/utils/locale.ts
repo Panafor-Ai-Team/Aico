@@ -30,13 +30,10 @@ export const getAntdLocale = async (lang?: string) => {
   return locale;
 };
 
-/**
- * Parse the browser language and return the fallback language
- */
-export const parseBrowserLanguage = (headers: Headers, defaultLang: string = DEFAULT_LANG) => {
-  // if the default language is not 'en-US', just return the default language as fallback lang
-  if (defaultLang !== 'en-US') return defaultLang;
-
+const resolveFromAcceptLanguage = (
+  headers: Headers,
+  defaultLang: (typeof supportedAcceptLanguageLocales)[number],
+) => {
   /**
    * The arguments are as follows:
    *
@@ -56,6 +53,24 @@ export const parseBrowserLanguage = (headers: Headers, defaultLang: string = DEF
 
   return normalizeLocale(browserLang);
 };
+
+/**
+ * Parse the browser language and return the fallback language
+ */
+export const parseBrowserLanguage = (headers: Headers, defaultLang: string = DEFAULT_LANG) => {
+  // if the default language is not 'en-US', just return the default language as fallback lang
+  if (defaultLang !== 'en-US') return defaultLang;
+
+  return resolveFromAcceptLanguage(headers, 'en-US');
+};
+
+/**
+ * Resolve the "System Language" (`auto`) choice from Accept-Language.
+ * Unlike `parseBrowserLanguage` (the default for visitors who have not chosen anything),
+ * this honours the header and falls back to DEFAULT_LANG only when nothing supported matches.
+ */
+export const resolveAutoLanguage = (headers: Headers) =>
+  resolveFromAcceptLanguage(headers, DEFAULT_LANG);
 
 /**
  * Parse the page locale from the URL and search

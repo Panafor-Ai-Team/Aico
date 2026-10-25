@@ -1,3 +1,6 @@
+import { isDesktop } from '@lobechat/const';
+
+import { DEFAULT_LANG } from '@/const/locale';
 import { type TopicGroupMode } from '@/types/topic';
 
 import type {
@@ -380,7 +383,7 @@ const showImagePanel = (s: GlobalState) => s.status.showImagePanel;
 const showImageTopicPanel = (s: GlobalState) => s.status.showImageTopicPanel;
 const hidePWAInstaller = (s: GlobalState) => s.status.hidePWAInstaller;
 const isShowCredit = (s: GlobalState) => s.status.isShowCredit;
-const language = (s: GlobalState) => s.status.language || 'auto';
+const language = (s: GlobalState) => s.status.language || (isDesktop ? 'auto' : DEFAULT_LANG);
 const modelDetailPanelExpandedKeys = (s: GlobalState): ModelDetailPanelExpandedKey[] => {
   const collapsedKeys = s.status.modelDetailPanelCollapsedKeys ?? [];
 

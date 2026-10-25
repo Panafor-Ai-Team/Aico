@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { LOBE_LOCALE_COOKIE } from '@/const/locale';
 import { type LocaleMode } from '@/types/locale';
 
-import { switchLang } from './switchLang';
+import { hasAutoLocaleCookie, switchLang } from './switchLang';
 
 vi.mock('i18next', () => ({
   changeLanguage: vi.fn(),
@@ -37,15 +37,33 @@ describe('switchLang', () => {
     expect(document.documentElement.dir).toBe('rtl');
   });
 
-  it('should change language based on navigator.language when locale is "auto"', () => {
-    const navigatorLanguage = 'fr';
-    vi.spyOn(navigator, 'language', 'get').mockReturnValue(navigatorLanguage);
+  it('should resolve "auto" from the browser language list and persist `auto` in the cookie', () => {
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['fr-CA', 'en-US']);
 
     switchLang('auto');
 
-    expect(changeLanguage).toHaveBeenCalledWith(navigatorLanguage);
-    expect(document.documentElement.lang).toBe(navigatorLanguage);
-    expect(setCookie).toHaveBeenCalledWith(LOBE_LOCALE_COOKIE, undefined, 365);
+    expect(changeLanguage).toHaveBeenCalledWith('fr-FR');
+    expect(document.documentElement.lang).toBe('fr-FR');
+    // `auto` must stay in the cookie (not be deleted) so a reload can tell it apart from "no choice"
+    expect(setCookie).toHaveBeenCalledWith(LOBE_LOCALE_COOKIE, 'auto', 365);
+  });
+
+  it('should skip unsupported system languages when resolving "auto"', () => {
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['xx-YY', 'en-GB']);
+
+    switchLang('auto');
+
+    expect(changeLanguage).toHaveBeenCalledWith('en-US');
+  });
+
+  it('should fall back to Persian when "auto" has no supported system language', () => {
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['xx-YY']);
+
+    switchLang('auto');
+
+    expect(changeLanguage).toHaveBeenCalledWith('fa-IR');
+    expect(document.documentElement.lang).toBe('fa-IR');
+    expect(document.documentElement.dir).toBe('rtl');
   });
 
   it('should prefer the desktop system language over a poisoned navigator.language', () => {
@@ -58,5 +76,21 @@ describe('switchLang', () => {
     expect(document.documentElement.lang).toBe('zh-CN');
 
     vi.unstubAllGlobals();
+  });
+});
+
+describe('hasAutoLocaleCookie', () => {
+  afterEach(() => {
+    document.cookie = 'LOBE_LOCALE=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+  });
+
+  it('should be true only when the cookie value is `auto`', () => {
+    expect(hasAutoLocaleCookie()).toBe(false);
+
+    document.cookie = 'LOBE_LOCALE=en-US; path=/';
+    expect(hasAutoLocaleCookie()).toBe(false);
+
+    document.cookie = 'LOBE_LOCALE=auto; path=/';
+    expect(hasAutoLocaleCookie()).toBe(true);
   });
 });

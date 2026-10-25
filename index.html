@@ -99,8 +99,38 @@
         var hl = new URLSearchParams(location.search).get('hl');
         var m = document.cookie.match(/(?:^|;\s*)LOBE_LOCALE=([^;]*)/);
         var cookie = m ? decodeURIComponent(m[1]) : '';
+        // "System Language": first supported entry of the browser / OS language list, else Persian.
+        // Keep in sync with resolveSystemLocale in packages/locales/src/resources.ts
+        // (guarded by src/spa/htmlLocaleScript.test.ts).
+        var supportedLocales = ['ar', 'bg-BG', 'de-DE', 'en-US', 'es-ES', 'fr-FR', 'ja-JP', 'ko-KR', 'pt-BR', 'ru-RU', 'tr-TR', 'zh-CN', 'zh-TW', 'vi-VN', 'fa-IR', 'it-IT', 'pl-PL', 'nl-NL'];
+        function resolveSystemLocale() {
+          var env = window.lobeEnv;
+          var langs =
+            env && env.systemLanguage
+              ? [env.systemLanguage]
+              : navigator.languages && navigator.languages.length
+                ? navigator.languages
+                : [navigator.language];
+          for (var i = 0; i < langs.length; i++) {
+            var tag = String(langs[i] || '')
+              .toLowerCase()
+              .replace(/_/g, '-');
+            var primary = tag.split('-')[0];
+            if (!primary || tag === '*') continue;
+            if (primary === 'zh') return /(?:^|-)(?:hant|tw|hk|mo)(?:-|$)/.test(tag) ? 'zh-TW' : 'zh-CN';
+            for (var j = 0; j < supportedLocales.length; j++) {
+              if (supportedLocales[j].toLowerCase() === tag) return supportedLocales[j];
+            }
+            for (var k = 0; k < supportedLocales.length; k++) {
+              if (supportedLocales[k].toLowerCase().split('-')[0] === primary) {
+                return supportedLocales[k];
+              }
+            }
+          }
+          return 'fa-IR';
+        }
         var locale = hl || cookie || 'fa-IR';
-        if (locale === 'auto') locale = navigator.language || 'fa-IR';
+        if (locale === 'auto') locale = resolveSystemLocale();
         if (hl && !cookie) {
           document.cookie =
             'LOBE_LOCALE=' + encodeURIComponent(hl) + ';path=/;max-age=7776000;SameSite=Lax';

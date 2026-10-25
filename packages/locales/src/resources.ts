@@ -48,6 +48,41 @@ export const normalizeLocale = (locale?: string): Locales => {
   return DEFAULT_LANG;
 };
 
+const matchSupportedLocale = (tag: string): Locales | undefined => {
+  const lower = tag.trim().toLowerCase().replaceAll('_', '-');
+  if (!lower || lower === '*') return;
+
+  const primary = lower.split('-')[0];
+  if (primary === 'zh') {
+    return /(?:^|-)(?:hant|tw|hk|mo)(?:-|$)/.test(lower) ? 'zh-TW' : 'zh-CN';
+  }
+
+  const exact = locales.find((l) => l.toLowerCase() === lower);
+  if (exact) return exact;
+
+  return locales.find((l) => l.toLowerCase().split('-')[0] === primary);
+};
+
+/**
+ * Resolve the "System Language" (`auto`) choice from the browser / OS language list.
+ * Walks the list in preference order and returns the first supported locale; falls back to
+ * DEFAULT_LANG when the list is empty or has no supported entry. Unlike `normalizeLocale`,
+ * an unsupported entry does not stop the walk (`['ja-XX', 'en-GB']` → en-US).
+ *
+ * Keep in sync with the inline script in `index.html`, `index.mobile.html` and `index.auth.html`
+ * (guarded by `src/spa/htmlLocaleScript.test.ts`).
+ */
+export const resolveSystemLocale = (languages?: readonly string[] | string | null): Locales => {
+  const list = typeof languages === 'string' ? [languages] : (languages ?? []);
+
+  for (const tag of list) {
+    const matched = matchSupportedLocale(tag);
+    if (matched) return matched;
+  }
+
+  return DEFAULT_LANG;
+};
+
 type LocaleOptions = {
   label: string;
   value: Locales;

@@ -1,12 +1,16 @@
+import { isDesktop } from '@lobechat/const';
+
 import { DEFAULT_LANG } from '@/const/locale';
-import { type Locales } from '@/locales/resources';
-import { getSystemLanguage } from '@/utils/client/systemLanguage';
+import { type Locales, resolveSystemLocale } from '@/locales/resources';
+import { getSystemLanguages } from '@/utils/client/systemLanguage';
 import { isOnServerSide } from '@/utils/env';
 
 import { type GlobalState } from '../initialState';
 import { systemStatus } from './systemStatus';
 
-const language = (s: GlobalState) => systemStatus(s).language || 'auto';
+// Web defaults to Persian until the user picks a language; only desktop follows the OS by default.
+const language = (s: GlobalState) =>
+  systemStatus(s).language || (isDesktop ? 'auto' : DEFAULT_LANG);
 
 const currentLanguage = (s: GlobalState) => {
   const locale = language(s);
@@ -14,7 +18,7 @@ const currentLanguage = (s: GlobalState) => {
   if (locale === 'auto') {
     if (isOnServerSide) return DEFAULT_LANG;
 
-    return getSystemLanguage() as Locales;
+    return resolveSystemLocale(getSystemLanguages()) as Locales;
   }
 
   return locale as Locales;
