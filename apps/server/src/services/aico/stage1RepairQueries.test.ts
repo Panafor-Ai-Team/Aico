@@ -149,6 +149,30 @@ describe('stage-1 repair dry-run queries', () => {
     expect(Number(found[0].refunded_micro_usd)).toBe(usd(8));
   });
 
+  it('R5 does not list a late-settle refund: it returns a hold the close withheld', async () => {
+    const { member, org, orgModel } = await setupMember();
+    await orgModel.reclaimMemberRemainingCredit({
+      orgId: org.id,
+      orgMemberId: member.id,
+      remainingMicroUsd: usd(8),
+    });
+    await db.insert(walletTransactions).values({
+      amountMicroUsd: usd(0.24),
+      amountToman: 0,
+      balanceAfterMicroUsd: 0,
+      balanceBeforeMicroUsd: 0,
+      createdAt: new Date(Date.now() + 60_000),
+      description: 'Late settle refund for hold test',
+      metadata: { holdId: 'hold_test', reason: 'late_settle' },
+      orgId: org.id,
+      orgMemberId: member.id,
+      type: 'period_refund',
+      userId: memberUserId,
+    });
+
+    expect(await rows(R5_REFUND_AFTER_RECLAIM)).toHaveLength(0);
+  });
+
   it('W1 lists a fully debited wallet that still has a key', async () => {
     const billing = new AicoBillingModel(db);
     await billing.manualCreditUser({

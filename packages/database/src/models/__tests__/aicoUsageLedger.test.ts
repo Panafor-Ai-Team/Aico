@@ -319,9 +319,15 @@ describe('AicoUsageLedgerModel.settleHold', () => {
     const oldCycle = await placeOk({ billingSource: 'organization', subject });
     const sameCycle = await placeOk({ billingSource: 'organization', subject });
 
+    // The renewal: a new epoch, and the closed cycle's counters leave with it.
+    // The second hold is then treated as one placed in the new cycle.
     await serverDB
       .update(memberBudgets)
-      .set({ ledgerEpoch: 1 })
+      .set({
+        heldMicroUsd: applyMultiplierMicroUsd(300_000, 12_000),
+        ledgerEpoch: 1,
+        openHolds: 1,
+      })
       .where(eq(memberBudgets.id, budget.id));
     await ledger.settleHold(oldCycle, { chargedRawMicroUsd: 100_000, reason: 'usage' });
 

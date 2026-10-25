@@ -352,13 +352,23 @@ export const memberBudgets = pgTable(
      * this cycle; always 0 while `AICO_BILLING_LEDGER_MODE` is not `enforce`.
      */
     heldMicroUsd: bigint('held_micro_usd', { mode: 'number' }).notNull().default(0),
+    /**
+     * What ledger closes (renewal, reclaim) withheld for holds still open at
+     * the close. A late settle of such a hold draws it down and returns what
+     * the hold did not use to the org. Never above the sum of those holds.
+     */
+    closedHoldPoolMicroUsd: bigint('closed_hold_pool_micro_usd', { mode: 'number' })
+      .notNull()
+      .default(0),
     /** Number of open usage holds; capped by `AICO_LEDGER_MAX_OPEN_HOLDS`. */
     openHolds: integer('open_holds').notNull().default(0),
     /**
-     * Bumped only where renewal resets `settledUsageMicroUsd`. A hold records the
-     * epoch it was placed in, and its charge is added to `settledUsageMicroUsd`
-     * only if the epoch still matches — so a hold straddling a renewal never
-     * charges the new cycle for the old one.
+     * Bumped wherever a cycle ends: renewal, a ledger reclaim, and a revived
+     * budget. A hold records the epoch it was placed in; its charge and its
+     * release from `held_micro_usd` / `open_holds` apply only while the epoch
+     * still matches, so a hold straddling a close never charges or frees the
+     * next cycle. What the close withheld for it is in
+     * `closed_hold_pool_micro_usd`.
      */
     ledgerEpoch: integer('ledger_epoch').notNull().default(0),
     isActive: boolean('is_active').notNull().default(true),

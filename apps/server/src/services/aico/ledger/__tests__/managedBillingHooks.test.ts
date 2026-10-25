@@ -24,6 +24,9 @@ vi.mock('../config', () => ({
 
 vi.mock('../floatGuard', () => ({ assertPlatformCapacity: vi.fn() }));
 
+const sendSecurityAlert = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => {}));
+vi.mock('../../securityAlert', () => ({ sendSecurityAlert }));
+
 const recordChatTtftPhase = vi.fn();
 vi.mock('@lobechat/observability-otel/modules/agent-runtime', () => ({
   recordChatTtftPhase: (...args: unknown[]) => recordChatTtftPhase(...args),
@@ -83,7 +86,12 @@ const makeDeps = () => {
     ledger: {
       placeHold: vi.fn(async (_p: unknown) => ({ holdId: 'uhld_1', ok: true as const })),
       recordShadowHold: vi.fn(async (_p: unknown) => 'uhld_s'),
-      settleHold: vi.fn(async (_id: string, _p: unknown) => ({ settled: true })),
+      settleHold: vi.fn(
+        async (
+          _id: string,
+          _p: unknown,
+        ): Promise<{ settled: boolean; unchargedMicroUsd?: number }> => ({ settled: true }),
+      ),
       shadowAvailability: vi.fn(async (_p: unknown) => null),
     },
     platformBp: vi.fn(async () => 12_500),
@@ -296,6 +304,41 @@ describe('createManagedBillingHooks', () => {
   });
 
   describe('settling chat', () => {
+    it('raises an alert when a late settle charged more than the hold reserved', async () => {
+      deps.ledger.settleHold.mockResolvedValueOnce({ settled: true, unchargedMicroUsd: 240_000 });
+      sendSecurityAlert.mockClear();
+      const hooks = build();
+      const payload = chatPayload();
+      await hooks.beforeChat!(payload);
+      await hooks.onChatFinal!(
+        { text: 'hi', usage: { totalInputTokens: 10, totalOutputTokens: 10, totalTokens: 20 } },
+        { payload },
+      );
+
+      expect(sendSecurityAlert).toHaveBeenCalledTimes(1);
+      expect(sendSecurityAlert).toHaveBeenCalledWith(
+        db,
+        expect.objectContaining({
+          dedupeKey: 'ledger.late_settle_uncharged:uhld_1',
+          details: { holdId: 'uhld_1', unchargedMicroUsd: 240_000 },
+          type: 'ledger.late_settle_uncharged',
+        }),
+      );
+    });
+
+    it('raises no alert for an ordinary settle', async () => {
+      sendSecurityAlert.mockClear();
+      const hooks = build();
+      const payload = chatPayload();
+      await hooks.beforeChat!(payload);
+      await hooks.onChatFinal!(
+        { text: 'hi', usage: { totalInputTokens: 10, totalOutputTokens: 10, totalTokens: 20 } },
+        { payload },
+      );
+
+      expect(sendSecurityAlert).not.toHaveBeenCalled();
+    });
+
     it('settles the cost recomputed from tokens and ignores usage.cost', async () => {
       const hooks = build();
       const payload = chatPayload();

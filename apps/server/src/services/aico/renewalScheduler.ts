@@ -529,6 +529,10 @@ const renewOrg = async (params: {
     return failResult(shortfallMicroUsd);
   };
 
+  // Under the usage ledger the closing cycle is settled from ledger columns, and
+  // so is the refund below (recomputed under the budget locks).
+  const ledgerAuthoritative = await isLedgerAuthoritative(db);
+
   // 1. Authoritative settlement of the closing period (OpenRouter is the source
   //    of truth for spend). Any read failure fails the batch — never guess usage.
   const refunds = new Map<string, number>();
@@ -593,7 +597,7 @@ const renewOrg = async (params: {
     });
   }
 
-  const refundedMicroUsd = [...refunds.values()].reduce((sum, v) => sum + v, 0);
+  let refundedMicroUsd = [...refunds.values()].reduce((sum, v) => sum + v, 0);
 
   // 2. Refund confirmed-unused credit, then CAS-debit only the unfunded next-cap slice.
   try {
@@ -623,26 +627,55 @@ const renewOrg = async (params: {
       // lock every budget (budgets before the org row, the order the
       // allocate and reclaim paths use) and abandon the batch if any changed.
       // The next run re-reads them.
-      if (aicoEnv.AICO_FIX_R5_RENEWAL_LOCK) {
+      // Under the ledger the lock is not optional: an open hold may settle at any
+      // moment, and the refund must be the one the locked rows give.
+      let lockedById = new Map<string, typeof memberBudgets.$inferSelect>();
+      if (aicoEnv.AICO_FIX_R5_RENEWAL_LOCK || ledgerAuthoritative) {
         const locked = await tx
           .select()
           .from(memberBudgets)
           .where(inArray(memberBudgets.id, budgetIds))
           .for('update');
-        const read = new Map(budgets.map((b) => [b.budgetId, b]));
-        const unchanged = locked.filter((row) => {
-          const b = read.get(row.id);
-          return (
-            b !== undefined &&
-            row.renewalStatus === 'renewal_pending' &&
-            Number(row.periodAmountMicroUsd ?? 0) === b.currentPeriodAmountMicroUsd &&
-            Number(row.pendingPeriodAmountMicroUsd ?? 0) === b.prepaidMicroUsd &&
-            (row.pendingPeriod ?? row.period) === b.nextPeriod
-          );
-        });
-        if (unchanged.length !== budgetIds.length) {
-          throw new Error('BUDGETS_CHANGED_DURING_RENEWAL');
+        lockedById = new Map(locked.map((row) => [row.id, row]));
+        if (aicoEnv.AICO_FIX_R5_RENEWAL_LOCK) {
+          const read = new Map(budgets.map((b) => [b.budgetId, b]));
+          const unchanged = locked.filter((row) => {
+            const b = read.get(row.id);
+            return (
+              b !== undefined &&
+              row.renewalStatus === 'renewal_pending' &&
+              Number(row.periodAmountMicroUsd ?? 0) === b.currentPeriodAmountMicroUsd &&
+              Number(row.pendingPeriodAmountMicroUsd ?? 0) === b.prepaidMicroUsd &&
+              (row.pendingPeriod ?? row.period) === b.nextPeriod
+            );
+          });
+          if (unchanged.length !== budgetIds.length) {
+            throw new Error('BUDGETS_CHANGED_DURING_RENEWAL');
+          }
         }
+      }
+
+      // Ledger close: what each budget still has open is counted as used, and
+      // the part of it the cycle could still have spent is parked in the budget's
+      // pool (see `closed_hold_pool_micro_usd`). Figures come from the locked
+      // rows, not from the read before this transaction — a hold that settled in
+      // between would otherwise be charged to a cycle that is about to reset.
+      const withheldByBudget = new Map<string, number>();
+      if (ledgerAuthoritative) {
+        const duplicate = new Set(duplicateKeys.map((d) => d.budgetId));
+        for (const b of budgets) {
+          const row = lockedById.get(b.budgetId);
+          if (!row || duplicate.has(b.budgetId)) continue;
+          const held = Math.max(0, Math.trunc(Number(row.heldMicroUsd ?? 0)));
+          const settledUsage = Math.max(0, Math.trunc(Number(row.settledUsageMicroUsd ?? 0)));
+          const cycle = Math.max(0, Math.trunc(Number(row.periodAmountMicroUsd ?? 0)));
+          refunds.set(
+            b.memberId,
+            Number(confirmedUnusedMicro(BigInt(cycle), BigInt(settledUsage + held))),
+          );
+          withheldByBudget.set(b.budgetId, Math.min(held, Math.max(0, cycle - settledUsage)));
+        }
+        refundedMicroUsd = [...refunds.values()].reduce((sum, v) => sum + v, 0);
       }
 
       // D1: locked (after the budgets) so the period_refund rows chain from the
@@ -740,9 +773,13 @@ const renewOrg = async (params: {
             checkpointMultiplierBp: currentMultiplierBp,
             usageBaselineMicroUsd: nextBaselines.get(b.memberId) ?? 0,
             // The one place settled usage resets. Holds opened in the closing
-            // cycle were refunded at full value, so their settle must not land
-            // in the new cycle; held and open_holds stay as they are.
+            // cycle belong to it: their counters leave with it (a ledger close
+            // parks what it withheld in the pool), and their settle, which
+            // carries the old epoch, is recognised as late.
+            closedHoldPoolMicroUsd: sql`${memberBudgets.closedHoldPoolMicroUsd} + ${withheldByBudget.get(b.budgetId) ?? 0}`,
+            heldMicroUsd: 0,
             ledgerEpoch: sql`${memberBudgets.ledgerEpoch} + 1`,
+            openHolds: 0,
           })
           .where(eq(memberBudgets.id, b.budgetId));
 

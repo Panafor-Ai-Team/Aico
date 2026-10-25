@@ -46,6 +46,7 @@ export const R5_REFUND_AFTER_RECLAIM = `
         JOIN wallet_transactions p
           ON p.org_member_id = r.org_member_id AND p.type = 'period_refund'
          AND p.created_at > r.created_at
+         AND coalesce(p.metadata->>'reason', '') <> 'late_settle'
        WHERE r.type = 'reclaim'
          AND NOT EXISTS (SELECT 1 FROM wallet_transactions a
                           WHERE a.org_member_id = r.org_member_id AND a.type = 'allocate'

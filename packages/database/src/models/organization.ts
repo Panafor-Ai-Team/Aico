@@ -1819,14 +1819,18 @@ export class OrganizationModel {
         .for('update')
         .limit(1);
 
+      // What this close counts as used only because a hold is still open. It is
+      // parked in the budget's pool: if the hold settles for less, the
+      // difference goes back to the org from there.
+      let withheldForOpenHolds = 0;
       if (params.useLedgerRemaining && existingBudget) {
+        const cycle = currentCycleLimitMicroUsd(existingBudget);
+        const settledUsage = Math.max(0, Number(existingBudget.settledUsageMicroUsd ?? 0));
+        const held = Math.max(0, Number(existingBudget.heldMicroUsd ?? 0));
         remaining =
-          Math.max(
-            0,
-            currentCycleLimitMicroUsd(existingBudget) -
-              Math.max(0, Number(existingBudget.settledUsageMicroUsd ?? 0)) -
-              Math.max(0, Number(existingBudget.heldMicroUsd ?? 0)),
-          ) + Math.max(0, Number(existingBudget.pendingPeriodAmountMicroUsd ?? 0));
+          Math.max(0, cycle - settledUsage - held) +
+          Math.max(0, Number(existingBudget.pendingPeriodAmountMicroUsd ?? 0));
+        withheldForOpenHolds = Math.min(held, Math.max(0, cycle - settledUsage));
       }
 
       const { expected } = params;
@@ -1858,6 +1862,17 @@ export class OrganizationModel {
             periodAmountMicroUsd: 0,
             renewalStatus: 'settled',
             reservedMicroUsd: 0,
+            // A ledger close ends the cycle its open holds belong to: they move
+            // out of the cycle's counters (into the pool) and the epoch moves on,
+            // so their settle is recognised as late (see `settleLate`).
+            ...(params.useLedgerRemaining
+              ? {
+                  closedHoldPoolMicroUsd: sql`${memberBudgets.closedHoldPoolMicroUsd} + ${withheldForOpenHolds}`,
+                  heldMicroUsd: 0,
+                  ledgerEpoch: sql`${memberBudgets.ledgerEpoch} + 1`,
+                  openHolds: 0,
+                }
+              : {}),
           })
           .where(
             and(
