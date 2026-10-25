@@ -391,6 +391,7 @@
   "platform.reconciliation.columns.status": "Status",
   "platform.reconciliation.floatHint": "Amber from 80%, red above 100%. Billed balance owed to users: {{promised}}.",
   "platform.reconciliation.floatSummary": "Live keys can spend {{exposure}} of the {{float}} provider float ({{percent}}%)",
+  "platform.reconciliation.historyCutoff": "History checked from {{time}}; older transactions are not re-checked.",
   "platform.reconciliation.lastRun": "Last run {{time}} ({{trigger}})",
   "platform.reconciliation.never": "No check has run yet. It runs every 15 minutes, or press Run now.",
   "platform.reconciliation.ran": "Books check finished",

@@ -143,6 +143,15 @@ declare global {
        */
       AICO_OPENROUTER_MOCK?: string;
       /**
+       * Reconcile's wallet and org ledger checks look at transactions from this
+       * instant on; older rows are summarised, not re-checked. For history that
+       * can no longer be repaired (breaks that a past bug wrote and that new
+       * code does not cause). UTC ISO with a `Z`, e.g. `2026-10-25T00:00:00Z`.
+       * A date without a time or with an offset is rejected and the app will
+       * not start. Unset checks the whole history.
+       */
+      AICO_RECONCILE_LEDGER_SINCE?: string;
+      /**
        * Optional HTTPS webhook for Aico security ops alerts (MON-003).
        * Receives JSON: { type, severity, summary, details, timestamp }.
        */
@@ -224,6 +233,7 @@ export const getAicoConfig = () => {
       CHEAPVIBECODE_BASE_URL: z.string().default('https://ru.cheapvibecode.ru'),
       CHEAPVIBECODE_MANAGEMENT_API_KEY: z.string().optional(),
       CHEAPVIBECODE_VIDEO_BASE_URL: z.string().url().optional(),
+      AICO_RECONCILE_LEDGER_SINCE: z.string().datetime().optional(),
       AICO_SECURITY_ALERT_WEBHOOK_URL: z.string().url().optional(),
       AICO_TOMAN_PER_USD: z.coerce.number().positive().int().default(187_400),
       OPENROUTER_MANAGEMENT_API_KEY: z.string().optional(),
@@ -256,6 +266,7 @@ export const getAicoConfig = () => {
       CHEAPVIBECODE_BASE_URL: process.env.CHEAPVIBECODE_BASE_URL || 'https://ru.cheapvibecode.ru',
       CHEAPVIBECODE_MANAGEMENT_API_KEY: process.env.CHEAPVIBECODE_MANAGEMENT_API_KEY,
       CHEAPVIBECODE_VIDEO_BASE_URL: process.env.CHEAPVIBECODE_VIDEO_BASE_URL || undefined,
+      AICO_RECONCILE_LEDGER_SINCE: process.env.AICO_RECONCILE_LEDGER_SINCE || undefined,
       AICO_SECURITY_ALERT_WEBHOOK_URL: process.env.AICO_SECURITY_ALERT_WEBHOOK_URL || undefined,
       AICO_TOMAN_PER_USD: process.env.AICO_TOMAN_PER_USD,
       OPENROUTER_MANAGEMENT_API_KEY: process.env.OPENROUTER_MANAGEMENT_API_KEY,

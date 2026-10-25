@@ -634,7 +634,13 @@ export const aicoKeyOutbox = pgTable(
     }),
     userId: text('user_id').references(() => users.id, { onDelete: 'set null' }),
     openrouterKeyId: text('openrouter_key_id'),
-    /** pending | processing | succeeded | failed */
+    /**
+     * pending | processing | succeeded | failed | unsupported | superseded.
+     * `unsupported` is written by `processKeyOutbox` for a job the provider can
+     * never perform (terminal, not a failure). `superseded` is set by ops on a
+     * `failed` row whose budget was renewed after the row was queued; nothing
+     * in the code writes it, and key hygiene ignores it.
+     */
     status: text('status').notNull().default('pending'),
     attempts: integer('attempts').notNull().default(0),
     nextAttemptAt: timestamptz('next_attempt_at').notNull(),

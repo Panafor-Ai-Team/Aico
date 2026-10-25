@@ -371,6 +371,7 @@
   "platform.reconciliation.columns.status": "状态",
   "platform.reconciliation.floatHint": "80% 起为黄色，超过 100% 为红色。欠用户的计费余额：{{promised}}。",
   "platform.reconciliation.floatSummary": "在用密钥可消耗服务商余额 {{float}} 中的 {{exposure}}（{{percent}}%）",
+  "platform.reconciliation.historyCutoff": "自 {{time}} 起检查历史记录；更早的交易不再重新检查。",
   "platform.reconciliation.lastRun": "上次运行 {{time}}（{{trigger}}）",
   "platform.reconciliation.never": "尚未运行过核对。每 15 分钟自动运行一次，也可点击“立即运行”。",
   "platform.reconciliation.ran": "账目核对已完成",

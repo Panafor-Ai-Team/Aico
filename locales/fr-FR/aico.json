@@ -391,6 +391,7 @@
   "platform.reconciliation.columns.status": "Statut",
   "platform.reconciliation.floatHint": "Orange dès 80 %, rouge au-delà de 100 %. Solde facturé dû aux utilisateurs : {{promised}}.",
   "platform.reconciliation.floatSummary": "Les clés actives peuvent dépenser {{exposure}} sur les {{float}} de réserve fournisseur ({{percent}} %)",
+  "platform.reconciliation.historyCutoff": "Historique vérifié à partir du {{time}} ; les transactions plus anciennes ne sont pas revérifiées.",
   "platform.reconciliation.lastRun": "Dernière exécution {{time}} ({{trigger}})",
   "platform.reconciliation.never": "Aucun contrôle n'a encore été exécuté. Il tourne toutes les 15 minutes, ou cliquez sur Lancer maintenant.",
   "platform.reconciliation.ran": "Contrôle des comptes terminé",

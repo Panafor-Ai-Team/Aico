@@ -231,10 +231,63 @@ const greedyOrder = <T extends ChainRow>(rows: T[], start: number | null): T[] =
   return ordered;
 };
 
-/** Chain breaks within one subject's rows, oldest first. */
-const chainBreaks = (label: string, rows: ChainRow[]): string[] => {
+/** The start of the history reconcile still checks, or null for all of it. */
+const historyCutoff = (): Date | null => {
+  const raw = aicoEnv.AICO_RECONCILE_LEDGER_SINCE;
+  if (!raw) return null;
+  const at = new Date(raw);
+  return Number.isNaN(at.getTime()) ? null : at;
+};
+
+export interface CutoffSplit<T extends ChainRow> {
+  /** Balance the last pre-cutoff row left behind, or null when it has no figure. */
+  anchor: number | null;
+  /** Rows before the cutoff. */
+  before: number;
+  /** Rows at or after the cutoff, still in chain order. */
+  rows: T[];
+  /**
+   * Where the checked history starts: the anchor plus any later pre-cutoff
+   * rows that carry no balance, or the plain sum of the pre-cutoff amounts
+   * when none of them has one. Zero when there is nothing before the cutoff.
+   */
+  startBalance: number;
+}
+
+/**
+ * Splits rows already in chain order (`orderChain`, which never goes back in
+ * time) at `cutoff`. Without a cutoff everything is checked, as before.
+ */
+export const splitAtCutoff = <T extends ChainRow>(
+  ordered: T[],
+  cutoff: Date | null,
+): CutoffSplit<T> => {
+  if (!cutoff) return { anchor: null, before: 0, rows: ordered, startBalance: 0 };
+  const firstKept = ordered.findIndex((r) => r.createdAt.getTime() >= cutoff.getTime());
+  const cut = firstKept === -1 ? ordered.length : firstKept;
+  const pre = ordered.slice(0, cut);
+
+  let anchorIndex = -1;
+  for (let i = pre.length - 1; i >= 0; i -= 1) {
+    if (pre[i].balanceAfterMicroUsd != null) {
+      anchorIndex = i;
+      break;
+    }
+  }
+  const anchor = anchorIndex === -1 ? null : Number(pre[anchorIndex].balanceAfterMicroUsd);
+  const amountOf = (rows: T[]) => rows.reduce((acc, r) => acc + Number(r.amountMicroUsd ?? 0), 0);
+  return {
+    anchor,
+    before: pre.length,
+    rows: ordered.slice(cut),
+    startBalance: anchor == null ? amountOf(pre) : anchor + amountOf(pre.slice(anchorIndex + 1)),
+  };
+};
+
+/** Chain breaks within one subject's rows, oldest first, continuing from `start`. */
+const chainBreaks = (label: string, rows: ChainRow[], start: number | null = null): string[] => {
   const out: string[] = [];
-  let prevAfter: number | null = null;
+  let prevAfter: number | null = start;
   for (const row of rows) {
     const before = row.balanceBeforeMicroUsd == null ? null : Number(row.balanceBeforeMicroUsd);
     const after = row.balanceAfterMicroUsd == null ? null : Number(row.balanceAfterMicroUsd);
@@ -277,11 +330,15 @@ const walletLedgerCheck = async (db: LobeChatDatabase): Promise<AicoReconciliati
     byUser.set(row.userId!, list);
   }
 
+  const cutoff = historyCutoff();
   const details: string[] = [];
   let unexplainedMicro = 0;
+  let rowsBeforeCutoff = 0;
   for (const wallet of wallets) {
-    const list = orderChain(byUser.get(wallet.userId) ?? []);
-    const sum = list.reduce((acc, r) => acc + Number(r.amountMicroUsd ?? 0), 0);
+    const split = splitAtCutoff(orderChain(byUser.get(wallet.userId) ?? []), cutoff);
+    rowsBeforeCutoff += split.before;
+    const sum =
+      split.startBalance + split.rows.reduce((acc, r) => acc + Number(r.amountMicroUsd ?? 0), 0);
     const balance = Number(wallet.balance ?? 0);
     if (sum !== balance) {
       unexplainedMicro += Math.abs(balance - sum);
@@ -289,13 +346,17 @@ const walletLedgerCheck = async (db: LobeChatDatabase): Promise<AicoReconciliati
         `wallet ${wallet.userId}: balance ${usd(balance)} but its transactions sum to ${usd(sum)}`,
       );
     }
-    details.push(...chainBreaks(`wallet ${wallet.userId}`, list));
+    details.push(...chainBreaks(`wallet ${wallet.userId}`, split.rows, split.anchor));
   }
 
   return check(
     'wallet_ledger',
     details,
-    { unexplainedMicroUsd: unexplainedMicro, wallets: wallets.length },
+    {
+      unexplainedMicroUsd: unexplainedMicro,
+      wallets: wallets.length,
+      ...(cutoff ? { historyCutoff: cutoff.toISOString(), rowsBeforeCutoff } : {}),
+    },
     details.length > 0 ? 'critical' : 'ok',
   );
 };
@@ -326,20 +387,27 @@ const orgLedgerCheck = async (db: LobeChatDatabase): Promise<AicoReconciliationC
     byOrg.set(row.orgId!, list);
   }
 
+  const cutoff = historyCutoff();
   const details: string[] = [];
+  let rowsBeforeCutoff = 0;
   for (const org of orgs) {
-    const list = orderChain(byOrg.get(org.id) ?? []);
+    const ordered = orderChain(byOrg.get(org.id) ?? []);
+    const split = splitAtCutoff(ordered, cutoff);
+    rowsBeforeCutoff += split.before;
+    // The end point is checked against the last row ever written; only the
+    // chain between rows is limited to the checked history.
+    const list = split.rows;
     // Org rows record the org wallet's before/after, but the amount's sign is
     // the member's point of view (an allocation is positive and drains the
     // org), so only the chain and its end point are checked here.
-    const last = list.at(-1);
+    const last = ordered.at(-1);
     const balance = Number(org.balance ?? 0);
     if (last && Number(last.balanceAfterMicroUsd) !== balance) {
       details.push(
         `org ${org.id}: balance ${usd(balance)} but its last transaction ended at ${usd(Number(last.balanceAfterMicroUsd))}`,
       );
     }
-    let prevAfter: number | null = null;
+    let prevAfter: number | null = split.anchor;
     for (const row of list) {
       const before = row.balanceBeforeMicroUsd == null ? null : Number(row.balanceBeforeMicroUsd);
       if (before != null && prevAfter != null && before !== prevAfter) {
@@ -354,7 +422,10 @@ const orgLedgerCheck = async (db: LobeChatDatabase): Promise<AicoReconciliationC
   return check(
     'org_ledger',
     details,
-    { orgs: orgs.length },
+    {
+      orgs: orgs.length,
+      ...(cutoff ? { historyCutoff: cutoff.toISOString(), rowsBeforeCutoff } : {}),
+    },
     details.length > 0 ? 'critical' : 'ok',
   );
 };

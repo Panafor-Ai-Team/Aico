@@ -391,6 +391,7 @@
   "platform.reconciliation.columns.status": "وضعیت",
   "platform.reconciliation.floatHint": "از ۸۰٪ زرد و بالای ۱۰۰٪ قرمز. موجودی بدهکار به کاربران (با ضریب): {{promised}}.",
   "platform.reconciliation.floatSummary": "کلیدهای فعال می‌توانند {{exposure}} از {{float}} اعتبار ارائه‌دهنده را خرج کنند ({{percent}}٪)",
+  "platform.reconciliation.historyCutoff": "تاریخچه از {{time}} به بعد بررسی می‌شود؛ تراکنش‌های قدیمی‌تر دوباره بررسی نمی‌شوند.",
   "platform.reconciliation.lastRun": "آخرین اجرا {{time}} ({{trigger}})",
   "platform.reconciliation.never": "هنوز بررسی‌ای اجرا نشده. هر ۱۵ دقیقه اجرا می‌شود، یا «اجرا کن» را بزنید.",
   "platform.reconciliation.ran": "بررسی تراز حساب‌ها انجام شد",

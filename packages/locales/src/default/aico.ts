@@ -456,6 +456,8 @@ export default {
   'platform.reconciliation.runFailed': 'Books check failed to run',
   'platform.reconciliation.never':
     'No check has run yet. It runs every 15 minutes, or press Run now.',
+  'platform.reconciliation.historyCutoff':
+    'History checked from {{time}}; older transactions are not re-checked.',
   'platform.reconciliation.lastRun': 'Last run {{time}} ({{trigger}})',
   'platform.reconciliation.trigger.cron': 'scheduled',
   'platform.reconciliation.trigger.manual': 'manual',
