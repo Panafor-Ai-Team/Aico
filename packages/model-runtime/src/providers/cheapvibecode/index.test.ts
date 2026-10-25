@@ -63,3 +63,22 @@ describe('LobeCheapVibeCodeAI', () => {
     });
   });
 });
+
+describe('params.baseURL', () => {
+  const load = async () => {
+    vi.resetModules();
+    return (await import('./index')).params.baseURL;
+  };
+
+  it('defaults to the ru. origin', async () => {
+    vi.stubEnv('CHEAPVIBECODE_CHAT_BASE_URL', '');
+    await expect(load()).resolves.toBe('https://ru.cheapvibecode.ru/v1');
+    vi.unstubAllEnvs();
+  });
+
+  it('can be pointed at another origin by env', async () => {
+    vi.stubEnv('CHEAPVIBECODE_CHAT_BASE_URL', 'https://cheapvibecode.ru/v1');
+    await expect(load()).resolves.toBe('https://cheapvibecode.ru/v1');
+    vi.unstubAllEnvs();
+  });
+});

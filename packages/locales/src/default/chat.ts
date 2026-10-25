@@ -522,6 +522,8 @@ export default {
     'Estimated from current context, tools, and model pricing. Actual cost may vary.',
   'input.disclaimer': 'Agents can make mistakes. Use your judgment for critical info.',
   'input.errorMsg': 'Send failed: {{errorMsg}}. Retry, or send again later.',
+  'input.errorServerUnavailable': 'the server is temporarily unavailable',
+  'input.errorTooLarge': 'the message is too large, shorten it or attach it as a file',
   'input.inputCompletionError.desc':
     'Input suggestions stopped after an error. Retry, or adjust the suggestion model in Settings.',
   'input.inputCompletionError.retry': 'Retry',
@@ -602,6 +604,7 @@ export default {
   'messageAction.reaction': 'Add Reaction',
   'messageAction.regenerate': 'Regenerate',
   'messageAction.select': 'Select',
+  'messageAction.viaAuto': 'via Auto',
   'messageLink.openInSideBrowser': 'Open in side browser',
   'messageForward.bar.cancel': 'Cancel',
   'messageForward.bar.delete': 'Delete',

@@ -14,7 +14,11 @@ import { type LooseTFunction } from '@/types/looseTranslation';
 import { formatNumber } from '@/utils/format';
 
 import { formatMessageCostUsd, resolveMessageCost } from './resolveMessageCost';
-import { resolveCostModelId, resolveMessageModelName } from './resolveMessageModelName';
+import {
+  isRoutedModel,
+  resolveCostModelId,
+  resolveMessageModelName,
+} from './resolveMessageModelName';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   chip: css`
@@ -69,6 +73,11 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     min-width: 0;
     padding-block-end: 8px;
     border-block-end: 1px solid ${cssVar.colorSplit};
+  `,
+  viaAuto: css`
+    flex: none;
+    font-size: 12px;
+    color: ${cssVar.colorTextTertiary};
   `,
   sectionTitle: css`
     margin-block-end: 4px;
@@ -147,6 +156,7 @@ const MessageCostBadge = memo<MessageCostBadgeProps>(
     const { t } = useTranslation('chat');
     const isShowCredit = useGlobalStore(systemStatusSelectors.isShowCredit);
     const costModel = resolveCostModelId(model, metadata);
+    const viaAuto = isRoutedModel(model, metadata);
     const modelCard = useAiInfraStore(
       aiModelSelectors.getModelCard(costModel ?? '', provider ?? ''),
     );
@@ -182,6 +192,7 @@ const MessageCostBadge = memo<MessageCostBadgeProps>(
               <div className={styles.modelRow}>
                 {showIcon && <BrandedModelIcon model={costModel!} size={16} type={'mono'} />}
                 <span className={styles.modelName}>{modelName}</span>
+                {viaAuto && <span className={styles.viaAuto}>{t('messageAction.viaAuto')}</span>}
               </div>
             )}
 

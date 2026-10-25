@@ -4,6 +4,7 @@ import type { LobeChatDatabase } from '@/database/type';
 
 import {
   getManagedChatPricing,
+  getManagedChatPricingForPayload,
   getManagedModelRates,
   type ManagedModelRates,
   rateToPusdPerToken,
@@ -57,6 +58,7 @@ beforeEach(() => {
     row('gpt-5.6-luna', 0.33),
     row('gpt-5.6-terra', 1.5),
     row('deepseek-v4.1-flash', 0.3),
+    row('mimo-v2.6-pro', 0.4),
   ];
 });
 
@@ -169,6 +171,33 @@ describe('getManagedChatPricing', () => {
     await expect(getManagedChatPricing(db, 'unknown-model')).resolves.toBeUndefined();
     await expect(getManagedChatPricing(db, 'malformed')).resolves.toBeUndefined();
     await expect(getManagedChatPricing(db, '')).resolves.toBeUndefined();
+  });
+});
+
+describe('getManagedChatPricingForPayload', () => {
+  it('prices a concrete model as itself', async () => {
+    await expect(
+      getManagedChatPricingForPayload(db, { messages: [], model: 'grok-4.6' } as never),
+    ).resolves.toEqual(cvcPricing(0.5));
+  });
+
+  it('prices Auto as the model it routes to, matching the ledger charge', async () => {
+    const payload = { messages: [], model: 'openrouter/auto' } as never;
+    const resolved = await resolveChatRates(db, payload);
+    await expect(getManagedChatPricingForPayload(db, payload)).resolves.toEqual(
+      await getManagedChatPricing(db, resolved!.modelId),
+    );
+  });
+
+  it("prices Auto with an image and tools as the default route's pinned model", async () => {
+    const payload = {
+      messages: [{ content: [{ image_url: { url: 'x' }, type: 'image_url' }], role: 'user' }],
+      model: 'openrouter/auto',
+      tools: [{ function: { name: 't' }, type: 'function' }],
+    };
+    await expect(getManagedChatPricingForPayload(db, payload as never)).resolves.toEqual(
+      cvcPricing(0.4),
+    );
   });
 });
 

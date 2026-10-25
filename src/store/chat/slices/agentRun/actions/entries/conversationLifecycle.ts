@@ -103,6 +103,7 @@ import {
   parseSingleAgentMentionDirectRoute,
   processCommands,
 } from './commandBus';
+import { describeSendFailure } from './describeSendFailure';
 import { resolveExistingTopicForRun } from './resolveExistingTopic';
 
 /**
@@ -1430,7 +1431,9 @@ export class ConversationLifecycleActionImpl {
         const isAbort = e.message.includes('aborted') || e.name === 'AbortError';
         // Check if error is due to cancellation
         if (!isAbort) {
-          this.#get().updateOperationMetadata(operationId, { inputSendErrorMsg: e.message });
+          this.#get().updateOperationMetadata(operationId, {
+            inputSendErrorMsg: describeSendFailure(e),
+          });
           const op = this.#get().operations[operationId];
           if (op?.metadata.inputEditorTempState) {
             targetInputEditor?.setJSONState(op.metadata.inputEditorTempState);

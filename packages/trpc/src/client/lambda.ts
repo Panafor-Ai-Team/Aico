@@ -121,11 +121,35 @@ const notifyRemoteServerNetworkError = async (response: Response) => {
   }
 };
 
+/**
+ * An error response whose body is not JSON: an edge proxy's own page (nginx
+ * 413/502/504 are HTML) rather than a tRPC envelope. tRPC would otherwise
+ * `res.json()` it and surface "Unexpected token '<'", losing the status.
+ */
+export class NonJsonHttpResponseError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`HTTP ${status}`);
+    this.name = 'NonJsonHttpResponseError';
+    this.status = status;
+  }
+}
+
+/** The HTTP status of a non-JSON error response behind a tRPC failure, if that is what it was. */
+export const getNonJsonHttpStatus = (error: unknown): number | undefined => {
+  const cause = (error as { cause?: unknown } | null | undefined)?.cause;
+  return cause instanceof NonJsonHttpResponseError ? cause.status : undefined;
+};
+
 // 2. Shared link options
 const linkOptions = {
   fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
     // Ensure credentials are included to send cookies (like mp_token)
     const response = await fetch(input, { ...init, credentials: 'include' });
+    if (!response.ok && !response.headers.get('content-type')?.includes('json')) {
+      throw new NonJsonHttpResponseError(response.status);
+    }
     if (isDesktop && isProxyNetworkFailure(response)) void notifyRemoteServerNetworkError(response);
     return response;
   },

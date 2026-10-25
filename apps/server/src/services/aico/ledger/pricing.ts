@@ -169,6 +169,22 @@ export const getManagedChatPricing = async (
 };
 
 /**
+ * Stream-time pricing for a chat payload. Auto has no price of its own, so it
+ * is priced as the model the ledger will charge it as (same routing and
+ * fallback as `resolveChatRates`), keeping the cost shown on the message equal
+ * to the amount held and settled.
+ */
+export const getManagedChatPricingForPayload = async (
+  db: LobeChatDatabase,
+  payload: ChatStreamPayload,
+): Promise<Pricing | undefined> => {
+  if (!isAutoModelId(payload.model)) return getManagedChatPricing(db, payload.model);
+
+  const resolved = await resolveChatRates(db, payload);
+  return resolved ? getManagedChatPricing(db, resolved.modelId) : undefined;
+};
+
+/**
  * Rates for a chat payload. Auto is priced as the model the runtime will route
  * it to, and if that model is unpriced, as the most expensive priced slot.
  */

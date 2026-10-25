@@ -38,11 +38,16 @@ export interface CheapVibeCodeAutoRoute {
   visionTools: string;
 }
 
+// TEMPORARY: OpenRouter is gone and Auto is pinned to a single model in every
+// slot until the router is reworked. The per-slot table above is the intended
+// shape; restore it (or set `AICO_CVC_AUTO_ROUTE`) when that lands. Note this
+// model's vision and tool-calling abilities are not verified for the vision
+// slots.
 export const DEFAULT_CVC_AUTO_ROUTE: CheapVibeCodeAutoRoute = {
-  default: 'glm-5.3-flash',
-  reasoning: 'grok-4.6',
-  vision: 'gpt-5.6-luna',
-  visionTools: 'gpt-5.6-terra',
+  default: 'mimo-v2.6-pro',
+  reasoning: 'mimo-v2.6-pro',
+  vision: 'mimo-v2.6-pro',
+  visionTools: 'mimo-v2.6-pro',
 };
 
 /**
