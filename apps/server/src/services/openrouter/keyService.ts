@@ -2202,7 +2202,29 @@ export class AicoOpenRouterKeyService {
     if (!budget) return null;
 
     if (await isLedgerAuthoritative(this.db)) {
-      return { nextCycleBaselineMicroUsd: 0, ...this.ledgerCycleFigures(budget) };
+      const figures = this.ledgerCycleFigures(budget);
+      // The money figures are the ledger's, but the key is still the thing that
+      // meters the next cycle. A provider whose counters do not reset (CVC) keeps
+      // counting across the boundary, so the new cycle has to start from where the
+      // counter is — a zero baseline would size it against the key's lifetime usage.
+      if (
+        isSharedInferenceKey() ||
+        this.managed.capabilities.nativePeriodicLimits ||
+        !budget.openrouterKeyId
+      ) {
+        return { nextCycleBaselineMicroUsd: 0, ...figures };
+      }
+      const info = await this.readFrozenMemberKeyInfo({
+        managedKeyLimitMicroUsd: budget.managedKeyLimitMicroUsd,
+        managedKeyProviderId: budget.managedKeyProviderId,
+        openrouterKeyCiphertext: budget.openrouterKeyCiphertext,
+        openrouterKeyId: budget.openrouterKeyId,
+      }).catch(() => null);
+      const rawUsage = info ? this.rawMeteredUsageMicro(budget, info) : null;
+      return {
+        nextCycleBaselineMicroUsd: this.nextCycleBaselineMicro(budget, rawUsage),
+        ...figures,
+      };
     }
 
     if (!budget.openrouterKeyId) return null;

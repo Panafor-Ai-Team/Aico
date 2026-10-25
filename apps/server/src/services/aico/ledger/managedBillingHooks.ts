@@ -14,6 +14,7 @@ import type { LobeChatDatabase } from '@/database/type';
 import { applyMultiplierMicroUsd } from '@/database/utils/aicoMoney';
 
 import { AicoManagedPolicyError, type ManagedExecutionContext } from '../managedPolicy';
+import { sendSecurityAlert } from '../securityAlert';
 import { getCachedUsageMultiplierBp } from '../usageMultiplier';
 import { getLedgerConfig, type LedgerConfig } from './config';
 import {
@@ -182,7 +183,18 @@ export const createManagedBillingHooks = (params: {
     handle.settled = true;
     handle.abortCleanup?.();
     try {
-      await ledger.settleHold(handle.holdId, settleParams);
+      const result = await ledger.settleHold(handle.holdId, settleParams);
+      if (result.unchargedMicroUsd) {
+        // A call that outlived its cycle cost more than it reserved. The cycle
+        // is closed and refunded, so nothing could charge the difference.
+        await sendSecurityAlert(db, {
+          dedupeKey: `ledger.late_settle_uncharged:${handle.holdId}`,
+          details: { holdId: handle.holdId, unchargedMicroUsd: result.unchargedMicroUsd },
+          severity: 'warning',
+          summary: `A call settled after its cycle closed for $${(result.unchargedMicroUsd / 1_000_000).toFixed(6)} more than it reserved; the difference was not charged`,
+          type: 'ledger.late_settle_uncharged',
+        }).catch(() => null);
+      }
     } catch (error) {
       // The hold stays open and maintenance charges it in full at expiry.
       console.error('[aico-ledger] settle failed', {

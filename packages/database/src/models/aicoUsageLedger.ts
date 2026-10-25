@@ -5,10 +5,12 @@ import {
   type AicoLedgerStateItem,
   memberBudgets,
   type NewAicoLedgerState,
+  organizations,
   type UsageHoldItem,
   usageHolds,
   usageLogs,
   userWallets,
+  walletTransactions,
 } from '../schemas/aicoOrganization';
 import type { LobeChatDatabase, Transaction } from '../type';
 import {
@@ -53,6 +55,16 @@ export type SettleReason =
   | 'not_metered'
   | 'released_rejected'
   | 'usage';
+
+export interface SettleResult {
+  settled: boolean;
+  /**
+   * Billed micro-USD a late settle charged above what its hold reserved. The
+   * cycle it belonged to is closed and already refunded, so nothing could
+   * charge it; the caller raises an alert. Absent when there is none.
+   */
+  unchargedMicroUsd?: number;
+}
 
 /** `available` is in the subject's unit: raw for a wallet, billed for a budget. */
 export type HoldRefusal =
@@ -280,7 +292,7 @@ export class AicoUsageLedgerModel {
   // ─── Settle ──────────────────────────────────────────────────────────
 
   /** Idempotent: a hold that is no longer open is left untouched. */
-  settleHold = async (holdId: string, params: SettleParams): Promise<{ settled: boolean }> =>
+  settleHold = async (holdId: string, params: SettleParams): Promise<SettleResult> =>
     this.db.transaction(async (tx) => this.settleInTx(tx, holdId, params));
 
   /**
@@ -505,11 +517,85 @@ export class AicoUsageLedgerModel {
     }
   };
 
+  /**
+   * A hold that settles after the cycle it was placed in was closed. The close
+   * counted the whole hold as used and parked what it withheld in the budget's
+   * `closed_hold_pool_micro_usd`; what the hold did not use goes back to the org
+   * from there, never more than the pool holds. Never throws: failing here would
+   * roll back the settle and expiry would then charge the full hold.
+   */
+  private settleLate = async (
+    tx: Transaction,
+    hold: UsageHoldItem,
+    figures: {
+      budget: { closedHoldPoolMicroUsd: number; orgId: string };
+      chargedBilled: number;
+      holdBilled: number;
+    },
+  ): Promise<SettleResult> => {
+    const { budget, chargedBilled, holdBilled } = figures;
+    const pool = Math.max(0, toInt(budget.closedHoldPoolMicroUsd));
+    const release = Math.min(holdBilled, pool);
+    const credit = Math.min(Math.max(0, holdBilled - chargedBilled), release);
+    const unchargedMicroUsd = Math.max(0, chargedBilled - holdBilled);
+    const result: SettleResult = {
+      settled: true,
+      ...(unchargedMicroUsd > 0 ? { unchargedMicroUsd } : {}),
+    };
+
+    if (release > 0 && hold.budgetId) {
+      await tx
+        .update(memberBudgets)
+        .set({
+          closedHoldPoolMicroUsd: sql`GREATEST(0, ${memberBudgets.closedHoldPoolMicroUsd} - ${release})`,
+        })
+        .where(eq(memberBudgets.id, hold.budgetId));
+    }
+    if (credit <= 0) return result;
+
+    // Budget row first (held since the settle update), then the org: the order
+    // renewal and reclaim take their locks in.
+    const [org] = await tx
+      .select()
+      .from(organizations)
+      .where(eq(organizations.id, budget.orgId))
+      .limit(1)
+      .for('update');
+    // A deleted org forfeited its wallet; crediting it would recreate a balance
+    // on a tombstone.
+    if (!org || org.status === 'deleted') return result;
+
+    const balanceBefore = toInt(org.walletBalanceMicroUsd);
+    const [updated] = await tx
+      .update(organizations)
+      .set({ walletBalanceMicroUsd: sql`${organizations.walletBalanceMicroUsd} + ${credit}` })
+      .where(eq(organizations.id, org.id))
+      .returning({ walletBalanceMicroUsd: organizations.walletBalanceMicroUsd });
+    await tx.insert(walletTransactions).values({
+      amountMicroUsd: credit,
+      amountToman: 0,
+      balanceAfterMicroUsd: toInt(updated?.walletBalanceMicroUsd),
+      balanceBeforeMicroUsd: balanceBefore,
+      description: `Late settle refund for hold ${hold.id}`,
+      metadata: {
+        chargedMicroUsd: chargedBilled,
+        heldMicroUsd: holdBilled,
+        holdId: hold.id,
+        reason: 'late_settle',
+      },
+      orgId: org.id,
+      orgMemberId: hold.orgMemberId,
+      type: 'period_refund',
+      userId: hold.userId,
+    });
+    return result;
+  };
+
   private settleInTx = async (
     tx: Transaction,
     holdId: string,
     params: SettleParams,
-  ): Promise<{ settled: boolean }> => {
+  ): Promise<SettleResult> => {
     const [hold] = await tx
       .select()
       .from(usageHolds)
@@ -597,18 +683,36 @@ export class AicoUsageLedgerModel {
           .where(eq(userWallets.userId, hold.userId));
       }
     } else if (hold.budgetId) {
-      await tx
+      const holdEpoch = toInt(hold.budgetEpoch);
+      const holdBilled = nonNegInt(hold.holdMicroUsd);
+      // Holds belong to the cycle they were placed in. A close (renewal or
+      // reclaim) zeroes `held` and `open_holds` for the cycle it ends, so a hold
+      // that settles afterwards must not take anything off the next cycle's
+      // counters, and its charge must not land in the new cycle either.
+      const inCycle = sql`${memberBudgets.ledgerEpoch} = ${holdEpoch}`;
+      const [budget] = await tx
         .update(memberBudgets)
         .set({
-          heldMicroUsd: sql`GREATEST(0, ${memberBudgets.heldMicroUsd} - ${nonNegInt(hold.holdMicroUsd)})`,
+          heldMicroUsd: sql`CASE WHEN ${inCycle} THEN GREATEST(0, ${memberBudgets.heldMicroUsd} - ${holdBilled}) ELSE ${memberBudgets.heldMicroUsd} END`,
           lastSyncStatus: 'synced',
           lastSyncedAt: new Date(),
-          openHolds: sql`GREATEST(0, ${memberBudgets.openHolds} - 1)`,
-          // A hold placed before a renewal must not charge the new cycle: the
-          // renewal already refunded the old cycle net of this hold.
-          settledUsageMicroUsd: sql`CASE WHEN ${memberBudgets.ledgerEpoch} = ${toInt(hold.budgetEpoch)} THEN ${memberBudgets.settledUsageMicroUsd} + ${chargedBilled} ELSE ${memberBudgets.settledUsageMicroUsd} END`,
+          openHolds: sql`CASE WHEN ${inCycle} THEN GREATEST(0, ${memberBudgets.openHolds} - 1) ELSE ${memberBudgets.openHolds} END`,
+          settledUsageMicroUsd: sql`CASE WHEN ${inCycle} THEN ${memberBudgets.settledUsageMicroUsd} + ${chargedBilled} ELSE ${memberBudgets.settledUsageMicroUsd} END`,
         })
-        .where(eq(memberBudgets.id, hold.budgetId));
+        .where(eq(memberBudgets.id, hold.budgetId))
+        .returning({
+          closedHoldPoolMicroUsd: memberBudgets.closedHoldPoolMicroUsd,
+          ledgerEpoch: memberBudgets.ledgerEpoch,
+          orgId: memberBudgets.orgId,
+        });
+
+      if (budget && toInt(budget.ledgerEpoch) !== holdEpoch) {
+        return this.settleLate(tx, hold, {
+          budget,
+          chargedBilled,
+          holdBilled,
+        });
+      }
     }
 
     return { settled: true };

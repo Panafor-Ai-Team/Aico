@@ -7,9 +7,14 @@ import { cleanupAicoTables, seedUsers } from '@/database/models/__tests__/aico.p
 import { OrganizationModel } from '@/database/models/organization';
 import { memberBudgets, userWallets } from '@/database/schemas/aicoOrganization';
 import { billedUsageFromCapacity } from '@/database/utils/aicoMoney';
+import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
 import type { ManagedProviderClient } from '@/server/services/managedProvider';
 
 import { AicoOpenRouterKeyService } from './keyService';
+
+vi.hoisted(() => {
+  process.env.KEY_VAULTS_SECRET ||= 'LA7n9k3JdEcbSgml2sxfw+4TV1AzaaFU5+R176aQz4s=';
+});
 
 const ledger = vi.hoisted(() => ({ authoritative: false, shared: false }));
 
@@ -186,6 +191,87 @@ describe('AicoOpenRouterKeyService under the authoritative ledger', () => {
     const { orgMemberId } = await seedBudget({ openrouterKeyId: 'cvc_m' });
     await expect(keys.syncMemberCycleUsage(orgMemberId)).resolves.toBeNull();
     expect(provider.getKey).not.toHaveBeenCalled();
+  });
+});
+
+describe('C4: the next cycle starts from the key counter, not from zero', () => {
+  // A $5 key on a gateway whose counter never resets, with $3 already spent on it.
+  const KEY_LIMIT_MICRO = 5_000_000;
+  const seedCvcBudget = async () => {
+    ledger.authoritative = true;
+    const gateKeeper = await KeyVaultsGateKeeper.initWithEnvKey();
+    return seedBudget({
+      managedKeyLimitMicroUsd: KEY_LIMIT_MICRO,
+      managedKeyProviderId: 'cheapvibecode',
+      openrouterKeyCiphertext: await gateKeeper.encrypt('sk-cvc-c4'),
+      openrouterKeyId: 'cvc_c4',
+      settledUsageMicroUsd: 200_000,
+    });
+  };
+  const frozenRead = (remainingUsd: number | null) => {
+    provider.capabilities.revoke = true;
+    provider.updateKey.mockResolvedValue({
+      disabled: true,
+      hash: 'cvc_c4',
+      limit: null,
+      limitRemaining: remainingUsd,
+      name: 'k',
+      usage: 0,
+      usageDaily: null,
+      usageMonthly: null,
+      usageWeekly: null,
+    } as never);
+  };
+
+  it('reads the frozen key and baselines the new cycle at the counter, keeping ledger money figures', async () => {
+    const { orgMemberId } = await seedCvcBudget();
+    frozenRead(2); // $2 left of $5 → $3 spent
+
+    await expect(keys.settleMemberPeriod(orgMemberId)).resolves.toEqual({
+      nextCycleBaselineMicroUsd: 3_000_000,
+      remainingMicroUsd: 800_000,
+      usageMicroUsd: 200_000,
+    });
+    // The frozen-read path (revoke capability): a same-state edit, not getKey.
+    expect(provider.updateKey).toHaveBeenCalledTimes(1);
+    expect(provider.getKey).not.toHaveBeenCalled();
+  });
+
+  it('reads the key through getKey when the provider cannot freeze by secret', async () => {
+    const { orgMemberId } = await seedCvcBudget();
+    // makeProvider's default: revoke false, getKey reports $0.5 left → $4.5 spent.
+
+    const settled = await keys.settleMemberPeriod(orgMemberId);
+
+    expect(settled?.nextCycleBaselineMicroUsd).toBe(4_500_000);
+    expect(provider.getKey).toHaveBeenCalledTimes(1);
+    expect(provider.updateKey).not.toHaveBeenCalled();
+  });
+
+  it('keeps a zero baseline under the shared key or native periodic limits', async () => {
+    const { orgMemberId } = await seedCvcBudget();
+    frozenRead(2);
+
+    ledger.shared = true;
+    expect((await keys.settleMemberPeriod(orgMemberId))?.nextCycleBaselineMicroUsd).toBe(0);
+    ledger.shared = false;
+
+    provider.capabilities.nativePeriodicLimits = true;
+    expect((await keys.settleMemberPeriod(orgMemberId))?.nextCycleBaselineMicroUsd).toBe(0);
+    expect(provider.updateKey).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the stored key limit when the frozen read fails', async () => {
+    const { orgMemberId } = await seedCvcBudget();
+    provider.capabilities.revoke = true;
+    provider.updateKey.mockRejectedValue(new Error('CVC down'));
+
+    const settled = await keys.settleMemberPeriod(orgMemberId);
+
+    // Assume the key is spent: a free cycle bounded by the key's own limit beats
+    // billing the closing cycle a second time.
+    expect(settled?.nextCycleBaselineMicroUsd).toBe(KEY_LIMIT_MICRO);
+    expect(settled?.remainingMicroUsd).toBe(800_000);
   });
 });
 
