@@ -335,3 +335,99 @@ describe('N10: usage reports separate measured spend from an estimate', () => {
     );
   });
 });
+
+describe('N11/PH: history shows what the wallet did, on the right wallet', () => {
+  const today = () => new Date().toISOString().slice(0, 10);
+
+  /** Fund $20, give the owner $5, then lower it to $2: the org gets $3 back. */
+  const seedAllocateThenReduce = async () => {
+    const orgModel = new OrganizationModel(testDB);
+    const org = await orgModel.createOrganization({ name: 'History Co', ownerUserId: ownerId });
+    await orgModel.addManualCredit({
+      amountMicroUsd: usd(20),
+      amountToman: 1_000_000,
+      createdByUserId: ownerId,
+      description: 'fund',
+      fxRateTomanPerUsd: 50_000,
+      orgId: org.id,
+      type: 'topup',
+    });
+    const me = (await orgModel.listMembers(org.id)).find((m) => m.userId === ownerId)!;
+    const caller = organizationRouter.createCaller(createTestContext(ownerId));
+    for (const amountUsd of [5, 2]) {
+      await caller.allocateMemberCredit({
+        amountMicroUsd: String(usd(amountUsd)),
+        orgId: org.id,
+        orgMemberId: me.id,
+        period: 'monthly',
+      });
+    }
+    return { caller, orgId: org.id };
+  };
+
+  it('org history: a reduction is money back, an allocation is money out, stored amounts unchanged', async () => {
+    const { caller, orgId } = await seedAllocateThenReduce();
+
+    const rows = await caller.getTransactionHistory({ from: today(), orgId, to: today() });
+    const allocates = rows.filter((r) => r.type === 'allocate');
+    const reduction = allocates.find((r) => r.amountMicroUsd === String(usd(3)))!;
+    const allocation = allocates.find((r) => r.amountMicroUsd === String(usd(5)))!;
+
+    expect(allocates).toHaveLength(2);
+    // The stored amount is the member's view: positive for both.
+    expect(reduction.amountUsd).toBe('3.000000');
+    expect(reduction.walletChangeMicroUsd).toBe(String(usd(3)));
+    expect(reduction.walletChangeUsd).toBe('3.000000');
+    expect(Number(reduction.walletChangePi)).toBeGreaterThan(0);
+    expect(allocation.walletChangeMicroUsd).toBe(String(-usd(5)));
+    expect(allocation.walletChangeUsd).toBe('-5.000000');
+    expect(Number(allocation.walletChangePi)).toBeLessThan(0);
+    // The same size in π, opposite sign, for amounts of equal size.
+    expect(Math.abs(Number(allocation.walletChangePi))).toBeGreaterThan(
+      Math.abs(Number(reduction.walletChangePi)),
+    );
+  });
+
+  it('platform view: recent transactions carry the same wallet change', async () => {
+    await testDB.insert(platformAdminUsers).values({
+      email: 'operator-n11@ledger.test',
+      id: operatorId,
+      passwordHash: 'unusable:test',
+    });
+    await seedAllocateThenReduce();
+    const caller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+
+    const { recentTransactions } = await caller.getPlatformFinancials();
+    const reduction = recentTransactions.find(
+      (r) => r.type === 'allocate' && r.amountMicroUsd === String(usd(3)),
+    )!;
+    const allocation = recentTransactions.find(
+      (r) => r.type === 'allocate' && r.amountMicroUsd === String(usd(5)),
+    )!;
+
+    expect(reduction.walletChangeMicroUsd).toBe(String(usd(3)));
+    expect(allocation.walletChangeMicroUsd).toBe(String(-usd(5)));
+    expect(allocation.walletChangeUsd).toBe('-5.000000');
+    // The stored amount is left as it was.
+    expect(allocation.amountUsd).toBe('5.000000');
+  });
+
+  it('PH: a member’s personal history does not list their organization rows', async () => {
+    await seedAllocateThenReduce();
+    await testDB.insert(userWallets).values({ balanceMicroUsd: usd(1), userId: ownerId });
+    await testDB.insert(walletTransactions).values({
+      amountMicroUsd: usd(1),
+      amountToman: 0,
+      balanceAfterMicroUsd: usd(1),
+      balanceBeforeMicroUsd: 0,
+      description: 'personal top-up',
+      type: 'topup',
+      userId: ownerId,
+    });
+    const caller = aicoBillingRouter.createCaller(createTestContext(ownerId));
+
+    const mine = await caller.getMyTransactions();
+
+    expect(mine.map((r) => r.type)).toEqual(['topup']);
+  });
+});

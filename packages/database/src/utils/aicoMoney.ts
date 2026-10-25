@@ -645,3 +645,21 @@ export const rawUsdToPiTokensDecimal = (
   if (!Number.isFinite(rawUsd) || rawUsd <= 0) return 0;
   return (rawUsd * safeCvcTokensPerUsd(cvcTokensPerUsd)) / CVC_TOKENS_PER_PI;
 };
+
+/**
+ * What a transaction did to the wallet it was written against, signed: the
+ * balance after minus the balance before. Stored `amount` is not always that
+ * (an org `allocate` row carries the member's point of view and is positive
+ * even when it takes money back to the org), so displays use this and fall
+ * back to `amount` only for rows without both balances.
+ */
+export const walletChangeMicroUsd = (row: {
+  amountMicroUsd?: number | null;
+  balanceAfterMicroUsd?: number | null;
+  balanceBeforeMicroUsd?: number | null;
+}): number => {
+  if (row.balanceAfterMicroUsd != null && row.balanceBeforeMicroUsd != null) {
+    return Number(row.balanceAfterMicroUsd) - Number(row.balanceBeforeMicroUsd);
+  }
+  return Number(row.amountMicroUsd ?? 0);
+};

@@ -1179,8 +1179,8 @@ export const OrgAdminMembers = () => {
                         render: (v: string) => Number(v).toLocaleString(),
                       },
                       {
-                        dataIndex: 'amountUsd',
-                        title: t('wallet.columns.usd'),
+                        dataIndex: 'walletChangePi',
+                        title: t('wallet.columns.pi'),
                         render: (v: string) => pi(v),
                       },
                       {

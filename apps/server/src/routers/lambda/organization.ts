@@ -12,6 +12,7 @@ import {
   microUsdToDecimalString,
   tomanString,
   usdDecimalStringToMicro,
+  walletChangeMicroUsd,
 } from '@/database/utils/aicoMoney';
 import { appEnv } from '@/envs/app';
 import { normalizeIranianPhoneNumber } from '@/libs/better-auth/phone';
@@ -25,7 +26,7 @@ import {
   serializeSweepPreview,
   serializeSweepResult,
 } from '@/server/services/aico/orgBudgetSweep';
-import { piFromBilledMicro } from '@/server/services/aico/piToken';
+import { piFromBilledMicro, signedPiFromBilledMicro } from '@/server/services/aico/piToken';
 import { recordAicoSecurityEvent } from '@/server/services/aico/securityAudit';
 import { EmailService } from '@/server/services/email';
 import { isManagedKeyCapacityError } from '@/server/services/managedProvider/cheapvibecode';
@@ -1058,22 +1059,35 @@ export const organizationRouter = router({
     .query(async ({ ctx, input }) => {
       await requireOrgManager(ctx.organizationModel, ctx.userId, input.orgId);
       try {
-        const rows = await ctx.organizationModel.getTransactionHistory({
-          from: input.from,
-          limit: input.limit,
-          orgId: input.orgId,
-          to: input.to,
+        const [rows, multiplierBp] = await Promise.all([
+          ctx.organizationModel.getTransactionHistory({
+            from: input.from,
+            limit: input.limit,
+            orgId: input.orgId,
+            to: input.to,
+          }),
+          new AicoBillingModel(ctx.serverDB).getUsageMultiplierBp(),
+        ]);
+        return rows.map((row) => {
+          // N11: what the org wallet actually did. `amount*` keeps the stored
+          // (member point of view) figure, which is positive for a reduction.
+          const walletChange = walletChangeMicroUsd(row);
+          return {
+            amountMicroUsd: String(row.amountMicroUsd ?? 0),
+            amountToman: tomanString(row.amountToman ?? 0),
+            amountUsd: microUsdToDecimalString(row.amountMicroUsd ?? 0),
+            createdAt: row.createdAt.toISOString(),
+            description: row.description,
+            id: row.id,
+            orgMemberId: row.orgMemberId,
+            type: row.type,
+            walletChangeMicroUsd: String(walletChange),
+            walletChangePi: String(
+              signedPiFromBilledMicro({ billedMicroUsd: walletChange, multiplierBp }),
+            ),
+            walletChangeUsd: microUsdToDecimalString(walletChange),
+          };
         });
-        return rows.map((row) => ({
-          amountMicroUsd: String(row.amountMicroUsd ?? 0),
-          amountToman: tomanString(row.amountToman ?? 0),
-          amountUsd: microUsdToDecimalString(row.amountMicroUsd ?? 0),
-          createdAt: row.createdAt.toISOString(),
-          description: row.description,
-          id: row.id,
-          orgMemberId: row.orgMemberId,
-          type: row.type,
-        }));
       } catch (error) {
         throw mapOrgDateRangeError(error);
       }

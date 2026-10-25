@@ -19,6 +19,7 @@ import {
   MIN_USAGE_MULTIPLIER_BP,
   tomanString,
   usdDecimalStringToMicro,
+  walletChangeMicroUsd,
 } from '@/database/utils/aicoMoney';
 import {
   hashOperatorPassword,
@@ -861,6 +862,9 @@ export const platformAdminRouter = router({
           type: t.type,
           userEmail: t.userEmail,
           userId: t.userId,
+          // N11: what the row did to its wallet; `amount*` stays as stored.
+          walletChangeMicroUsd: String(walletChangeMicroUsd(t)),
+          walletChangeUsd: microUsdToDecimalString(walletChangeMicroUsd(t)),
         })),
         to: null as string | null,
         totalOpenRouterCostMicroUsd: String(costMicroUsd),

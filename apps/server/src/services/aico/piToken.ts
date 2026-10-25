@@ -27,5 +27,19 @@ export const piFromBilledMicro = (params: {
     cvcTokensPerUsd: cvcTokensPerUsd(),
   });
 
+/**
+ * `piFromBilledMicro` is 0 for anything at or below zero, so a signed amount is
+ * converted on its absolute value and the sign put back.
+ */
+export const signedPiFromBilledMicro = (params: {
+  billedMicroUsd: number;
+  multiplierBp?: number | null;
+}): number => {
+  const billed = Math.trunc(Number(params.billedMicroUsd));
+  if (!Number.isFinite(billed)) return 0;
+  const abs = piFromBilledMicro({ ...params, billedMicroUsd: Math.abs(billed) });
+  return billed < 0 ? -abs : abs;
+};
+
 export const piFromDepositMicro = (depositMicroUsd: number, multiplierBp: number): number =>
   topupPiTokensFromDeposit(depositMicroUsd, multiplierBp, cvcTokensPerUsd());
