@@ -1155,4 +1155,48 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
       expect(ownerRow.id).toBeTruthy();
     });
   });
+
+  describe('re-joining while a removal is unsettled (RI)', () => {
+    const setup = async () => {
+      const { organizationMembers } = await import('@/database/schemas/aicoOrganization');
+      const ownerCaller = organizationRouter.createCaller(createTestContext(ownerId));
+      const created = await ownerCaller.create({ name: 'Rejoin Router Org' });
+      const invite = await ownerCaller.inviteMember({
+        identifierType: 'email',
+        identifierValue: 'member@rbac.test',
+        orgId: created.id,
+        role: 'member',
+      });
+      const memberCaller = organizationRouter.createCaller(createTestContext(memberId));
+      await memberCaller.acceptInvite({ token: invite.inviteUrl.split('/invite/').at(-1)! });
+      await testDB
+        .update(organizationMembers)
+        .set({ status: 'revocation_pending' })
+        .where(eq(organizationMembers.userId, memberId));
+      return { created, memberCaller, ownerCaller };
+    };
+
+    it('acceptInvite answers CONFLICT while the removal is still being settled', async () => {
+      const { created, memberCaller, ownerCaller } = await setup();
+      const second = await ownerCaller.inviteMember({
+        identifierType: 'email',
+        identifierValue: 'member@rbac.test',
+        orgId: created.id,
+        role: 'member',
+      });
+
+      await expect(
+        memberCaller.acceptInvite({ token: second.inviteUrl.split('/invite/').at(-1)! }),
+      ).rejects.toMatchObject({ code: 'CONFLICT', message: 'MEMBER_REMOVAL_IN_PROGRESS' });
+    });
+
+    it('platform assignManager answers CONFLICT for a member whose removal is unsettled', async () => {
+      const { created } = await setup();
+      const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+
+      await expect(
+        platformCaller.assignManager({ orgId: created.id, role: 'admin', userId: memberId }),
+      ).rejects.toMatchObject({ code: 'CONFLICT', message: 'MEMBER_REMOVAL_IN_PROGRESS' });
+    });
+  });
 });

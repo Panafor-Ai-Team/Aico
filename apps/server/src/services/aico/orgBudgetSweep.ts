@@ -1,4 +1,8 @@
-import { OrganizationModel, type ReclaimBudgetSnapshot } from '@/database/models/organization';
+import {
+  OrganizationModel,
+  type ReclaimBudgetSnapshot,
+  reclaimSnapshotOf,
+} from '@/database/models/organization';
 import { aicoKeyOutbox } from '@/database/schemas';
 import type { LobeChatDatabase } from '@/database/type';
 import {
@@ -303,7 +307,13 @@ export const executeOrgBudgetSweep = async ({
           openrouterKeyId: budget.openrouterKeyId,
           orgId,
           orgMemberId: member.id,
-          payload: { batchId, createdByUserId: actorUserId ?? null },
+          payload: {
+            batchId,
+            createdByUserId: actorUserId ?? null,
+            // The budget as this sweep saw it: the retry must not reclaim an
+            // allocation made after it.
+            expected: reclaimSnapshotOf(budget),
+          },
           status: 'pending',
           userId: member.userId,
         });
@@ -349,7 +359,11 @@ export const executeOrgBudgetSweep = async ({
         openrouterKeyId: budget.openrouterKeyId,
         orgId,
         orgMemberId: member.id,
-        payload: { batchId, createdByUserId: actorUserId ?? null },
+        payload: {
+          batchId,
+          createdByUserId: actorUserId ?? null,
+          expected: reclaimSnapshotOf(budget),
+        },
         status: 'pending',
         userId: member.userId,
       });

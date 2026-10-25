@@ -389,6 +389,12 @@ export const platformAdminRouter = router({
             userAgent: ctx.userAgent,
           });
           return row;
+        })
+        .catch((error: unknown) => {
+          if (error instanceof Error && error.message === 'MEMBER_REMOVAL_IN_PROGRESS') {
+            throw new TRPCError({ cause: error, code: 'CONFLICT', message: error.message });
+          }
+          throw error;
         });
     }),
 
