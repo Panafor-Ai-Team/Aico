@@ -21,6 +21,7 @@ import { sleep } from '@/utils/sleep';
 import { setNamespace } from '@/utils/storeDebug';
 
 import { type FileStore } from '../../store';
+import { resolvePersistedFileMime } from './persistedFile';
 import { filterSupportedChatUploadFiles } from './uploadGuard';
 
 const n = setNamespace('chat');
@@ -103,7 +104,7 @@ export class FileActionImpl {
           file: {
             name: file.name,
             size: file.size ?? 0,
-            type: file.type || file.fileType || '',
+            type: resolvePersistedFileMime(file),
           } as File,
           fileUrl: url,
           id: file.id,
