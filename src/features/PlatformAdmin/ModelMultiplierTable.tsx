@@ -19,6 +19,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { toastAicoError } from '@/business/client/resolveAicoErrorMessage';
+import { formatIsolatedCoefficient } from '@/features/AicoBilling/piToken';
 import { AICO_TABLE_SCROLL, aicoPanelStyles } from '@/features/AicoPanels';
 import { useClientDataSWR } from '@/libs/swr';
 import { controlPlaneClient } from '@/libs/trpc/client/controlPlane';
@@ -36,9 +37,7 @@ interface ModelRow {
 }
 
 const formatCoefficient = (bp: number | null | undefined) =>
-  typeof bp === 'number'
-    ? `x${(bp / BP_SCALE).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`
-    : '—';
+  typeof bp === 'number' ? formatIsolatedCoefficient(bp / BP_SCALE) : '—';
 
 export const ModelMultiplierTable = () => {
   const { t } = useTranslation('aico');

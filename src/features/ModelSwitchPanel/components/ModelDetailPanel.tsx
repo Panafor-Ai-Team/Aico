@@ -1,5 +1,5 @@
 import { Accordion, AccordionItem, Flexbox, Icon, Tag, Text, Tooltip } from '@lobehub/ui';
-import { createStaticStyles } from 'antd-style';
+import { createStaticStyles, cssVar } from 'antd-style';
 import { ArrowDownToDot, ArrowUpFromDot, CircleFadingArrowUp } from 'lucide-react';
 import type { FC } from 'react';
 import { memo } from 'react';
@@ -103,8 +103,11 @@ const PriceValue: FC<PriceValueProps> = ({ price, prefix = '', showPiIcon, suffi
       </span>
     )}
     <span className={styles.priceAmount}>
-      {prefix}
-      {price.current}
+      {/* Keep "4×" / "0.33×" LTR inside RTL text so the × never mirrors to "×4". */}
+      <bdi dir="ltr">
+        {prefix}
+        {price.current}
+      </bdi>
       {showPiIcon && price.current !== '-' && <PiTokenIcon size={12} />}
       {suffix}
     </span>
@@ -144,6 +147,7 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
       model,
       pricingGroups,
       rating,
+      reasoningBilledTwice,
     } = useModelDetailPanel({
       enabledList: enabledListProp,
       modelId,
@@ -151,6 +155,11 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
       provider,
       t,
     });
+
+    const withBilledTwiceHint = (text: string) =>
+      reasoningBilledTwice
+        ? `${text} ${t('ModelSwitchPanel.detail.pricing.reasoningBilledTwiceHint')}`
+        : text;
 
     if (!model) return null;
 
@@ -373,7 +382,11 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
                   (approximatePrice ? (
                     <span className={styles.actionText}>{approximatePrice}</span>
                   ) : isSingleTextRate ? (
-                    <Tooltip title={getPricingTooltip('coefficient', formatPrice!.input.current)}>
+                    <Tooltip
+                      title={withBilledTwiceHint(
+                        getPricingTooltip('coefficient', formatPrice!.input.current),
+                      )}
+                    >
                       <span className={styles.actionText}>
                         <PriceValue price={formatPrice!.input} />
                       </span>
@@ -465,6 +478,11 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
                       })}
                     </Flexbox>
                   ))}
+                  {reasoningBilledTwice && (
+                    <Flexbox className={styles.row} style={{ color: cssVar.colorWarning }}>
+                      {t('ModelSwitchPanel.detail.pricing.reasoningBilledTwiceHint')}
+                    </Flexbox>
+                  )}
                 </Flexbox>
               </AccordionItem>
             )}

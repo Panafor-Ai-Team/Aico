@@ -510,10 +510,11 @@ export class AiInfraRepos {
   private fetchBuiltinModels = async (
     providerId: string,
   ): Promise<AiProviderModelListItem[] | undefined> => {
-    // Managed Aico traffic is resold upstream capacity — every price shown for
-    // it carries the platform markup, on every branch below including the
-    // static model-bank fallback. Every managed provider id is listed, not just
-    // the active one, so the markup survives a switch in either direction.
+    // Managed Aico traffic is resold upstream capacity. Prices shown for it are
+    // the provider's published coefficient as-is (the platform multiplier applies
+    // only to top-up yield), on every branch below including the static
+    // model-bank fallback. Every managed provider id is listed, not just the
+    // active one, so this holds across a switch in either direction.
     const isManagedProvider =
       providerId === 'openrouter' ||
       providerId === BRANDING_PROVIDER ||
@@ -599,8 +600,8 @@ export class AiInfraRepos {
       const builtin = await this.staticModelList(providerId);
 
       // Reached on first setup or when the managed gateway is unreachable.
-      // Without the markup here the fallback would silently serve raw resale
-      // prices.
+      // The fallback goes through the same managed path as the synced catalog, so
+      // both serve prices in one convention.
       return isManagedProvider
         ? this.withUsageMultiplier(builtin, syncedCatalogProviderId)
         : builtin;

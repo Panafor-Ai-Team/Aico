@@ -6,6 +6,7 @@ import {
   resolveAutoRoute,
 } from '@lobechat/model-runtime';
 import type { Pricing } from 'model-bank';
+import { REASONING_BILLED_TWICE_MODEL_IDS } from 'model-bank';
 import cvcModels from 'model-bank/cheapvibecode';
 
 import { OpenRouterModelCatalogModel } from '@/database/models/openrouterModelCatalog';
@@ -15,7 +16,7 @@ import type { LobeChatDatabase } from '@/database/type';
  * Models whose measured charge counts reasoning tokens a second time
  * (`deepseek-v4.1-flash` ~x0.433 against a published x0.3).
  */
-export const REASONING_BILLED_TWICE = new Set(['deepseek-v4.1-flash', 'mimo-v2.5']);
+export const REASONING_BILLED_TWICE = new Set(REASONING_BILLED_TWICE_MODEL_IDS);
 
 export interface ManagedModelRates {
   contextWindowTokens: number | null;

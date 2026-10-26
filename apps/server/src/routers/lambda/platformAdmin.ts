@@ -198,6 +198,8 @@ export const platformAdminRouter = router({
     const rows = await ctx.billingModel.listUsageMultipliers([...MANAGED_PROVIDER_IDS]);
     return {
       activeProviderId: MANAGED_PROVIDER_ID,
+      // The preview next to each editable multiplier converts at this rate.
+      cvcTokensPerUsd: cvcTokensPerUsd(),
       providers: rows.map((row) => {
         const multiplierBp = Number(row.multiplierBp ?? DEFAULT_USAGE_MULTIPLIER_BP);
         return {

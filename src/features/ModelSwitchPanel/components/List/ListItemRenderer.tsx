@@ -90,7 +90,7 @@ export const ListItemRenderer = memo<ListItemRendererProps>(
               navigate('/settings/provider/all');
             }}
           >
-            {t('ModelSwitchPanel.emptyProvider')}
+            <span dir="auto">{t('ModelSwitchPanel.emptyProvider')}</span>
             <Icon icon={LucideArrowRight} />
           </Block>
         );
@@ -146,7 +146,7 @@ export const ListItemRenderer = memo<ListItemRendererProps>(
               navigate(`/settings/provider/${toProviderRouteSegment(item.provider.id)}`);
             }}
           >
-            {t('ModelSwitchPanel.emptyModel')}
+            <span dir="auto">{t('ModelSwitchPanel.emptyModel')}</span>
             <Icon icon={LucideArrowRight} />
           </Flexbox>
         );

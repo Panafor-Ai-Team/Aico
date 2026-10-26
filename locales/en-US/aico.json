@@ -340,7 +340,7 @@
   "platform.modelEnabledHint": "Models switched on here are the ones people can pick on the site. A choice made here survives the next catalog sync.",
   "platform.modelEnabledSaved": "Model availability updated",
   "platform.modelEnabledSelected": "{{count}} selected",
-  "platform.modelMultiplierHint": "The cost multiplier each model publishes, refreshed from the provider every 6 hours. Prices shown and charged are this multiplier times the platform markup; it cannot be edited here.",
+  "platform.modelMultiplierHint": "The cost multiplier each model publishes, refreshed from the provider every 6 hours. Model prices shown and charged use this multiplier as published (the platform multiplier applies only to top-ups); it cannot be edited here.",
   "platform.modelMultiplierModel": "Model",
   "platform.modelMultiplierPublished": "Published",
   "platform.modelMultiplierTitle": "Per-model coefficients",

@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { toastAicoError } from '@/business/client/resolveAicoErrorMessage';
 import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
 import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
+import { useCvcTokensPerUsd } from '@/features/AicoBilling/useCvcTokensPerUsd';
 import { aicoPanelStyles } from '@/features/AicoPanels';
 import { lambdaClient } from '@/libs/trpc/client';
 
@@ -74,6 +75,8 @@ export const TeamModelsForm = ({
   teams: Team[];
 }) => {
   const { t } = useTranslation('aico');
+  // Re-render once the server's CVC rate is known; costs below are formatted at it.
+  useCvcTokensPerUsd();
   const [teamId, setTeamId] = useState<string | undefined>(teams[0]?.id);
   const [enabledIds, setEnabledIds] = useState<Set<string>>(() => new Set());
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());

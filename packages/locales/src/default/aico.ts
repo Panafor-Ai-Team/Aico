@@ -372,7 +372,7 @@ export default {
   'platform.provider.cheapvibecode': 'Token gateway',
   'platform.modelMultiplierTitle': 'Per-model coefficients',
   'platform.modelMultiplierHint':
-    'The cost multiplier each model publishes, refreshed from the provider every 6 hours. Prices shown and charged are this multiplier times the platform markup; it cannot be edited here.',
+    'The cost multiplier each model publishes, refreshed from the provider every 6 hours. Model prices shown and charged use this multiplier as published (the platform multiplier applies only to top-ups); it cannot be edited here.',
   'platform.modelMultiplierModel': 'Model',
   'platform.modelMultiplierPublished': 'Published',
   'platform.modelEnabledColumn': 'On the site',

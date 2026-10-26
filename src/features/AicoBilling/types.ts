@@ -51,6 +51,8 @@ export type AicoOrganizationBillingSource = {
 export type AicoBillingSource = AicoPersonalBillingSource | AicoOrganizationBillingSource;
 
 export type AicoBillingSourcesResponse = {
+  /** Server `AICO_CVC_TOKENS_PER_USD`; absent in responses cached by older builds. */
+  cvcTokensPerUsd?: number;
   preferredBillingSource: 'personal' | 'organization';
   preferredOrganizationId: string | null;
   sources: AicoBillingSource[];

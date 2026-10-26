@@ -320,7 +320,7 @@
   "platform.manualCreditHint": "按管理员设定的汇率将 toman 转为组织 USD 钱包余额。",
   "platform.manualUserCredit": "用户手动入账",
   "platform.manualUserCreditHint": "按管理员汇率为 B2C 用户 USD 钱包入账。填写邮箱和/或从钱包列表选择用户。",
-  "platform.modelMultiplierHint": "服务商为每个模型公布的成本系数，每 6 小时从服务商同步一次。显示和扣费的价格为该系数乘以平台加价，此处不可编辑。",
+  "platform.modelMultiplierHint": "服务商为每个模型公布的成本系数，每 6 小时从服务商同步一次。显示和扣费的价格直接使用该系数（平台系数仅在充值时生效），此处不可编辑。",
   "platform.modelMultiplierModel": "模型",
   "platform.modelMultiplierPublished": "公布值",
   "platform.modelMultiplierTitle": "各模型系数",

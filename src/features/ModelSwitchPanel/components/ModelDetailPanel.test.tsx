@@ -107,6 +107,7 @@ vi.mock('@/store/global/selectors', () => ({
 
 const translations: Record<string, string> = {
   'ModelSwitchPanel.detail.context': 'Context Length',
+  'ModelSwitchPanel.detail.contextTokens': '{{amount}} tokens',
   'ModelSwitchPanel.detail.pricing': 'Pricing',
   'ModelSwitchPanel.detail.pricing.credits.coefficient':
     'Usage coefficient {{amount}} (same for input and output)',
@@ -120,6 +121,7 @@ const translations: Record<string, string> = {
   'ModelSwitchPanel.detail.pricing.input': 'Input ${{amount}}/M',
   'ModelSwitchPanel.detail.pricing.output': 'Output ${{amount}}/M',
   'ModelSwitchPanel.detail.pricing.perImage': '~ ${{amount}} / image',
+  'ModelSwitchPanel.detail.pricing.perMillionTokens': '/M tokens',
   'ModelSwitchPanel.detail.pricing.perVideo': '~ ${{amount}} / video',
   'ModelSwitchPanel.detail.pricing.unit.imageGeneration': 'Image Generation',
   'ModelSwitchPanel.detail.pricing.unit.textInput': 'Input',
