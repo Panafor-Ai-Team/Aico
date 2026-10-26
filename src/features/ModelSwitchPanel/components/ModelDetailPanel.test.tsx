@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { EnabledProviderWithModels } from '@/types/aiProvider';
 
+import { useModelDetailSectionsStore } from '../hooks/useModelDetailSections';
 import ModelDetailPanel from './ModelDetailPanel';
 
 vi.mock('antd-style', () => ({
@@ -89,7 +90,7 @@ vi.mock('@/business/client/hooks/useBusinessModelRating', () => ({
 
 const globalState = {
   status: {
-    modelDetailPanelExpandedKeys: ['pricing'],
+    modelDetailPanelExpandedKeys: [] as string[],
   },
   updateModelDetailPanelExpandedKeys: vi.fn(),
 };
@@ -206,6 +207,11 @@ const createEnabledList = (
   },
 ];
 
+// abilities / pricing start collapsed; these tests read the pricing rows, so open them first
+beforeEach(() => {
+  useModelDetailSectionsStore.setState({ openKeys: ['pricing'] });
+});
+
 describe('ModelDetailPanel pricing', () => {
   it('renders the localized model description when provided', () => {
     const { container } = render(
@@ -311,7 +317,7 @@ describe('ModelDetailPanel pricing', () => {
     expect(expanded.container).not.toHaveTextContent('Output');
     expanded.unmount();
 
-    globalState.status.modelDetailPanelExpandedKeys = [];
+    useModelDetailSectionsStore.setState({ openKeys: [] });
     try {
       const collapsed = render(
         <ModelDetailPanel
@@ -326,7 +332,7 @@ describe('ModelDetailPanel pricing', () => {
       );
       expect(collapsed.container).not.toHaveTextContent('Output coefficient');
     } finally {
-      globalState.status.modelDetailPanelExpandedKeys = ['pricing'];
+      useModelDetailSectionsStore.setState({ openKeys: ['pricing'] });
     }
   });
 

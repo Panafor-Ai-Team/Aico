@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EnabledProviderWithModels } from '@/types/aiProvider';
 
 import { useModelDetailPanel } from './useModelDetailPanel';
+import { useModelDetailSectionsStore } from './useModelDetailSections';
 
 const {
   globalState,
@@ -19,7 +20,7 @@ const {
 } = vi.hoisted(() => ({
   globalState: {
     status: {
-      modelDetailPanelExpandedKeys: ['pricing'],
+      modelDetailPanelExpandedKeys: ['rating'],
     },
     updateModelDetailPanelExpandedKeys: vi.fn(),
   },
@@ -144,7 +145,8 @@ const renderModelDetailPanelHook = (
 
 describe('useModelDetailPanel', () => {
   beforeEach(() => {
-    globalState.status.modelDetailPanelExpandedKeys = ['pricing'];
+    globalState.status.modelDetailPanelExpandedKeys = ['rating'];
+    useModelDetailSectionsStore.setState({ openKeys: [] });
     globalState.updateModelDetailPanelExpandedKeys = updateExpandedKeysMock;
     updateExpandedKeysMock.mockReset();
     useEnabledChatModelsMock.mockReturnValue([]);
@@ -341,13 +343,39 @@ describe('useModelDetailPanel', () => {
     expect(result.current.approximatePiPrice).toEqual({ amount: '1,000', unit: 'image' });
   });
 
-  it('updates expanded detail sections', () => {
+  it('keeps abilities and pricing collapsed until the user opens them', () => {
+    const { result } = renderModelDetailPanelHook();
+
+    expect(result.current.expandedKeys).toEqual(['rating']);
+    expect(result.current.isAbilitiesExpanded).toBe(false);
+    expect(result.current.isPricingExpanded).toBe(false);
+  });
+
+  it('opens a section on click and remembers it across hovers in the session', () => {
+    const { result, unmount } = renderModelDetailPanelHook();
+
+    act(() => {
+      result.current.handleExpandedChange(['rating', 'pricing']);
+    });
+
+    expect(result.current.isPricingExpanded).toBe(true);
+    expect(result.current.isAbilitiesExpanded).toBe(false);
+
+    // the popup unmounts when the hover ends and mounts again on the next hover
+    unmount();
+    const next = renderModelDetailPanelHook();
+
+    expect(next.result.current.isPricingExpanded).toBe(true);
+  });
+
+  it('persists only the persisted sections and keeps abilities/pricing in memory', () => {
     const { result } = renderModelDetailPanelHook();
 
     act(() => {
-      result.current.handleExpandedChange(['abilities']);
+      result.current.handleExpandedChange(['rating', 'abilities']);
     });
 
-    expect(updateExpandedKeysMock).toHaveBeenCalledWith(['abilities']);
+    expect(updateExpandedKeysMock).toHaveBeenCalledWith(['rating']);
+    expect(useModelDetailSectionsStore.getState().openKeys).toEqual(['abilities']);
   });
 });

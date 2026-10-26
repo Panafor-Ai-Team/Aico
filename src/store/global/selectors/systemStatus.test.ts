@@ -136,7 +136,7 @@ describe('systemStatusSelectors', () => {
   });
 
   describe('modelDetailPanelExpandedKeys', () => {
-    it('should expand every section by default', () => {
+    it('should expand the persisted sections by default', () => {
       const s: GlobalState = {
         ...initialState,
         status: {
@@ -153,11 +153,21 @@ describe('systemStatusSelectors', () => {
     it('should exclude collapsed keys stored by the user', () => {
       const s: GlobalState = merge(initialState, {
         status: {
-          modelDetailPanelCollapsedKeys: ['abilities', 'config'],
+          modelDetailPanelCollapsedKeys: ['rating'],
         },
       });
 
-      expect(systemStatusSelectors.modelDetailPanelExpandedKeys(s)).toEqual(['rating', 'pricing']);
+      expect(systemStatusSelectors.modelDetailPanelExpandedKeys(s)).toEqual(['config']);
+    });
+
+    it('should never expand abilities or pricing from persisted state', () => {
+      // they always start collapsed; a stored empty collapsed list must not open them
+      const s: GlobalState = merge(initialState, {
+        status: { modelDetailPanelCollapsedKeys: [] },
+      });
+
+      expect(systemStatusSelectors.modelDetailPanelExpandedKeys(s)).not.toContain('abilities');
+      expect(systemStatusSelectors.modelDetailPanelExpandedKeys(s)).not.toContain('pricing');
     });
 
     it('should ignore a legacy persisted expanded-keys array and keep new sections expanded', () => {
