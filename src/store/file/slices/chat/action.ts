@@ -81,17 +81,33 @@ export class FileActionImpl {
    * Attach an already-persisted file (e.g. one picked from the agent's earlier uploads)
    * to the draft, so the chip row shows it and the send path includes it.
    * `skipRemoveFile` keeps the stored file safe when the chip is removed.
+   *
+   * The agent config returns raw `files` rows, whose mime column is `fileType` (the
+   * `FileItem.type` typing does not hold there), and whose `url` is the stored key,
+   * not a loadable URL — so accept both mime fields and preview through `/f/:id`.
    */
-  attachChatFile = (file: Pick<FileItem, 'id' | 'name' | 'size' | 'type' | 'url'>): void => {
+  attachChatFile = (
+    file: Pick<FileItem, 'id' | 'name'> & {
+      fileType?: string | null;
+      size?: number | null;
+      type?: string | null;
+    },
+  ): void => {
     if (this.#get().chatUploadFileList.some((item) => item.id === file.id)) return;
+
+    const url = `/f/${file.id}`;
 
     this.#get().dispatchChatUploadFileList({
       files: [
         {
-          file: { name: file.name, size: file.size, type: file.type } as File,
-          fileUrl: file.url,
+          file: {
+            name: file.name,
+            size: file.size ?? 0,
+            type: file.type || file.fileType || '',
+          } as File,
+          fileUrl: url,
           id: file.id,
-          previewUrl: file.url,
+          previewUrl: url,
           skipRemoveFile: true,
           status: 'success',
         },
