@@ -123,7 +123,9 @@ export const MODEL_DETAIL_PANEL_EXPANDED_KEYS = [
 export type ModelDetailPanelExpandedKey = (typeof MODEL_DETAIL_PANEL_EXPANDED_KEYS)[number];
 
 /**
- * Expandable sections of the ModelDetailPanel Accordion, all expanded by default.
+ * Persisted expandable sections of the ModelDetailPanel Accordion, expanded by default.
+ * `abilities` and `pricing` are not here: they always start collapsed and keep their open
+ * state in memory only — see SESSION_SECTION_KEYS in `ModelSwitchPanel/hooks`.
  *
  * Persistence stores the COLLAPSED keys (`modelDetailPanelCollapsedKeys`) instead of the
  * expanded ones: an expanded-keys array persisted before a section shipped would keep that
@@ -132,8 +134,6 @@ export type ModelDetailPanelExpandedKey = (typeof MODEL_DETAIL_PANEL_EXPANDED_KE
  */
 export const MODEL_DETAIL_PANEL_EXPANDABLE_KEYS = [
   'rating',
-  'abilities',
-  'pricing',
   'config',
 ] as const satisfies readonly ModelDetailPanelExpandedKey[];
 

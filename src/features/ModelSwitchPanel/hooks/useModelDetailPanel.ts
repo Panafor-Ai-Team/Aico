@@ -48,6 +48,7 @@ import { formatTokenNumber } from '@/utils/format';
 import { formatPriceByCurrency, getOriginalUnitRateByName, getUnitRateByName } from '@/utils/index';
 
 import type { PricingMode } from '../types';
+import { splitExpandedKeys, useModelDetailSectionsStore } from './useModelDetailSections';
 
 export interface FormattedUnitPrice {
   current: string;
@@ -347,7 +348,13 @@ export const useModelDetailPanel = ({
     return providerData?.children.find((m) => m.id === modelId);
   }, [enabledList, modelId, provider]);
 
-  const expandedKeys = useGlobalStore(systemStatusSelectors.modelDetailPanelExpandedKeys);
+  const persistedExpandedKeys = useGlobalStore(systemStatusSelectors.modelDetailPanelExpandedKeys);
+  const sessionOpenKeys = useModelDetailSectionsStore((s) => s.openKeys);
+  const setSessionOpenKeys = useModelDetailSectionsStore((s) => s.setOpenKeys);
+  const expandedKeys = useMemo(
+    () => [...persistedExpandedKeys, ...sessionOpenKeys],
+    [persistedExpandedKeys, sessionOpenKeys],
+  );
   const updateExpandedKeys = useGlobalStore((s) => s.updateModelDetailPanelExpandedKeys);
   const applyBusinessModelPricing = useBusinessModelPricing();
   const applyBusinessModelRating = useBusinessModelRating();
@@ -472,8 +479,13 @@ export const useModelDetailPanel = ({
   );
 
   const handleExpandedChange = useCallback(
-    (keys: unknown[]) => updateExpandedKeys(keys as ModelDetailPanelExpandedKey[]),
-    [updateExpandedKeys],
+    (keys: unknown[]) => {
+      const { persisted, session } = splitExpandedKeys(keys as ModelDetailPanelExpandedKey[]);
+
+      updateExpandedKeys(persisted);
+      setSessionOpenKeys(session);
+    },
+    [setSessionOpenKeys, updateExpandedKeys],
   );
 
   const contextWindowLabel = useMemo(() => {
