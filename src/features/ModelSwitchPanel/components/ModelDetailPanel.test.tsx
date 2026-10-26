@@ -136,8 +136,11 @@ const translations: Record<string, string> = {
   'test-model.description': 'Localized model description.',
 };
 
+let mockLanguage = 'en-US';
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
+    i18n: { language: mockLanguage },
     t: (key: string, options?: Record<string, string>) => {
       const template = translations[key] ?? options?.defaultValue ?? key;
 
@@ -219,6 +222,27 @@ describe('ModelDetailPanel pricing', () => {
       'Localized model description.',
     );
   });
+
+  it.each([
+    ['fa-IR', 'rtl'],
+    ['en-US', 'ltr'],
+    ['fr-FR', 'ltr'],
+  ])(
+    'lays the panel out %s as %s so titles and rows start from the right in Persian',
+    (lang, dir) => {
+      mockLanguage = lang;
+      const { container } = render(
+        <ModelDetailPanel
+          enabledList={createEnabledList('lobehub', textPricing)}
+          model="test-model"
+          provider="lobehub"
+        />,
+      );
+
+      expect(container.querySelector('.container')).toHaveAttribute('dir', dir);
+      mockLanguage = 'en-US';
+    },
+  );
 
   it('lets the description pick its own direction inside the LTR popup', () => {
     const { container } = render(
