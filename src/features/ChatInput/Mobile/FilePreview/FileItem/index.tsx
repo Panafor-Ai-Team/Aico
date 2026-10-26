@@ -21,7 +21,7 @@ const FileItem = memo<FileItemProps>((props) => {
   const { file, id, previewUrl, status } = props;
   const [removeFile] = useFileStore((s) => [s.removeChatUploadFile]);
 
-  if (file.type.startsWith('image')) {
+  if (file.type?.startsWith('image')) {
     return (
       <Image
         alt={file.name}

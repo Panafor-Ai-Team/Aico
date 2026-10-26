@@ -21,6 +21,7 @@ import {
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
 import { fileChatSelectors, useFileStore } from '@/store/file';
+import { resolvePersistedFileMime } from '@/store/file/slices/chat/persistedFile';
 import { featureFlagsSelectors, useServerConfigStore } from '@/store/serverConfig';
 import { useUserStore } from '@/store/user';
 import { preferenceSelectors } from '@/store/user/selectors';
@@ -218,7 +219,13 @@ const FileUpload = memo(() => {
       children: [
         // first the files
         ...files.map((item) => ({
-          icon: <FileIcon fileName={item.name} fileType={item.type} size={MENU_ICON_SIZE} />,
+          icon: (
+            <FileIcon
+              fileName={item.name}
+              fileType={resolvePersistedFileMime(item)}
+              size={MENU_ICON_SIZE}
+            />
+          ),
           key: item.id,
           label: (
             <CheckboxItem
