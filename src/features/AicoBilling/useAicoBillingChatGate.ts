@@ -10,18 +10,21 @@ import { useAicoBillingSources } from './useAicoBillingSources';
 export type AicoBillingChatGate = {
   blocked: boolean;
   blockReason: AicoBillingChatBlockReason | null;
+  /** Wallets are still being read: Send is held, but nothing is wrong yet. */
+  loading: boolean;
   showTrialCta: boolean;
   trialActive: boolean;
   trialAvailable: boolean;
 };
 
 export const useAicoBillingChatGate = (): AicoBillingChatGate => {
-  const { activeSource, data, isLoading } = useAicoBillingSources();
+  const { activeSource, data, error, isLoading } = useAicoBillingSources();
 
   if (isLoading || !data || !activeSource) {
     return {
       blocked: true,
       blockReason: null,
+      loading: Boolean(isLoading) || (!data && !error),
       showTrialCta: false,
       trialActive: Boolean(data?.trialActive),
       trialAvailable: Boolean(data?.trialAvailable),
@@ -36,6 +39,7 @@ export const useAicoBillingChatGate = (): AicoBillingChatGate => {
   return {
     blocked,
     blockReason,
+    loading: false,
     showTrialCta:
       blocked &&
       activeSource.source === 'personal' &&

@@ -1,3 +1,4 @@
+import { cvcMultiplierToPricing } from '@lobechat/model-runtime';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { LobeChatDatabase } from '@/database/type';
@@ -242,5 +243,28 @@ describe('resolveChatRates', () => {
       visionTools: 'd',
     });
     expect(result).toBeNull();
+  });
+});
+
+describe('charge equals the published CVC multiplier', () => {
+  // `multiplier` x tokens is what CVC deducts (probe, section 3). Prices go
+  // multiplier -> catalog USD rate -> ledger pico-USD; the round trip must land
+  // back on multiplier x tokens, give or take the 1 micro-USD ceiling.
+  const tokensPerUsd = 25_000_000;
+  const tokens = { completion: 400_000, prompt: 600_000, reasoning: 0, total: 1_000_000 };
+
+  it.each([0.05, 0.3, 0.33, 1, 1.25, 2, 62.5])('bills %s× as %s x tokens', async (multiplier) => {
+    catalogRows.rows = [{ ...row('cvc-model', 1), pricing: cvcMultiplierToPricing(multiplier) }];
+
+    const rates = await getManagedModelRates(db, 'cvc-model');
+    expect(rates).not.toBeNull();
+
+    const micro = rawCostMicroUsd(rates!, tokens);
+    const cvcTokens = (micro / 1_000_000) * tokensPerUsd;
+    const expected = multiplier * tokens.total;
+
+    // One micro-USD is 25 CVC tokens; the ledger rounds up, never down.
+    expect(cvcTokens).toBeGreaterThanOrEqual(expected - 1e-6);
+    expect(cvcTokens - expected).toBeLessThanOrEqual(tokensPerUsd / 1_000_000 + 1e-6);
   });
 });

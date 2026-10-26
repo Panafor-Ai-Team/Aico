@@ -62,7 +62,7 @@ const GenerationListItemRenderer = memo<GenerationListItemRendererProps>(
               navigate('/settings/provider/all');
             }}
           >
-            {t('ModelSwitchPanel.emptyProvider')}
+            <span dir="auto">{t('ModelSwitchPanel.emptyProvider')}</span>
             <Icon icon={LucideArrowRight} />
           </Flexbox>
         );
@@ -116,7 +116,7 @@ const GenerationListItemRenderer = memo<GenerationListItemRendererProps>(
               onClose();
             }}
           >
-            {t('ModelSwitchPanel.emptyModel')}
+            <span dir="auto">{t('ModelSwitchPanel.emptyModel')}</span>
             <Icon icon={LucideArrowRight} />
           </Flexbox>
         );

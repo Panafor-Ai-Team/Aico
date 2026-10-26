@@ -12,7 +12,6 @@
  * one is still editable so a switch does not need a deploy to set its rate.
  */
 
-// eslint-disable-next-line no-restricted-imports -- Text/Tag not in base-ui yet
 import { Block, Flexbox, Tag, Text } from '@lobehub/ui';
 import { Button, toast } from '@lobehub/ui/base-ui';
 import { InputNumber } from 'antd';
@@ -21,6 +20,7 @@ import { useTranslation } from 'react-i18next';
 import { mutate as globalMutate } from 'swr';
 
 import { toastAicoError } from '@/business/client/resolveAicoErrorMessage';
+import { CVC_TOKENS_PER_PI, DEFAULT_CVC_TOKENS_PER_USD } from '@/features/AicoBilling/piToken';
 import { aicoPanelStyles } from '@/features/AicoPanels';
 import { useClientDataSWR } from '@/libs/swr';
 import { controlPlaneClient } from '@/libs/trpc/client/controlPlane';
@@ -44,6 +44,9 @@ export const UsageMultiplierSection = () => {
   );
 
   const providers: ProviderRow[] = useMemo(() => data?.providers ?? [], [data?.providers]);
+
+  // π bought by $1 at a 1× multiplier, from the server's CVC rate (not a client constant).
+  const piPerUsdAtOne = (data?.cvcTokensPerUsd ?? DEFAULT_CVC_TOKENS_PER_USD) / CVC_TOKENS_PER_PI;
 
   // Hydrate the inputs from the server, converting bp -> x at the boundary.
   // Keyed by provider so a save on one row never clobbers an unsaved edit on
@@ -114,7 +117,7 @@ export const UsageMultiplierSection = () => {
             <Text type="secondary">
               {t('platform.multiplierPreview', {
                 pi: Math.floor(
-                  25_000 / (drafts[provider.providerId] ?? provider.multiplierBp / BP_SCALE),
+                  piPerUsdAtOne / (drafts[provider.providerId] ?? provider.multiplierBp / BP_SCALE),
                 ).toLocaleString(),
               })}
             </Text>

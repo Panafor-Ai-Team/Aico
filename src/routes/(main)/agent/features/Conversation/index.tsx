@@ -3,8 +3,9 @@ import { Flexbox, TooltipGroup } from '@lobehub/ui';
 import React, { memo, Suspense, useCallback } from 'react';
 
 import DragUploadZone, { type DroppedLocalPath, useUploadFiles } from '@/components/DragUploadZone';
-import Loading from '@/components/Loading/BrandTextLoading';
+import { delayed } from '@/components/Skeleton/Delayed';
 import { insertLocalPathTags } from '@/features/ChatInput/InputEditor/insertLocalFileTags';
+import ConversationLayoutSkeleton from '@/features/Conversation/components/ConversationLayoutSkeleton';
 import { useResourceAccess } from '@/features/ResourcePermission/useResourceAccess';
 import { useEffectiveWorkingDirectory } from '@/hooks/useEffectiveWorkingDirectory';
 import { useAgentStore } from '@/store/agent';
@@ -63,7 +64,7 @@ const ChatConversation = memo(() => {
   );
 
   return (
-    <Suspense fallback={<Loading debugId="Agent > ChatConversation" />}>
+    <Suspense fallback={delayed(<ConversationLayoutSkeleton />)}>
       {canUseResource ? (
         <DragUploadZone
           enableLocalPathReference={enableLocalPathReference}

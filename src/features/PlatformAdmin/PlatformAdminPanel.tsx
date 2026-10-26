@@ -23,6 +23,7 @@ import {
   resolveFxTopupPayload,
 } from '@/features/AicoBilling/FxTopupFields';
 import { groupedNumberInputProps } from '@/features/AicoBilling/groupedNumberInput';
+import { formatIsolatedCoefficient } from '@/features/AicoBilling/piToken';
 import { AICO_TABLE_SCROLL, aicoPanelStyles } from '@/features/AicoPanels';
 import { createBudgetSweepModal } from '@/features/OrgAdmin/BudgetSweepModal';
 import {
@@ -209,7 +210,7 @@ export const PlatformAdminPanel = () => {
         <StatisticCard
           title={t('platform.multiplierCard')}
           statistic={{
-            value: `${((usageMultiplier?.multiplierBp ?? 12_000) / 10_000).toFixed(2)}x`,
+            value: formatIsolatedCoefficient((usageMultiplier?.multiplierBp ?? 12_000) / 10_000),
           }}
         />
         <StatisticCard

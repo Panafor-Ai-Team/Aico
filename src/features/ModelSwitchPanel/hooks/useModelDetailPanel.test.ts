@@ -55,6 +55,8 @@ const translations: Record<string, string> = {
   'ModelSwitchPanel.detail.pricing.credits.second': '/s',
   'ModelSwitchPanel.detail.pricing.credits.video': '/video',
   'ModelSwitchPanel.detail.pricing.credits.output': 'Output coefficient {{amount}}',
+  'ModelSwitchPanel.detail.contextTokens': '{{amount}} tokens',
+  'ModelSwitchPanel.detail.pricing.perMillionTokens': '/M tokens',
 };
 
 const t = ((key: string, options?: Record<string, string>) => {
@@ -247,6 +249,44 @@ describe('useModelDetailPanel', () => {
       current: '7,500',
       original: '12,500',
     });
+  });
+
+  it('flags managed models whose thinking tokens CVC counts twice', () => {
+    const flagged = renderModelDetailPanelHook({
+      enabledList: [
+        {
+          ...createEnabledList(BRANDING_PROVIDER, basePricing)[0],
+          children: [
+            {
+              ...createEnabledList(BRANDING_PROVIDER, basePricing)[0].children[0],
+              id: 'mimo-v2.5',
+            },
+          ],
+        },
+      ],
+      modelId: 'mimo-v2.5',
+    });
+    expect(flagged.result.current.reasoningBilledTwice).toBe(true);
+
+    // The published coefficient is exact for every other model.
+    const plain = renderModelDetailPanelHook();
+    expect(plain.result.current.reasoningBilledTwice).toBe(false);
+  });
+
+  it('does not flag a direct provider that happens to share a model id', () => {
+    const direct = renderModelDetailPanelHook({
+      enabledList: [
+        {
+          ...createEnabledList('openai', basePricing)[0],
+          children: [
+            { ...createEnabledList('openai', basePricing)[0].children[0], id: 'mimo-v2.5' },
+          ],
+        },
+      ],
+      modelId: 'mimo-v2.5',
+      provider: 'openai',
+    });
+    expect(direct.result.current.reasoningBilledTwice).toBe(false);
   });
 
   it('uses the enabled model list hook when no list is provided', () => {

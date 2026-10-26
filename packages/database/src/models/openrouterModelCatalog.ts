@@ -437,7 +437,7 @@ export class OpenRouterModelCatalogModel {
     const rowModels = rows.map((row) => {
       // AICO-180: `payload` is the raw OpenRouter model JSON. Drop every
       // cost-bearing field before spreading it into a client-visible response —
-      // the marked-up `pricing` below is the only price a caller may see.
+      // the `pricing` rebuilt below is the only price a caller may see.
       const { pricing: _rawPricing, ...payload } = (row.payload ?? {}) as Record<string, unknown>;
       const isAuto = row.id === OPENROUTER_AUTO_MODEL_ID;
       return {

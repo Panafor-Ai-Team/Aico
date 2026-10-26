@@ -28,6 +28,7 @@ import type {
   PricingUnitName,
   TieredPricingUnit,
 } from 'model-bank';
+import { isReasoningBilledTwice } from 'model-bank';
 import { useCallback, useMemo } from 'react';
 
 import { useBusinessModelPricing } from '@/business/client/hooks/useBusinessModelPricing';
@@ -37,6 +38,7 @@ import {
   formatTokenCoefficient,
   rawUsdToPiTokens,
 } from '@/features/AicoBilling/piToken';
+import { useCvcTokensPerUsd } from '@/features/AicoBilling/useCvcTokensPerUsd';
 import { useEnabledChatModels } from '@/hooks/useEnabledChatModels';
 import { useGlobalStore } from '@/store/global';
 import type { ModelDetailPanelExpandedKey } from '@/store/global/initialState';
@@ -335,6 +337,8 @@ export const useModelDetailPanel = ({
   provider,
   t,
 }: UseModelDetailPanelParams) => {
+  // Coefficients are catalog prices converted back at the server's CVC rate.
+  const cvcTokensPerUsd = useCvcTokensPerUsd();
   const enabledListFromHook = useEnabledChatModels();
   const enabledList = enabledListProp ?? enabledListFromHook;
   const model = useMemo(() => {
@@ -359,6 +363,9 @@ export const useModelDetailPanel = ({
     [applyBusinessModelPricing, modelId, pricing, provider],
   );
   const isCreditPricing = isPiPricingProvider(provider);
+  // CVC counts thinking tokens twice for a few models, so the published coefficient
+  // understates their real cost. Only managed (π) pricing carries that coefficient.
+  const reasoningBilledTwice = isCreditPricing && isReasoningBilledTwice(modelId);
   const hasPricing = !!displayPricing;
   const formatPrice = displayPricing ? getPrice(displayPricing, isCreditPricing) : null;
   const hasCachedInputPricing = displayPricing
@@ -387,7 +394,7 @@ export const useModelDetailPanel = ({
       amount: formatPiRate(rate),
       unit: pricingMode === 'image' ? 'image' : 'video',
     } as const;
-  }, [displayPricing, isCreditPricing, model, pricingMode]);
+  }, [cvcTokensPerUsd, displayPricing, isCreditPricing, model, pricingMode]);
 
   const approximatePriceLabel = useMemo(() => {
     if (isCreditPricing || !displayPricing || !pricingMode) return null;
@@ -448,10 +455,14 @@ export const useModelDetailPanel = ({
 
   const getUnitPriceSuffix = useCallback(
     (unit: PricingUnit['unit']) => {
-      if (!isCreditPricing) return UNIT_LABEL_MAP[unit] || '';
+      if (!isCreditPricing) {
+        return unit === 'millionTokens'
+          ? t('ModelSwitchPanel.detail.pricing.perMillionTokens')
+          : getCreditsUnitLabel(unit);
+      }
       return isTokenUnit(unit) ? '' : getCreditsUnitLabel(unit);
     },
-    [getCreditsUnitLabel, isCreditPricing],
+    [getCreditsUnitLabel, isCreditPricing, t],
   );
 
   /** Managed non-token units show a π amount, so the panel renders the coin before the suffix. */
@@ -470,8 +481,10 @@ export const useModelDetailPanel = ({
 
     return model.contextWindowTokens === 0
       ? '∞'
-      : `${formatTokenNumber(model.contextWindowTokens)} tokens`;
-  }, [model?.contextWindowTokens]);
+      : t('ModelSwitchPanel.detail.contextTokens', {
+          amount: formatTokenNumber(model.contextWindowTokens),
+        });
+  }, [model?.contextWindowTokens, t]);
 
   const enabledAbilities = useMemo(
     () =>
@@ -496,6 +509,7 @@ export const useModelDetailPanel = ({
     hasAbilities: enabledAbilities.length > 0,
     hasCachedInputPricing,
     hasPricing,
+    reasoningBilledTwice,
     isAbilitiesExpanded: expandedKeys.includes('abilities'),
     isCreditPricing,
     isPiAmountUnit,

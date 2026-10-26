@@ -57,6 +57,16 @@ export const useBusinessChatInputSendDisabled = (): boolean => {
   return blocked;
 };
 
+/**
+ * Why Send is held while wallets load, or undefined. Lets the Send button say
+ * "preparing wallet" instead of looking broken.
+ */
+export const useBusinessChatInputSendLoadingHint = (): string | undefined => {
+  const { t } = useTranslation('aico');
+  const { loading } = useAicoBillingChatGate();
+  return loading ? t('billing.preparingWallet') : undefined;
+};
+
 export const getBusinessChatInputSendAreaPrefix = (sendAreaPrefix?: ReactNode): ReactNode => {
   const switcher = createElement(BillingSourceSwitcher);
   if (!sendAreaPrefix) return switcher;

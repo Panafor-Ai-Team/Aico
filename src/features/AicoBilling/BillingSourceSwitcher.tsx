@@ -1,6 +1,6 @@
 'use client';
 
-import { Center, Flexbox, Text } from '@lobehub/ui';
+import { Center, Flexbox, Skeleton, Text } from '@lobehub/ui';
 import { createStaticStyles, cx } from 'antd-style';
 import { CheckIcon, ChevronDownIcon, WalletIcon } from 'lucide-react';
 import { memo, useMemo, useState } from 'react';
@@ -132,7 +132,24 @@ const BillingSourceSwitcher = memo(() => {
     });
   }, [busy, data?.sources, isSelected, selectSource, t]);
 
-  if (isLoading && !activeSource) return null;
+  // Keep the pill's footprint while wallets load so Send and the model chip do
+  // not shift when it arrives.
+  if (isLoading && !activeSource) {
+    return (
+      <span
+        aria-label={t('billing.preparingWallet')}
+        role="status"
+        title={t('billing.preparingWallet')}
+      >
+        <Skeleton.Button
+          active
+          shape="round"
+          size="small"
+          style={{ height: 28, minWidth: 96, width: 96 }}
+        />
+      </span>
+    );
+  }
   if (!activeSource) return null;
 
   const label = sourceLabel(activeSource, t);

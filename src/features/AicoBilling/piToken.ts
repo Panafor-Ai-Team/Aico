@@ -6,12 +6,29 @@
 
 export const CVC_TOKENS_PER_PI = 1000;
 export const DEFAULT_CVC_TOKENS_PER_USD = 25_000_000;
+
+/**
+ * CVC tokens per USD as the server has it (`AICO_CVC_TOKENS_PER_USD`).
+ *
+ * Every catalog price is derived from CVC's published multiplier at this rate,
+ * so the coefficient shown has to be converted back at the same rate or it stops
+ * matching CVC. The server hands it to the client with the billing sources;
+ * until that arrives (or if it is invalid) the 25M default applies.
+ */
+let serverCvcTokensPerUsd: number | undefined;
+
+export const getCvcTokensPerUsd = (): number => serverCvcTokensPerUsd ?? DEFAULT_CVC_TOKENS_PER_USD;
+
+export const setCvcTokensPerUsd = (value: number | null | undefined): void => {
+  const n = Number(value);
+  serverCvcTokensPerUsd = Number.isFinite(n) && n > 0 ? n : undefined;
+};
 /** Default top-up yield at CVC 1.25×: $1 → 20_000 π. */
 export const DEFAULT_PI_PER_USD = 20_000;
 
 export const rawUsdToPiTokens = (
   rawUsd: number,
-  cvcTokensPerUsd: number = DEFAULT_CVC_TOKENS_PER_USD,
+  cvcTokensPerUsd: number = getCvcTokensPerUsd(),
 ): number => {
   if (!Number.isFinite(rawUsd) || rawUsd <= 0) return 0;
   return (rawUsd * cvcTokensPerUsd) / CVC_TOKENS_PER_PI;
@@ -23,7 +40,7 @@ export const rawUsdToPiTokens = (
  */
 export const rawUsdToCvcCoefficient = (
   rawUsd: number,
-  cvcTokensPerUsd: number = DEFAULT_CVC_TOKENS_PER_USD,
+  cvcTokensPerUsd: number = getCvcTokensPerUsd(),
 ): number => {
   if (!Number.isFinite(rawUsd) || rawUsd <= 0) return 0;
   return (rawUsd * cvcTokensPerUsd) / 1_000_000;
@@ -39,10 +56,20 @@ export const formatCvcCoefficient = (coefficient: number): string => {
   return `${text}×`;
 };
 
+/**
+ * Coefficient for plain-text surfaces in RTL locales: without isolation the
+ * trailing `×` mirrors to the wrong side (`×4`). Explicit U+2066/U+2069 escapes
+ * keep the isolates visible in source.
+ */
+export const isolateLtr = (text: string): string => `\u2066${text}\u2069`;
+
+export const formatIsolatedCoefficient = (coefficient: number): string =>
+  isolateLtr(formatCvcCoefficient(coefficient));
+
 /** Managed token rate as its CVC coefficient only: `$0.16/M` → `4×`. */
 export const formatTokenCoefficient = (
   rawUsd: number,
-  cvcTokensPerUsd: number = DEFAULT_CVC_TOKENS_PER_USD,
+  cvcTokensPerUsd: number = getCvcTokensPerUsd(),
 ): string => formatCvcCoefficient(rawUsdToCvcCoefficient(rawUsd, cvcTokensPerUsd));
 
 /** Format a π amount without its unit (balances are integers; tiny costs keep decimals). */

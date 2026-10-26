@@ -330,6 +330,9 @@ export const aicoBillingRouter = router({
         Date.now() - routeStart,
       );
       return {
+        // Lets the picker convert catalog prices back to CVC's published multiplier
+        // at the same rate the catalog was derived with.
+        cvcTokensPerUsd: cvcTokensPerUsd(),
         preferredBillingSource: wallet.preferredBillingSource as 'personal' | 'organization',
         preferredOrganizationId: wallet.preferredOrganizationId,
         sources: [personal, ...organizationSources],

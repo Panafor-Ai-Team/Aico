@@ -16,8 +16,10 @@ export {
   formatPiAmount,
   formatPiTokens,
   formatRemainingPi,
+  getCvcTokensPerUsd,
   piTokensToBilledUsdString,
   rawUsdToPiTokens,
+  setCvcTokensPerUsd,
 } from './piToken';
 export { PI_TOKEN_ICON_SRC, PiAmount, PiTokenIcon } from './PiTokenIcon';
 export { FUNDS_BLOCKED_SOUND_URL, playFundsBlockedSound } from './playFundsBlockedSound';
@@ -47,4 +49,5 @@ export {
 } from './types';
 export { useAicoBillingChatGate } from './useAicoBillingChatGate';
 export { useAicoBillingSources } from './useAicoBillingSources';
+export { useCvcTokensPerUsd } from './useCvcTokensPerUsd';
 export { useFundsBlockedComposerCue } from './useFundsBlockedComposerCue';

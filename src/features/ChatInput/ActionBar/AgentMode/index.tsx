@@ -1,4 +1,4 @@
-import { Flexbox, Icon, Popover, Tooltip } from '@lobehub/ui';
+import { Flexbox, Icon, Popover, Skeleton, Tooltip } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import {
   ChevronDownIcon,
@@ -259,7 +259,16 @@ const AgentMode = memo(() => {
     </div>
   );
 
-  if (isAccessLoading || isPreferenceLoading) return null;
+  // Hold the 28px pill's footprint so the action bar does not shift when it resolves.
+  if (isAccessLoading || isPreferenceLoading)
+    return (
+      <Skeleton.Button
+        active
+        shape="round"
+        size="small"
+        style={{ height: 28, minWidth: 84, width: 84 }}
+      />
+    );
 
   if (disabled)
     return (

@@ -2,12 +2,18 @@ import { mutate } from '@/libs/swr';
 import { lambdaClient } from '@/libs/trpc/client';
 
 import { AICO_BILLING_SOURCES_SWR_KEY } from './cacheKeys';
+import { setCvcTokensPerUsd } from './piToken';
 import type { AicoBillingSourcesResponse } from './types';
 
-const queryBillingSources = (syncLive: boolean) =>
-  lambdaClient.aicoBilling.getMyBillingSources.query({
+const queryBillingSources = async (syncLive: boolean) => {
+  const response = (await lambdaClient.aicoBilling.getMyBillingSources.query({
     syncLive,
-  }) as Promise<AicoBillingSourcesResponse>;
+  })) as AicoBillingSourcesResponse;
+  // Set before SWR notifies subscribers, so the first render after the data
+  // lands already formats multipliers at the server's rate.
+  if (response.cvcTokensPerUsd) setCvcTokensPerUsd(response.cvcTokensPerUsd);
+  return response;
+};
 
 let liveRefresh: Promise<void> | null = null;
 
