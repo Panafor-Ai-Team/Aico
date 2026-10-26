@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 
 import { PiTokenIcon } from '@/features/AicoBilling/PiTokenIcon';
 import type { EnabledProviderWithModels } from '@/types/aiProvider';
+import { getDocumentDirection } from '@/utils/client/applyDocumentDirection';
 
 import type { FormattedUnitPrice } from '../hooks/useModelDetailPanel';
 import { UNIT_ICON_MAP, useModelDetailPanel } from '../hooks/useModelDetailPanel';
@@ -124,7 +125,7 @@ interface ModelDetailPanelProps {
 
 const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
   ({ model: modelId, provider, enabledList: enabledListProp, pricingMode }) => {
-    const { t } = useTranslation(['components', 'models']);
+    const { t, i18n } = useTranslation(['components', 'models']);
     const {
       approximatePiPrice,
       approximatePriceLabel,
@@ -204,7 +205,9 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
       : undefined;
 
     return (
-      <Flexbox className={styles.container}>
+      // Explicit language direction: the model list around this popup is pinned LTR, and
+      // titles / abilities / pricing rows must still start from the right in Persian.
+      <Flexbox className={styles.container} dir={getDocumentDirection(i18n?.language)}>
         {description && (
           // The popup is pinned LTR for the English model names, but the description is
           // localized prose: `dir="auto"` lets a Persian description start from the right
