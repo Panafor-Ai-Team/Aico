@@ -136,14 +136,18 @@ const BillingSourceSwitcher = memo(() => {
   // not shift when it arrives.
   if (isLoading && !activeSource) {
     return (
-      <Skeleton.Button
-        active
+      <span
         aria-label={t('billing.preparingWallet')}
-        shape="round"
-        size="small"
-        style={{ height: 28, minWidth: 96, width: 96 }}
+        role="status"
         title={t('billing.preparingWallet')}
-      />
+      >
+        <Skeleton.Button
+          active
+          shape="round"
+          size="small"
+          style={{ height: 28, minWidth: 96, width: 96 }}
+        />
+      </span>
     );
   }
   if (!activeSource) return null;
