@@ -249,12 +249,38 @@ describe('useFileStore:chat', () => {
       expect(result.current.chatUploadFileList).toHaveLength(1);
       expect(result.current.chatUploadFileList[0]).toMatchObject({
         file: { name: 'report.pdf', size: 2048, type: 'application/pdf' },
-        fileUrl: persisted.url,
+        fileUrl: '/f/file-1',
         id: 'file-1',
-        previewUrl: persisted.url,
+        previewUrl: '/f/file-1',
         skipRemoveFile: true,
         status: 'success',
       });
+    });
+
+    it('accepts a raw files row that carries the mime in fileType, not type', () => {
+      const { result } = renderHook(() => useStore());
+      const { type: _type, ...rest } = persisted;
+
+      act(() => {
+        useStore.setState({ chatUploadFileList: [] });
+        result.current.attachChatFile({ ...rest, fileType: 'image/png' } as any);
+      });
+
+      const [item] = result.current.chatUploadFileList;
+      expect(item.file.type).toBe('image/png');
+      expect(item.previewUrl).toBe('/f/file-1');
+    });
+
+    it('never leaves file.type undefined when the row has no mime at all', () => {
+      const { result } = renderHook(() => useStore());
+      const { type: _type, ...rest } = persisted;
+
+      act(() => {
+        useStore.setState({ chatUploadFileList: [] });
+        result.current.attachChatFile(rest as any);
+      });
+
+      expect(result.current.chatUploadFileList[0].file.type).toBe('');
     });
 
     it('does not add the same file twice', () => {
