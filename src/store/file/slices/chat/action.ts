@@ -1,4 +1,4 @@
-import { type ChatContextContent } from '@lobechat/types';
+import { type ChatContextContent, type FileItem } from '@lobechat/types';
 import { COMPRESSIBLE_IMAGE_TYPES, compressImageFile } from '@lobechat/utils/compressImage';
 import { toast } from '@lobehub/ui/base-ui';
 import { Buffer } from 'buffer.js';
@@ -77,12 +77,40 @@ export class FileActionImpl {
     this.#set({ chatContextSelections: next }, false, n('addChatContextSelection'));
   };
 
+  /**
+   * Attach an already-persisted file (e.g. one picked from the agent's earlier uploads)
+   * to the draft, so the chip row shows it and the send path includes it.
+   * `skipRemoveFile` keeps the stored file safe when the chip is removed.
+   */
+  attachChatFile = (file: Pick<FileItem, 'id' | 'name' | 'size' | 'type' | 'url'>): void => {
+    if (this.#get().chatUploadFileList.some((item) => item.id === file.id)) return;
+
+    this.#get().dispatchChatUploadFileList({
+      files: [
+        {
+          file: { name: file.name, size: file.size, type: file.type } as File,
+          fileUrl: file.url,
+          id: file.id,
+          previewUrl: file.url,
+          skipRemoveFile: true,
+          status: 'success',
+        },
+      ],
+      type: 'addFiles',
+    });
+  };
+
   clearChatContextSelections = (): void => {
     this.#set({ chatContextSelections: [] }, false, n('clearChatContextSelections'));
   };
 
   clearChatUploadFileList = (): void => {
     this.#set({ chatUploadFileList: [] }, false, n('clearChatUploadFileList'));
+  };
+
+  /** Drop a file from the draft only — never deletes the stored file. */
+  detachChatFile = (id: string): void => {
+    this.#get().dispatchChatUploadFileList({ id, type: 'removeFile' });
   };
 
   dispatchChatUploadFileList = (payload: UploadFileListDispatch): void => {

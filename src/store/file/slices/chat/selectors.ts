@@ -6,6 +6,8 @@ const chatUploadFileList = (s: FilesStoreState) => s.chatUploadFileList;
 const chatContextSelections = (s: FilesStoreState) => s.chatContextSelections;
 const isImageUploading = (s: FilesStoreState) => s.uploadingIds.length > 0;
 
+const chatUploadFileIds = (s: FilesStoreState) => s.chatUploadFileList.map((item) => item.id);
+
 const chatRawFileList = (s: FilesStoreState) => s.chatUploadFileList.map((item) => item.file);
 const chatUploadFileListHasItem = (s: FilesStoreState) => s.chatUploadFileList.length > 0;
 const chatContextSelectionHasItem = (s: FilesStoreState) => s.chatContextSelections.length > 0;
@@ -28,6 +30,7 @@ export const fileChatSelectors = {
   chatContextSelectionHasItem,
   chatContextSelections,
   chatRawFileList,
+  chatUploadFileIds,
   chatUploadFileList,
   chatUploadFileListHasItem,
   isUploadingFiles,

@@ -10,6 +10,7 @@ import FileIcon from '@/components/FileIcon';
 import RepoIcon from '@/components/LibIcon';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
+import { fileChatSelectors, useFileStore } from '@/store/file';
 
 import { useAgentId } from '../../hooks/useAgentId';
 import CheckboxItem from '../components/CheckboxWithLoading';
@@ -78,13 +79,17 @@ export const useControls = ({
     isEqual,
   );
 
-  const [toggleFile, toggleKnowledgeBase] = useAgentStore((s) => [
-    s.toggleFile,
-    s.toggleKnowledgeBase,
+  const toggleKnowledgeBase = useAgentStore((s) => s.toggleKnowledgeBase);
+
+  // Files are attached to the current draft (chip row + send path), not toggled as
+  // agent-wide knowledge — only libraries keep the agent-level toggle.
+  const attachedFileIds = useFileStore(fileChatSelectors.chatUploadFileIds, isEqual);
+  const [attachChatFile, detachChatFile] = useFileStore((s) => [
+    s.attachChatFile,
+    s.detachChatFile,
   ]);
-  const enabledCount =
-    files.filter((item) => item.enabled).length +
-    knowledgeBases.filter((item) => item.enabled).length;
+  const attachedFiles = files.filter((item) => attachedFileIds.includes(item.id));
+  const enabledCount = attachedFiles.length + knowledgeBases.filter((item) => item.enabled).length;
 
   const libraryItems = knowledgeBases.map((item) => ({
     icon: <RepoIcon />,
@@ -108,13 +113,14 @@ export const useControls = ({
     key: item.id,
     label: (
       <CheckboxItem
-        checked={item.enabled}
+        checked={attachedFileIds.includes(item.id)}
         hasPadding={false}
         id={item.id}
         label={item.name}
         labelMaxWidth={labelMaxWidth}
-        onUpdate={async (id, enabled) => {
-          await toggleFile(id, enabled);
+        onUpdate={async (id, attached) => {
+          if (attached) attachChatFile(item);
+          else detachChatFile(id);
         }}
       />
     ),

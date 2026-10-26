@@ -228,4 +228,76 @@ describe('useFileStore:chat', () => {
       expect(removeFile).not.toHaveBeenCalled();
     });
   });
+
+  describe('attachChatFile / detachChatFile', () => {
+    const persisted = {
+      id: 'file-1',
+      name: 'report.pdf',
+      size: 2048,
+      type: 'application/pdf',
+      url: 'https://files.example.test/report.pdf',
+    };
+
+    it('adds a persisted file to the draft list that the chip row and send path read', () => {
+      const { result } = renderHook(() => useStore());
+
+      act(() => {
+        useStore.setState({ chatUploadFileList: [] });
+        result.current.attachChatFile(persisted);
+      });
+
+      expect(result.current.chatUploadFileList).toHaveLength(1);
+      expect(result.current.chatUploadFileList[0]).toMatchObject({
+        file: { name: 'report.pdf', size: 2048, type: 'application/pdf' },
+        fileUrl: persisted.url,
+        id: 'file-1',
+        previewUrl: persisted.url,
+        skipRemoveFile: true,
+        status: 'success',
+      });
+    });
+
+    it('does not add the same file twice', () => {
+      const { result } = renderHook(() => useStore());
+
+      act(() => {
+        useStore.setState({ chatUploadFileList: [] });
+        result.current.attachChatFile(persisted);
+        result.current.attachChatFile(persisted);
+      });
+
+      expect(result.current.chatUploadFileList).toHaveLength(1);
+    });
+
+    it('detaches from the draft without deleting the stored file', () => {
+      const removeFile = vi.spyOn(fileService, 'removeFile').mockResolvedValue(undefined);
+      const { result } = renderHook(() => useStore());
+
+      act(() => {
+        useStore.setState({ chatUploadFileList: [] });
+        result.current.attachChatFile(persisted);
+        result.current.detachChatFile('file-1');
+      });
+
+      expect(result.current.chatUploadFileList).toEqual([]);
+      expect(removeFile).not.toHaveBeenCalled();
+    });
+
+    it('removing the chip of an attached file does not delete the stored file', async () => {
+      const removeFile = vi.spyOn(fileService, 'removeFile').mockResolvedValue(undefined);
+      const { result } = renderHook(() => useStore());
+
+      act(() => {
+        useStore.setState({ chatUploadFileList: [] });
+        result.current.attachChatFile(persisted);
+      });
+
+      await act(async () => {
+        await result.current.removeChatUploadFile('file-1');
+      });
+
+      expect(result.current.chatUploadFileList).toEqual([]);
+      expect(removeFile).not.toHaveBeenCalled();
+    });
+  });
 });
