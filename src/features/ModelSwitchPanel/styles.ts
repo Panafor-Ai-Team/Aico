@@ -1,14 +1,20 @@
 import { createStaticStyles } from 'antd-style';
 
+// Model names, badges and usage coefficients are always English, so every popup of the
+// picker (panel, detail popup, provider submenu) is pinned LTR even when the app runs RTL.
 export const styles = createStaticStyles(({ css, cssVar }) => ({
   container: css`
     pointer-events: auto;
     user-select: none;
+
+    direction: ltr;
     overflow: hidden;
+
     padding: 0 !important;
   `,
   detailPopup: css`
     user-select: none;
+    direction: ltr;
     overscroll-behavior: contain;
     width: 400px;
   `,
