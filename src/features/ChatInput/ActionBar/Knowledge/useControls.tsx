@@ -11,6 +11,7 @@ import RepoIcon from '@/components/LibIcon';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
 import { fileChatSelectors, useFileStore } from '@/store/file';
+import { resolvePersistedFileMime } from '@/store/file/slices/chat/persistedFile';
 
 import { useAgentId } from '../../hooks/useAgentId';
 import CheckboxItem from '../components/CheckboxWithLoading';
@@ -109,7 +110,7 @@ export const useControls = ({
   }));
 
   const fileItems = files.map((item) => ({
-    icon: <FileIcon fileName={item.name} fileType={item.type} size={20} />,
+    icon: <FileIcon fileName={item.name} fileType={resolvePersistedFileMime(item)} size={20} />,
     key: item.id,
     label: (
       <CheckboxItem
