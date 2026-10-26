@@ -61,8 +61,10 @@ export const formatCvcCoefficient = (coefficient: number): string => {
  * trailing `×` mirrors to the wrong side (`×4`). Explicit U+2066/U+2069 escapes
  * keep the isolates visible in source.
  */
+export const isolateLtr = (text: string): string => `\u2066${text}\u2069`;
+
 export const formatIsolatedCoefficient = (coefficient: number): string =>
-  `\u2066${formatCvcCoefficient(coefficient)}\u2069`;
+  isolateLtr(formatCvcCoefficient(coefficient));
 
 /** Managed token rate as its CVC coefficient only: `$0.16/M` → `4×`. */
 export const formatTokenCoefficient = (

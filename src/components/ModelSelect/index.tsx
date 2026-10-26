@@ -256,6 +256,10 @@ export const ModelInfoTags = memo<ModelInfoTagsProps>(
 
 interface ModelItemRenderProps extends ChatModelCard, Partial<Omit<FlexboxProps, 'id' | 'title'>> {
   abilities?: ModelAbilities;
+  /** Managed usage coefficient label (already LTR-isolated), e.g. `4×`. */
+  coefficientLabel?: string;
+  /** Why the coefficient understates the cost; renders the tag as a warning. */
+  coefficientWarning?: string;
   newBadgeLabel?: string;
   proBadgeLabel?: string;
   showInfoTag?: boolean;
@@ -271,6 +275,8 @@ export const ModelItemRender = memo<ModelItemRenderProps>(
     imageOutput,
     newBadgeLabel,
     proBadgeLabel,
+    coefficientLabel,
+    coefficientWarning,
     video,
     vision,
     id,
@@ -323,6 +329,18 @@ export const ModelItemRender = memo<ModelItemRenderProps>(
               {proBadgeLabel}
             </Tag>
           )}
+          {coefficientLabel &&
+            (coefficientWarning ? (
+              <Tooltip title={coefficientWarning}>
+                <Tag color="warning" size="small" style={{ flex: 'none' }}>
+                  {coefficientLabel}
+                </Tag>
+              </Tooltip>
+            ) : (
+              <Tag size="small" style={{ flex: 'none' }}>
+                {coefficientLabel}
+              </Tag>
+            ))}
         </Flexbox>
         {showInfoTag && (
           <ModelInfoTags
