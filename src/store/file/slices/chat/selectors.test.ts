@@ -32,6 +32,16 @@ describe('filesSelectors', () => {
 });
 
 describe('fileChatSelectors', () => {
+  describe('chatUploadFileIds', () => {
+    it('should return the ids of the draft attachments', () => {
+      const state = {
+        chatUploadFileList: [{ id: 'a' }, { id: 'b' }] as UploadFileItem[],
+      } as FilesStoreState;
+
+      expect(fileChatSelectors.chatUploadFileIds(state)).toEqual(['a', 'b']);
+    });
+  });
+
   describe('chatRawFileList', () => {
     it('should return a list of raw files', () => {
       const state = {

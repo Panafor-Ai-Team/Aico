@@ -20,7 +20,7 @@ import {
 } from '@/hooks/useVisualMediaUploadAbility';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
-import { useFileStore } from '@/store/file';
+import { fileChatSelectors, useFileStore } from '@/store/file';
 import { featureFlagsSelectors, useServerConfigStore } from '@/store/serverConfig';
 import { useUserStore } from '@/store/user';
 import { preferenceSelectors } from '@/store/user/selectors';
@@ -75,9 +75,14 @@ const FileUpload = memo(() => {
     isEqual,
   );
 
-  const [toggleFile, toggleKnowledgeBase] = useAgentStore((s) => [
-    s.toggleFile,
-    s.toggleKnowledgeBase,
+  const toggleKnowledgeBase = useAgentStore((s) => s.toggleKnowledgeBase);
+
+  // Files are attached to the current draft (chip row + send path), not toggled as
+  // agent-wide knowledge — only libraries keep the agent-level toggle.
+  const attachedFileIds = useFileStore(fileChatSelectors.chatUploadFileIds, isEqual);
+  const [attachChatFile, detachChatFile] = useFileStore((s) => [
+    s.attachChatFile,
+    s.detachChatFile,
   ]);
 
   // Viewer doesn't have `file:upload` permission — backend would 403.
@@ -217,13 +222,12 @@ const FileUpload = memo(() => {
           key: item.id,
           label: (
             <CheckboxItem
-              checked={item.enabled}
+              checked={attachedFileIds.includes(item.id)}
               id={item.id}
               label={item.name}
-              onUpdate={async (id, enabled) => {
-                setUpdating(true);
-                await toggleFile(id, enabled);
-                setUpdating(false);
+              onUpdate={async (id, attached) => {
+                if (attached) attachChatFile(item);
+                else detachChatFile(id);
               }}
             />
           ),
