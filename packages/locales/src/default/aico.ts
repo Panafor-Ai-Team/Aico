@@ -490,6 +490,7 @@ export default {
 
   'billing.organization': 'Organization',
   'billing.personal': 'Personal',
+  'billing.preparingWallet': 'Preparing your wallet…',
   'billing.remaining': '{{amount}} left',
   'billing.selectHint':
     'Each source has its own balance. The selected source is charged on the next chat.',

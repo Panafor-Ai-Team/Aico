@@ -5,6 +5,7 @@
   "billing.fundsBlocked.title": "当前计费来源无法发起对话",
   "billing.organization": "组织",
   "billing.personal": "个人",
+  "billing.preparingWallet": "正在准备钱包…",
   "billing.remaining": "剩余 {{amount}}",
   "billing.selectHint": "每个来源有独立余额。选中的来源将在下一次对话扣费。",
   "billing.sourcesTitle": "计费来源",

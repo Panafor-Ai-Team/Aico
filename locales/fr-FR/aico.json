@@ -5,6 +5,7 @@
   "billing.fundsBlocked.title": "Impossible de discuter avec cette source de facturation",
   "billing.organization": "Organisation",
   "billing.personal": "Personnel",
+  "billing.preparingWallet": "Préparation de votre portefeuille…",
   "billing.remaining": "{{amount}} restants",
   "billing.selectHint": "Chaque source a son propre solde. La source sélectionnée est débitée au prochain chat.",
   "billing.sourcesTitle": "Sources de facturation",

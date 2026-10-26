@@ -5,6 +5,7 @@
   "billing.fundsBlocked.title": "با این منبع پرداخت نمی‌توانید چت کنید",
   "billing.organization": "سازمان",
   "billing.personal": "شخصی",
+  "billing.preparingWallet": "در حال آماده‌سازی کیف پول…",
   "billing.remaining": "{{amount}} باقی‌مانده",
   "billing.selectHint": "هر منبع موجودی و کلید جداگانه دارد. با انتخاب منبع، گفتگوی بعدی از همان موجودی کسر می‌شود.",
   "billing.sourcesTitle": "منابع پرداخت",
