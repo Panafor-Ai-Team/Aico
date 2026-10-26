@@ -36,6 +36,7 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     padding-inline: 8px;
 
     line-height: 1.5;
+    text-align: start;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
   `,
@@ -205,7 +206,16 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
     return (
       <Flexbox className={styles.container}>
         {description && (
-          <Text as={'p'} className={styles.description} fontSize={12} type={'secondary'}>
+          // The popup is pinned LTR for the English model names, but the description is
+          // localized prose: `dir="auto"` lets a Persian description start from the right
+          // and an English one from the left.
+          <Text
+            as={'p'}
+            className={styles.description}
+            dir={'auto'}
+            fontSize={12}
+            type={'secondary'}
+          >
             {description}
           </Text>
         )}

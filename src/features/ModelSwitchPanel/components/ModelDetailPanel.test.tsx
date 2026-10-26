@@ -220,6 +220,20 @@ describe('ModelDetailPanel pricing', () => {
     );
   });
 
+  it('lets the description pick its own direction inside the LTR popup', () => {
+    const { container } = render(
+      <ModelDetailPanel
+        model="test-model"
+        provider="lobehub"
+        enabledList={createEnabledList('lobehub', textPricing, {
+          description: 'Fallback model description.',
+        })}
+      />,
+    );
+
+    expect(container.querySelector('.description')).toHaveAttribute('dir', 'auto');
+  });
+
   it('renders managed provider token pricing as a coefficient only', () => {
     const { container } = render(
       <ModelDetailPanel
