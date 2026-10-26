@@ -60,7 +60,6 @@ Treat **globs** as high-care: prefer keeping Aico behavior unless the user appro
 
 - Aico-owned migrations (historically `0131+` / tags containing `aico`) under `packages/database/migrations/`
 - `packages/database/migrations/meta/_journal.json`
-- `packages/database/src/core/migrations.json`
 - Schema/repos touching wallets, OpenRouter key columns, trial/budget tables
 
 When upstream adds a migration with the **same numeric prefix**, keep Aico’s files and renumber upstream — never delete Aico SQL to “match” lobehub numbering.
