@@ -1,0 +1,22 @@
+[Unit]
+Description=Onlyboxes worker-docker (Aico Cloud Sandbox)
+Documentation=file:///opt/onlyboxes/ONLYBOXES-SANDBOX.md
+# Never run sandboxes without the network isolation and the swap/disk guard.
+Requires=docker.service onlyboxes-sandbox-firewall.service onlyboxes-guard.service
+After=docker.service onlyboxes-sandbox-firewall.service onlyboxes-guard.service
+
+[Service]
+EnvironmentFile=/etc/onlyboxes/worker.env
+ExecStart=/opt/onlyboxes/bin/onlyboxes-worker-docker
+Restart=always
+RestartSec=5
+# Caps the worker and the `docker` CLI children it spawns. An output bomb
+# (unbounded exec buffer upstream) kills the worker here, not the host;
+# sandbox containers survive and are reconciled on restart.
+MemoryMax=512M
+MemorySwapMax=0
+CPUQuota=25%
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target
