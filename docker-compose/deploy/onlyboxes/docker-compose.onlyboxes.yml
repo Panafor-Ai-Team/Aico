@@ -1,0 +1,39 @@
+# Onlyboxes console for the Aico Cloud Sandbox (SANDBOX_PROVIDER=onlyboxes).
+#
+# Its own compose project: always run with `-p onlyboxes` from this directory,
+# never next to the panachat stack. See ../ONLYBOXES-SANDBOX.md.
+#
+# Nothing is published on a public interface (Docker-published ports bypass ufw):
+#   - 127.0.0.1:50051  gRPC for the host-side worker-docker
+#   - 127.0.0.1:8089   dashboard, reached through an SSH tunnel
+#   - <panachat gateway>:8089  REST for the app containers on panachat-network
+# The console keeps its own network, so it cannot reach Postgres/Redis.
+name: onlyboxes
+
+services:
+  console:
+    image: ${ONLYBOXES_CONSOLE_IMAGE:?pin coolfan1024/onlyboxes:<tag>@sha256:<digest>}
+    container_name: onlyboxes-console
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CONSOLE_ENABLE_REGISTRATION: 'false'
+      CONSOLE_LOG_FORMAT: json
+    ports:
+      - '127.0.0.1:50051:50051'
+      - '127.0.0.1:8089:8089'
+      - '${ONLYBOXES_APP_BIND_IP:?panachat-network gateway IP}:8089:8089'
+    volumes:
+      - ./db:/app/db
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.25
+    pids_limit: 256
+    networks:
+      - onlyboxes-internal
+
+networks:
+  onlyboxes-internal:
+    name: onlyboxes-internal
+    driver: bridge
