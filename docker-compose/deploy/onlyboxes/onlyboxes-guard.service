@@ -4,9 +4,17 @@ Requires=docker.service
 After=docker.service onlyboxes-sandbox-firewall.service
 
 [Service]
+Slice=onlyboxes.slice
 ExecStart=/opt/onlyboxes/onlyboxes-guard.sh run
 Restart=always
 RestartSec=5
+# Measured: ~27 MB and 14 tasks at peak; TasksMax counts the docker CLI's threads.
+MemoryMax=64M
+MemoryLow=32M
+MemorySwapMax=0
+CPUQuota=10%
+TasksMax=128
+OOMScoreAdjust=-900
 
 [Install]
 WantedBy=multi-user.target

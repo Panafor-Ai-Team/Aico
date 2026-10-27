@@ -15,17 +15,19 @@ panachat-green/blue ──REST──► 172.18.0.1:8089 ─► onlyboxes-console
                                    (172.20.0.0/16, br-onlyboxes, ICC off, one per user+topic)
 ```
 
-| Limit                              | Value                                                                                                   | Enforced by                    |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| Sandboxes                          | 5 active (a 6th new session gets HTTP 429 `session_capacity_exceeded`)                                  | worker                         |
-| Per sandbox                        | 512 MiB RAM, **0 swap**, 0.5 CPU, 256 pids, 50 MB/s + 300 IOPS on the root disk                         | worker + `onlyboxes-guard`     |
-| Writable layer                     | removed above 5 GB; all sandboxes removed if `/` free < 40 GB                                           | `onlyboxes-guard` (30 s sweep) |
-| Console                            | 256 MiB, 0.25 CPU                                                                                       | compose                        |
-| Worker + its `docker` CLI children | 512 MiB, 25 % CPU                                                                                       | systemd                        |
-| Bandwidth                          | 40 Mbit down / 20 Mbit up shared by all sandboxes                                                       | tc on `br-onlyboxes`           |
-| Network                            | no private/link-local ranges (Postgres, Redis, Stalwart, rustfs, console), no SMTP; host only on 80/443 | `sandbox-firewall.sh`          |
+| Limit                              | Value                                                                                                    | Enforced by                    |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| **All of Onlyboxes**               | **2 GiB RAM hard total, swap 0** (`onlyboxes.slice`): worker, guard, console and every sandbox           | systemd slice                  |
+| Sandboxes                          | 5 active (a 6th new session gets HTTP 429 `session_capacity_exceeded`)                                   | worker                         |
+| Per sandbox                        | 512 MiB RAM (shares the 2 GiB total), **0 swap**, 0.5 CPU, 256 pids, 50 MB/s + 300 IOPS on the root disk | worker + `onlyboxes-guard`     |
+| Writable layer                     | removed above 5 GB; all sandboxes removed if `/` free < 40 GB                                            | `onlyboxes-guard` (30 s sweep) |
+| Console                            | 128 MiB (64 MiB protected), 0.25 CPU, 256 pids, 20 MB/s + 200 IOPS, tasks kept 7 days                    | compose                        |
+| Worker + its `docker` CLI children | 256 MiB (64 MiB protected), 25 % CPU                                                                     | systemd                        |
+| Guard                              | 64 MiB (32 MiB protected), 10 % CPU, 128 tasks                                                           | systemd                        |
+| Bandwidth                          | 40 Mbit down / 20 Mbit up shared by all sandboxes                                                        | tc on `br-onlyboxes`           |
+| Network                            | no private/link-local ranges (Postgres, Redis, Stalwart, rustfs, console), no SMTP; host only on 80/443  | `sandbox-firewall.sh`          |
 
-Total ceiling: about 3.5 GiB RAM and 3.25 vCPU. A LobeHub session (`lobe-<userId>-<topicId>`) holds its sandbox for 15 minutes after its last command.
+Total ceiling: **2 GiB RAM** (the slice) plus about 80 MB of containerd-shim outside it, and 3.25 vCPU. The five 512 MiB sandboxes overcommit the slice on purpose: when the total is reached the kernel reclaims cache, then OOM-kills a sandbox process. The worker, guard and console have `OOMScoreAdjust=-900` and a `MemoryLow` floor, and a sandbox outside the slice is removed by the guard. A LobeHub session (`lobe-<userId>-<topicId>`) holds its sandbox for 15 minutes after its last command.
 
 ## Files
 
@@ -33,7 +35,8 @@ Total ceiling: about 3.5 GiB RAM and 3.25 vCPU. A LobeHub session (`lobe-<userId
 | ------------------------------------------------------------------ | -------------------------------------------- |
 | `onlyboxes/docker-compose.onlyboxes.yml`, `onlyboxes/.env.example` | `/opt/onlyboxes/` (+ `.env`, `db/`)          |
 | `onlyboxes/sandbox-firewall.sh`, `onlyboxes/onlyboxes-guard.sh`    | `/opt/onlyboxes/`                            |
-| `onlyboxes/*.service`                                              | `/etc/systemd/system/`                       |
+| `onlyboxes/*.service`, `onlyboxes/onlyboxes.slice`                 | `/etc/systemd/system/`                       |
+| `onlyboxes/docker-shim.sh`                                         | `/opt/onlyboxes/shim/docker` (755)           |
 | `onlyboxes/worker.env.example`                                     | `/etc/onlyboxes/worker.env` (600)            |
 | release binary                                                     | `/opt/onlyboxes/bin/onlyboxes-worker-docker` |
 | `scripts/aico/onlyboxes-loadtest.sh`                               | `/opt/onlyboxes/onlyboxes-loadtest.sh`       |
@@ -57,8 +60,10 @@ echo '97f8fb27102b7e6784086e17074dec7412d51a7f1894e1e353605f2a180de756  onlyboxe
 python3 -m zipfile -e onlyboxes-worker-docker_0.14.1_linux_amd64.zip bin/
 mv bin/onlyboxes-worker-docker_0.14.1_linux_amd64 bin/onlyboxes-worker-docker && chmod 755 bin/onlyboxes-worker-docker
 
-# 2. Network isolation and guard (copy the repo files listed above first).
+# 2. Memory budget, network isolation and guard (copy the repo files listed above first).
+install -D -m 755 docker-shim.sh /opt/onlyboxes/shim/docker
 systemctl daemon-reload
+systemctl start onlyboxes.slice && systemctl show onlyboxes.slice -p MemoryMax -p MemorySwapMax
 systemctl enable --now onlyboxes-sandbox-firewall.service onlyboxes-guard.service
 /opt/onlyboxes/sandbox-firewall.sh check && /opt/onlyboxes/sandbox-firewall.sh status
 
@@ -148,7 +153,8 @@ systemctl disable --now onlyboxes-guard
 
 ## Known limits
 
-- Disk is watched, not quota'd: overlayfs on ext4 has no per-container size limit. The 50 MB/s write cap and the 30 s sweep bound a fill to about 7.5 GB per sweep.
-- Swap is zeroed within moments of container start, not at creation.
-- Large stdout is buffered unbounded in the worker (upstream). The 512 MiB systemd cap turns this into a worker restart, not a host problem.
+- The writable layer is the one soft limit (everything else is a kernel cap). Disk is watched, not quota'd: overlayfs on ext4 has no per-container size limit. The 50 MB/s write cap and the 30 s sweep bound a fill to about 7.5 GB per sweep.
+- Sandboxes join `onlyboxes.slice` through `/opt/onlyboxes/shim/docker`, because worker-docker has no cgroup option. Re-check the shim on every Onlyboxes upgrade; the guard removes any managed container found outside the slice.
+- containerd-shim (about 12 MB per container) runs in `containerd.service`, outside the 2 GiB slice.
+- Large stdout is buffered unbounded in the worker (upstream). The 256 MiB systemd cap turns this into a worker restart, not a host problem.
 - The sandbox runs as root on the shared host kernel (runc, default seccomp/AppArmor, no userns-remap). Keep the kernel, containerd and Docker patched.

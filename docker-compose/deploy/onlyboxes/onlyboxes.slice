@@ -1,0 +1,13 @@
+[Unit]
+Description=Onlyboxes Cloud Sandbox: hard memory budget for worker, guard, console and sandboxes
+Before=slices.target
+
+[Slice]
+# Hard total for everything Onlyboxes runs. The per-sandbox limits (5 x 512 MiB)
+# overcommit this on purpose: idle sandboxes use ~1 MiB, and when the total is
+# reached the kernel reclaims cache, then OOM-kills inside this slice only.
+# The worker, guard and console carry OOMScoreAdjust=-900 and a MemoryLow floor,
+# so the victim is a sandbox process.
+# Outside this slice: containerd-shim (~12 MB per container, in containerd.service).
+MemoryMax=2G
+MemorySwapMax=0

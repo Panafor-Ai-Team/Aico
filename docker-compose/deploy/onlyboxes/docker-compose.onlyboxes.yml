@@ -20,16 +20,35 @@ services:
     environment:
       CONSOLE_ENABLE_REGISTRATION: 'false'
       CONSOLE_LOG_FORMAT: json
+      CONSOLE_TASK_RETENTION_DAYS: '7'
     ports:
       - '127.0.0.1:50051:50051'
       - '127.0.0.1:8089:8089'
       - '${ONLYBOXES_APP_BIND_IP:?panachat-network gateway IP}:8089:8089'
     volumes:
       - ./db:/app/db
-    mem_limit: 256m
-    memswap_limit: 256m
+    # Inside onlyboxes.slice (2G total for all of Onlyboxes); mem_reservation is memory.low.
+    cgroup_parent: onlyboxes.slice
+    mem_limit: 128m
+    memswap_limit: 128m
+    mem_reservation: 64m
+    oom_score_adj: -900
     cpus: 0.25
     pids_limit: 256
+    # Becomes cgroup v2 io.max (works with the `none` scheduler); keeps SQLite off Postgres' disk budget.
+    blkio_config:
+      device_read_bps:
+        - path: ${ONLYBOXES_IO_DEVICE:-/dev/vda}
+          rate: 20mb
+      device_write_bps:
+        - path: ${ONLYBOXES_IO_DEVICE:-/dev/vda}
+          rate: 20mb
+      device_read_iops:
+        - path: ${ONLYBOXES_IO_DEVICE:-/dev/vda}
+          rate: 200
+      device_write_iops:
+        - path: ${ONLYBOXES_IO_DEVICE:-/dev/vda}
+          rate: 200
     networks:
       - onlyboxes-internal
 

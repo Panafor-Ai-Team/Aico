@@ -6,17 +6,23 @@ Requires=docker.service onlyboxes-sandbox-firewall.service onlyboxes-guard.servi
 After=docker.service onlyboxes-sandbox-firewall.service onlyboxes-guard.service
 
 [Service]
+Slice=onlyboxes.slice
 EnvironmentFile=/etc/onlyboxes/worker.env
+# The shim puts every sandbox container into onlyboxes.slice (see docker-shim.sh).
+Environment=PATH=/opt/onlyboxes/shim:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/opt/onlyboxes/bin/onlyboxes-worker-docker
 Restart=always
 RestartSec=5
 # Caps the worker and the `docker` CLI children it spawns. An output bomb
 # (unbounded exec buffer upstream) kills the worker here, not the host;
 # sandbox containers survive and are reconciled on restart.
-MemoryMax=512M
+MemoryMax=256M
+MemoryLow=64M
 MemorySwapMax=0
 CPUQuota=25%
 TasksMax=512
+# Inside the 2G slice, make a sandbox the OOM victim, not the worker.
+OOMScoreAdjust=-900
 
 [Install]
 WantedBy=multi-user.target

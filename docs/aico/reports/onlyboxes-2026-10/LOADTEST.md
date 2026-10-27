@@ -2,7 +2,7 @@
 
 Production host (4 vCPU / 7.75 GiB), Onlyboxes 0.14.1, runtime `0.14.1-lobehub`. The test ran **before** any app traffic was pointed at the sandbox. It used `scripts/aico/onlyboxes-loadtest.sh` against the console on loopback, with synthetic JIT subjects `loadtest-1..9` under issuer `aico-loadtest`.
 
-Limits under test: 5 sessions × (512 MiB, swap 0, 0.5 CPU, 256 pids, io.max 50 MB/s + 300 IOPS); worker 512 MiB / 25 % CPU.
+Limits under test: 5 sessions × (512 MiB, swap 0, 0.5 CPU, 256 pids, io.max 50 MB/s + 300 IOPS); worker 512 MiB / 25 % CPU. The 2 GiB total for all of Onlyboxes was added and tested afterwards (section below).
 
 ## Results
 
@@ -19,6 +19,14 @@ Limits under test: 5 sessions × (512 MiB, swap 0, 0.5 CPU, 256 pids, io.max 50 
 | disk: 6 GB write                                | **Pass**                 | guard removed the container at 6.06 GB (one 30 s sweep past 5 GB); free space restored                                                                                                                                                                                                     |
 | disk I/O isolation                              | **Pass (light DB load)** | during a 2 GB direct write: host PSI io up to 74 %, **Postgres and app cgroup io.pressure 0.00**, app latency 0.10–0.19 s. Not tested: a heavy concurrent Postgres write load                                                                                                              |
 | outbomb: 2 GB stdout                            | **Pass (as designed)**   | worker OOM-killed inside its 512 MiB unit, systemd restarted it, it reconnected in seconds; bystander session kept working; host memory unchanged. The bombing command got 502                                                                                                             |
+
+## 2 GiB total (`onlyboxes.slice`), same day
+
+After the worker, guard, console and every sandbox were moved into `onlyboxes.slice` (`MemoryMax=2G`, swap 0), the `slice` scenario had 5 sandboxes each hold 450 MB at once, about 2.25 GB in total:
+
+- `onlyboxes.slice` memory.peak = **2147483648 (exactly 2 GiB)**, never above it. memory.events: `max 370`, `oom_kill 1`, `low 14406` (the worker, guard and console `MemoryLow` floors were honoured).
+- Exactly one process was killed: `python3` in one sandbox, with `oom_memcg=/onlyboxes.slice`. The other 4 sessions finished with exit 0.
+- Worker, guard and console: no restart and not OOM-killed (`oom_score_adj -900`). App latency ≤ 0.20 s, host swap untouched.
 
 Host during the whole run: PSI memory ≤ 0.44, swap free constant at 3.38 GiB, app latency never above 0.22 s.
 

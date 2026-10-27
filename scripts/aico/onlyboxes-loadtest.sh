@@ -3,7 +3,7 @@
 # Runs ON the server, against the console on loopback, before the app is switched over.
 #
 #   onlyboxes-loadtest.sh <scenario> [out-dir]
-#   scenarios: cpu oom work cap fork parallel outbomb disk net all
+#   scenarios: cpu oom work cap fork parallel outbomb disk net slice all
 #
 # Auth: mints obx_jit_v1 tokens exactly like the app (apps/server/src/services/sandbox/
 # providers/onlyboxes.ts createJITToken) for synthetic subjects loadtest-1..6 under a
@@ -21,6 +21,7 @@ SESSIONS="${ONLYBOXES_LOADTEST_SESSIONS:-5}"
 # Public IPv4 of this host, for the host-port probes in `net`.
 HOST_IP="${ONLYBOXES_LOADTEST_HOST_IP:-$(ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')}"
 LEASE=300
+SLICE="${ONLYBOXES_SLICE:-onlyboxes.slice}"
 
 KEY="$(sed -n 's/^CONSOLE_JIT_SIGNING_KEY=//p' "$ENV_FILE")"
 [[ -n "$KEY" ]] || { echo "CONSOLE_JIT_SIGNING_KEY not found in $ENV_FILE" >&2; exit 1; }
@@ -78,16 +79,25 @@ sample_stop() {
     "$OUT/host-$SCENARIO_NAME.tsv"
 }
 
-# Peak memory and swap limit of every managed container (cgroup v2).
+# cgroup v2 directory of a running container, from its init process.
+container_cgroup() {
+  local pid
+  pid="$(docker inspect -f '{{.State.Pid}}' "$1")"
+  echo "/sys/fs/cgroup$(sed -n 's/^0:://p' "/proc/$pid/cgroup")"
+}
+
+# Peak memory, swap limit and slice of every managed container, plus the slice total.
 cgroup_report() {
-  local id name
+  local id name cg
   for id in $(docker ps -q --no-trunc --filter label=onlyboxes.managed=true); do
     name="$(docker inspect -f '{{.Name}}' "$id")"
-    printf '  %s peak=%s swap.max=%s io.max=%s\n' "${name:1:34}" \
-      "$(cat /sys/fs/cgroup/system.slice/docker-$id.scope/memory.peak 2>/dev/null)" \
-      "$(cat /sys/fs/cgroup/system.slice/docker-$id.scope/memory.swap.max 2>/dev/null)" \
-      "$(cat /sys/fs/cgroup/system.slice/docker-$id.scope/io.max 2>/dev/null)"
+    cg="$(container_cgroup "$id")"
+    printf '  %s peak=%s swap.max=%s io.max=%s cgroup=%s\n' "${name:1:34}" \
+      "$(cat "$cg/memory.peak" 2>/dev/null)" "$(cat "$cg/memory.swap.max" 2>/dev/null)" \
+      "$(cat "$cg/io.max" 2>/dev/null)" "${cg#/sys/fs/cgroup/}"
   done
+  printf '  %s max=%s peak=%s current=%s\n' "$SLICE" "$(cat "/sys/fs/cgroup/$SLICE/memory.max")" \
+    "$(cat "/sys/fs/cgroup/$SLICE/memory.peak")" "$(cat "/sys/fs/cgroup/$SLICE/memory.current")"
 }
 
 # Waits only for its own jobs: a bare `wait` would also wait for the sampler.
@@ -136,6 +146,15 @@ PY" 120000
       for i in $(seq 1 "$SESSIONS"); do term "$i" "true" | sed "s/^/  session $i: /"; done
       term $((SESSIONS + 1)) "true" | sed "s/^/  session $((SESSIONS + 1)): /"
       echo "  expect: sessions 1..$SESSIONS -> 200, session $((SESSIONS + 1)) -> 429 session_capacity_exceeded" ;;
+    slice)
+      sample_start
+      parallel "python3 -c 'import time; b=bytearray(450*1024*1024); time.sleep(20); print(len(b))'" 120000
+      sample_stop
+      cgroup_report
+      echo "  expect: slice peak <= its max; some sessions exit 137; only sandbox processes in dmesg:"
+      dmesg -T | grep -E 'oom-kill:|Killed process' | tail -8 | sed 's/^/    /'
+      systemctl is-active onlyboxes-worker-docker onlyboxes-guard | tr '\n' ' ' | sed 's/^/    worker, guard: /'
+      echo "console: $(docker inspect -f '{{.State.Status}} restarts={{.RestartCount}}' onlyboxes-console)" ;;
     fork)
       term 1 "timeout 20 python3 -c 'import os
 while True: os.fork()' ; echo exit=\$?" 60000 | sed 's/^/  session 1 (fork bomb): /' &
@@ -183,11 +202,11 @@ while True: os.fork()' ; echo exit=\$?" 60000 | sed 's/^/  session 1 (fork bomb)
 
 case "$SCENARIO" in
   all)
-    for s in net cap parallel cpu oom work fork disk outbomb; do
+    for s in net cap parallel cpu oom work slice fork disk outbomb; do
       run_scenario "$s" 2>&1 | tee -a "$OUT/report.txt"
       sleep 20
     done ;;
-  cpu | oom | work | cap | fork | parallel | outbomb | disk | net)
+  cpu | oom | work | cap | fork | parallel | outbomb | disk | net | slice)
     run_scenario "$SCENARIO" 2>&1 | tee -a "$OUT/report.txt" ;;
   *)
     sed -n '2,12p' "$0" >&2

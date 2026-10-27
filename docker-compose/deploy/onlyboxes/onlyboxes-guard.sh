@@ -5,6 +5,8 @@
 #   onlyboxes-guard.sh sweep   one sweep, then exit
 #
 # Per container (on every start, and re-checked each sweep):
+#   - slice:    must run inside ONLYBOXES_GUARD_SLICE (docker-shim.sh puts it there);
+#               a managed container outside it is removed, so the 2G total fails closed
 #   - swap 0:   docker update --memory-swap = --memory   (worker only passes --memory)
 #   - disk I/O: cgroup v2 io.max on the root disk         (scheduler is `none`, so no weights)
 # Each sweep:
@@ -21,7 +23,7 @@ MAX_LAYER_BYTES="${ONLYBOXES_GUARD_MAX_LAYER_BYTES:-5000000000}"
 MIN_FREE_BYTES="${ONLYBOXES_GUARD_MIN_FREE_BYTES:-40000000000}"
 IO_LIMITS="${ONLYBOXES_GUARD_IO_LIMITS:-rbps=52428800 wbps=52428800 riops=300 wiops=300}"
 FIREWALL="${ONLYBOXES_GUARD_FIREWALL:-/opt/onlyboxes/sandbox-firewall.sh}"
-CGROUP_ROOT=/sys/fs/cgroup/system.slice
+SLICE="${ONLYBOXES_GUARD_SLICE:-onlyboxes.slice}"
 
 log() { printf 'onlyboxes-guard: %s\n' "$*" >&2; }
 
@@ -57,11 +59,18 @@ remove_container() {
 }
 
 harden() {
-  local id="$1" info name managed mem swap cg
-  info="$(docker inspect -f '{{.Name}}|{{index .Config.Labels "onlyboxes.managed"}}|{{.HostConfig.Memory}}|{{.HostConfig.MemorySwap}}' "$id" 2>/dev/null)" || return 0
-  IFS='|' read -r name managed mem swap <<<"$info"
+  local id="$1" info name managed mem swap pid cgpath cg
+  info="$(docker inspect -f '{{.Name}}|{{index .Config.Labels "onlyboxes.managed"}}|{{.HostConfig.Memory}}|{{.HostConfig.MemorySwap}}|{{.State.Pid}}' "$id" 2>/dev/null)" || return 0
+  IFS='|' read -r name managed mem swap pid <<<"$info"
   name="${name#/}"
   [[ "$managed" == "true" ]] && is_guarded_name "$name" || return 0
+  [[ "$pid" -gt 0 ]] || return 0
+
+  cgpath="$(sed -n 's/^0:://p' "/proc/$pid/cgroup" 2>/dev/null)"
+  if [[ "$cgpath" != "/$SLICE/"* ]]; then
+    remove_container "$id" "$name" "running outside $SLICE (cgroup ${cgpath:-unknown})"
+    return 0
+  fi
 
   if [[ "$mem" -le 0 ]]; then
     remove_container "$id" "$name" "no memory limit set"
@@ -72,7 +81,7 @@ harden() {
       || log "docker update swap failed for $name"
   fi
 
-  cg="$CGROUP_ROOT/docker-$id.scope"
+  cg="/sys/fs/cgroup$cgpath"
   [[ -d "$cg" ]] || return 0
   if [[ "$(cat "$cg/memory.swap.max" 2>/dev/null)" != "0" ]]; then
     echo 0 >"$cg/memory.swap.max" 2>/dev/null || log "cannot zero memory.swap.max for $name"
