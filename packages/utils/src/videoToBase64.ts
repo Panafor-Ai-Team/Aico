@@ -17,12 +17,15 @@ export const videoUrlToBase64 = async (
         )
       : await fetch(videoUrl);
 
+    // The body streams; release the connection of a response we will not read.
     if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
       throw new Error(`Failed to fetch video: ${response.status} ${response.statusText}`);
     }
 
     const contentType = response.headers.get('content-type');
     if (!contentType || !contentType.startsWith('video/')) {
+      await response.body?.cancel().catch(() => {});
       throw new Error('URL does not point to a valid video file');
     }
 
