@@ -76,6 +76,12 @@ export class S3StaticFileImpl implements FileServiceImpl {
     return this.s3.createPreSignedUrlForPreview(key, expiresIn);
   }
 
+  async createPreSignedUrlForDownload(url: string, filename: string): Promise<string> {
+    const key = await this.getStorageKeyFromUrl(url);
+
+    return this.s3.createPreSignedUrlForDownload(key, filename);
+  }
+
   private async getStorageKeyFromUrl(url: string): Promise<string> {
     if (!url.startsWith('http://') && !url.startsWith('https://')) return url;
 

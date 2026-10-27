@@ -1,6 +1,7 @@
 import { ComputerRuntime } from '@lobechat/tool-runtime';
 import type { BuiltinServerRuntimeOutput } from '@lobechat/types';
 
+import { toFileDownloadUrl } from '../downloadUrl';
 import type {
   ExecuteCodeParams,
   ExecuteCodeState,
@@ -83,9 +84,10 @@ export class CloudSandboxExecutionRuntime extends ComputerRuntime {
       const filename = args.path.split('/').pop() || 'exported_file';
 
       const result = await this.sandboxService.exportAndUploadFile(args.path, filename);
+      const downloadUrl = result.success && result.url ? toFileDownloadUrl(result.url) : '';
 
       const state: ExportFileState = {
-        downloadUrl: result.success && result.url ? result.url : '',
+        downloadUrl,
         fileId: result.fileId,
         filename: result.filename,
         mimeType: result.mimeType,
@@ -107,7 +109,7 @@ export class CloudSandboxExecutionRuntime extends ComputerRuntime {
       }
 
       return {
-        content: `File exported successfully.\n\nFilename: ${filename}\nDownload URL: ${result.url}`,
+        content: `File exported successfully.\n\nFilename: ${filename}\nDownload URL: ${downloadUrl}`,
         state,
         success: true,
       };

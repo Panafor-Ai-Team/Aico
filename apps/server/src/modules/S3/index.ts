@@ -32,6 +32,20 @@ export type FileType = z.infer<typeof fileSchema>;
 const DEFAULT_S3_REGION = 'us-east-1';
 const PUBLIC_READ_ACL_HEADER = 'public-read';
 
+/**
+ * RFC 6266 attachment header: an ASCII `filename` fallback plus the UTF-8
+ * `filename*` form so non-Latin names (e.g. Persian) survive the download.
+ */
+export const buildAttachmentContentDisposition = (filename: string): string => {
+  const asciiFallback = filename.replaceAll(/[^\u0020-\u007E]/g, '_').replaceAll(/["\\]/g, '_');
+  const encoded = encodeURIComponent(filename).replaceAll(
+    /['()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+
+  return `attachment; filename="${asciiFallback || 'download'}"; filename*=UTF-8''${encoded}`;
+};
+
 export interface PreSignedUpload {
   headers?: Record<string, string>;
   url: string;
@@ -261,6 +275,26 @@ export class S3 {
     const command = new GetObjectCommand({
       Bucket: this.bucket,
       Key: key,
+    });
+
+    return getSignedUrl(this.signingClient, command, {
+      expiresIn: expiresIn ?? fileEnv.S3_PREVIEW_URL_EXPIRE_IN,
+    });
+  }
+
+  /**
+   * Pre-signed GET that makes the browser save the object as `filename`
+   * (`Content-Disposition: attachment`) instead of rendering it inline.
+   */
+  public async createPreSignedUrlForDownload(
+    key: string,
+    filename: string,
+    expiresIn?: number,
+  ): Promise<string> {
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      ResponseContentDisposition: buildAttachmentContentDisposition(filename),
     });
 
     return getSignedUrl(this.signingClient, command, {
