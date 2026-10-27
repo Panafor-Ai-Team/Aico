@@ -12,6 +12,7 @@ import { GET } from './route';
 const fileServiceMocks = vi.hoisted(() => {
   const instance = {
     createCachedPreSignedUrlForPreview: vi.fn(),
+    createPreSignedUrlForDownload: vi.fn(),
     getFullFileUrl: vi.fn(),
   };
 
@@ -44,12 +45,38 @@ describe('file proxy route', () => {
     vi.mocked(getServerDB).mockResolvedValue(db);
     vi.mocked(FileModel.getFileById).mockResolvedValue({
       id: 'file-id',
+      name: 'گزارش.pdf',
       url: 'files/user-id/image.png',
       userId: 'owner-user-id',
     } as FileItem);
     fileServiceMocks.instance.createCachedPreSignedUrlForPreview.mockResolvedValue(
       'https://s3.example.com/presigned-preview-url',
     );
+    fileServiceMocks.instance.createPreSignedUrlForDownload.mockResolvedValue(
+      'https://s3.example.com/presigned-download-url',
+    );
+  });
+
+  it('should redirect to an attachment download URL named after the file when ?download is set', async () => {
+    const response = await GET(new Request('https://lobehub.com/f/file-id?download=1'), {
+      params: Promise.resolve({ id: 'file-id' }),
+    });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe('https://s3.example.com/presigned-download-url');
+    expect(fileServiceMocks.instance.createPreSignedUrlForDownload).toHaveBeenCalledWith(
+      'files/user-id/image.png',
+      'گزارش.pdf',
+    );
+    expect(fileServiceMocks.instance.createCachedPreSignedUrlForPreview).not.toHaveBeenCalled();
+  });
+
+  it('should keep the inline preview redirect without ?download', async () => {
+    await GET(new Request('https://lobehub.com/f/file-id'), {
+      params: Promise.resolve({ id: 'file-id' }),
+    });
+
+    expect(fileServiceMocks.instance.createPreSignedUrlForDownload).not.toHaveBeenCalled();
   });
 
   it('should redirect to a cached presigned preview URL instead of a public full file URL', async () => {

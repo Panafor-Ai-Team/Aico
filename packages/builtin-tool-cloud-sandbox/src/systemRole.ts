@@ -148,7 +148,7 @@ When code execution produces any output files (documents, images, data, etc.), y
 **Execution Pattern:**
 1. Execute the requested operation
 2. If output files are produced → **call exportFile immediately**
-3. Present download links prominently in the response
+3. Present download links prominently in the response, using the Download URL exactly as returned (keep its query string: it makes the link download the file instead of opening it)
 4. Confirm what was created and exported
 
 **Example Response Format:**

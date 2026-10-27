@@ -14,7 +14,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { FileS3, S3 } from './index';
+import { buildAttachmentContentDisposition, FileS3, S3 } from './index';
 
 // Mock AWS SDK
 vi.mock('@aws-sdk/client-s3');
@@ -472,6 +472,38 @@ describe('FileS3', () => {
       expect(mockGetSignedUrl).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
         expiresIn: 1800,
       });
+    });
+  });
+
+  describe('createPreSignedUrlForDownload', () => {
+    it('should presign a GET that forces an attachment download with the file name', async () => {
+      const s3 = new FileS3();
+
+      const result = await s3.createPreSignedUrlForDownload('exports/report.pdf', 'report.pdf');
+
+      expect(GetObjectCommand).toHaveBeenCalledWith({
+        Bucket: 'test-bucket',
+        Key: 'exports/report.pdf',
+        ResponseContentDisposition: `attachment; filename="report.pdf"; filename*=UTF-8''report.pdf`,
+      });
+      expect(mockGetSignedUrl).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+        expiresIn: 7200,
+      });
+      expect(result).toBe('https://presigned-url.example.com');
+    });
+  });
+
+  describe('buildAttachmentContentDisposition', () => {
+    it('should keep non-ASCII names in the UTF-8 form with an ASCII fallback', () => {
+      expect(buildAttachmentContentDisposition('گزارش (نهایی).pdf')).toBe(
+        `attachment; filename="_____ (_____).pdf"; filename*=UTF-8''${encodeURIComponent('گزارش')}%20%28${encodeURIComponent('نهایی')}%29.pdf`,
+      );
+    });
+
+    it('should neutralize quotes in the ASCII fallback', () => {
+      expect(buildAttachmentContentDisposition('a"b.txt')).toBe(
+        `attachment; filename="a_b.txt"; filename*=UTF-8''a%22b.txt`,
+      );
     });
   });
 

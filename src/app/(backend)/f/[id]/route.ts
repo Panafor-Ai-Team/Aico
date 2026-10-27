@@ -23,8 +23,12 @@ type Params = Promise<{ id: string }>;
  * every previously-shared `/f/:id` link, so access stays public by id.
  * S3 objects are private (`S3_SET_ACL=0`); this handler mints a short-lived
  * presigned GET. Knowing `/f/:id` is the permission (capability URL).
+ *
+ * `?download` (any value) redirects to a presigned GET with
+ * `Content-Disposition: attachment`, so a plain link saves the file under its
+ * stored name instead of opening it in the browser.
  */
-export const GET = async (_req: Request, segmentData: { params: Params }) => {
+export const GET = async (req: Request, segmentData: { params: Params }) => {
   try {
     const params = await segmentData.params;
     const { id } = params;
@@ -46,6 +50,13 @@ export const GET = async (_req: Request, segmentData: { params: Params }) => {
 
     // Create file service with file owner's userId
     const fileService = new FileService(db, file.userId);
+
+    if (new URL(req.url).searchParams.has('download')) {
+      const downloadUrl = await fileService.createPreSignedUrlForDownload(file.url, file.name);
+      log('Web S3 presigned download URL generated');
+
+      return Response.redirect(downloadUrl, 302);
+    }
 
     // Web: Generate a cached S3 presigned URL, normalizing legacy full S3 URLs.
     const redirectUrl = await fileService.createCachedPreSignedUrlForPreview(file.url);

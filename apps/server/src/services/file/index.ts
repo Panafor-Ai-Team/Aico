@@ -107,6 +107,13 @@ export class FileService {
   }
 
   /**
+   * Create pre-signed URL that makes the browser save the file as `filename`
+   */
+  public async createPreSignedUrlForDownload(url: string, filename: string): Promise<string> {
+    return this.impl.createPreSignedUrlForDownload(url, filename);
+  }
+
+  /**
    * Upload content
    */
   public async uploadContent(path: string, content: string) {
