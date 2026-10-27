@@ -26,6 +26,36 @@ const JIT_TOKEN_PREFIX = 'obx_jit_v1.';
 const WRITE_FILE_CHUNK_BYTES = 48 * 1024;
 const SKILL_ARCHIVE_CACHE_DIR = '/tmp/lobe-skills';
 
+// Transient console errors (Onlyboxes 0.14.1 `/api/v1/commands/terminal`). All of
+// these are raised before the command reaches a sandbox, so a retry cannot run it twice.
+// 503: worker reconnecting / route not ready (`session_unavailable`, `no_worker`).
+const UNAVAILABLE_RETRY_DELAYS_MS = [500, 1000, 2000, 4000];
+// 409 `session_busy`: the per-session inflight cap is reached.
+const BUSY_RETRY_DELAYS_MS = [500, 1000, 2000];
+const SESSION_BUSY_MESSAGE = 'session is busy';
+// 404 `session_not_found`: a stale route after the host guard removed the sandbox.
+// The console prunes it, and the next `create_if_missing` call recreates the sandbox.
+const NOT_FOUND_RETRY_DELAYS_MS = [500];
+
+export const SANDBOX_CAPACITY_ERROR_NAME = 'SandboxCapacityExceeded';
+export const SANDBOX_CAPACITY_ERROR_MESSAGE =
+  'The cloud sandbox is at capacity: all sandboxes are currently in use. Please try again in a few minutes.';
+
+class OnlyboxesRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'OnlyboxesRequestError';
+  }
+}
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
 interface OnlyboxesTaskResponse {
   error?: { code?: string; message?: string };
   result?: Record<string, unknown>;
@@ -84,83 +114,83 @@ export class OnlyboxesSandboxProvider implements SandboxProvider {
     try {
       switch (toolName) {
         case 'runCommand': {
-          return this.runCommand(params);
+          return await this.runCommand(params);
         }
 
         case 'getCommandOutput': {
-          return this.getCommandOutput(params);
+          return await this.getCommandOutput(params);
         }
 
         case 'killCommand': {
-          return this.killCommand(params);
+          return await this.killCommand(params);
         }
 
         case 'executeCode': {
-          return this.executeCode(params);
+          return await this.executeCode(params);
         }
 
         case 'execScript': {
-          return this.execScript(params);
+          return await this.execScript(params);
         }
 
         case 'listLocalFiles': {
-          return this.runJsonScript(listFilesScript, params);
+          return await this.runJsonScript(listFilesScript, params);
         }
 
         case 'listFiles': {
-          return this.runJsonScript(listFilesScript, params);
+          return await this.runJsonScript(listFilesScript, params);
         }
 
         case 'readLocalFile': {
-          return this.runJsonScript(readFileScript, params);
+          return await this.runJsonScript(readFileScript, params);
         }
 
         case 'readFile': {
-          return this.runJsonScript(readFileScript, params);
+          return await this.runJsonScript(readFileScript, params);
         }
 
         case 'writeLocalFile': {
-          return this.writeLocalFile(params);
+          return await this.writeLocalFile(params);
         }
 
         case 'writeFile': {
-          return this.writeLocalFile(params);
+          return await this.writeLocalFile(params);
         }
 
         case 'editLocalFile': {
-          return this.runJsonScript(editFileScript, params);
+          return await this.runJsonScript(editFileScript, params);
         }
 
         case 'editFile': {
-          return this.runJsonScript(editFileScript, params);
+          return await this.runJsonScript(editFileScript, params);
         }
 
         case 'searchLocalFiles': {
-          return this.runJsonScript(searchFilesScript, params);
+          return await this.runJsonScript(searchFilesScript, params);
         }
 
         case 'searchFiles': {
-          return this.runJsonScript(searchFilesScript, params);
+          return await this.runJsonScript(searchFilesScript, params);
         }
 
         case 'moveLocalFiles': {
-          return this.runJsonScript(moveFilesScript, params);
+          return await this.runJsonScript(moveFilesScript, params);
         }
 
         case 'moveFiles': {
-          return this.runJsonScript(moveFilesScript, params);
+          return await this.runJsonScript(moveFilesScript, params);
         }
 
         case 'grepContent': {
-          return this.runJsonScript(grepContentScript, params);
+          return await this.runJsonScript(grepContentScript, params);
         }
 
         case 'globLocalFiles': {
-          return this.runJsonScript(globFilesScript, params);
+          return await this.runJsonScript(globFilesScript, params);
         }
 
         case 'globFiles': {
-          return this.runJsonScript(globFilesScript, params);
+          return await this.runJsonScript(globFilesScript, params);
         }
 
         default: {
@@ -619,16 +649,20 @@ export class OnlyboxesSandboxProvider implements SandboxProvider {
   }
 
   private async execTerminal(command: string, timeoutMs = DEFAULT_TIMEOUT_MS) {
-    return this.request<TerminalExecResult>('/api/v1/commands/terminal', {
-      body: JSON.stringify({
-        command,
-        create_if_missing: true,
-        lease_ttl_sec: this.leaseTTLSec,
-        session_id: this.sessionId,
-        timeout_ms: timeoutMs,
-      }),
-      method: 'POST',
-    });
+    return this.request<TerminalExecResult>(
+      '/api/v1/commands/terminal',
+      {
+        body: JSON.stringify({
+          command,
+          create_if_missing: true,
+          lease_ttl_sec: this.leaseTTLSec,
+          session_id: this.sessionId,
+          timeout_ms: timeoutMs,
+        }),
+        method: 'POST',
+      },
+      { retryNotFound: true },
+    );
   }
 
   private async ensureSession() {
@@ -652,7 +686,54 @@ export class OnlyboxesSandboxProvider implements SandboxProvider {
     });
   }
 
-  private async request<T>(path: string, init: RequestInit): Promise<T> {
+  /**
+   * @param options.retryNotFound only for calls that send `create_if_missing: true`,
+   * where a retry after `404 session not found` recreates the sandbox.
+   */
+  private async request<T>(
+    path: string,
+    init: RequestInit,
+    options?: { retryNotFound?: boolean },
+  ): Promise<T> {
+    const retries = { busy: 0, notFound: 0, unavailable: 0 };
+
+    while (true) {
+      try {
+        return await this.send<T>(path, init);
+      } catch (error) {
+        if (!(error instanceof OnlyboxesRequestError)) throw error;
+
+        if (error.status === 429) {
+          const capacityError = new Error(SANDBOX_CAPACITY_ERROR_MESSAGE);
+          capacityError.name = SANDBOX_CAPACITY_ERROR_NAME;
+          throw capacityError;
+        }
+
+        let delayMs: number | undefined;
+
+        if (error.status === 503) {
+          delayMs = UNAVAILABLE_RETRY_DELAYS_MS[retries.unavailable++];
+        } else if (error.status === 409 && error.message === SESSION_BUSY_MESSAGE) {
+          delayMs = BUSY_RETRY_DELAYS_MS[retries.busy++];
+        } else if (error.status === 404 && options?.retryNotFound) {
+          delayMs = NOT_FOUND_RETRY_DELAYS_MS[retries.notFound++];
+        }
+
+        if (delayMs === undefined) throw error;
+
+        log(
+          'Onlyboxes %s returned %d (%s), retrying in %dms',
+          path,
+          error.status,
+          error.message,
+          delayMs,
+        );
+        await sleep(delayMs);
+      }
+    }
+  }
+
+  private async send<T>(path: string, init: RequestInit): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set('Authorization', `Bearer ${this.createJITToken()}`);
     headers.set('Content-Type', 'application/json');
@@ -671,7 +752,7 @@ export class OnlyboxesSandboxProvider implements SandboxProvider {
           : typeof json?.error?.message === 'string'
             ? json.error.message
             : `Onlyboxes request failed with HTTP ${response.status}`;
-      throw new Error(message);
+      throw new OnlyboxesRequestError(message, response.status);
     }
 
     return json as T;
