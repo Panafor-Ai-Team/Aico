@@ -151,10 +151,13 @@ const ConnectorDetail = memo<ConnectorDetailProps>(
           try {
             if (isBuiltin) {
               await uninstallBuiltinTool(connector.identifier);
-            } else if (isMarketplace) {
-              await uninstallMCPPlugin(connector.identifier);
+              await deleteConnector(connectorId);
+            } else {
+              // Delete the connector first: for a Composio app it revokes the
+              // account, and if that fails the plugin row must stay too.
+              await deleteConnector(connectorId);
+              if (isMarketplace) await uninstallMCPPlugin(connector.identifier);
             }
-            await deleteConnector(connectorId);
             onDelete?.();
           } catch (error) {
             notifyActionError(error);

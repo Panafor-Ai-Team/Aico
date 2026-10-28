@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type * as ComposioLib from '@/libs/composio';
+
 import { composioRouter } from './composio';
 
 const mocks = vi.hoisted(() => ({
@@ -56,7 +58,9 @@ vi.mock('@/database/models/connectorTool', () => ({
   })),
 }));
 
-vi.mock('@/libs/composio', () => ({
+vi.mock('@/libs/composio', async (importOriginal) => ({
+  // Keep the real helpers (e.g. revokeComposioConnectedAccount) on the mocked client.
+  ...(await importOriginal<typeof ComposioLib>()),
   getComposioClient: () => ({
     authConfigs: { create: mocks.authConfigsCreate, list: mocks.authConfigsList },
     connectedAccounts: { delete: mocks.connectedAccountsDelete, link: mocks.connectedAccountsLink },
@@ -98,6 +102,55 @@ describe('composioRouter.createConnection dual-write', () => {
     ]);
     // pre-auth seed must NOT prune (tool list may be incomplete before auth)
     expect(mocks.connectorToolDeleteToolsNotIn).not.toHaveBeenCalled();
+  });
+});
+
+describe('composioRouter.createConnection reconnect', () => {
+  beforeEach(() => {
+    mocks.getServerComposioAuthConfigId.mockReturnValue('ac_env');
+    mocks.connectedAccountsLink.mockResolvedValue({ id: 'ca-new', redirectUrl: 'https://auth' });
+    mocks.getRawComposioTools.mockResolvedValue({ items: [] });
+  });
+
+  // Composio rejects a link while the user already has an ACTIVE account for the
+  // auth config unless allowMultiple is set — an orphan left by an uninstall then
+  // made every personal Connect click fail silently.
+  it('links a personal connection with allowMultiple', async () => {
+    await caller().createConnection({ appSlug: 'GITHUB', identifier: 'github', label: 'GitHub' });
+
+    expect(mocks.connectedAccountsLink).toHaveBeenCalledWith(
+      'user-1',
+      'ac_env',
+      expect.objectContaining({ allowMultiple: true }),
+    );
+  });
+
+  it('revokes the account of the row it replaces', async () => {
+    mocks.connectorFindScopedByIdentifier.mockResolvedValue({
+      id: 'conn-existing',
+      metadata: { composio: { connectedAccountId: 'ca-old' } },
+    });
+
+    await caller().createConnection({ appSlug: 'GITHUB', identifier: 'github', label: 'GitHub' });
+
+    expect(mocks.connectedAccountsDelete).toHaveBeenCalledWith('ca-old');
+    expect(mocks.connectedAccountsLink).toHaveBeenCalledTimes(1);
+  });
+
+  it('still links when revoking the replaced account fails', async () => {
+    mocks.connectorFindScopedByIdentifier.mockResolvedValue({
+      id: 'conn-existing',
+      metadata: { composio: { connectedAccountId: 'ca-old' } },
+    });
+    mocks.connectedAccountsDelete.mockRejectedValue(new Error('Composio down'));
+
+    const res = await caller().createConnection({
+      appSlug: 'GITHUB',
+      identifier: 'github',
+      label: 'GitHub',
+    });
+
+    expect(res.connectedAccountId).toBe('ca-new');
   });
 });
 
@@ -174,6 +227,30 @@ describe('composioRouter delete paths clean up the connector projection', () => 
 
   it('deleteConnection deletes both plugin and connector', async () => {
     mocks.connectedAccountsDelete.mockResolvedValue(undefined);
+    mocks.connectorFindScopedByIdentifier.mockResolvedValue({ id: 'conn-existing' });
+
+    await caller().deleteConnection({ connectedAccountId: 'ca-1', identifier: 'gmail' });
+
+    expect(mocks.pluginDelete).toHaveBeenCalledWith('gmail');
+    expect(mocks.connectorDelete).toHaveBeenCalledWith('conn-existing');
+  });
+
+  it('deleteConnection keeps both rows when revoking the account fails', async () => {
+    mocks.connectedAccountsDelete.mockRejectedValue(new Error('Composio down'));
+    mocks.connectorFindScopedByIdentifier.mockResolvedValue({ id: 'conn-existing' });
+
+    await expect(
+      caller().deleteConnection({ connectedAccountId: 'ca-1', identifier: 'gmail' }),
+    ).rejects.toThrow('Composio down');
+
+    expect(mocks.pluginDelete).not.toHaveBeenCalled();
+    expect(mocks.connectorDelete).not.toHaveBeenCalled();
+  });
+
+  it('deleteConnection deletes the rows when the account is already gone', async () => {
+    mocks.connectedAccountsDelete.mockRejectedValue(
+      Object.assign(new Error('Not found'), { status: 404 }),
+    );
     mocks.connectorFindScopedByIdentifier.mockResolvedValue({ id: 'conn-existing' });
 
     await caller().deleteConnection({ connectedAccountId: 'ca-1', identifier: 'gmail' });

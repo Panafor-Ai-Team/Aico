@@ -18,7 +18,7 @@ import {
   ConnectorSourceType,
   ConnectorStatus,
 } from '@/database/schemas';
-import { getComposioClient } from '@/libs/composio';
+import { getComposioClient, revokeComposioConnectedAccount } from '@/libs/composio';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import {
@@ -252,19 +252,31 @@ export const composioRouter = router({
         });
       }
 
+      // Reconnecting over an existing row replaces its account: revoke the old one
+      // so its token doesn't outlive the row that pointed at it. Best-effort — the
+      // link below no longer depends on it.
+      const replaced = await ctx.connectorModel.findScopedByIdentifier(identifier, agentId);
+      const replacedAccountId = replaced?.metadata?.composio?.connectedAccountId;
+      if (replacedAccountId) {
+        try {
+          await revokeComposioConnectedAccount(ctx.composioClient, replacedAccountId);
+        } catch (error) {
+          console.warn('[Composio] Failed to revoke the replaced connection:', error);
+        }
+      }
+
       // Composio-managed OAuth auth configs no longer support `initiate`; use
       // `link` (POST /api/v3/connected_accounts/link) to get the redirect URL.
       //
-      // `allowMultiple` for agent connections: Composio rejects a second linked
-      // account for the same (user entity, auth config) unless this is set. An
-      // agent connector is intentionally a *separate* account from the user's
-      // (and from other agents'), all under the same Composio user entity but
-      // distinguished by connectedAccountId — so agent links must allow multiple.
-      // Personal connections keep the default (one account per auth config).
+      // `allowMultiple` always: without it Composio rejects the link whenever the
+      // user entity already has an ACTIVE account for this auth config — an agent
+      // connection (a deliberately separate account), another scope's connection,
+      // or an orphan whose row was deleted without revoking it. Every runtime call
+      // pins the row's own connectedAccountId, so an extra account is never used.
       const connReq = await (ctx.composioClient.connectedAccounts as any).link(
         userId,
         authConfigId,
-        { callbackUrl, ...(agentId ? { allowMultiple: true } : {}) },
+        { allowMultiple: true, callbackUrl },
       );
 
       let rawTools: Awaited<ReturnType<typeof fetchCuratedComposioTools>> = [];
@@ -361,11 +373,9 @@ export const composioRouter = router({
       // Gate before deleting the remote account, so a non-creator/owner member
       // can't grief another member's Composio connection.
       await assertComposioRowManageable(ctx, input.identifier, input.agentId);
-      try {
-        await (ctx.composioClient.connectedAccounts as any).delete(input.connectedAccountId);
-      } catch (error) {
-        console.warn('[Composio] Failed to delete remote connection:', error);
-      }
+      // Revoke before deleting the rows: if it fails, keep them so the user sees
+      // the error and can retry, instead of an orphan ACTIVE account.
+      await revokeComposioConnectedAccount(ctx.composioClient, input.connectedAccountId);
 
       // Agent connections have no plugin-table row; only remove the base plugin
       // projection for personal connections.
