@@ -15,7 +15,7 @@ import { SearchRepo } from '@/database/repositories/search';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { getServerDefaultFilesConfig } from '@/server/globalConfig';
-import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import { initEmbeddingRuntimeFromDB } from '@/server/modules/ModelRuntime';
 import { ChunkService } from '@/server/services/chunk';
 import { DocumentService } from '@/server/services/document';
 import { KnowledgeBaseSearchService } from '@/server/services/knowledgeBase';
@@ -128,7 +128,7 @@ export const chunkRouter = router({
       const { model, provider } =
         getServerDefaultFilesConfig().embeddingModel || DEFAULT_FILE_EMBEDDING_MODEL_ITEM;
       // Read user's provider config from database
-      const agentRuntime = await initModelRuntimeFromDB(
+      const agentRuntime = await initEmbeddingRuntimeFromDB(
         ctx.serverDB,
         ctx.userId,
         provider,

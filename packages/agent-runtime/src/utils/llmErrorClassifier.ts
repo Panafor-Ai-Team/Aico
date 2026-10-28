@@ -224,7 +224,10 @@ const createKindClassifier = (options: LLMErrorClassifierOptions = {}) => {
 
     if (status !== undefined) {
       if (status === 401 || status === 403) return 'stop';
-      if (status === 400 || status === 404 || status === 409 || status === 422) return 'stop';
+      // 413: the request body is too large and resending it cannot succeed.
+      if (status === 400 || status === 404 || status === 409 || status === 413 || status === 422) {
+        return 'stop';
+      }
       if (status === 408 || status === 425 || status === 429 || status >= 500) return 'retry';
     }
 
@@ -255,6 +258,19 @@ const bestEffortMessage = (error: unknown): string => {
     // Property access itself can throw (e.g. hostile Proxy). Fall through to default.
   }
   return 'unknown error';
+};
+
+/**
+ * The chat route's own "no response headers within the start window" failure.
+ * It already cost a full window per attempt, so retrying it many times keeps the
+ * user waiting for minutes on an upstream that is not answering.
+ */
+export const isChatStartTimeoutError = (error: unknown): boolean => {
+  try {
+    return normalizeSignal(error).message.includes('chat start timed out');
+  } catch {
+    return false;
+  }
 };
 
 export const createLLMErrorClassifier = (options: LLMErrorClassifierOptions = {}) => {

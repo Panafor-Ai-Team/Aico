@@ -72,6 +72,17 @@ describe('llmErrorClassifier', () => {
     expect(classifyLLMError(new Error('unexpected upstream issue')).kind).toBe('retry');
   });
 
+  it('stops on 413 because resending the same body cannot succeed', () => {
+    expect(classifyLLMError({ code: 413, message: 'Request Entity Too Large' }).kind).toBe('stop');
+    expect(classifyLLMError({ message: 'upstream said 413' }).kind).toBe('stop');
+  });
+
+  it('still retries the chat start timeout (the budget caps it, not the classifier)', () => {
+    expect(classifyLLMError(new Error('Chat start timed out: upstream-headers')).kind).toBe(
+      'retry',
+    );
+  });
+
   it('preserves a valid result when provider error shapes contain non-string fields', () => {
     expect(
       classifyWithSpecs({ errorType: { nested: 'structured' }, message: 'structured type' }),

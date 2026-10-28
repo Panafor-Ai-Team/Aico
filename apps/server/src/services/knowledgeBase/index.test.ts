@@ -8,7 +8,7 @@ import { SearchRepo } from '@/database/repositories/search';
 import { knowledgeBaseFiles } from '@/database/schemas';
 import { buildWorkspaceWhere } from '@/database/utils/workspace';
 import { getServerDefaultFilesConfig } from '@/server/globalConfig';
-import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import { initEmbeddingRuntimeFromDB } from '@/server/modules/ModelRuntime';
 
 import { DocumentService } from '../document';
 import { KnowledgeBaseSearchService } from './index';
@@ -19,7 +19,7 @@ vi.mock('@/database/models/file', () => ({ FileModel: vi.fn() }));
 vi.mock('@/database/repositories/search', () => ({ SearchRepo: vi.fn() }));
 vi.mock('../document', () => ({ DocumentService: vi.fn() }));
 vi.mock('@/server/globalConfig', () => ({ getServerDefaultFilesConfig: vi.fn() }));
-vi.mock('@/server/modules/ModelRuntime', () => ({ initModelRuntimeFromDB: vi.fn() }));
+vi.mock('@/server/modules/ModelRuntime', () => ({ initEmbeddingRuntimeFromDB: vi.fn() }));
 vi.mock('@/database/utils/workspace', () => ({
   buildWorkspaceWhere: vi.fn(() => 'WORKSPACE_SCOPE'),
 }));
@@ -184,7 +184,7 @@ describe('KnowledgeBaseSearchService', () => {
       vi.mocked(getServerDefaultFilesConfig).mockReturnValue({
         embeddingModel: { model: 'text-embedding-3-small', provider: 'openai' },
       } as any);
-      vi.mocked(initModelRuntimeFromDB).mockResolvedValue({
+      vi.mocked(initEmbeddingRuntimeFromDB).mockResolvedValue({
         embeddings: vi.fn().mockResolvedValue([[0.1, 0.2, 0.3]]),
       } as any);
     });

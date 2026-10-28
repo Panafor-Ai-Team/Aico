@@ -24,9 +24,11 @@ import { ModelProvider } from 'model-bank';
 import { AiProviderBaseURLSchema } from 'model-bank/aiProvider';
 import { DEFAULT_MODEL_PROVIDER_LIST } from 'model-bank/modelProviders';
 
+import { MANAGED_PROVIDER_ID } from '@lobechat/business-const';
 import { getBusinessModelRuntimeHooks } from '@/business/server/model-runtime';
 import { AiProviderModel } from '@/database/models/aiProvider';
 import { type LobeChatDatabase } from '@/database/type';
+import { aicoEnv } from '@/envs/aico';
 import { getLLMConfig } from '@/envs/llm';
 import { assertManagedTrafficAllowed } from '@/server/services/aico/ledger/gate';
 import { createManagedBillingHooks } from '@/server/services/aico/ledger/managedBillingHooks';
@@ -559,4 +561,45 @@ export const initModelRuntimeFromDB = async (
 
   // 6. Initialize ModelRuntime with the payload and hooks
   return initModelRuntimeWithUserPayload(runtimeLookupProvider, payload, { userId }, hooks);
+};
+
+/**
+ * Runtime for an embedding call.
+ *
+ * Embeddings stay on OpenRouter whatever the managed chat provider is, because
+ * CheapVibeCode serves no embeddings route (see `DEFAULT_EMBEDDING_PROVIDER`).
+ * `initModelRuntimeFromDB` cannot do that: it treats `openrouter` as a managed
+ * provider id and rewrites it to the active gateway, so the request would go to
+ * CheapVibeCode with a member key and 404.
+ *
+ * While the managed provider is something else, this builds an unmanaged
+ * OpenRouter runtime from `AICO_EMBEDDING_OPENROUTER_API_KEY`. The platform pays
+ * for these calls; they are not held or settled against a member wallet. On any
+ * other provider, or when OpenRouter is itself the managed one, it defers to
+ * `initModelRuntimeFromDB` unchanged.
+ */
+export const initEmbeddingRuntimeFromDB = async (
+  db: LobeChatDatabase,
+  userId: string,
+  provider: string,
+  workspaceId?: string,
+  options?: { billingContext?: unknown; modelId?: string },
+): Promise<ModelRuntime> => {
+  if (provider !== ModelProvider.OpenRouter || MANAGED_PROVIDER_ID === ModelProvider.OpenRouter) {
+    return initModelRuntimeFromDB(db, userId, provider, workspaceId, options);
+  }
+
+  const apiKey = aicoEnv.AICO_EMBEDDING_OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      'EMBEDDING_PROVIDER_NOT_CONFIGURED: set AICO_EMBEDDING_OPENROUTER_API_KEY to embed while the managed provider is not OpenRouter',
+    );
+  }
+
+  return initModelRuntimeWithUserPayload(
+    ModelProvider.OpenRouter,
+    buildPayloadFromKeyVaults({ apiKey }, ModelProvider.OpenRouter),
+    { userId },
+    createLLMGenerationTracingHook(userId, ModelProvider.OpenRouter, workspaceId),
+  );
 };

@@ -43,6 +43,12 @@ declare global {
        */
       AICO_CVC_TOKENS_PER_USD?: string;
       /**
+       * OpenRouter inference key used only for embeddings while the managed chat
+       * provider is not OpenRouter (CheapVibeCode serves no embeddings route).
+       * The platform pays for these calls; they are not metered to member wallets.
+       */
+      AICO_EMBEDDING_OPENROUTER_API_KEY?: string;
+      /**
        * Kill switch for the 2026-10 reclaim fix (R1): a removed member's key is
        * frozen first and settled through the freeze, because CheapVibeCode will
        * not read a frozen key's balance. On unless set to `0`.
@@ -230,6 +236,7 @@ export const getAicoConfig = () => {
       AICO_FIX_SC_KEY_FOLLOWS_MONEY: z.boolean().default(true),
       AICO_CVC_TOKENS_PER_USD: z.coerce.number().positive().int().default(25_000_000),
       AICO_OPENROUTER_MOCK: z.boolean().optional().default(false),
+      AICO_EMBEDDING_OPENROUTER_API_KEY: z.string().optional(),
       CHEAPVIBECODE_BASE_URL: z.string().default('https://ru.cheapvibecode.ru'),
       CHEAPVIBECODE_MANAGEMENT_API_KEY: z.string().optional(),
       CHEAPVIBECODE_VIDEO_BASE_URL: z.string().url().optional(),
@@ -263,6 +270,7 @@ export const getAicoConfig = () => {
       AICO_FIX_SC_KEY_FOLLOWS_MONEY: process.env.AICO_FIX_SC_KEY_FOLLOWS_MONEY !== '0',
       AICO_CVC_TOKENS_PER_USD: process.env.AICO_CVC_TOKENS_PER_USD,
       AICO_OPENROUTER_MOCK: process.env.AICO_OPENROUTER_MOCK === '1',
+      AICO_EMBEDDING_OPENROUTER_API_KEY: process.env.AICO_EMBEDDING_OPENROUTER_API_KEY || undefined,
       CHEAPVIBECODE_BASE_URL: process.env.CHEAPVIBECODE_BASE_URL || 'https://ru.cheapvibecode.ru',
       CHEAPVIBECODE_MANAGEMENT_API_KEY: process.env.CHEAPVIBECODE_MANAGEMENT_API_KEY,
       CHEAPVIBECODE_VIDEO_BASE_URL: process.env.CHEAPVIBECODE_VIDEO_BASE_URL || undefined,
