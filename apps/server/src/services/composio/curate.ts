@@ -1,3 +1,4 @@
+import { ConnectorToolPermission } from '@/database/schemas';
 import { inferCrudType } from '@/libs/mcp/utils';
 
 export interface ComposioToolLike {
@@ -149,3 +150,46 @@ export const fetchCuratedComposioTools = async (
 
   return curateComposioTools(items, { max, prioritySlugs });
 };
+
+/**
+ * Version of the tool set a Composio connector row was synced with. Bump it
+ * whenever the curation rules change: ACTIVE connectors stamped with an older
+ * (or no) `metadata.composio.toolsVersion` are re-synced on their next agent run,
+ * because the saved tool rows are otherwise only written once, at connect time.
+ */
+export const COMPOSIO_TOOLS_VERSION = 1;
+
+export interface ComposioToolInput {
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+  name: string;
+}
+
+/** Normalize a raw Composio tool (slug/inputParameters) to the shape stored on connector rows. */
+export const normalizeComposioTool = (tool: ComposioToolLike) => ({
+  description: tool.description || '',
+  inputSchema: tool.inputParameters ||
+    tool.inputSchema || {
+      properties: {},
+      type: 'object',
+    },
+  name: tool.slug || tool.name || '',
+});
+
+/**
+ * Map synced tools to `user_connector_tools` rows. Read actions run unattended;
+ * anything that mutates the user's account needs a human approval. Only applied
+ * to newly-inserted rows — an explicit user choice is preserved on re-sync.
+ */
+export const toConnectorToolRows = (tools: ComposioToolInput[]) =>
+  tools.map((t) => {
+    const crudType = inferCrudType(t.name);
+    return {
+      crudType,
+      defaultPermission:
+        crudType === 'read' ? ConnectorToolPermission.auto : ConnectorToolPermission.needs_approval,
+      description: t.description,
+      inputSchema: t.inputSchema,
+      toolName: t.name,
+    };
+  });

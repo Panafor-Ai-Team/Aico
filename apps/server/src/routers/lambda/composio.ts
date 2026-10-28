@@ -17,13 +17,16 @@ import {
   type ConnectorMetadata,
   ConnectorSourceType,
   ConnectorStatus,
-  ConnectorToolPermission,
 } from '@/database/schemas';
 import { getComposioClient } from '@/libs/composio';
-import { inferCrudType } from '@/libs/mcp/utils';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
-import { fetchCuratedComposioTools } from '@/server/services/composio/curate';
+import {
+  COMPOSIO_TOOLS_VERSION,
+  type ComposioToolInput,
+  fetchCuratedComposioTools,
+  toConnectorToolRows,
+} from '@/server/services/composio/curate';
 
 import { assertWorkspaceRowManageable } from './_helpers/assertWorkspaceRowManageable';
 
@@ -77,12 +80,6 @@ async function assertComposioRowManageable(
   if (existing) assertWorkspaceRowManageable(ctx, existing.userId, 'connector');
 }
 
-type ComposioToolInput = {
-  description?: string;
-  inputSchema?: Record<string, unknown>;
-  name: string;
-};
-
 /**
  * Dual-write helper: mirror a Composio connection into `user_connectors`
  * (+ `user_connector_tools`) so the runtime can resolve it without touching the
@@ -117,9 +114,17 @@ async function upsertComposioConnector(
     tools?: ComposioToolInput[];
   },
 ): Promise<void> {
+  // Stamp the tool-set version only when an authoritative tool list is written,
+  // so a connector synced before the curation rules changed is picked up for a
+  // lazy re-sync at runtime (ComposioService.getComposioManifests).
+  const composio: ComposioConnectorMetadata =
+    params.replaceTools && params.tools?.length
+      ? { ...params.composio, toolsVersion: COMPOSIO_TOOLS_VERSION }
+      : params.composio;
+
   const metadata: ConnectorMetadata = {
     avatar: '🔌',
-    composio: params.composio,
+    composio,
     description: `Composio: ${params.label}`,
   };
 
@@ -157,25 +162,7 @@ async function upsertComposioConnector(
 
   if (params.tools) {
     if (params.tools.length > 0) {
-      await connectorToolModel.upsertMany(
-        connectorId,
-        params.tools.map((t) => {
-          const crudType = inferCrudType(t.name);
-          return {
-            crudType,
-            // Read actions run unattended; anything that mutates the user's
-            // account needs a human approval. Only applied to newly-inserted
-            // rows — an explicit user choice is preserved on re-sync.
-            defaultPermission:
-              crudType === 'read'
-                ? ConnectorToolPermission.auto
-                : ConnectorToolPermission.needs_approval,
-            description: t.description,
-            inputSchema: t.inputSchema,
-            toolName: t.name,
-          };
-        }),
-      );
+      await connectorToolModel.upsertMany(connectorId, toConnectorToolRows(params.tools));
     }
 
     // Replace (not merge) so tools removed upstream stop being advertised.

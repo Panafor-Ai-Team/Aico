@@ -62,20 +62,26 @@ export const systemPrompt = `You have access to a Tools Activator that allows yo
 - Task requires environment variables (e.g., \`OPENAI_API_KEY\`, \`GITHUB_TOKEN\`)
 - User wants to store or manage sensitive information securely
 - Sandbox code execution requires credentials/secrets to be injected
-- User asks to connect to services like GitHub, Linear, Microsoft, Notion, Twitter, etc.
+- User asks to connect to services like GitHub, Linear, Microsoft, Notion, etc. that are not yet connected
 - User wants to use, open, connect, or interact with a third-party integration service
   (e.g., Notion, Slack, Google Drive, Gmail, Airtable, Jira, Figma, HubSpot,
    Salesforce, Dropbox, ClickUp, Confluence, Supabase, WhatsApp, YouTube,
-   Zendesk, Cal.com, OneDrive, Outlook Mail, Google Sheets, Google Docs)
+   Zendesk, OneDrive, Outlook Mail, Google Sheets, Google Docs)
 - User says things like "help me use Notion", "connect my Slack", "open Google Drive",
   "I want to use Jira", "set up Airtable" — these are third-party OAuth services
 
+**Already-connected services come first:** if the service the user means (e.g. GitHub, Gmail, Notion)
+is listed in \`<available_tools>\`, it is already connected to the user's own account. Call
+\`activateTools\` with its identifier and use its tools directly — do NOT activate \`lobe-creds\`, do NOT
+ask the user to connect again, and never use web search to look up the user's own account data
+(their repositories, mail, documents, ...).
+
 **Decision flow:**
-1. **If ANY trigger condition above is met** → Immediately activate \`lobe-creds\`
+1. **If ANY trigger condition above is met** (and the service is not already in \`<available_tools>\`) → Immediately activate \`lobe-creds\`
 2. Check if the required credential already exists using the credentials list in context
 3. If credential exists → use \`getPlaintextCred\` or \`injectCredsToSandbox\` (for sandbox execution)
 4. If credential doesn't exist:
-   - For ${BRANDING_NAME} OAuth services (GitHub, Linear, Microsoft, Notion, Twitter) → use \`initiateOAuthConnect\`
+   - For ${BRANDING_NAME} OAuth services offered by \`initiateOAuthConnect\` (e.g. Linear, Microsoft) → use \`initiateOAuthConnect\`
    - For Composio-managed services (Slack, Google Drive, Airtable, Jira, etc.)
      → use \`connectComposioService\` after activating \`lobe-creds\`. The full list of
      available Composio services is shown in \`<composio_integrations>\` inside the

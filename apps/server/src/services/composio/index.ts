@@ -3,7 +3,7 @@ import type { LobeToolManifest } from '@lobechat/context-engine';
 import type { LobeChatDatabase } from '@lobechat/database';
 import debug from 'debug';
 
-import { ConnectorModel } from '@/database/models/connector';
+import { ConnectorModel, type DecryptedConnector } from '@/database/models/connector';
 import { ConnectorToolModel } from '@/database/models/connectorTool';
 import { PluginModel } from '@/database/models/plugin';
 import type { UserConnectorToolItem } from '@/database/schemas';
@@ -14,9 +14,31 @@ import {
 } from '@/libs/composio';
 import { type ToolExecutionResult } from '@/server/services/toolExecution/types';
 
+import {
+  COMPOSIO_TOOLS_VERSION,
+  fetchCuratedComposioTools,
+  normalizeComposioTool,
+  toConnectorToolRows,
+} from './curate';
+
 const log = debug('lobe-server:composio-service');
 
 const VALID_COMPOSIO_IDENTIFIERS = new Set(COMPOSIO_APP_TYPES.map((type) => type.identifier));
+
+/**
+ * Shown to the model in `<available_tools>`. Spell out that this is the user's
+ * own authorized account: with a bare "Composio: GitHub" the model treats the
+ * integration as generic and falls back to public web search for the user's data.
+ */
+const describeConnectedApp = (label: string) =>
+  `${label} — connected to the user's own ${label} account (including private data). ` +
+  `Use it for anything about the user's own ${label} content; do not use web search for it.`;
+
+/** Upper bound on the lazy tool re-sync, so a slow Composio API can't stall an agent run. */
+const TOOLS_RESYNC_TIMEOUT_MS = 5000;
+/** After a failed re-sync, skip retrying that connector for this long (per process). */
+const TOOLS_RESYNC_RETRY_COOLDOWN_MS = 10 * 60 * 1000;
+const toolsResyncFailedAt = new Map<string, number>();
 
 export interface ComposioToolExecuteParams {
   /**
@@ -244,6 +266,72 @@ export class ComposioService {
     return undefined;
   }
 
+  /**
+   * Bring ACTIVE connectors saved with an older curated tool set up to date.
+   *
+   * The tool rows are only written when a connection becomes ACTIVE, so a
+   * connection made before the curation rules changed keeps the old (for GitHub:
+   * write-heavy, no "list my repos") tools forever. Each connector is re-synced
+   * once per `COMPOSIO_TOOLS_VERSION`; failures keep the saved tools.
+   */
+  private async resyncStaleTools(connectors: DecryptedConnector[]): Promise<void> {
+    if (!this.connectorModel || !this.connectorToolModel || !isComposioClientAvailable()) return;
+    const connectorModel = this.connectorModel;
+    const connectorToolModel = this.connectorToolModel;
+
+    const now = Date.now();
+    const stale = connectors.filter((c) => {
+      const composio = c.metadata?.composio;
+      if (!composio || (composio.toolsVersion ?? 0) >= COMPOSIO_TOOLS_VERSION) return false;
+      return now - (toolsResyncFailedAt.get(c.id) ?? 0) > TOOLS_RESYNC_RETRY_COOLDOWN_MS;
+    });
+    if (stale.length === 0) return;
+
+    const resync = async (connector: DecryptedConnector) => {
+      const composio = connector.metadata!.composio!;
+      const raw = await fetchCuratedComposioTools(getComposioClient(), composio.appSlug);
+      const tools = raw.map(normalizeComposioTool).filter((t) => t.name);
+      // Never wipe a connector's tools because Composio returned nothing.
+      if (tools.length === 0) throw new Error('Composio returned no tools');
+
+      await connectorToolModel.upsertMany(connector.id, toConnectorToolRows(tools));
+      await connectorToolModel.deleteToolsNotIn(
+        connector.id,
+        tools.map((t) => t.name),
+      );
+      await connectorModel.update(connector.id, {
+        metadata: {
+          ...connector.metadata,
+          composio: { ...composio, toolsVersion: COMPOSIO_TOOLS_VERSION },
+        },
+      });
+      log('resyncStaleTools: %s re-synced with %d tools', connector.identifier, tools.length);
+    };
+
+    await Promise.all(
+      stale.map(async (connector) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            resync(connector),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(
+                () => reject(new Error('Composio tool re-sync timed out')),
+                TOOLS_RESYNC_TIMEOUT_MS,
+              );
+            }),
+          ]);
+          toolsResyncFailedAt.delete(connector.id);
+        } catch (error) {
+          toolsResyncFailedAt.set(connector.id, Date.now());
+          log('resyncStaleTools: %s failed, keeping saved tools: %O', connector.identifier, error);
+        } finally {
+          clearTimeout(timer);
+        }
+      }),
+    );
+  }
+
   async getComposioManifests(agentId?: string): Promise<LobeToolManifest[]> {
     const manifests: LobeToolManifest[] = [];
     const coveredIdentifiers = new Set<string>();
@@ -261,6 +349,8 @@ export class ComposioService {
         );
 
         if (composioConnectors.length > 0) {
+          await this.resyncStaleTools(composioConnectors);
+
           const tools = await this.connectorToolModel.queryAllByConnectorIds(
             composioConnectors.map((c) => c.id),
           );
@@ -292,7 +382,7 @@ export class ComposioService {
               identifier: connector.identifier,
               meta: {
                 avatar: connector.metadata?.avatar || '☁️',
-                description: `Composio: ${label}`,
+                description: describeConnectedApp(label),
                 tags: ['composio', 'mcp'],
                 title: label,
               },

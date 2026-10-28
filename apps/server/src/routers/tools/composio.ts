@@ -7,7 +7,10 @@ import { PluginModel } from '@/database/models/plugin';
 import { getComposioClient, isComposioConnectedAccountNotFoundError } from '@/libs/composio';
 import { publicProcedure, router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
-import { fetchCuratedComposioTools } from '@/server/services/composio/curate';
+import {
+  fetchCuratedComposioTools,
+  normalizeComposioTool,
+} from '@/server/services/composio/curate';
 import { MCPService } from '@/server/services/mcp';
 
 // wsCompatProcedure (not authedProcedure): when a request carries X-Workspace-Id
@@ -134,15 +137,7 @@ export const composioToolsRouter = router({
       // empty and every tool collapses to the same `${identifier}____` name.
       const rawTools = await fetchCuratedComposioTools(ctx.composioClient, input.appSlug);
 
-      const tools = rawTools.map((tool) => ({
-        description: tool.description || '',
-        inputSchema: tool.inputParameters ||
-          tool.inputSchema || {
-            properties: {},
-            type: 'object',
-          },
-        name: tool.slug || tool.name || '',
-      }));
+      const tools = rawTools.map(normalizeComposioTool);
 
       return { tools };
     }),

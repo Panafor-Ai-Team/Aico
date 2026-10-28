@@ -1340,8 +1340,6 @@
   "tools.composio.servers": "台のサーバー",
   "tools.composio.servers.airtable.description": "Airtableは、スプレッドシートの柔軟性とデータベースの強力さを兼ね備えたクラウドベースのデータベース＆スプレッドシートプラットフォームで、チームがプロジェクトを整理・追跡・共同作業できるようにします。",
   "tools.composio.servers.airtable.readme": "Airtableと連携してデータベースやワークフローを管理します。レコードの検索、エントリの作成、データの更新、カスタマイズ可能なビューと強力なトラッキング機能による自動化が可能です。",
-  "tools.composio.servers.cal-com.description": "Cal.comは、メールのやり取りなしでミーティングのスケジュールを調整できるオープンソースのスケジューリングプラットフォームです。イベントタイプ、予約、空き状況の管理やカレンダーとの連携が可能です。",
-  "tools.composio.servers.cal-com.readme": "Cal.comと接続してスケジュールや予定を管理します。空き状況の確認、会議の予約、イベントタイプの管理、自然な会話を通じたカレンダーの自動化が可能です。",
   "tools.composio.servers.clickup.description": "ClickUpは、タスクの整理、プロジェクト管理、チームの効果的なコラボレーションを支援する包括的なプロジェクト管理・生産性向上プラットフォームです。",
   "tools.composio.servers.clickup.readme": "ClickUpと連携してタスク管理、プロジェクトの進捗追跡、作業の整理を行います。タスクの作成、ステータスの更新、カスタムワークフローの管理、チームとの自然言語によるコラボレーションが可能です。",
   "tools.composio.servers.confluence.description": "Confluenceは、知識とコラボレーションが融合するチームワークスペースです。",

@@ -1340,8 +1340,6 @@
   "tools.composio.servers": "sunucular",
   "tools.composio.servers.airtable.description": "Airtable, bir elektronik tablo esnekliğini veritabanı gücüyle birleştiren bulut tabanlı bir veritabanı ve tablo platformudur. Takımların projeleri özelleştirilebilir görünümler ve güçlü otomasyon özellikleriyle düzenlemesini, takip etmesini ve iş birliği yapmasını sağlar.",
   "tools.composio.servers.airtable.readme": "Veritabanlarınızı ve iş akışlarınızı yönetmek için Airtable ile entegre olun. Kayıtları sorgulayın, girişler oluşturun, verileri güncelleyin ve özelleştirilebilir görünümlerle işlemleri otomatikleştirin.",
-  "tools.composio.servers.cal-com.description": "Cal.com, e-posta trafiği olmadan toplantı planlamanızı sağlayan açık kaynaklı bir zamanlama platformudur. Etkinlik türlerini, rezervasyonları, uygunlukları yönetin ve takvimlerle entegre ederek randevularınızı kolayca planlayın.",
-  "tools.composio.servers.cal-com.readme": "Takvim ve randevularınızı yönetmek için Cal.com'a bağlanın. Müsaitlik durumunu görüntüleyin, toplantılar planlayın, etkinlik türlerini yönetin ve takviminizi doğal konuşmalarla otomatikleştirin.",
   "tools.composio.servers.clickup.description": "ClickUp, görevleri düzenlemek, projeleri yönetmek ve özelleştirilebilir iş akışları ile etkili iş birliği sağlamak için kapsamlı bir proje yönetimi ve verimlilik platformudur.",
   "tools.composio.servers.clickup.readme": "Görevleri yönetmek, projeleri takip etmek ve işlerinizi düzenlemek için ClickUp'a bağlanın. Görevler oluşturun, durumları güncelleyin, özel iş akışlarını yönetin ve ekibinizle doğal dil komutlarıyla iş birliği yapın.",
   "tools.composio.servers.confluence.description": "Confluence, bilginin ve iş birliğinin buluştuğu bir ekip çalışma alanıdır.",

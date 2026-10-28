@@ -3139,12 +3139,6 @@ When I am ___, I need ___
   'tools.composio.servers.airtable.readme':
     'Integrate with Airtable to manage your databases and workflows. Query records, create entries, update data, and automate operations with customizable views and powerful tracking features.',
 
-  'tools.composio.servers.cal-com.description':
-    'Cal.com is an open-source scheduling platform that helps you schedule meetings without the back-and-forth emails. Manage event types, bookings, availability, and integrate with calendars for seamless appointment scheduling',
-
-  'tools.composio.servers.cal-com.readme':
-    'Connect to Cal.com to manage your scheduling and appointments. View availability, book meetings, manage event types, and automate your calendar through natural conversation.',
-
   'tools.composio.servers.clickup.description':
     'ClickUp is a comprehensive project management and productivity platform that helps teams organize tasks, manage projects, and collaborate effectively with customizable workflows and powerful tracking features',
 
