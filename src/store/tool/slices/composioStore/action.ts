@@ -1,4 +1,6 @@
 import { COMPOSIO_APP_TYPES } from '@lobechat/const';
+import { toast } from '@lobehub/ui/base-ui';
+import { t } from 'i18next';
 import { produce } from 'immer';
 import { type SWRResponse } from 'swr';
 import useSWR from 'swr';
@@ -138,6 +140,8 @@ export class ComposioStoreActionImpl {
       return server;
     } catch (error) {
       console.error('[Composio] Failed to create connection:', error);
+      // Every connect entry point returns quietly on `undefined`; say why here.
+      toast.error(t('tools.composio.connectFailed', { label, ns: 'setting' }));
 
       this.#set(
         produce((draft: ComposioStoreState) => {
@@ -297,6 +301,17 @@ export class ComposioStoreActionImpl {
         });
       } catch (error) {
         console.error('[Composio] Failed to delete connection:', error);
+        // The server keeps the connection when revoking it fails; show it again.
+        this.#set(
+          produce((draft: ComposioStoreState) => {
+            if (!draft.composioServers.some((s) => s.identifier === identifier)) {
+              draft.composioServers.push(server);
+            }
+          }),
+          false,
+          n('removeComposioConnection/rollback'),
+        );
+        toast.error(t('tools.composio.disconnectFailed', { label: server.label, ns: 'setting' }));
       }
     }
   };

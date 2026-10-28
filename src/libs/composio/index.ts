@@ -49,6 +49,32 @@ export const isComposioConnectedAccountLookupNotFoundError = (error: unknown): b
   return record?.status === 404 || record?.statusCode === 404;
 };
 
+/**
+ * Revokes a Composio connected account (deletes it, and the OAuth token it holds).
+ *
+ * Use when:
+ * - A connection is disconnected, uninstalled or replaced
+ *
+ * Expects:
+ * - Callers delete their own DB rows only after this resolves, so a failed revoke
+ *   never leaves an ACTIVE account behind with no row pointing at it (such an
+ *   orphan keeps the token alive and blocks `connectedAccounts.link` for the user)
+ *
+ * Returns:
+ * - Resolves when the account is gone, including when it was already missing;
+ *   rethrows any other failure
+ */
+export const revokeComposioConnectedAccount = async (
+  client: Composio,
+  connectedAccountId: string,
+): Promise<void> => {
+  try {
+    await client.connectedAccounts.delete(connectedAccountId);
+  } catch (error) {
+    if (!isComposioConnectedAccountLookupNotFoundError(error)) throw error;
+  }
+};
+
 export const getComposioClient = (): Composio => {
   const apiKey = getServerComposioApiKey();
 

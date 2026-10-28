@@ -18,6 +18,11 @@ import {
   ConnectorToolPermission,
 } from '@/database/schemas';
 import type { LobeChatDatabase } from '@/database/type';
+import {
+  getComposioClient,
+  isComposioClientAvailable,
+  revokeComposioConnectedAccount,
+} from '@/libs/composio';
 import { inferCrudType } from '@/libs/mcp/utils';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
@@ -663,6 +668,15 @@ export const connectorRouter = router({
       // Missing row → keep the delete idempotent, nothing to authorize.
       if (!target) return;
       assertWorkspaceRowManageable(ctx, target.userId, 'connector');
+
+      // A Composio connector's authorization lives in its Composio account, not
+      // in this row. Revoke it first: deleting only the row leaves an ACTIVE
+      // account (and its token) behind, which also blocks reconnecting.
+      const composioAccountId = target.metadata?.composio?.connectedAccountId;
+      if (composioAccountId && isComposioClientAvailable()) {
+        await revokeComposioConnectedAccount(getComposioClient(), composioAccountId);
+      }
+
       await ctx.connectorModel.delete(input.id);
 
       // Agent-owned connector: also unpin its tool from the owning agent's
