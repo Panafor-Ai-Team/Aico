@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   pluginCreate: vi.fn(),
   pluginDelete: vi.fn(),
   pluginFindById: vi.fn(),
+  pluginQuery: vi.fn(),
+  resyncStaleConnections: vi.fn(),
   pluginUpdate: vi.fn(),
 }));
 
@@ -38,6 +40,7 @@ vi.mock('@/database/models/plugin', () => ({
     create: mocks.pluginCreate,
     delete: mocks.pluginDelete,
     findById: mocks.pluginFindById,
+    query: mocks.pluginQuery,
     update: mocks.pluginUpdate,
   })),
 }));
@@ -55,6 +58,12 @@ vi.mock('@/database/models/connectorTool', () => ({
   ConnectorToolModel: vi.fn().mockImplementation(() => ({
     deleteToolsNotIn: mocks.connectorToolDeleteToolsNotIn,
     upsertMany: mocks.connectorToolUpsertMany,
+  })),
+}));
+
+vi.mock('@/server/services/composio', () => ({
+  ComposioService: vi.fn().mockImplementation(() => ({
+    resyncStaleConnections: mocks.resyncStaleConnections,
   })),
 }));
 
@@ -82,7 +91,14 @@ describe('composioRouter.createConnection dual-write', () => {
     mocks.getServerComposioAuthConfigId.mockReturnValue('ac_env');
     mocks.connectedAccountsLink.mockResolvedValue({ id: 'ca-1', redirectUrl: 'https://auth' });
     mocks.getRawComposioTools.mockResolvedValue({
-      items: [{ description: 'send', inputParameters: { type: 'object' }, slug: 'GMAIL_SEND' }],
+      items: [
+        {
+          description: 'send',
+          inputParameters: { type: 'object' },
+          slug: 'GMAIL_SEND',
+          tags: ['important'],
+        },
+      ],
     });
 
     await caller().createConnection({ appSlug: 'GMAIL', identifier: 'gmail', label: 'Gmail' });
@@ -265,5 +281,24 @@ describe('composioRouter delete paths clean up the connector projection', () => 
     await caller().removeComposioPlugin({ identifier: 'gmail' });
 
     expect(mocks.connectorDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe('composioRouter.getComposioPlugins', () => {
+  // The browser builds its Composio tools from these rows, so connections saved
+  // with an older curated tool set must be re-synced before they are returned.
+  it('re-syncs stale connections before returning the Composio rows', async () => {
+    mocks.pluginQuery.mockResolvedValue([
+      { customParams: { composio: { status: 'ACTIVE' } }, identifier: 'google-drive' },
+      { customParams: {}, identifier: 'some-mcp' },
+    ]);
+
+    const rows = await caller().getComposioPlugins();
+
+    expect(mocks.resyncStaleConnections).toHaveBeenCalledTimes(1);
+    expect(mocks.resyncStaleConnections.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.pluginQuery.mock.invocationCallOrder[0],
+    );
+    expect(rows.map((r: any) => r.identifier)).toEqual(['google-drive']);
   });
 });

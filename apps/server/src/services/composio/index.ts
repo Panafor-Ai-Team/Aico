@@ -1,4 +1,4 @@
-import { COMPOSIO_APP_TYPES } from '@lobechat/const';
+import { COMPOSIO_APP_TYPES, describeConnectedComposioApp } from '@lobechat/const';
 import type { LobeToolManifest } from '@lobechat/context-engine';
 import type { LobeChatDatabase } from '@lobechat/database';
 import debug from 'debug';
@@ -24,15 +24,6 @@ import {
 const log = debug('lobe-server:composio-service');
 
 const VALID_COMPOSIO_IDENTIFIERS = new Set(COMPOSIO_APP_TYPES.map((type) => type.identifier));
-
-/**
- * Shown to the model in `<available_tools>`. Spell out that this is the user's
- * own authorized account: with a bare "Composio: GitHub" the model treats the
- * integration as generic and falls back to public web search for the user's data.
- */
-const describeConnectedApp = (label: string) =>
-  `${label} — connected to the user's own ${label} account (including private data). ` +
-  `Use it for anything about the user's own ${label} content; do not use web search for it.`;
 
 /** Upper bound on the lazy tool re-sync, so a slow Composio API can't stall an agent run. */
 const TOOLS_RESYNC_TIMEOUT_MS = 5000;
@@ -299,6 +290,23 @@ export class ComposioService {
         connector.id,
         tools.map((t) => t.name),
       );
+      // The browser builds its Composio tools from the personal plugin row's
+      // manifest, not from the connector tool rows — refresh that copy too.
+      if (this.pluginModel && !connector.agentId) {
+        const plugin = await this.pluginModel.findById(connector.identifier);
+        if (plugin?.manifest) {
+          await this.pluginModel.update(connector.identifier, {
+            manifest: {
+              ...plugin.manifest,
+              api: tools.map((t) => ({
+                description: t.description,
+                name: t.name,
+                parameters: t.inputSchema,
+              })),
+            },
+          });
+        }
+      }
       await connectorModel.update(connector.id, {
         metadata: {
           ...connector.metadata,
@@ -330,6 +338,23 @@ export class ComposioService {
         }
       }),
     );
+  }
+
+  /**
+   * Re-sync the caller's ACTIVE Composio connectors saved with an older curated
+   * tool set. Entry point for callers outside an agent run (the page-load
+   * connections fetch); never throws — saved tools stay on any failure.
+   */
+  async resyncStaleConnections(agentId?: string): Promise<void> {
+    if (!this.connectorModel) return;
+    try {
+      const connectors = await this.connectorModel.resolveAll(agentId);
+      await this.resyncStaleTools(
+        connectors.filter((c) => c.isEnabled && c.metadata?.composio?.status === 'ACTIVE'),
+      );
+    } catch (error) {
+      log('resyncStaleConnections failed: %O', error);
+    }
   }
 
   async getComposioManifests(agentId?: string): Promise<LobeToolManifest[]> {
@@ -382,7 +407,7 @@ export class ComposioService {
               identifier: connector.identifier,
               meta: {
                 avatar: connector.metadata?.avatar || '☁️',
-                description: describeConnectedApp(label),
+                description: describeConnectedComposioApp(label),
                 tags: ['composio', 'mcp'],
                 title: label,
               },

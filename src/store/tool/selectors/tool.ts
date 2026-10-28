@@ -1,5 +1,9 @@
 import { getBuiltinRenderDisplayControl } from '@lobechat/builtin-tools/displayControls';
-import { getComposioAppByIdentifier, getLobehubSkillProviderById } from '@lobechat/const';
+import {
+  describeConnectedComposioApp,
+  getComposioAppByIdentifier,
+  getLobehubSkillProviderById,
+} from '@lobechat/const';
 import { type RenderDisplayControl, type ToolManifest } from '@lobechat/types';
 
 import {
@@ -165,10 +169,11 @@ const availableToolsForDiscovery = (s: ToolStoreState): AvailableToolForDiscover
     .filter((server) => server.status === ComposioServerStatus.ACTIVE && server.tools?.length)
     .map((server) => {
       const config = getComposioAppByIdentifier(server.identifier);
+      const name = config?.label || server.label;
       return {
-        description: config?.description || '',
+        description: describeConnectedComposioApp(name),
         identifier: server.identifier,
-        name: config?.label || server.label,
+        name,
       };
     });
 

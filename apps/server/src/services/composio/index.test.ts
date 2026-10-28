@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   markComposioUnavailable: vi.fn(),
   pluginFindById: vi.fn(),
   pluginQuery: vi.fn(),
+  pluginUpdate: vi.fn(),
   toolsExecute: vi.fn(),
 }));
 
@@ -44,6 +45,7 @@ vi.mock('@/database/models/plugin', () => ({
   PluginModel: vi.fn().mockImplementation(() => ({
     findById: mocks.pluginFindById,
     query: mocks.pluginQuery,
+    update: mocks.pluginUpdate,
   })),
 }));
 
@@ -230,6 +232,30 @@ describe('ComposioService.getComposioManifests tool re-sync', () => {
     });
   });
 
+  // Regression: the browser builds its Composio tools from the plugin row's
+  // manifest, so re-syncing only the connector tool rows never reached it.
+  it("refreshes the plugin row's manifest with the re-synced tools", async () => {
+    mocks.connectorQuery.mockResolvedValue([staleGithub({ id: 'conn-github-plugin' })]);
+    mocks.pluginFindById.mockResolvedValue({
+      identifier: 'github',
+      manifest: { api: [{ name: 'OLD' }], identifier: 'github', meta: { title: 'GitHub' } },
+    });
+    mocks.fetchCurated.mockResolvedValue([
+      { description: 'Find files', inputParameters: { type: 'object' }, slug: 'GITHUB_FIND_FILE' },
+    ]);
+
+    await service().getComposioManifests();
+
+    expect(mocks.pluginUpdate).toHaveBeenCalledWith('github', {
+      manifest: expect.objectContaining({
+        api: [
+          { description: 'Find files', name: 'GITHUB_FIND_FILE', parameters: { type: 'object' } },
+        ],
+        meta: { title: 'GitHub' },
+      }),
+    });
+  });
+
   it('does not re-sync a connector already on the current tool version', async () => {
     mocks.connectorQuery.mockResolvedValue([activeConnectorRow()]);
 
@@ -274,6 +300,41 @@ describe('ComposioService.getComposioManifests tool re-sync', () => {
 
     expect(manifest.meta.description).toContain("user's own Gmail account");
     expect(manifest.meta.description).toContain('do not use web search');
+  });
+});
+
+describe('ComposioService.resyncStaleConnections', () => {
+  it('re-syncs only ACTIVE, enabled connectors that are behind', async () => {
+    const stale = (id: string, overrides: Record<string, any> = {}) =>
+      activeConnectorRow({
+        id,
+        identifier: id,
+        metadata: {
+          composio: { appSlug: id.toUpperCase(), connectedAccountId: `ca-${id}`, status: 'ACTIVE' },
+        },
+        ...overrides,
+      });
+    mocks.connectorQuery.mockResolvedValue([
+      stale('googledrive'),
+      stale('airtable', { isEnabled: false }),
+      stale('zendesk', {
+        metadata: {
+          composio: { appSlug: 'ZENDESK', connectedAccountId: 'ca-z', status: 'PENDING' },
+        },
+      }),
+    ]);
+    mocks.fetchCurated.mockResolvedValue([{ slug: 'GOOGLEDRIVE_FIND_FILE' }]);
+
+    await service().resyncStaleConnections();
+
+    expect(mocks.fetchCurated).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchCurated).toHaveBeenCalledWith(expect.anything(), 'GOOGLEDRIVE');
+  });
+
+  it('never throws when the connector lookup fails', async () => {
+    mocks.connectorQuery.mockRejectedValue(new Error('db down'));
+
+    await expect(service().resyncStaleConnections()).resolves.toBeUndefined();
   });
 });
 

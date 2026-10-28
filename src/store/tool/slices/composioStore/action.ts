@@ -230,11 +230,18 @@ export class ComposioStoreActionImpl {
         label: server.label,
         status: 'ACTIVE',
         tools: tools.map((t) => ({
+          crudType: t.crudType,
           description: t.description,
           inputSchema: t.inputSchema,
           name: t.name,
         })),
       });
+
+      // Keep `installedPlugins` in step with the new connection. Best-effort:
+      // the connection itself is already saved and ACTIVE.
+      await this.#get()
+        .refreshPlugins()
+        .catch((error) => console.error('[Composio] Failed to refresh plugins:', error));
     } catch (error) {
       console.error('[Composio] Failed to refresh connection status:', error);
 

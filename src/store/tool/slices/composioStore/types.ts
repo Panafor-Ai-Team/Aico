@@ -5,6 +5,8 @@ export enum ComposioServerStatus {
 }
 
 export interface ComposioTool {
+  /** Server-resolved from Composio's read-only / destructive hints. */
+  crudType?: 'delete' | 'read' | 'update' | 'write';
   description?: string;
   inputSchema: {
     properties?: Record<string, any>;
