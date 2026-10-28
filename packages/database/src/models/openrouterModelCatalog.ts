@@ -173,6 +173,28 @@ const managedGenerationCatalogCards = (): OpenRouterCatalogModelInput[] =>
   MANAGED_PROVIDER_ID === 'cheapvibecode' ? CHEAPVIBECODE_GENERATION_CATALOG_CARDS : [];
 
 /**
+ * Drop stored rows for models this code no longer defines. Embedding rows are
+ * always ours (no upstream listing carries them), and under CheapVibeCode so is
+ * every media row. Without this, a model retired from the cards above keeps
+ * showing until the next sync deletes its row (up to the cron interval).
+ */
+const withoutRetiredCodeOwnedRows = (
+  models: AiProviderModelListItem[],
+): AiProviderModelListItem[] => {
+  const embeddingIds = new Set(EMBEDDING_CATALOG_CARDS.map((card) => card.id));
+  const mediaCards = managedGenerationCatalogCards();
+  const mediaIds = new Set(mediaCards.map((card) => card.id));
+  const mediaIsCodeOwned = MANAGED_PROVIDER_ID === 'cheapvibecode';
+
+  return models.filter((model) => {
+    const type = model.type || 'chat';
+    if (type === 'embedding') return embeddingIds.has(model.id);
+    if (mediaIsCodeOwned && type !== 'chat') return mediaIds.has(model.id);
+    return true;
+  });
+};
+
+/**
  * The generator cards are defined here, not by the upstream, so their parameter
  * schema and pricing in code are authoritative. Rows persisted by an earlier
  * sync would otherwise keep serving a stale schema (e.g. no start-frame upload)
@@ -463,7 +485,9 @@ export class OpenRouterModelCatalogModel {
     });
     const mapped = withAutoRouterAbilities(
       withCheapVibeCodeChatAbilities(
-        withCheapVibeCodeReasoningEffort(withManagedGenerationCards(rowModels)),
+        withCheapVibeCodeReasoningEffort(
+          withManagedGenerationCards(withoutRetiredCodeOwnedRows(rowModels)),
+        ),
       ),
     );
 

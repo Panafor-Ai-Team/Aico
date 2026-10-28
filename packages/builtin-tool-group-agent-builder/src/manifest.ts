@@ -252,7 +252,7 @@ export const GroupAgentBuilderManifest: BuiltinToolManifest = {
         properties: {
           providerId: {
             description:
-              'Optional: filter models by a specific provider id (e.g., "openai", "anthropic", "google")',
+              'Optional: filter models by a provider id that getAvailableModels returned',
             type: 'string',
           },
         },
@@ -330,7 +330,7 @@ export const GroupAgentBuilderManifest: BuiltinToolManifest = {
               },
               model: {
                 description:
-                  'The AI model identifier (e.g., "gpt-4o", "claude-sonnet-4-5-20250929")',
+                  'The AI model identifier, exactly as returned by getAvailableModels. Never use an id that list did not return.',
                 type: 'string',
               },
               params: {
@@ -343,7 +343,7 @@ export const GroupAgentBuilderManifest: BuiltinToolManifest = {
                 type: 'array',
               },
               provider: {
-                description: 'The AI provider identifier (e.g., "openai", "anthropic", "google")',
+                description: 'The provider id returned with the chosen model by getAvailableModels',
                 type: 'string',
               },
             },

@@ -8,6 +8,8 @@ export const BRANDING_INBOX_NAME_FA = `${BRANDING_NAME_FA} AI`;
 export const LOBE_CHAT_CLOUD = BRANDING_CLOUD_NAME;
 export const DEFAULT_EMBEDDING_PROVIDER = 'openrouter';
 export const DEFAULT_MINI_MODEL = 'openai/gpt-4o-mini';
+export const DEFAULT_SUB_AGENT_MODEL = 'deepseek/deepseek-chat-v3.1';
+export const toLiveManagedModelId = (modelId: string): string => modelId;
 export const DEFAULT_MINI_PROVIDER = 'openrouter';
 export const DEFAULT_MODEL = 'openrouter/auto';
 export const DEFAULT_ONBOARDING_MODEL = 'openrouter/auto';

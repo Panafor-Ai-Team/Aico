@@ -1,3 +1,4 @@
+import { toLiveManagedModelId } from '@lobechat/business-const';
 import { type ChatCompletionErrorPayload } from '@lobechat/model-runtime';
 import { AGENT_RUNTIME_ERROR_SET } from '@lobechat/model-runtime';
 import { ChatErrorType } from '@lobechat/types';
@@ -245,6 +246,9 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
     // `aicoBilling` only tells this route who pays; it must never reach the
     // upstream API — strict endpoints (Responses) reject unknown parameters.
     const { aicoBilling: _aicoBilling, ...data } = body;
+    // A browser bundle sends OpenRouter's default ids (mini, sub-agent) even
+    // while another gateway is live; translate before policy and pricing see them.
+    data.model = toLiveManagedModelId(data.model);
 
     let billingContext: AicoBillingContext;
     try {

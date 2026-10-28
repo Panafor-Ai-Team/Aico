@@ -743,7 +743,10 @@ export const PlatformAdminPanel = () => {
                 </Form.Item>
               </div>
               <Form.Item label={t('platform.trialModels')} name="allowedModelIds">
-                <Input.TextArea placeholder="openai/gpt-4o-mini (empty = all)" rows={2} />
+                <Input.TextArea
+                  placeholder="glm-5.3-flash, deepseek-v4-flash (empty = all)"
+                  rows={2}
+                />
               </Form.Item>
               <Button htmlType="submit" loading={busy} type="primary">
                 {t('platform.trialSave')}
