@@ -8,10 +8,15 @@ export const VIDEO_GENERATION_PROVIDERS = ['aico', 'openrouter'] as const;
 export const DEFAULT_VIDEO_MODEL_PROVIDER = 'openrouter';
 
 /**
- * Default video generators for chat, in preference order: Grok Imagine Video
- * (CheapVibeCode gateway), then Create → Video's Seedance default.
+ * Default video generators for chat, in preference order: Kling Video V3
+ * (CheapVibeCode gateway), Grok Imagine Video (OpenRouter's `x-ai/…`), then
+ * Create → Video's Seedance default.
  */
-export const DEFAULT_VIDEO_MODEL_IDS = ['grok-imagine-video', 'dreamina-seedance-2-0-260128'];
+export const DEFAULT_VIDEO_MODEL_IDS = [
+  'kling-video-v3',
+  'grok-imagine-video',
+  'dreamina-seedance-2-0-260128',
+];
 
 export const isVideoGenerationProvider = (providerId: string) =>
   (VIDEO_GENERATION_PROVIDERS as readonly string[]).includes(providerId);

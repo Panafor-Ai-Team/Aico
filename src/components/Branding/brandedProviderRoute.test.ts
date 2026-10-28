@@ -37,3 +37,24 @@ describe('branded provider URL segment', () => {
     expect(isBrandedProviderRouteSegment(null)).toBe(false);
   });
 });
+
+describe('branded provider URL segment when BRANDING_PROVIDER is unset', () => {
+  // Production leaves BRANDING_PROVIDER unset, so it falls back to `official`.
+  it('still hides the gateway name and resolves the slug to the stored slot', async () => {
+    vi.resetModules();
+    vi.doMock('@lobechat/business-const', async (importOriginal) => ({
+      ...(await importOriginal<Record<string, unknown>>()),
+      BRANDING_NAME: 'Panachat',
+      BRANDING_PROVIDER: 'official',
+    }));
+    const { fromProviderRouteSegment, isBrandedProviderRouteSegment, toProviderRouteSegment } =
+      await import('./brandedProviderRoute');
+
+    expect(toProviderRouteSegment('openrouter')).toBe('panachat');
+    expect(toProviderRouteSegment('cheapvibecode')).toBe('panachat');
+    expect(fromProviderRouteSegment('panachat')).toBe('openrouter');
+    expect(isBrandedProviderRouteSegment('panachat')).toBe(true);
+    expect(isBrandedProviderRouteSegment('openrouter')).toBe(true);
+    vi.doUnmock('@lobechat/business-const');
+  });
+});

@@ -27,7 +27,7 @@ const byId = <T extends { id: string }>(rows: T[]) =>
   Object.fromEntries(rows.map((row) => [row.id, row])) as Record<string, T>;
 
 describe('CheapVibeCode generation models', () => {
-  it('adds the image and video generators a text-only /v1/models never lists', async () => {
+  it('adds the media models a text-only /v1/models never lists', async () => {
     const { OpenRouterModelCatalogModel } = await import('../openrouterModelCatalog');
     const catalog = new OpenRouterModelCatalogModel(db);
 
@@ -38,16 +38,16 @@ describe('CheapVibeCode generation models', () => {
 
     const models = byId(await catalog.listAsProviderModels());
 
-    for (const id of [
-      'gpt-image-2',
-      'gpt-image-2.5-sunburst',
-      'gpt-image-2.5-flare',
-      'nano-banana-2',
-      'grok-imagine-image',
-    ]) {
+    for (const id of ['gpt-image-2', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare']) {
       expect(models[id]).toMatchObject({ enabled: true, type: 'image' });
     }
-    expect(models['grok-imagine-video']).toMatchObject({ enabled: true, type: 'video' });
+    expect(models['kling-video-v3']).toMatchObject({ enabled: true, type: 'video' });
+    expect(models['minimax-video-h3']).toMatchObject({ enabled: true, type: 'video' });
+    expect(models['gpt-4o-transcribe']).toMatchObject({ enabled: true, type: 'asr' });
+    // Retired from CVC's media list (2026-10-28).
+    for (const id of ['nano-banana-2', 'grok-imagine-image', 'grok-imagine-video']) {
+      expect(models[id]).toBeUndefined();
+    }
     // GPT Image 2 defaults to medium quality.
     expect((models['gpt-image-2'] as any).parameters.quality.default).toBe('medium');
     // GPT Image 2 shares the 2.5 quality-tiered fee (CVC prices them the same),
@@ -102,66 +102,28 @@ describe('CheapVibeCode generation models', () => {
         medium: expect.any(Number),
       });
     }
-    // Nano Banana 2: aspect + resolution (Gemini surface) plus thinking level.
-    expect((models['nano-banana-2'] as any).parameters.reasoningEffort).toEqual({
-      default: 'medium',
-      enum: ['low', 'medium', 'high'],
+    // CVC docs: quality=auto is charged as low.
+    const gptImagePrices = ((models['gpt-image-2'] as any).pricing?.units?.[0] as any).lookup
+      .prices;
+    expect(gptImagePrices.auto).toBe(gptImagePrices.low);
+    // Kling: resolution × audio per-second lookup.
+    expect(((models['kling-video-v3'] as any).pricing?.units?.[0] as any).lookup).toMatchObject({
+      prices: {
+        '1080p_false': expect.any(Number),
+        '1080p_true': expect.any(Number),
+        '4k_false': expect.any(Number),
+        '4k_true': expect.any(Number),
+        '720p_false': expect.any(Number),
+        '720p_true': expect.any(Number),
+      },
+      pricingParams: ['resolution', 'generateAudio'],
     });
-    expect((models['nano-banana-2'] as any).parameters.aspectRatio.default).toBe('auto');
-    expect((models['nano-banana-2'] as any).parameters.resolution).toEqual({
-      default: '1K',
-      enum: ['512', '1K', '2K', '4K'],
+    expect((models['kling-video-v3'] as any).parameters.duration).toMatchObject({
+      max: 15,
+      min: 3,
     });
-    // Nano Banana 2: single 100K-token tier per image on CVC.
-    expect(models['nano-banana-2'].pricing?.approximatePricePerImage).toEqual(expect.any(Number));
-    expect((models['nano-banana-2'] as any).pricing?.units?.[0]).toMatchObject({
-      name: 'imageGeneration',
-      strategy: 'fixed',
-      unit: 'image',
-    });
-    // Grok Imagine Image keeps aspect + resolution (xAI / CVC video field names).
-    expect((models['grok-imagine-image'] as any).parameters.aspectRatio.default).toBe('auto');
-    expect((models['grok-imagine-image'] as any).parameters.resolution).toEqual({
-      default: '1k',
-      enum: ['1k', '2k'],
-    });
-    expect((models['grok-imagine-image'] as any).parameters.reasoningEffort).toBeUndefined();
-    // Grok Imagine Image: quality-tiered CVC fee (auto billed as medium).
-    expect(models['grok-imagine-image'].pricing?.approximatePricePerImage).toEqual(
-      expect.any(Number),
-    );
-    expect((models['grok-imagine-image'] as any).pricing?.units?.[0]).toMatchObject({
-      name: 'imageGeneration',
-      strategy: 'lookup',
-      unit: 'image',
-    });
-    expect(
-      (
-        (models['grok-imagine-image'] as any).pricing?.units?.[0] as {
-          lookup?: { prices?: object };
-        }
-      ).lookup?.prices,
-    ).toMatchObject({
-      auto: expect.any(Number),
-      high: expect.any(Number),
-      low: expect.any(Number),
-      medium: expect.any(Number),
-    });
-    // Resolution × source lookup so the chat confirm card price moves with quality.
-    expect(models['grok-imagine-video'].pricing?.units?.[0]).toMatchObject({
-      name: 'videoGeneration',
-      strategy: 'lookup',
-      unit: 'second',
-    });
-    expect(
-      (models['grok-imagine-video'].pricing?.units?.[0] as { lookup?: { prices?: object } }).lookup
-        ?.prices,
-    ).toMatchObject({
-      '480p_text': expect.any(Number),
-      '720p_text': expect.any(Number),
-      '480p_image': expect.any(Number),
-      '720p_image': expect.any(Number),
-    });
+    expect((models['minimax-video-h3'] as any).parameters.imageUrls.maxCount).toBe(4);
+    expect((models['minimax-video-h3'] as any).parameters.resolution.enum).toEqual(['768p', '2k']);
   });
 
   it('backfills them on the serve path for a catalog synced before they existed', async () => {
@@ -179,7 +141,7 @@ describe('CheapVibeCode generation models', () => {
     expect(models['gpt-image-2']).toMatchObject({ type: 'image' });
     expect(models['gpt-image-2.5-sunburst']).toMatchObject({ type: 'image' });
     expect(models['gpt-image-2.5-flare']).toMatchObject({ type: 'image' });
-    expect(models['grok-imagine-video']).toMatchObject({ type: 'video' });
+    expect(models['kling-video-v3']).toMatchObject({ type: 'video' });
   });
 
   it('overlays GPT Image 2.5 pricing and quality schema on a row synced without them', async () => {
@@ -212,7 +174,7 @@ describe('CheapVibeCode generation models', () => {
     });
   });
 
-  it('lets GPT Image 2 take several reference images and Grok Imagine Video one start frame', async () => {
+  it('lets GPT Image 2 take several reference images and Kling one first and last frame', async () => {
     const { OpenRouterModelCatalogModel } = await import('../openrouterModelCatalog');
     await db.insert(openrouterModelCatalog).values([
       { enabled: true, id: 'openrouter/auto', payload: {}, syncedAt: new Date(), type: 'chat' },
@@ -230,41 +192,42 @@ describe('CheapVibeCode generation models', () => {
 
     expect(models['gpt-image-2'].parameters.imageUrls.maxCount).toBe(16);
     expect(models['gpt-image-2'].parameters.quality.default).toBe('medium');
-    // CheapVibeCode rejects `reference_images`, so the video card must not offer several.
-    expect(models['grok-imagine-video'].parameters.imageUrl).toEqual({ default: null });
-    expect(models['grok-imagine-video'].parameters.imageUrls).toBeUndefined();
+    // Kling takes frames, not `reference_images`, so it must not offer several.
+    expect(models['kling-video-v3'].parameters.imageUrl).toEqual({ default: null });
+    expect(models['kling-video-v3'].parameters.endImageUrl).toEqual({ default: null });
+    expect(models['kling-video-v3'].parameters.imageUrls).toBeUndefined();
   });
 
-  it('offers an image upload for Grok Imagine Video even from a row synced before it', async () => {
+  it('offers an image upload for Kling Video V3 even from a row synced before it', async () => {
     const { OpenRouterModelCatalogModel } = await import('../openrouterModelCatalog');
     await db.insert(openrouterModelCatalog).values([
       { enabled: true, id: 'openrouter/auto', payload: {}, syncedAt: new Date(), type: 'chat' },
       {
         enabled: true,
-        id: 'grok-imagine-video',
+        id: 'kling-video-v3',
         // Text-to-video-only schema persisted by an earlier sync.
-        payload: { parameters: { duration: { default: 6 }, prompt: { default: '' } } },
+        payload: { parameters: { duration: { default: 5 }, prompt: { default: '' } } },
         syncedAt: new Date(),
         type: 'video',
       },
     ]);
 
     const video = byId(await new OpenRouterModelCatalogModel(db).listAsProviderModels())[
-      'grok-imagine-video'
+      'kling-video-v3'
     ] as any;
 
     expect(video.parameters.imageUrl).toEqual({ default: null });
     expect(video.enabled).toBe(true);
   });
 
-  it('overlays Grok Imagine Video pricing on a row synced without a price table', async () => {
+  it('overlays Kling Video V3 pricing on a row synced without a price table', async () => {
     const { OpenRouterModelCatalogModel } = await import('../openrouterModelCatalog');
     await db.insert(openrouterModelCatalog).values([
       { enabled: true, id: 'openrouter/auto', payload: {}, syncedAt: new Date(), type: 'chat' },
       {
         enabled: true,
-        id: 'grok-imagine-video',
-        payload: { parameters: { duration: { default: 6 }, prompt: { default: '' } } },
+        id: 'kling-video-v3',
+        payload: { parameters: { duration: { default: 5 }, prompt: { default: '' } } },
         pricing: null,
         syncedAt: new Date(),
         type: 'video',
@@ -272,7 +235,7 @@ describe('CheapVibeCode generation models', () => {
     ]);
 
     const video = byId(await new OpenRouterModelCatalogModel(db).listAsProviderModels())[
-      'grok-imagine-video'
+      'kling-video-v3'
     ];
 
     expect(video.pricing?.units?.[0]).toMatchObject({
@@ -289,13 +252,13 @@ describe('CheapVibeCode generation models', () => {
       triggeredBy: 'test',
     });
 
-    await catalog.setModelsEnabled(['grok-imagine-video'], false);
+    await catalog.setModelsEnabled(['kling-video-v3'], false);
     await catalog.replaceCatalog({
       models: [{ id: 'glm-5.3', type: 'chat' }],
       triggeredBy: 'cron',
     });
 
-    expect(byId(await catalog.listAsProviderModels())['grok-imagine-video'].enabled).toBe(false);
+    expect(byId(await catalog.listAsProviderModels())['kling-video-v3'].enabled).toBe(false);
   });
 
   it('backfills reasoningEffort on reasoning chat models missing the extendParam', async () => {

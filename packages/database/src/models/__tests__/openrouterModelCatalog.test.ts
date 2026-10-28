@@ -256,7 +256,7 @@ describe('OpenRouterModelCatalogModel', () => {
     });
 
     const rows = await catalog.listAsProviderModels();
-    const embedding = rows.find((r) => r.id === 'openai/text-embedding-3-small');
+    const embedding = rows.find((r) => r.id === 'google/gemini-embedding-2');
     expect(embedding).toMatchObject({ enabled: true, type: 'embedding' });
 
     // Stays present and enabled across a re-sync too, same as product Auto.
@@ -265,7 +265,7 @@ describe('OpenRouterModelCatalogModel', () => {
       triggeredBy: 'cron',
     });
     const rowsAfterResync = await catalog.listAsProviderModels();
-    expect(rowsAfterResync.find((r) => r.id === 'openai/text-embedding-3-small')).toMatchObject({
+    expect(rowsAfterResync.find((r) => r.id === 'google/gemini-embedding-2')).toMatchObject({
       enabled: true,
     });
   });
@@ -295,7 +295,7 @@ describe('OpenRouterModelCatalogModel', () => {
     ]);
 
     const rows = await catalog.listAsProviderModels();
-    expect(rows.find((r) => r.id === 'openai/text-embedding-3-small')).toMatchObject({
+    expect(rows.find((r) => r.id === 'google/gemini-embedding-2')).toMatchObject({
       enabled: true,
       type: 'embedding',
     });

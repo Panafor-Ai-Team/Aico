@@ -234,7 +234,8 @@ export const cheapVibeCodeGptImage25Pricing: Pricing = {
     {
       lookup: {
         prices: {
-          auto: cheapVibeCodeTokensToUsd(100_000),
+          // CVC docs: `quality=auto` is served and charged as `low`.
+          auto: cheapVibeCodeTokensToUsd(50_000),
           high: cheapVibeCodeTokensToUsd(150_000),
           low: cheapVibeCodeTokensToUsd(50_000),
           medium: cheapVibeCodeTokensToUsd(100_000),

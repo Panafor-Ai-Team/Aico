@@ -30,6 +30,10 @@ interface CheapVibeCodeVideoTask {
   video?: { url?: string | null } | null;
 }
 
+/** Models that accept up to {@link MAX_REFERENCE_IMAGES} `reference_images` (CVC docs). */
+const REFERENCE_IMAGE_MODELS = new Set(['minimax-video-h3']);
+const MAX_REFERENCE_IMAGES = 4;
+
 const FAILED_STATUSES = new Set(['cancelled', 'canceled', 'error', 'expired', 'failed']);
 
 const taskErrorMessage = (error: CheapVibeCodeVideoTask['error']) => {
@@ -63,7 +67,16 @@ export const createCheapVibeCodeVideo = async (
   options: CreateVideoOptions,
 ): Promise<CreateVideoResponse> => {
   const { model, params } = payload;
-  const { aspectRatio, duration, imageUrl, imageUrls, prompt, resolution } = params;
+  const {
+    aspectRatio,
+    duration,
+    endImageUrl,
+    generateAudio,
+    imageUrl,
+    imageUrls,
+    prompt,
+    resolution,
+  } = params;
 
   const body: Record<string, unknown> = { model, prompt };
   if (typeof duration === 'number' && Number.isFinite(duration)) {
@@ -71,13 +84,22 @@ export const createCheapVibeCodeVideo = async (
   }
   if (resolution) body.resolution = resolution;
   if (aspectRatio) body.aspect_ratio = aspectRatio;
+  // Kling has audio on by default; only an explicit opt-out is sent.
+  if (generateAudio === false) body.enable_audio = false;
 
-  // Only a single start frame: CheapVibeCode rejects xAI's `reference_images`
-  // with `400 invalid_json`, failing the whole request.
-  const startFrame = [imageUrl, ...(imageUrls ?? [])].find(
-    (url): url is string => typeof url === 'string' && url.length > 0,
-  );
+  const isUrl = (url: unknown): url is string => typeof url === 'string' && url.length > 0;
+  const references = (imageUrls ?? []).filter(isUrl);
+  const hasFrames = isUrl(imageUrl) || isUrl(endImageUrl);
+
+  // Frames and reference images cannot be mixed. Only models that take
+  // `reference_images` get them; elsewhere the first reference is a start frame,
+  // since a model without that field answers `400 invalid_json`.
+  if (!hasFrames && references.length > 0 && REFERENCE_IMAGE_MODELS.has(model)) {
+    body.reference_images = references.slice(0, MAX_REFERENCE_IMAGES).map((url) => ({ url }));
+  }
+  const startFrame = body.reference_images ? undefined : [imageUrl, ...references].find(isUrl);
   if (startFrame) body.image = { url: startFrame };
+  if (startFrame && isUrl(endImageUrl)) body.last_image = { url: endImageUrl };
 
   log('Creating video - model: %s, body: %O', model, {
     ...body,
