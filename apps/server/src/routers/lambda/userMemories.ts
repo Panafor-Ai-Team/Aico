@@ -975,7 +975,15 @@ export const userMemoriesRouter = router({
         const result = await searchUserMemories(ctx, searchParams);
         return result;
       } catch (error) {
-        console.error('Failed to retrieve memory for topic:', error);
+        // Best-effort lookup run on every topic load: log one line, not the provider's
+        // whole error payload (headers included), so a missing upstream route does not
+        // flood the logs.
+        const { errorType, message, provider } = (error ?? {}) as Record<string, unknown>;
+        console.warn('Failed to retrieve memory for topic:', {
+          errorType,
+          message: typeof message === 'string' ? message.trim().slice(0, 200) : String(error),
+          provider,
+        });
         return EMPTY_SEARCH_RESULT;
       }
     }),

@@ -175,7 +175,7 @@ const cvcRequest = async <T>(
   path: string,
   init: RequestInit & { method: string },
   apiKey: string,
-  options: { mutation?: boolean } = {},
+  options: { mutation?: boolean; quietStatuses?: number[] } = {},
 ): Promise<T> => {
   const baseUrls = resolveBaseUrls();
   let lastError: Error | null = null;
@@ -215,12 +215,14 @@ const cvcRequest = async <T>(
         // DATA-013: never embed an upstream body in Error.message.
         // Include the base URL: with multiple failover domains, the domain
         // that failed is what distinguishes a dead host from a bad request.
-        console.warn('[cheapvibecode] API error', {
-          baseUrl,
-          bodyPreview: body.slice(0, 200),
-          path,
-          status: res.status,
-        });
+        if (!options.quietStatuses?.includes(res.status)) {
+          console.warn('[cheapvibecode] API error', {
+            baseUrl,
+            bodyPreview: body.slice(0, 200),
+            path,
+            status: res.status,
+          });
+        }
         const code = readErrorCode(body);
         if (
           res.status === 409 &&
@@ -251,9 +253,16 @@ const cvcRequest = async <T>(
  * credential, which is why the product server can call it directly instead of
  * proxying through the control plane.
  */
-export const fetchKeyBalanceUsd = async (apiKey: string): Promise<number> =>
+export const fetchKeyBalanceUsd = async (
+  apiKey: string,
+  options: { expectUnauthorized?: boolean } = {},
+): Promise<number> =>
   cvcTokensToUsd(
-    readBalanceTokens(await cvcRequest<unknown>('/v1/balance', { method: 'GET' }, apiKey)),
+    readBalanceTokens(
+      await cvcRequest<unknown>('/v1/balance', { method: 'GET' }, apiKey, {
+        quietStatuses: options.expectUnauthorized ? [401] : undefined,
+      }),
+    ),
   );
 
 /** Shared by both clients: per-key state comes from the member's own credential. */
@@ -264,7 +273,9 @@ const getKeyByCredential: ManagedProviderClient['getKey'] = async (credential) =
     );
   }
 
-  const remainingUsd = await fetchKeyBalanceUsd(credential.apiKey);
+  const remainingUsd = await fetchKeyBalanceUsd(credential.apiKey, {
+    expectUnauthorized: credential.expectUnauthorized,
+  });
   const limitUsd = credential.limitUsd;
 
   return {

@@ -455,6 +455,26 @@ describe('HttpCheapVibeCodeClient', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('logs a 401 balance read as a provider warning by default', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fetchMock.mockResolvedValue(jsonResponse({ error: { code: 'invalid_api_key' } }, 401));
+
+    await expect(client().getKey({ apiKey: 'sk-cvc-member', hash: 'h' })).rejects.toThrow('401');
+    expect(warn).toHaveBeenCalledWith('[cheapvibecode] API error', expect.objectContaining({ status: 401 }));
+    warn.mockRestore();
+  });
+
+  it('still throws, but does not log, a 401 the caller expected from a frozen key', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fetchMock.mockResolvedValue(jsonResponse({ error: { code: 'invalid_api_key' } }, 401));
+
+    await expect(
+      client().getKey({ apiKey: 'sk-cvc-member', expectUnauthorized: true, hash: 'h' }),
+    ).rejects.toThrow('401');
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it('keeps upstream response bodies out of the thrown error (DATA-013)', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ secret: 'sk-cvc-leaked' }, 403));
 
