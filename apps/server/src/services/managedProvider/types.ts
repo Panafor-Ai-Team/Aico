@@ -58,6 +58,12 @@ export interface ManagedKeyCredential {
   /** The provider's own id/hash for the key, as stored in `openrouter_key_id`. */
   hash: string;
   /**
+   * The caller expects this key may be frozen, and a frozen key answers 401. The
+   * 401 still throws; it just is not logged as a provider warning. Reconciliation
+   * sets it for keys the books say have nothing left to spend.
+   */
+  expectUnauthorized?: boolean;
+  /**
    * The allowance this key was minted with, in USD.
    *
    * CVC's `GET /v1/balance` reports only what is *left*; there is no route that

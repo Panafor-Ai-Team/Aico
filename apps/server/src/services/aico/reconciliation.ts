@@ -542,6 +542,7 @@ const keyChecks = async (
         : null;
       const info = await managed.getKey({
         apiKey: apiKey ?? undefined,
+        expectUnauthorized: subject.availableBilledMicro <= 0,
         hash: subject.row.openrouterKeyId,
       });
       if (info.limitRemaining == null) throw new Error('no remaining reported');
