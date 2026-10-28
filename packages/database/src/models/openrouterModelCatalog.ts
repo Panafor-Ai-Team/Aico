@@ -13,14 +13,12 @@ import {
   cheapVibeCodeGptImage2Parameters,
   cheapVibeCodeGptImage25Parameters,
   cheapVibeCodeGptImage25Pricing,
-  cheapVibeCodeGrokImagineImageParameters,
-  cheapVibeCodeGrokImagineImagePricing,
-  cheapVibeCodeNanoBanana2Parameters,
-  cheapVibeCodeNanoBanana2Pricing,
 } from 'model-bank/imageParameters';
 import {
-  cheapVibeCodeGrokImagineVideoParameters,
-  cheapVibeCodeGrokImagineVideoPricing,
+  cheapVibeCodeKlingVideoV3Parameters,
+  cheapVibeCodeKlingVideoV3Pricing,
+  cheapVibeCodeMiniMaxVideoH3Parameters,
+  cheapVibeCodeMiniMaxVideoH3Pricing,
 } from 'model-bank/videoParameters';
 
 import {
@@ -93,23 +91,24 @@ const AUTO_CATALOG_CARD: OpenRouterCatalogModelInput = {
  */
 const EMBEDDING_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
   {
+    // Must match `DEFAULT_EMBEDDING_MODEL`. Rate is OpenRouter's listed text input
+    // price; embeddings are paid by the platform key, not metered to wallets.
     contextWindowTokens: 8192,
-    description:
-      'An efficient, cost-effective next-generation embedding model for retrieval and RAG scenarios.',
-    displayName: 'Text Embedding 3 Small',
-    id: 'openai/text-embedding-3-small',
+    description: 'Google Gemini embedding model for memory search and knowledge-base retrieval.',
+    displayName: 'Gemini Embedding 2',
+    id: 'google/gemini-embedding-2',
     pricing: {
-      units: [{ name: 'textInput', rate: 0.02, strategy: 'fixed', unit: 'millionTokens' }],
+      units: [{ name: 'textInput', rate: 0.2, strategy: 'fixed', unit: 'millionTokens' }],
     },
-    releasedAt: '2024-01-25',
     type: 'embedding',
   },
 ];
 
 /**
- * CheapVibeCode's generators. Its `/v1/models` lists only text-output models, so
- * image and video generation never arrive through a sync; these are the models
- * its `/v1/images/generations` and `/v1/videos/generations` actually accept.
+ * CheapVibeCode's media models. Its `/v1/models` lists only text-output models, so
+ * image, video and transcription models never arrive through a sync. This list is
+ * kept by hand against the "Media" section of CVC's portal docs (2026-10-28) —
+ * update it when CVC adds or retires a media model.
  * Injected only while CheapVibeCode is the live gateway, so an OpenRouter
  * catalog never offers ids its upstream would reject.
  */
@@ -142,27 +141,31 @@ const CHEAPVIBECODE_GENERATION_CATALOG_CARDS: OpenRouterCatalogModelInput[] = [
     type: 'image',
   },
   {
-    displayName: 'Nano Banana 2',
-    id: 'nano-banana-2',
-    parameters: cheapVibeCodeNanoBanana2Parameters,
-    // CVC fixed fee: a single 100K-token tier per image.
-    pricing: cheapVibeCodeNanoBanana2Pricing,
-    type: 'image',
-  },
-  {
-    displayName: 'Grok Imagine Image',
-    id: 'grok-imagine-image',
-    parameters: cheapVibeCodeGrokImagineImageParameters,
-    // CVC fixed fee per image by quality tier (auto billed as medium).
-    pricing: cheapVibeCodeGrokImagineImagePricing,
-    type: 'image',
-  },
-  {
-    displayName: 'Grok Imagine Video',
-    id: 'grok-imagine-video',
-    parameters: cheapVibeCodeGrokImagineVideoParameters,
-    pricing: cheapVibeCodeGrokImagineVideoPricing,
+    description:
+      'Kling Video V3 — 3–15 sec video at 720p, 1080p or 4K from text, a first frame, or first and last frames, with optional audio.',
+    displayName: 'Kling Video V3',
+    id: 'kling-video-v3',
+    parameters: cheapVibeCodeKlingVideoV3Parameters,
+    pricing: cheapVibeCodeKlingVideoV3Pricing,
     type: 'video',
+  },
+  {
+    description:
+      'MiniMax Video H3 — 4–15 sec video with audio at 768p or 2K, from first/last frames or up to 4 reference images.',
+    displayName: 'MiniMax Video H3',
+    id: 'minimax-video-h3',
+    parameters: cheapVibeCodeMiniMaxVideoH3Parameters,
+    pricing: cheapVibeCodeMiniMaxVideoH3Pricing,
+    type: 'video',
+  },
+  {
+    // `/v1/audio/transcriptions`: WAV only, up to 25 MiB, no `prompt`. Charged by
+    // verified audio duration at coefficient ×1; CVC publishes no per-second rate,
+    // so no price is shown rather than a guessed one.
+    description: 'GPT-4o Transcribe — speech to text from WAV audio up to 25 MiB.',
+    displayName: 'GPT-4o Transcribe',
+    id: 'gpt-4o-transcribe',
+    type: 'asr',
   },
 ];
 

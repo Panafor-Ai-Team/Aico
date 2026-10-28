@@ -117,6 +117,82 @@ describe('createCheapVibeCodeVideo', () => {
     });
   });
 
+  it('sends Kling first/last frames and the audio opt-out', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-6' }));
+
+    await createCheapVibeCodeVideo(
+      {
+        model: 'kling-video-v3',
+        params: {
+          duration: 5,
+          endImageUrl: 'https://s3.example.com/last.png',
+          generateAudio: false,
+          imageUrl: 'https://s3.example.com/first.png',
+          prompt: 'Door opens',
+          resolution: '1080p',
+        },
+      },
+      mockOptions,
+    );
+
+    expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).toEqual({
+      duration: 5,
+      enable_audio: false,
+      image: { url: 'https://s3.example.com/first.png' },
+      last_image: { url: 'https://s3.example.com/last.png' },
+      model: 'kling-video-v3',
+      prompt: 'Door opens',
+      resolution: '1080p',
+    });
+  });
+
+  it('leaves audio at its default when not turned off', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-7' }));
+
+    await createCheapVibeCodeVideo(
+      { model: 'kling-video-v3', params: { generateAudio: true, prompt: 'Rain' } },
+      mockOptions,
+    );
+
+    expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).not.toHaveProperty(
+      'enable_audio',
+    );
+  });
+
+  it('sends up to 4 MiniMax reference images when no frame is set', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-8' }));
+    const refs = [1, 2, 3, 4, 5].map((n) => `https://s3.example.com/r${n}.png`);
+
+    await createCheapVibeCodeVideo(
+      { model: 'minimax-video-h3', params: { imageUrls: refs, prompt: 'Group dance' } },
+      mockOptions,
+    );
+
+    const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+    expect(body.reference_images).toEqual(refs.slice(0, 4).map((url) => ({ url })));
+    expect(body).not.toHaveProperty('image');
+  });
+
+  it('never mixes MiniMax frames with reference images', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-9' }));
+
+    await createCheapVibeCodeVideo(
+      {
+        model: 'minimax-video-h3',
+        params: {
+          imageUrl: 'https://s3.example.com/first.png',
+          imageUrls: ['https://s3.example.com/r1.png'],
+          prompt: 'Walk in',
+        },
+      },
+      mockOptions,
+    );
+
+    const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+    expect(body.image).toEqual({ url: 'https://s3.example.com/first.png' });
+    expect(body).not.toHaveProperty('reference_images');
+  });
+
   it('honours CHEAPVIBECODE_VIDEO_BASE_URL', async () => {
     process.env.CHEAPVIBECODE_VIDEO_BASE_URL = 'https://mirror.cheapvibecode.ru/';
     global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-2' }));

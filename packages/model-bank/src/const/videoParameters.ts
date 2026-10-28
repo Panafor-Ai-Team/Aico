@@ -85,3 +85,79 @@ export const cheapVibeCodeGrokImagineVideoPricing: Pricing = {
     },
   ],
 };
+
+/**
+ * CheapVibeCode Kling Video V3 (`kling-video-v3`), from CVC's model docs:
+ * 3–15 sec, 720p / 1080p / 4K, text or first frame or first/last frame, audio
+ * on by default (`enable_audio: false` turns it off). Only `16:9` is documented
+ * as an aspect ratio, so it is the only one offered.
+ */
+export const cheapVibeCodeKlingVideoV3Parameters: VideoModelParamsSchema = {
+  aspectRatio: { default: '16:9', enum: ['16:9'] },
+  duration: { default: 5, max: 15, min: 3 },
+  endImageUrl: { default: null },
+  generateAudio: { default: true },
+  imageUrl: { default: null },
+  prompt: { default: '' },
+  resolution: { default: '720p', enum: ['720p', '1080p', '4k'] },
+};
+
+/**
+ * Kling Video V3 output pricing per second, with and without audio:
+ * 720p 470K / 320K · 1080p 630K / 420K · 4K 1.56M / 1.56M. CVC charges
+ * rate × selected duration up front and refunds a failed task in full.
+ */
+export const cheapVibeCodeKlingVideoV3Pricing: Pricing = {
+  units: [
+    {
+      lookup: {
+        prices: {
+          '1080p_false': cheapVibeCodeTokensToUsd(420_000),
+          '1080p_true': cheapVibeCodeTokensToUsd(630_000),
+          '4k_false': cheapVibeCodeTokensToUsd(1_560_000),
+          '4k_true': cheapVibeCodeTokensToUsd(1_560_000),
+          '720p_false': cheapVibeCodeTokensToUsd(320_000),
+          '720p_true': cheapVibeCodeTokensToUsd(470_000),
+        },
+        pricingParams: ['resolution', 'generateAudio'],
+      },
+      name: 'videoGeneration',
+      strategy: 'lookup',
+      unit: 'second',
+    },
+  ],
+};
+
+/**
+ * CheapVibeCode MiniMax Video H3 (`minimax-video-h3`), from CVC's model docs:
+ * 4–15 sec, 768p / 2K, audio always included, first/last frame or up to 4
+ * reference images (frames and references cannot be mixed). Only `16:9` is
+ * documented as an aspect ratio.
+ */
+export const cheapVibeCodeMiniMaxVideoH3Parameters: VideoModelParamsSchema = {
+  aspectRatio: { default: '16:9', enum: ['16:9'] },
+  duration: { default: 5, max: 15, min: 4 },
+  endImageUrl: { default: null },
+  imageUrl: { default: null },
+  imageUrls: { default: [], maxCount: 4 },
+  prompt: { default: '' },
+  resolution: { default: '768p', enum: ['768p', '2k'] },
+};
+
+/** MiniMax Video H3 output pricing per second: 768p 260K · 2K 420K (audio included). */
+export const cheapVibeCodeMiniMaxVideoH3Pricing: Pricing = {
+  units: [
+    {
+      lookup: {
+        prices: {
+          '2k': cheapVibeCodeTokensToUsd(420_000),
+          '768p': cheapVibeCodeTokensToUsd(260_000),
+        },
+        pricingParams: ['resolution'],
+      },
+      name: 'videoGeneration',
+      strategy: 'lookup',
+      unit: 'second',
+    },
+  ],
+};

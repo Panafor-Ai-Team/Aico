@@ -84,9 +84,9 @@ describe('OpenRouterModelCatalogSyncService', () => {
           type: 'image',
         }),
         expect.objectContaining({
-          displayName: 'Text Embedding 3 Small',
+          displayName: 'Gemini Embedding 2',
           enabled: true,
-          id: 'openai/text-embedding-3-small',
+          id: 'google/gemini-embedding-2',
           type: 'embedding',
         }),
       ]),
