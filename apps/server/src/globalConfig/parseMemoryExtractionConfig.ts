@@ -181,7 +181,12 @@ const parseEmbeddingAgent = (
     DEFAULT_MINI_PROVIDER;
 
   return {
-    apiKey: process.env.MEMORY_USER_MEMORY_EMBEDDING_API_KEY ?? fallbackApiKey,
+    // Embeddings stay on OpenRouter while chat runs on another gateway; its key is
+    // a dedicated one (see `initEmbeddingRuntimeFromDB`).
+    apiKey:
+      process.env.MEMORY_USER_MEMORY_EMBEDDING_API_KEY ??
+      fallbackApiKey ??
+      (provider === 'openrouter' ? process.env.AICO_EMBEDDING_OPENROUTER_API_KEY : undefined),
     baseURL: process.env.MEMORY_USER_MEMORY_EMBEDDING_BASE_URL,
     // Embedding providers often have a smaller per-input limit than chat models.
     // Keep this below the provider's single-input embedding window.

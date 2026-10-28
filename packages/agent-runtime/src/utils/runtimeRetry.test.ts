@@ -18,6 +18,14 @@ describe('runtimeRetry', () => {
     expect(resolveLLMMaxAttempts('lobehub', options)).toBe(1);
   });
 
+  it('caps retries after a chat start timeout but not after other errors', () => {
+    const timeout = new Error('Chat start timed out: upstream-headers');
+
+    expect(resolveLLMRetryBudget('openai', {}, timeout)).toBe(1);
+    expect(resolveLLMRetryBudget('openai', {}, new Error('boom'))).toBe(5);
+    expect(resolveLLMRetryBudget('lobehub', { noRetryProviders: ['lobehub'] }, timeout)).toBe(0);
+  });
+
   it('calculates exponential LLM retry delay with a cap', () => {
     expect(getLLMRetryDelayMs(1)).toBe(1000);
     expect(getLLMRetryDelayMs(2)).toBe(2000);

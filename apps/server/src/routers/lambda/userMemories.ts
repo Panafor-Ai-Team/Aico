@@ -1,4 +1,3 @@
-import { BRANDING_PROVIDER, ENABLE_BUSINESS_FEATURES } from '@lobechat/business-const';
 import {
   DEFAULT_SEARCH_USER_MEMORY_TOP_K,
   DEFAULT_USER_MEMORY_EMBEDDING_MODEL_ITEM,
@@ -46,7 +45,7 @@ import {
 import { authedProcedure, router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { getServerDefaultFilesConfig } from '@/server/globalConfig';
-import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import { initEmbeddingRuntimeFromDB } from '@/server/modules/ModelRuntime';
 import { resolvePreferredGenerationBilling } from '@/server/services/aico/generationBilling';
 import type { UserMemoryEmbeddingRuntime } from '@/server/services/memory/userMemory/embedding';
 import { embedUserMemoryTexts } from '@/server/services/memory/userMemory/embedding';
@@ -135,10 +134,13 @@ const searchUserMemories = async (
   // model id (exempt from team allow-lists in assertModelAllowed, still gated
   // by the catalog kill-switch). Without it every memory search fails with
   // MODEL_ID_REQUIRED.
-  const modelRuntime = await initModelRuntimeFromDB(ctx.serverDB, ctx.userId, provider, undefined, {
-    billingContext,
-    modelId: embeddingModel,
-  });
+  const modelRuntime = await initEmbeddingRuntimeFromDB(
+    ctx.serverDB,
+    ctx.userId,
+    provider,
+    undefined,
+    { billingContext, modelId: embeddingModel },
+  );
   const normalizedQueries = [
     ...new Set((normalizedInput.queries ?? []).map((query) => query.trim()).filter(Boolean)),
   ];
@@ -179,13 +181,12 @@ const searchUserMemories = async (
 const getEmbeddingRuntime = async (serverDB: LobeChatDatabase, userId: string) => {
   const { provider, model: embeddingModel } =
     getServerDefaultFilesConfig().embeddingModel || DEFAULT_USER_MEMORY_EMBEDDING_MODEL_ITEM;
-  const resolvedProvider = ENABLE_BUSINESS_FEATURES ? BRANDING_PROVIDER : provider;
   const billingModel = new AicoBillingModel(serverDB);
   const billingContext = await resolvePreferredGenerationBilling(
     async (uid) => (await billingModel.getUserWallet(uid)) ?? null,
     userId,
   );
-  const agentRuntime = await initModelRuntimeFromDB(serverDB, userId, resolvedProvider, undefined, {
+  const agentRuntime = await initEmbeddingRuntimeFromDB(serverDB, userId, provider, undefined, {
     billingContext,
     modelId: embeddingModel,
   });

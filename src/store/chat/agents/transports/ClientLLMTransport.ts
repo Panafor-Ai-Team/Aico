@@ -151,8 +151,8 @@ class ClientLLMRetryPolicy implements LLMRetryPolicy {
     // The package publishes the canonical stream_retry event through StreamSink.
   }
 
-  resolveRetryBudget(provider: string) {
-    return resolveLLMRetryBudget(provider, CLIENT_LLM_RETRY_POLICY);
+  resolveRetryBudget(provider: string, error?: unknown) {
+    return resolveLLMRetryBudget(provider, CLIENT_LLM_RETRY_POLICY, error);
   }
 
   async waitForRetry(delayMs: number): Promise<void> {

@@ -3,7 +3,6 @@ import {
   MemoryExecutionRuntime,
   type MemoryRuntimeService,
 } from '@lobechat/builtin-tool-memory/executionRuntime';
-import { BRANDING_PROVIDER, ENABLE_BUSINESS_FEATURES } from '@lobechat/business-const';
 import {
   DEFAULT_USER_MEMORY_EMBEDDING_MODEL_ITEM,
   MEMORY_SEARCH_TOP_K_LIMITS,
@@ -44,7 +43,7 @@ import {
 import { userSettings } from '@/database/schemas';
 import { getServerDefaultFilesConfig } from '@/server/globalConfig';
 import {
-  initModelRuntimeFromDB,
+  initEmbeddingRuntimeFromDB,
   initModelRuntimeWithUserPayload,
 } from '@/server/modules/ModelRuntime';
 import {
@@ -107,10 +106,10 @@ const getEmbeddingRuntime = async (
     userId,
   );
 
-  const agentRuntime = await initModelRuntimeFromDB(
+  const agentRuntime = await initEmbeddingRuntimeFromDB(
     serverDB,
     userId,
-    ENABLE_BUSINESS_FEATURES ? BRANDING_PROVIDER : provider,
+    provider,
     workspaceId,
     {
       billingContext,
@@ -241,7 +240,7 @@ class MemoryServerRuntimeService implements MemoryRuntimeService {
           this.memoryEmbeddingRuntime.payload,
           { userId: this.userId },
         )
-      : await initModelRuntimeFromDB(
+      : await initEmbeddingRuntimeFromDB(
           this.serverDB,
           this.userId,
           defaultEmbeddingConfig.provider,

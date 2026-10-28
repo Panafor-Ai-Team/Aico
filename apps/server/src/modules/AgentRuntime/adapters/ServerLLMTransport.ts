@@ -105,8 +105,8 @@ class ServerLLMRetryPolicy implements LLMRetryPolicy {
     this.lastFailureWasStall = error.message?.includes(STALL_GUARD_MARKER) ?? false;
   }
 
-  resolveRetryBudget(provider: string) {
-    return resolveLLMRetryBudget(provider, SERVER_LLM_RETRY_POLICY);
+  resolveRetryBudget(provider: string, error?: unknown) {
+    return resolveLLMRetryBudget(provider, SERVER_LLM_RETRY_POLICY, error);
   }
 
   async waitForRetry(delayMs: number): Promise<void> {

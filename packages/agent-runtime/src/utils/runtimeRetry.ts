@@ -1,3 +1,5 @@
+import { isChatStartTimeoutError } from './llmErrorClassifier';
+
 const DEFAULT_LLM_MAX_RETRIES = 5;
 const DEFAULT_LLM_RETRY_BASE_DELAY_MS = 1000;
 const DEFAULT_LLM_RETRY_MAX_DELAY_MS = 30_000;
@@ -35,8 +37,20 @@ const resolveLLMMaxRetries = (provider: string, options: LLMRetryPolicyOptions =
 export const shouldRetryLLM = (kind: RuntimeRetryKind, attempt: number, maxRetries: number) =>
   kind === 'retry' && attempt <= maxRetries;
 
-export const resolveLLMRetryBudget = (provider: string, options: LLMRetryPolicyOptions = {}) =>
-  resolveLLMMaxRetries(provider, options);
+/** A start timeout already waited a full window, so it gets at most this many retries. */
+const CHAT_START_TIMEOUT_MAX_RETRIES = 1;
+
+export const resolveLLMRetryBudget = (
+  provider: string,
+  options: LLMRetryPolicyOptions = {},
+  error?: unknown,
+) => {
+  const budget = resolveLLMMaxRetries(provider, options);
+
+  return error !== undefined && isChatStartTimeoutError(error)
+    ? Math.min(budget, CHAT_START_TIMEOUT_MAX_RETRIES)
+    : budget;
+};
 
 export const resolveLLMMaxAttempts = (provider: string, options: LLMRetryPolicyOptions = {}) =>
   resolveLLMMaxRetries(provider, options) + 1;
