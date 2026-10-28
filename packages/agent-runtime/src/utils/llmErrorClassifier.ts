@@ -95,6 +95,16 @@ const numericStatusFromCode = (...codes: unknown[]): number | undefined => {
   return undefined;
 };
 
+// The chat route reports plain HTTP-class failures (400, 403, 429...) as a numeric
+// `errorType`, which the client keeps as `type`. It is the only status signal such
+// an error carries: its message is translated UI text, not something to match on.
+const numericErrorType = (...types: unknown[]): number | undefined => {
+  for (const type of types) {
+    if (typeof type === 'number' && type >= 100 && type <= 599) return type;
+  }
+  return undefined;
+};
+
 const normalizeSignal = (error: unknown): LLMErrorSignal => {
   if (typeof error === 'string') {
     const message = error.toLowerCase();
@@ -120,7 +130,9 @@ const normalizeSignal = (error: unknown): LLMErrorSignal => {
           ? raw.status
           : typeof raw.statusCode === 'number'
             ? raw.statusCode
-            : (numericStatusFromCode(raw.code) ?? tryExtractStatus(message)),
+            : (numericStatusFromCode(raw.code) ??
+              numericErrorType(raw.errorType, raw.type) ??
+              tryExtractStatus(message)),
     };
   }
 
@@ -166,6 +178,7 @@ const normalizeSignal = (error: unknown): LLMErrorSignal => {
               : typeof nestedError?.status === 'number'
                 ? nestedError.status
                 : (numericStatusFromCode(raw.code, nested?.code, nestedError?.code) ??
+                  numericErrorType(raw.errorType, raw.type, nested?.errorType, nested?.type) ??
                   tryExtractStatus(message)),
     };
   }

@@ -77,6 +77,16 @@ describe('llmErrorClassifier', () => {
     expect(classifyLLMError({ message: 'upstream said 413' }).kind).toBe('stop');
   });
 
+  it("reads the chat route's numeric error type as an HTTP status", () => {
+    // fetch-sse keeps the route's `errorType` as `type`; the message is translated UI text.
+    expect(classifyLLMError({ message: 'translated text', type: 400 }).kind).toBe('stop');
+    expect(classifyLLMError({ message: 'translated text', type: 403 }).kind).toBe('stop');
+    expect(classifyLLMError({ message: 'translated text', type: 404 }).kind).toBe('stop');
+    expect(classifyLLMError({ message: 'translated text', type: 429 }).kind).toBe('retry');
+    expect(classifyLLMError({ message: 'translated text', type: 500 }).kind).toBe('retry');
+    expect(classifyLLMError({ errorType: 400, message: 'MODEL_DISABLED:x' }).kind).toBe('stop');
+  });
+
   it('still retries the chat start timeout (the budget caps it, not the classifier)', () => {
     expect(classifyLLMError(new Error('Chat start timed out: upstream-headers')).kind).toBe(
       'retry',
