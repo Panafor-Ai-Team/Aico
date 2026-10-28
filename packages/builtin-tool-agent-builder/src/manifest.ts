@@ -16,7 +16,7 @@ export const AgentBuilderManifest: BuiltinToolManifest = {
         properties: {
           providerId: {
             description:
-              'Optional: filter models by a specific provider id (e.g., "openai", "anthropic", "google")',
+              'Optional: filter models by a provider id that getAvailableModels returned',
             type: 'string',
           },
         },
@@ -92,7 +92,7 @@ export const AgentBuilderManifest: BuiltinToolManifest = {
               },
               model: {
                 description:
-                  'The AI model identifier (e.g., "gpt-4o", "gpt-4o-mini", "claude-3-5-sonnet-20241022", "gemini-1.5-pro")',
+                  'The AI model identifier, exactly as returned by getAvailableModels. Never use an id that list did not return.',
                 type: 'string',
               },
               openingMessage: {
@@ -119,7 +119,7 @@ export const AgentBuilderManifest: BuiltinToolManifest = {
               },
               provider: {
                 description:
-                  'The AI provider identifier (e.g., "openai", "anthropic", "google", "azure")',
+                  'The provider id returned with the chosen model by getAvailableModels',
                 type: 'string',
               },
             },

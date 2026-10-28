@@ -1,4 +1,4 @@
-import { DEFAULT_PROVIDER } from '@lobechat/business-const';
+import { DEFAULT_PROVIDER, DEFAULT_SUB_AGENT_MODEL } from '@lobechat/business-const';
 import type { LobeAgentAgencyConfig } from '@lobechat/types';
 
 export { DEFAULT_MINI_MODEL, DEFAULT_MODEL } from '@lobechat/business-const';
@@ -7,16 +7,16 @@ export { DEFAULT_MINI_MODEL, DEFAULT_MODEL } from '@lobechat/business-const';
 export const DEFAULT_EMBEDDING_MODEL = 'google/gemini-embedding-2';
 
 /**
- * Default model for sub-agents spawned via `lobe-agent.callSubAgent`.
- * Sub-agents run on a lightweight model by default instead of inheriting the
- * parent agent's main model. Overridable per agent via `agencyConfig.subagent`.
+ * Default model for sub-agents spawned via `lobe-agent.callSubAgent` (per
+ * managed gateway, see `@lobechat/business-const`). Sub-agents run on a
+ * lightweight model by default instead of inheriting the parent agent's main
+ * model. Overridable per agent via `agencyConfig.subagent`.
  *
  * Paired with `DEFAULT_PROVIDER` rather than a dedicated sub-agent provider, so
- * a build that swaps `@lobechat/business-const` (the cloud one routes through
- * its own official provider) moves the sub-agent along with the main model
- * instead of leaving it pointed at a provider that build doesn't serve.
+ * a build that swaps `@lobechat/business-const` moves the sub-agent along with
+ * the main model instead of leaving it pointed at a provider it doesn't serve.
  */
-export const DEFAULT_SUB_AGENT_MODEL = 'deepseek/deepseek-chat-v3.1';
+export { DEFAULT_SUB_AGENT_MODEL } from '@lobechat/business-const';
 
 /**
  * Resolve the model a sub-agent runs on from the spawning agent's

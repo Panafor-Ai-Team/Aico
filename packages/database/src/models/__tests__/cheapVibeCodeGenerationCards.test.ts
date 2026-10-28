@@ -126,6 +126,35 @@ describe('CheapVibeCode generation models', () => {
     expect((models['minimax-video-h3'] as any).parameters.resolution.enum).toEqual(['768p', '2k']);
   });
 
+  it('stops serving retired media and embedding rows before the next sync deletes them', async () => {
+    const { OpenRouterModelCatalogModel } = await import('../openrouterModelCatalog');
+    const now = new Date();
+    await db.insert(openrouterModelCatalog).values(
+      [
+        ['openrouter/auto', 'chat'],
+        ['glm-5.3', 'chat'],
+        ['grok-imagine-video', 'video'],
+        ['grok-imagine-image', 'image'],
+        ['nano-banana-2', 'image'],
+        ['openai/text-embedding-3-small', 'embedding'],
+      ].map(([id, type]) => ({ enabled: true, id, payload: {}, syncedAt: now, type })),
+    );
+
+    const models = byId(await new OpenRouterModelCatalogModel(db).listAsProviderModels());
+
+    for (const id of [
+      'grok-imagine-video',
+      'grok-imagine-image',
+      'nano-banana-2',
+      'openai/text-embedding-3-small',
+    ]) {
+      expect(models[id]).toBeUndefined();
+    }
+    expect(models['glm-5.3']).toBeDefined();
+    expect(models['kling-video-v3']).toMatchObject({ type: 'video' });
+    expect(models['google/gemini-embedding-2']).toMatchObject({ type: 'embedding' });
+  });
+
   it('backfills them on the serve path for a catalog synced before they existed', async () => {
     const { OpenRouterModelCatalogModel } = await import('../openrouterModelCatalog');
     await db.insert(openrouterModelCatalog).values({

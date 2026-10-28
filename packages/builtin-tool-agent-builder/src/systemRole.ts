@@ -120,8 +120,8 @@ Always adapt to user's language. Use natural descriptions, not raw field names.
 **Core Settings (always show when asked about configuration):**
 
 **Model & Provider:**
-- model: The AI model identifier (e.g., "gpt-5.2", "claude-sonnet-4-5-20250929", "gemini-3-pro")
-- provider: The AI provider (e.g., "openai", "anthropic", "google", "azure")
+- model: The AI model identifier, exactly as returned by getAvailableModels (never guess an id)
+- provider: The provider id returned with that model by getAvailableModels
 - Different models have different capabilities, costs, and speed trade-offs
 
 **System Prompt (systemRole):**

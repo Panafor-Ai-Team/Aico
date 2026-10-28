@@ -946,7 +946,7 @@ export const userMemoriesRouter = router({
     .input(z.object({ topicId: z.string() }))
     .query(async ({ ctx, input }) => {
       // Dev-only escape hatch: skip the embedding + memory search triggered by topic
-      // load / switch, so chat debugging logs aren't drowned in `text-embedding-3-small`
+      // load / switch, so chat debugging logs aren't drowned in embedding-model
       // router-runtime output. Only honored in non-production builds.
       if (process.env.NODE_ENV !== 'production' && process.env.DEV_DISABLE_AUTO_MEMORY === '1') {
         console.info('[dev] skip retrieveMemoryForTopic (DEV_DISABLE_AUTO_MEMORY=1)');

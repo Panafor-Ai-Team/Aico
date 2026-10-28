@@ -13,7 +13,7 @@ import type {
   LLMTransport,
 } from '@lobechat/agent-runtime';
 import { resolveLLMMaxAttempts, resolveLLMRetryBudget } from '@lobechat/agent-runtime';
-import { BRANDING_PROVIDER } from '@lobechat/business-const';
+import { BRANDING_PROVIDER, toLiveManagedModelId } from '@lobechat/business-const';
 import {
   type ChatStreamPayload,
   consumeStreamUntilDone,
@@ -291,7 +291,8 @@ export class ServerLLMTransport implements LLMTransport {
     const tools = resolved.tools.length > 0 ? resolved.tools : undefined;
     const chatPayload = {
       messages: input.context.messages as ChatStreamPayload['messages'],
-      model: input.model,
+      // Agent configs and sub-agent overrides may carry another gateway's default id.
+      model: toLiveManagedModelId(input.model),
       stream: this.ctx.stream ?? true,
       tools,
       ...(input.context.modelParameters as Partial<ChatStreamPayload>),

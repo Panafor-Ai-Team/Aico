@@ -49,6 +49,41 @@ const MINI_MODEL_BY_PROVIDER: Record<ManagedProviderId, string> = {
 export const DEFAULT_MINI_MODEL = MINI_MODEL_BY_PROVIDER[MANAGED_PROVIDER_ID];
 export const DEFAULT_MINI_PROVIDER: ManagedProviderId = MANAGED_PROVIDER_ID;
 
+/**
+ * Default model for sub-agents spawned via `lobe-agent.callSubAgent`. Per
+ * provider for the same reason as the mini model: the id is an upstream SKU.
+ */
+const SUB_AGENT_MODEL_BY_PROVIDER: Record<ManagedProviderId, string> = {
+  cheapvibecode: 'deepseek-v4-flash',
+  openrouter: 'deepseek/deepseek-chat-v3.1',
+};
+
+export const DEFAULT_SUB_AGENT_MODEL = SUB_AGENT_MODEL_BY_PROVIDER[MANAGED_PROVIDER_ID];
+
+const PER_PROVIDER_DEFAULT_MODELS = [MINI_MODEL_BY_PROVIDER, SUB_AGENT_MODEL_BY_PROVIDER];
+
+/**
+ * Map another managed gateway's default model id onto the live gateway's.
+ *
+ * `MANAGED_PROVIDER_ID` has no `NEXT_PUBLIC_` twin, so a browser bundle always
+ * resolves the defaults above as OpenRouter's (`openai/gpt-4o-mini`, …), and
+ * users' saved settings keep whichever id was current when they saved. Sent to
+ * CheapVibeCode as-is, those ids do not exist. Server entry points pass every
+ * managed model id through here; any other id is returned unchanged.
+ */
+export const toLiveManagedModelId = (
+  modelId: string,
+  live: ManagedProviderId = MANAGED_PROVIDER_ID,
+): string => {
+  for (const table of PER_PROVIDER_DEFAULT_MODELS) {
+    const foreign = Object.entries(table).some(
+      ([gateway, id]) => gateway !== live && id === modelId,
+    );
+    if (foreign) return table[live];
+  }
+  return modelId;
+};
+
 /** Onboarding / first-agent defaults must stay on the managed surface. */
 export const DEFAULT_ONBOARDING_MODEL = DEFAULT_MODEL;
 export const DEFAULT_ONBOARDING_PROVIDER: ManagedProviderId = MANAGED_PROVIDER_ID;

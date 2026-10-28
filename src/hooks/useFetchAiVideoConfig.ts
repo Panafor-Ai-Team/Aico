@@ -46,7 +46,10 @@ export const useFetchAiVideoConfig = () => {
     lastSelectedVideoProvider: s.status.lastSelectedVideoProvider,
   }));
   const isInitializedVideoConfig = useVideoStore((s) => s.isInit);
+  const currentModel = useVideoStore((s) => s.model);
+  const currentProvider = useVideoStore((s) => s.provider);
   const initializeVideoConfig = useVideoStore((s) => s.initializeVideoConfig);
+  const setModelAndProviderOnSelect = useVideoStore((s) => s.setModelAndProviderOnSelect);
 
   // Determine which model/provider to use for initialization
   const initParams = useMemo(() => {
@@ -88,4 +91,29 @@ export const useFetchAiVideoConfig = () => {
       initializeVideoConfig(isLogin, initParams.model, initParams.provider);
     }
   }, [isReadyForInit, isInitializedVideoConfig, isLogin, initParams, initializeVideoConfig]);
+
+  // Heal a selection that is no longer offered (e.g. a retired generator kept as
+  // the last-selected model) once the enabled list is ready, as Create → Image does.
+  useEffect(() => {
+    if (!isInitializedVideoConfig || !isReadyForInit) return;
+    if (enabledVideoModelList.length === 0) return;
+    if (checkModelEnabled(enabledVideoModelList, currentProvider, currentModel)) return;
+
+    const preferred =
+      initParams.model && initParams.provider
+        ? { model: initParams.model, provider: initParams.provider }
+        : { model: DEFAULT_AI_VIDEO_MODEL, provider: DEFAULT_AI_VIDEO_PROVIDER };
+    if (!checkModelEnabled(enabledVideoModelList, preferred.provider, preferred.model)) return;
+    if (preferred.model === currentModel && preferred.provider === currentProvider) return;
+
+    setModelAndProviderOnSelect(preferred.model, preferred.provider);
+  }, [
+    isInitializedVideoConfig,
+    isReadyForInit,
+    enabledVideoModelList,
+    currentModel,
+    currentProvider,
+    initParams,
+    setModelAndProviderOnSelect,
+  ]);
 };
