@@ -1,3 +1,5 @@
+import { describeConnectedComposioApp } from '@lobechat/const';
+
 import { type ToolStore } from '../../store';
 import { type ComposioServer, ComposioServerStatus } from './types';
 
@@ -68,7 +70,7 @@ export const composioStoreSelectors = {
             identifier: server.identifier,
             meta: {
               avatar: '☁️',
-              description: `Composio: ${server.label}`,
+              description: describeConnectedComposioApp(server.label),
               tags: ['composio', 'mcp'],
               title: server.label,
             },

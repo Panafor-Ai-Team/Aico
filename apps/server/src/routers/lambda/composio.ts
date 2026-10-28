@@ -21,6 +21,7 @@ import {
 import { getComposioClient, revokeComposioConnectedAccount } from '@/libs/composio';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
+import { ComposioService } from '@/server/services/composio';
 import {
   COMPOSIO_TOOLS_VERSION,
   type ComposioToolInput,
@@ -386,6 +387,14 @@ export const composioRouter = router({
     }),
 
   getComposioPlugins: composioProcedure.query(async ({ ctx }) => {
+    // The browser builds its Composio tools from these rows: bring connections
+    // saved with an older curated tool set up to date first (best-effort).
+    await new ComposioService({
+      db: ctx.serverDB,
+      userId: ctx.userId,
+      workspaceId: ctx.workspaceId ?? undefined,
+    }).resyncStaleConnections();
+
     const allPlugins = await ctx.pluginModel.query();
     return allPlugins.filter((plugin) => plugin.customParams?.composio);
   }),
@@ -446,6 +455,7 @@ export const composioRouter = router({
         status: z.string(),
         tools: z.array(
           z.object({
+            crudType: z.enum(['read', 'write', 'update', 'delete']).optional(),
             description: z.string().optional(),
             inputSchema: z.any().optional(),
             name: z.string(),

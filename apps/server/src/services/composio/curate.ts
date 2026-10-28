@@ -1,12 +1,15 @@
-import { ConnectorToolPermission } from '@/database/schemas';
+import { ConnectorToolPermission, type ToolCRUDType } from '@/database/schemas';
 import { inferCrudType } from '@/libs/mcp/utils';
 
 export interface ComposioToolLike {
   description?: string;
   inputParameters?: Record<string, unknown>;
   inputSchema?: Record<string, unknown>;
+  isDeprecated?: boolean;
   name?: string;
   slug?: string;
+  /** Composio hints: `readOnlyHint`, `destructiveHint`, `important`, ... */
+  tags?: string[];
 }
 
 /**
@@ -67,13 +70,33 @@ const PRIORITY_SLUGS_BY_APP: Record<string, string[]> = {
 
 const slugOf = (tool: ComposioToolLike) => (tool.slug || tool.name || '').toUpperCase();
 
+const hasTag = (tool: ComposioToolLike, tag: string) => tool.tags?.includes(tag) ?? false;
+
+/**
+ * Classify a Composio tool. Composio tags every tool with `readOnlyHint` /
+ * `destructiveHint`; trust those first. Name-based inference is only the
+ * fallback for untagged tools — it misreads namespaces with underscores
+ * (`ONE_DRIVE_GET_ITEM`) and treats `DOWNLOAD_*` / `EXPORT_*` as writes.
+ */
+export const classifyComposioTool = (tool: ComposioToolLike): ToolCRUDType => {
+  if (hasTag(tool, 'readOnlyHint')) return 'read';
+  if (hasTag(tool, 'destructiveHint')) return 'delete';
+  return inferCrudType(slugOf(tool));
+};
+
 export const isComposioReadTool = (slug: string) => inferCrudType(slug) === 'read';
+
+/** Verb rank among reads: finding things beats fetching a single known item. */
+const readVerbRank = (slug: string) => (/(?:^|_)(?:LIST|SEARCH|FIND|FETCH)_/.test(slug) ? 0 : 1);
 
 /**
  * Keep the highest-value slice of a Composio tool list: reads first (priority
- * slugs in curated order, then alphabetical), plus a handful of priority
- * writes. Non-priority writes are dropped — they are destructive and the model
- * can still reach them after a future activation/search surface.
+ * slugs in curated order, then Composio's `important` reads, then list/search/
+ * find verbs, then alphabetical), plus a handful of writes. Writes are the
+ * priority writes when the app has a list, otherwise its `important`
+ * non-destructive ones. Destructive tools are only advertised when listed as
+ * priority — the model can still reach them after a future activation/search
+ * surface.
  */
 export const curateComposioTools = <T extends ComposioToolLike>(
   tools: T[],
@@ -89,27 +112,40 @@ export const curateComposioTools = <T extends ComposioToolLike>(
   const seen = new Set<string>();
   const unique = tools.filter((tool) => {
     const slug = slugOf(tool);
-    if (!slug || seen.has(slug)) return false;
+    if (!slug || tool.isDeprecated || seen.has(slug)) return false;
     seen.add(slug);
     return true;
   });
 
-  const reads = unique.filter((tool) => isComposioReadTool(slugOf(tool)));
-  const writes = unique.filter((tool) => !isComposioReadTool(slugOf(tool)));
+  const isRead = (tool: T) => classifyComposioTool(tool) === 'read';
+  const reads = unique.filter(isRead);
+  const writes = unique.filter((tool) => !isRead(tool));
 
-  const priorityWrites = writes
-    .filter((tool) => prioritySlugs.includes(slugOf(tool)))
-    .slice(0, PRIORITY_WRITES);
-
-  const readBudget = Math.max(0, max - priorityWrites.length);
-  const selectedReads = [...reads]
+  const advertisedWrites =
+    prioritySlugs.length > 0
+      ? writes.filter((tool) => prioritySlugs.includes(slugOf(tool)))
+      : writes.filter(
+          (tool) => hasTag(tool, 'important') && classifyComposioTool(tool) !== 'delete',
+        );
+  const selectedWrites = [...advertisedWrites]
     .sort(
       (a, b) =>
         priorityRank(slugOf(a)) - priorityRank(slugOf(b)) || slugOf(a).localeCompare(slugOf(b)),
     )
+    .slice(0, PRIORITY_WRITES);
+
+  const readBudget = Math.max(0, max - selectedWrites.length);
+  const selectedReads = [...reads]
+    .sort(
+      (a, b) =>
+        priorityRank(slugOf(a)) - priorityRank(slugOf(b)) ||
+        Number(hasTag(b, 'important')) - Number(hasTag(a, 'important')) ||
+        readVerbRank(slugOf(a)) - readVerbRank(slugOf(b)) ||
+        slugOf(a).localeCompare(slugOf(b)),
+    )
     .slice(0, readBudget);
 
-  return [...selectedReads, ...priorityWrites];
+  return [...selectedReads, ...selectedWrites];
 };
 
 export type RawToolsClient = {
@@ -122,33 +158,27 @@ export type RawToolsClient = {
 };
 
 /**
- * Fetch the tools Composio exposes for a toolkit.
+ * Fetch the tools Composio exposes for a toolkit and curate them.
  *
- * Apps with a curation list (currently GitHub) are fetched in full and curated:
- * passing `limit` is what makes this work, because without it the SDK implicitly
- * adds `important: true`, which returns only page 1 (20 "important", mostly
- * write tools) and hides every read action.
- *
- * Other apps keep the previous behaviour (the SDK's important page) until they
- * get their own curation list.
+ * Always fetched in full: without `limit` the SDK implicitly adds
+ * `important: true`, which returns only page 1 (~20 tools, mostly alphabetical
+ * writes) and hides most read actions — for Google Drive that page has no
+ * "find file" at all.
  */
 export const fetchCuratedComposioTools = async (
   client: RawToolsClient,
   appSlug: string,
   max = DEFAULT_MAX_TOOLS,
 ): Promise<ComposioToolLike[]> => {
-  const prioritySlugs = PRIORITY_SLUGS_BY_APP[appSlug.toLowerCase()];
-
-  const response = await client.tools.getRawComposioTools(
-    prioritySlugs ? { limit: 1000, toolkits: [appSlug] } : { toolkits: [appSlug] },
-  );
+  const response = await client.tools.getRawComposioTools({ limit: 1000, toolkits: [appSlug] });
   const items = (
     Array.isArray(response) ? response : (response?.items ?? [])
   ) as ComposioToolLike[];
 
-  if (!prioritySlugs) return items.slice(0, max);
-
-  return curateComposioTools(items, { max, prioritySlugs });
+  return curateComposioTools(items, {
+    max,
+    prioritySlugs: PRIORITY_SLUGS_BY_APP[appSlug.toLowerCase()],
+  });
 };
 
 /**
@@ -157,9 +187,11 @@ export const fetchCuratedComposioTools = async (
  * (or no) `metadata.composio.toolsVersion` are re-synced on their next agent run,
  * because the saved tool rows are otherwise only written once, at connect time.
  */
-export const COMPOSIO_TOOLS_VERSION = 1;
+export const COMPOSIO_TOOLS_VERSION = 2;
 
 export interface ComposioToolInput {
+  /** Resolved from Composio's hints; falls back to name inference when absent. */
+  crudType?: ToolCRUDType;
   description?: string;
   inputSchema?: Record<string, unknown>;
   name: string;
@@ -167,6 +199,7 @@ export interface ComposioToolInput {
 
 /** Normalize a raw Composio tool (slug/inputParameters) to the shape stored on connector rows. */
 export const normalizeComposioTool = (tool: ComposioToolLike) => ({
+  crudType: classifyComposioTool(tool),
   description: tool.description || '',
   inputSchema: tool.inputParameters ||
     tool.inputSchema || {
@@ -183,7 +216,7 @@ export const normalizeComposioTool = (tool: ComposioToolLike) => ({
  */
 export const toConnectorToolRows = (tools: ComposioToolInput[]) =>
   tools.map((t) => {
-    const crudType = inferCrudType(t.name);
+    const crudType = t.crudType ?? inferCrudType(t.name);
     return {
       crudType,
       defaultPermission:

@@ -272,3 +272,12 @@ export const COMPOSIO_APP_TYPES: ComposioAppType[] = [
 
 export const getComposioAppByIdentifier = (identifier: string) =>
   COMPOSIO_APP_TYPES.find((s) => s.identifier === identifier);
+
+/**
+ * Shown to the model next to a connected Composio app. Spell out that it is the
+ * user's own authorized account: with a bare "Composio: GitHub" the model treats
+ * the integration as generic and falls back to public web search for their data.
+ */
+export const describeConnectedComposioApp = (label: string) =>
+  `${label} — connected to the user's own ${label} account (including private data). ` +
+  `Use it for anything about the user's own ${label} content; do not use web search for it.`;

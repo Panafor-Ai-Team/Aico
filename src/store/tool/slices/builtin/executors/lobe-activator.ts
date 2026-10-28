@@ -21,6 +21,7 @@ import { SkillsExecutionRuntime } from '@lobechat/builtin-tool-skills/executionR
 import { filterBuiltinSkills } from '@/helpers/skillFilters';
 import { agentSkillService } from '@/services/skill';
 import { getToolStoreState } from '@/store/tool';
+import { composioStoreSelectors } from '@/store/tool/selectors';
 import { toolSelectors } from '@/store/tool/selectors/tool';
 import { LobehubSkillStatus } from '@/store/tool/slices/lobehubSkillStore';
 
@@ -62,6 +63,27 @@ const service: ActivatorRuntimeService = {
           identifier: builtin.identifier,
           name: builtin.title ?? builtin.identifier,
           systemRole: builtin.manifest.systemRole,
+        });
+        continue;
+      }
+
+      // Search connected Composio apps. Read from the Composio store, not
+      // `installedPlugins`: that list is fetched once at page load, so an app
+      // connected in this session is in <available_tools> but not in it yet.
+      const composio = composioStoreSelectors
+        .composioAsLobeTools(s)
+        .find((tool) => tool.identifier === id);
+      if (composio?.manifest) {
+        results.push({
+          apiDescriptions: composio.manifest.api.map(
+            (a: { description: string; name: string }) => ({
+              description: a.description,
+              name: a.name,
+            }),
+          ),
+          avatar: composio.manifest.meta?.avatar,
+          identifier: composio.identifier,
+          name: composio.manifest.meta?.title ?? composio.identifier,
         });
         continue;
       }
