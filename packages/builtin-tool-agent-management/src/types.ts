@@ -61,7 +61,7 @@ export interface CreateAgentParams {
    */
   description?: string;
   /**
-   * AI model to use (e.g., "gpt-4o", "claude-3-5-sonnet")
+   * AI model to use; unset means the default model
    */
   model?: string;
   /**
@@ -77,7 +77,7 @@ export interface CreateAgentParams {
    */
   plugins?: string[];
   /**
-   * AI provider (e.g., "openai", "anthropic")
+   * AI provider; unset means the default provider
    */
   provider?: string;
   /**
