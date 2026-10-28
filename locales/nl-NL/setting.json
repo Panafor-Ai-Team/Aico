@@ -1340,8 +1340,6 @@
   "tools.composio.servers": "servers",
   "tools.composio.servers.airtable.description": "Airtable is een cloudgebaseerd database- en spreadsheetplatform dat de flexibiliteit van een spreadsheet combineert met de kracht van een database, waardoor teams projecten kunnen organiseren, volgen en samenwerken met aanpasbare weergaven en krachtige automatiseringsfuncties.",
   "tools.composio.servers.airtable.readme": "Integreer met Airtable om je databases en workflows te beheren. Doorzoek records, maak nieuwe items aan, werk gegevens bij en automatiseer processen met aanpasbare weergaven en krachtige trackingfuncties.",
-  "tools.composio.servers.cal-com.description": "Cal.com is een open-source planningsplatform dat helpt bij het plannen van afspraken zonder eindeloos heen-en-weer gemail.",
-  "tools.composio.servers.cal-com.readme": "Verbind met Cal.com om je planning en afspraken te beheren. Bekijk beschikbaarheid, plan vergaderingen, beheer evenementtypes en automatiseer je agenda via natuurlijke gesprekken.",
   "tools.composio.servers.clickup.description": "ClickUp is een uitgebreid platform voor projectbeheer en productiviteit dat teams helpt taken te organiseren, projecten te beheren en effectief samen te werken met aanpasbare workflows en krachtige trackingfuncties.",
   "tools.composio.servers.clickup.readme": "Verbind met ClickUp om taken te beheren, projecten te volgen en je werk te organiseren. Maak taken aan, werk statussen bij, beheer aangepaste workflows en werk samen met je team via natuurlijke taalopdrachten.",
   "tools.composio.servers.confluence.description": "Confluence is een teamwerkruimte waar kennis en samenwerking samenkomen.",

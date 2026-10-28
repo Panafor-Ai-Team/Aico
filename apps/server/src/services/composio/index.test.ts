@@ -1,11 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type * as CurateModule from './curate';
+import { COMPOSIO_TOOLS_VERSION } from './curate';
 import { ComposioService } from './index';
 
 const mocks = vi.hoisted(() => ({
   connectorQuery: vi.fn(),
   connectorQueryByIdentifiers: vi.fn(),
+  connectorToolDeleteNotIn: vi.fn(),
   connectorToolQueryAll: vi.fn(),
+  connectorToolUpsertMany: vi.fn(),
+  connectorUpdate: vi.fn(),
+  fetchCurated: vi.fn(),
   isClientAvailable: vi.fn(),
   isComposioNotFound: vi.fn(),
   markComposioUnavailable: vi.fn(),
@@ -22,12 +28,15 @@ vi.mock('@/database/models/connector', () => ({
     resolveAll: mocks.connectorQuery,
     resolveByIdentifiers: mocks.connectorQueryByIdentifiers,
     markComposioConnectionUnavailable: mocks.markComposioUnavailable,
+    update: mocks.connectorUpdate,
   })),
 }));
 
 vi.mock('@/database/models/connectorTool', () => ({
   ConnectorToolModel: vi.fn().mockImplementation(() => ({
+    deleteToolsNotIn: mocks.connectorToolDeleteNotIn,
     queryAllByConnectorIds: mocks.connectorToolQueryAll,
+    upsertMany: mocks.connectorToolUpsertMany,
   })),
 }));
 
@@ -44,6 +53,11 @@ vi.mock('@/libs/composio', () => ({
   isComposioConnectedAccountNotFoundError: mocks.isComposioNotFound,
 }));
 
+vi.mock('./curate', async (importOriginal) => ({
+  ...(await importOriginal<typeof CurateModule>()),
+  fetchCuratedComposioTools: mocks.fetchCurated,
+}));
+
 const service = () => new ComposioService({ db: {} as any, userId: 'user-1' });
 
 const activeConnectorRow = (overrides: Record<string, any> = {}) => ({
@@ -52,7 +66,12 @@ const activeConnectorRow = (overrides: Record<string, any> = {}) => ({
   isEnabled: true,
   metadata: {
     avatar: '🔌',
-    composio: { appSlug: 'GMAIL', connectedAccountId: 'ca-connector', status: 'ACTIVE' },
+    composio: {
+      appSlug: 'GMAIL',
+      connectedAccountId: 'ca-connector',
+      status: 'ACTIVE',
+      toolsVersion: COMPOSIO_TOOLS_VERSION,
+    },
   },
   name: 'Gmail',
   ...overrides,
@@ -74,6 +93,9 @@ beforeEach(() => {
   mocks.connectorToolQueryAll.mockResolvedValue([]);
   mocks.pluginQuery.mockResolvedValue([]);
   mocks.pluginFindById.mockResolvedValue(undefined);
+  mocks.connectorToolUpsertMany.mockResolvedValue(undefined);
+  mocks.connectorToolDeleteNotIn.mockResolvedValue(undefined);
+  mocks.connectorUpdate.mockResolvedValue(undefined);
 });
 
 describe('ComposioService.getComposioManifests', () => {
@@ -161,6 +183,97 @@ describe('ComposioService.getComposioManifests', () => {
   it('returns empty when there are no composio connections in either source', async () => {
     const manifests = await service().getComposioManifests();
     expect(manifests).toEqual([]);
+  });
+});
+
+describe('ComposioService.getComposioManifests tool re-sync', () => {
+  const staleGithub = (overrides: Record<string, any> = {}) =>
+    activeConnectorRow({
+      id: 'conn-github',
+      identifier: 'github',
+      metadata: {
+        avatar: '🔌',
+        composio: { appSlug: 'GITHUB', connectedAccountId: 'ca-gh', status: 'ACTIVE' },
+      },
+      name: 'GitHub',
+      ...overrides,
+    });
+
+  it('re-syncs an ACTIVE connector saved before the tool set was versioned', async () => {
+    mocks.connectorQuery.mockResolvedValue([staleGithub()]);
+    mocks.fetchCurated.mockResolvedValue([
+      {
+        description: 'List my repos',
+        inputParameters: { properties: {}, type: 'object' },
+        slug: 'GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER',
+      },
+      { description: 'Create an issue', slug: 'GITHUB_CREATE_AN_ISSUE' },
+    ]);
+
+    await service().getComposioManifests();
+
+    expect(mocks.fetchCurated).toHaveBeenCalledWith(expect.anything(), 'GITHUB');
+    const [connectorId, rows] = mocks.connectorToolUpsertMany.mock.calls[0];
+    expect(connectorId).toBe('conn-github');
+    expect(rows.map((r: any) => [r.toolName, r.defaultPermission])).toEqual([
+      ['GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER', 'auto'],
+      ['GITHUB_CREATE_AN_ISSUE', 'needs_approval'],
+    ]);
+    expect(mocks.connectorToolDeleteNotIn).toHaveBeenCalledWith('conn-github', [
+      'GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER',
+      'GITHUB_CREATE_AN_ISSUE',
+    ]);
+    expect(mocks.connectorUpdate).toHaveBeenCalledWith('conn-github', {
+      metadata: expect.objectContaining({
+        composio: expect.objectContaining({ toolsVersion: COMPOSIO_TOOLS_VERSION }),
+      }),
+    });
+  });
+
+  it('does not re-sync a connector already on the current tool version', async () => {
+    mocks.connectorQuery.mockResolvedValue([activeConnectorRow()]);
+
+    await service().getComposioManifests();
+
+    expect(mocks.fetchCurated).not.toHaveBeenCalled();
+    expect(mocks.connectorToolUpsertMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps the saved tools when the re-sync fails, and does not stamp the version', async () => {
+    mocks.connectorQuery.mockResolvedValue([staleGithub({ id: 'conn-github-fail' })]);
+    mocks.connectorToolQueryAll.mockResolvedValue([
+      { toolName: 'GITHUB_OLD_TOOL', userConnectorId: 'conn-github-fail' },
+    ]);
+    mocks.fetchCurated.mockRejectedValue(new Error('composio down'));
+
+    const manifests = await service().getComposioManifests();
+
+    expect(manifests).toHaveLength(1);
+    expect(manifests[0].api[0].name).toBe('GITHUB_OLD_TOOL');
+    expect(mocks.connectorToolDeleteNotIn).not.toHaveBeenCalled();
+    expect(mocks.connectorUpdate).not.toHaveBeenCalled();
+  });
+
+  it('never wipes the saved tools when Composio returns an empty list', async () => {
+    mocks.connectorQuery.mockResolvedValue([staleGithub({ id: 'conn-github-empty' })]);
+    mocks.fetchCurated.mockResolvedValue([]);
+
+    await service().getComposioManifests();
+
+    expect(mocks.connectorToolDeleteNotIn).not.toHaveBeenCalled();
+    expect(mocks.connectorUpdate).not.toHaveBeenCalled();
+  });
+
+  it("tells the model the integration is the user's own connected account", async () => {
+    mocks.connectorQuery.mockResolvedValue([activeConnectorRow()]);
+    mocks.connectorToolQueryAll.mockResolvedValue([
+      { toolName: 'GMAIL_SEND_EMAIL', userConnectorId: 'conn-gmail' },
+    ]);
+
+    const [manifest] = await service().getComposioManifests();
+
+    expect(manifest.meta.description).toContain("user's own Gmail account");
+    expect(manifest.meta.description).toContain('do not use web search');
   });
 });
 

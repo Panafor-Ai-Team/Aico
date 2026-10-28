@@ -1346,8 +1346,6 @@
   "tools.composio.servers": "个服务器",
   "tools.composio.servers.airtable.description": "Airtable 是一款基于云的数据库和电子表格平台，结合了电子表格的灵活性与数据库的强大功能，使团队能够通过可自定义视图和强大的自动化功能来组织、跟踪和协作项目。",
   "tools.composio.servers.airtable.readme": "集成 Airtable 以管理数据库和工作流程。查询记录、创建条目、更新数据，并通过可自定义视图和强大的跟踪功能实现自动化操作。",
-  "tools.composio.servers.cal-com.description": "Cal.com 是一个开源的日程安排平台，帮助您无需反复邮件即可安排会议。管理事件类型、预订、可用时间，并与日历集成，实现无缝预约安排。",
-  "tools.composio.servers.cal-com.readme": "连接 Cal.com 以管理您的日程和预约。查看可用时间、预订会议、管理事件类型，并通过自然对话自动化您的日历。",
   "tools.composio.servers.clickup.description": "ClickUp 是一个全面的项目管理和效率平台，帮助团队组织任务、管理项目，并通过可自定义的工作流程和强大的跟踪功能高效协作。",
   "tools.composio.servers.clickup.readme": "连接 ClickUp 以管理任务、跟踪项目并组织工作。创建任务、更新状态、管理自定义工作流程，并通过自然语言指令与团队协作。",
   "tools.composio.servers.confluence.description": "Confluence 是一个团队协作空间，融合了知识管理与协作功能。",

@@ -1340,8 +1340,6 @@
   "tools.composio.servers": "máy chủ",
   "tools.composio.servers.airtable.description": "Airtable là nền tảng cơ sở dữ liệu và bảng tính trên đám mây, kết hợp sự linh hoạt của bảng tính với sức mạnh của cơ sở dữ liệu, giúp các nhóm tổ chức, theo dõi và cộng tác trong các dự án với các chế độ xem tùy chỉnh và tính năng tự động hóa mạnh mẽ",
   "tools.composio.servers.airtable.readme": "Tích hợp với Airtable để quản lý cơ sở dữ liệu và quy trình làm việc. Truy vấn bản ghi, tạo mục, cập nhật dữ liệu và tự động hóa thao tác với chế độ xem tùy chỉnh và tính năng theo dõi mạnh mẽ.",
-  "tools.composio.servers.cal-com.description": "Cal.com là nền tảng lập lịch mã nguồn mở giúp bạn lên lịch họp mà không cần trao đổi email qua lại. Quản lý loại sự kiện, đặt lịch, thời gian rảnh và tích hợp với lịch để lên lịch hẹn dễ dàng",
-  "tools.composio.servers.cal-com.readme": "Kết nối với Cal.com để quản lý lịch trình và cuộc hẹn. Xem thời gian rảnh, đặt lịch họp, quản lý loại sự kiện và tự động hóa lịch của bạn qua hội thoại tự nhiên.",
   "tools.composio.servers.clickup.description": "ClickUp là nền tảng quản lý dự án và năng suất toàn diện giúp các nhóm tổ chức công việc, quản lý dự án và cộng tác hiệu quả với quy trình làm việc tùy chỉnh và tính năng theo dõi mạnh mẽ",
   "tools.composio.servers.clickup.readme": "Kết nối với ClickUp để quản lý công việc, theo dõi dự án và tổ chức công việc của bạn. Tạo nhiệm vụ, cập nhật trạng thái, quản lý quy trình tùy chỉnh và cộng tác với nhóm qua lệnh ngôn ngữ tự nhiên.",
   "tools.composio.servers.confluence.description": "Confluence là không gian làm việc nhóm nơi kiến thức và sự cộng tác hội tụ",

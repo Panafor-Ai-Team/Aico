@@ -1,5 +1,5 @@
 import type { IconType } from '@icons-pack/react-simple-icons';
-import { SiCaldotcom, SiGithub, SiX } from '@icons-pack/react-simple-icons';
+import { SiGithub } from '@icons-pack/react-simple-icons';
 
 export interface ComposioAppType {
   appSlug: string;
@@ -246,18 +246,6 @@ export const COMPOSIO_APP_TYPES: ComposioAppType[] = [
       'Integrate with Zendesk to manage support tickets and customer interactions. Create, update, and track support requests, access customer data, and streamline your support operations.',
   },
   {
-    appSlug: 'CALCOM',
-    author: 'Composio',
-    authorUrl: 'https://composio.dev',
-    description:
-      'Cal.com is an open-source scheduling platform that helps you schedule meetings without the back-and-forth emails.',
-    icon: SiCaldotcom,
-    identifier: 'cal-com',
-    label: 'Cal.com',
-    readme:
-      'Connect to Cal.com to manage your scheduling and appointments. View availability, book meetings, manage event types, and automate your calendar through natural conversation.',
-  },
-  {
     appSlug: 'NOTION',
     author: 'Composio',
     authorUrl: 'https://composio.dev',
@@ -267,18 +255,6 @@ export const COMPOSIO_APP_TYPES: ComposioAppType[] = [
     label: 'Notion',
     readme:
       'Connect to Notion to access and manage your workspace. Create pages, search content, update databases, and organize your knowledge base through natural conversation with your AI assistant.',
-  },
-  {
-    appSlug: 'TWITTER',
-    author: 'Composio',
-    authorUrl: 'https://composio.dev',
-    description:
-      'X (Twitter) is a social media platform for sharing real-time updates, news, and engaging with your audience',
-    icon: SiX,
-    identifier: 'twitter',
-    label: 'X (Twitter)',
-    readme:
-      'Connect to X (Twitter) to post updates, manage your timeline, and engage with your audience. Create content, monitor mentions, and build your social media presence through conversational AI.',
   },
   {
     appSlug: 'GITHUB',
