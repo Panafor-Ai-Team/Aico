@@ -506,6 +506,97 @@ describe('ConversationControl actions', () => {
   });
 
   describe('approveToolCalling', () => {
+    it('approves the rest of the request before the resumed run reads its approval config', async () => {
+      const { result } = renderHook(() => useChatStore());
+      const context: ConversationContext = { agentId: 'agent-1', topicId: 'topic-1' };
+      const key = messageMapKey(context);
+      const messages = [
+        createMockMessage({ id: 'user-1', role: 'user' }),
+        createMockMessage({ id: 'assistant-1', parentId: 'user-1', role: 'assistant' }),
+        createMockMessage({
+          id: 'tool-msg-1',
+          parentId: 'assistant-1',
+          plugin: { apiName: 'test', arguments: '{}', identifier: 'test-plugin', type: 'default' },
+          role: 'tool',
+        }),
+      ];
+
+      act(() => {
+        useChatStore.setState({
+          dbMessagesMap: { [key]: messages },
+          messagesMap: { [key]: messages },
+          toolApprovalRequestGrants: {},
+        });
+      });
+
+      vi.spyOn(result.current, 'optimisticUpdateMessagePlugin').mockResolvedValue(undefined);
+      let resumedApprovalMode: string | undefined;
+      vi.spyOn(result.current, 'internal_createAgentState').mockImplementation(() => {
+        resumedApprovalMode = useChatStore.getState().resolveUserInterventionConfig({
+          anchorMessageId: 'tool-msg-1',
+          topicId: 'topic-1',
+        }).approvalMode;
+        return {
+          agentConfig: createMockResolvedAgentConfig(),
+          context: { phase: 'init' } as any,
+          state: {} as any,
+        };
+      });
+      vi.spyOn(result.current, 'executeClientAgent').mockResolvedValue(undefined);
+      const updateTopicMetadata = vi
+        .spyOn(result.current, 'updateTopicMetadata')
+        .mockResolvedValue(undefined);
+
+      await act(async () => {
+        await result.current.approveToolCalling('tool-msg-1', 'group-1', context);
+      });
+
+      expect(useChatStore.getState().toolApprovalRequestGrants).toEqual({ 'user-1': true });
+      expect(resumedApprovalMode).toBe('auto-run');
+      expect(updateTopicMetadata).not.toHaveBeenCalled();
+    });
+
+    it('saves "always approve in this chat" on the topic', async () => {
+      const { result } = renderHook(() => useChatStore());
+      const context: ConversationContext = { agentId: 'agent-1', topicId: 'topic-1' };
+      const key = messageMapKey(context);
+      const messages = [
+        createMockMessage({ id: 'user-1', role: 'user' }),
+        createMockMessage({
+          id: 'tool-msg-1',
+          parentId: 'user-1',
+          plugin: { apiName: 'test', arguments: '{}', identifier: 'test-plugin', type: 'default' },
+          role: 'tool',
+        }),
+      ];
+
+      act(() => {
+        useChatStore.setState({
+          dbMessagesMap: { [key]: messages },
+          messagesMap: { [key]: messages },
+        });
+      });
+
+      vi.spyOn(result.current, 'optimisticUpdateMessagePlugin').mockResolvedValue(undefined);
+      vi.spyOn(result.current, 'internal_createAgentState').mockReturnValue({
+        agentConfig: createMockResolvedAgentConfig(),
+        context: { phase: 'init' } as any,
+        state: {} as any,
+      });
+      vi.spyOn(result.current, 'executeClientAgent').mockResolvedValue(undefined);
+      const updateTopicMetadata = vi
+        .spyOn(result.current, 'updateTopicMetadata')
+        .mockResolvedValue(undefined);
+
+      await act(async () => {
+        await result.current.approveToolCalling('tool-msg-1', 'group-1', context, {
+          scope: 'chat',
+        });
+      });
+
+      expect(updateTopicMetadata).toHaveBeenCalledWith('topic-1', { autoApproveTools: true });
+    });
+
     it('should use provided context instead of global state', async () => {
       const { result } = renderHook(() => useChatStore());
 

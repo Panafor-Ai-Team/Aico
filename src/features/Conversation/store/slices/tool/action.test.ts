@@ -84,7 +84,25 @@ describe('Tool Actions', () => {
       });
 
       // Verify context is passed as third argument
-      expect(mockApproveToolCalling).toHaveBeenCalledWith('tool-call-1', 'group-1', context);
+      expect(mockApproveToolCalling).toHaveBeenCalledWith(
+        'tool-call-1',
+        'group-1',
+        context,
+        undefined,
+      );
+    });
+
+    it('should forward the approval scope to ChatStore.approveToolCalling', async () => {
+      const context: ConversationContext = { agentId: 'session-1', topicId: 'topic-1' };
+      const store = createStore({ context });
+
+      await act(async () => {
+        await store.getState().approveToolCall('tool-call-1', 'group-1', { scope: 'chat' });
+      });
+
+      expect(mockApproveToolCalling).toHaveBeenCalledWith('tool-call-1', 'group-1', context, {
+        scope: 'chat',
+      });
     });
 
     it('should pass agent_builder scope context correctly', async () => {
@@ -102,7 +120,12 @@ describe('Tool Actions', () => {
       });
 
       // Verify entire context object is passed (including scope)
-      expect(mockApproveToolCalling).toHaveBeenCalledWith('tool-call-1', 'group-1', context);
+      expect(mockApproveToolCalling).toHaveBeenCalledWith(
+        'tool-call-1',
+        'group-1',
+        context,
+        undefined,
+      );
     });
 
     it('should call onToolApproved hook before approval', async () => {
@@ -121,7 +144,12 @@ describe('Tool Actions', () => {
       });
 
       expect(onToolApproved).toHaveBeenCalledWith('tool-call-1');
-      expect(mockApproveToolCalling).toHaveBeenCalledWith('tool-call-1', 'group-1', context);
+      expect(mockApproveToolCalling).toHaveBeenCalledWith(
+        'tool-call-1',
+        'group-1',
+        context,
+        undefined,
+      );
     });
 
     it('should respect onToolApproved hook returning false', async () => {
@@ -452,7 +480,12 @@ describe('Tool Actions', () => {
 
       // Now approve should have finished
       expect(approveFinished).toBe(true);
-      expect(mockApproveToolCalling).toHaveBeenCalledWith('tool-call-1', 'group-1', context);
+      expect(mockApproveToolCalling).toHaveBeenCalledWith(
+        'tool-call-1',
+        'group-1',
+        context,
+        undefined,
+      );
     });
 
     it('rejectToolCall should wait for pending args update before proceeding', async () => {

@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useChatInputResourceAccess } from '@/features/ChatInput/hooks/useChatInputResourceAccess';
 import { usePermission } from '@/hooks/usePermission';
+import { useChatStore } from '@/store/chat';
 import { useUserStore } from '@/store/user';
 import { toolInterventionSelectors } from '@/store/user/selectors';
 import { type ApprovalMode } from '@/store/user/slices/settings/selectors';
@@ -68,6 +69,10 @@ const ModeSelector = memo(() => {
   const disabled = !canCreateContent || !canUseResource;
   const approvalMode = useUserStore(toolInterventionSelectors.approvalMode);
   const updateHumanIntervention = useUserStore((s) => s.updateHumanIntervention);
+  // "Always approve in this chat" overrides the mode for the active topic only.
+  const activeTopicId = useChatStore((s) => s.activeTopicId);
+  const isChatAutoApproved = useChatStore((s) => s.isChatToolApprovalGranted(s.activeTopicId));
+  const revokeChatToolApproval = useChatStore((s) => s.revokeChatToolApproval);
 
   const modeLabels = useMemo(
     () => ({
@@ -98,6 +103,25 @@ const ModeSelector = memo(() => {
 
   const menuItems = useCallback(
     (): MenuProps['items'] => [
+      ...(isChatAutoApproved && activeTopicId
+        ? [
+            {
+              key: 'chat-auto-approve',
+              label: (
+                <ModeItemLabel
+                  desc={t('tool.intervention.chatAutoApprove.turnOff')}
+                  icon={Zap}
+                  title={t('tool.intervention.chatAutoApprove.active')}
+                />
+              ),
+              onClick: () => {
+                if (disabled) return;
+                void revokeChatToolApproval(activeTopicId);
+              },
+            },
+            { key: 'chat-auto-approve-divider', type: 'divider' as const },
+          ]
+        : []),
       {
         extra: approvalMode === 'auto-run' ? <Icon icon={Check} /> : undefined,
         key: 'auto-run',
@@ -135,7 +159,16 @@ const ModeSelector = memo(() => {
         onClick: () => handleModeChange('manual'),
       },
     ],
-    [approvalMode, modeLabels, handleModeChange, t],
+    [
+      activeTopicId,
+      approvalMode,
+      disabled,
+      handleModeChange,
+      isChatAutoApproved,
+      modeLabels,
+      revokeChatToolApproval,
+      t,
+    ],
   );
 
   const button = (
@@ -147,7 +180,7 @@ const ModeSelector = memo(() => {
       size="small"
       type={'text'}
     >
-      {modeLabels[approvalMode]}
+      {isChatAutoApproved ? modeLabels['auto-run'] : modeLabels[approvalMode]}
     </Button>
   );
 
@@ -175,7 +208,15 @@ const ModeSelector = memo(() => {
         {dropdownOpen ? (
           button
         ) : (
-          <Tooltip title={t('tool.intervention.approvalMode')}>{button}</Tooltip>
+          <Tooltip
+            title={
+              isChatAutoApproved
+                ? t('tool.intervention.chatAutoApprove.active')
+                : t('tool.intervention.approvalMode')
+            }
+          >
+            {button}
+          </Tooltip>
         )}
       </div>
     </DropdownMenu>

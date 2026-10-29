@@ -111,6 +111,12 @@ export interface OnboardingSessionSnapshot {
 }
 
 export interface ChatTopicMetadata {
+  /**
+   * The user chose "Always approve in this chat": tool calls in this topic run
+   * as if the approval mode were `auto-run` (hard stops such as the security
+   * blacklist still ask). Scoped to this topic only; new topics ask again.
+   */
+  autoApproveTools?: boolean;
   bot?: ChatTopicBotContext;
   boundDeviceId?: string;
   cronJobId?: string;
@@ -387,6 +393,7 @@ export const parseTopicScheduledRun = (raw: unknown): TopicScheduledRun | null =
 
 /** Metadata patch accepted by the topic update API. */
 export const chatTopicMetadataUpdateSchema = z.object({
+  autoApproveTools: z.boolean().optional(),
   boundDeviceId: z.string().optional(),
   heteroSessionId: z.string().optional(),
   heteroSessionIdByWorkingDirectory: z.record(z.string(), z.string()).optional(),

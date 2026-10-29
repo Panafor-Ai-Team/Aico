@@ -13,24 +13,36 @@ describe('resolveApprovalFooterButtons', () => {
 });
 
 describe('resolveApprovalChoices', () => {
-  it('offers approve and reject in manual mode', () => {
-    expect(resolveApprovalChoices({ isAllowListMode: false })).toEqual(['approve', 'reject']);
+  it('offers approve, approve for the chat and reject in manual mode', () => {
+    expect(resolveApprovalChoices({ canApproveChat: true, isAllowListMode: false })).toEqual([
+      'approve',
+      'approve-chat',
+      'reject',
+    ]);
   });
 
   it('adds "approve and remember" in allow-list mode', () => {
-    expect(resolveApprovalChoices({ isAllowListMode: true })).toEqual([
+    expect(resolveApprovalChoices({ canApproveChat: true, isAllowListMode: true })).toEqual([
       'approve',
+      'approve-chat',
       'approve-remember',
       'reject',
     ]);
   });
 
+  it('hides "approve for the chat" when there is no chat to remember it on', () => {
+    expect(resolveApprovalChoices({ canApproveChat: false, isAllowListMode: false })).toEqual([
+      'approve',
+      'reject',
+    ]);
+  });
+
   it('has no reject-reason or remember rows on confirm / cancel cards', () => {
-    expect(resolveApprovalChoices({ confirmCancel: true, isAllowListMode: true })).toEqual([
-      'approve',
-    ]);
-    expect(resolveApprovalChoices({ confirmCancel: true, isAllowListMode: false })).toEqual([
-      'approve',
-    ]);
+    expect(
+      resolveApprovalChoices({ canApproveChat: true, confirmCancel: true, isAllowListMode: true }),
+    ).toEqual(['approve']);
+    expect(
+      resolveApprovalChoices({ canApproveChat: true, confirmCancel: true, isAllowListMode: false }),
+    ).toEqual(['approve']);
   });
 });

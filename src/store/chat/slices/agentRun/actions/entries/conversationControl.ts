@@ -29,6 +29,7 @@ import { type StoreSetter } from '@/store/types';
 
 import { buildRunLifecycle } from '../lifecycle/buildRunLifecycle';
 import { type RunScope } from '../lifecycle/types';
+import { type ToolApprovalScope } from '../state/toolApproval';
 
 /**
  * Actions for controlling conversation operations like cancellation and error handling
@@ -374,6 +375,7 @@ export class ConversationControlActionImpl {
     toolMessageId: string,
     _assistantGroupId: string,
     context?: ConversationContext,
+    options?: { scope?: ToolApprovalScope },
   ): Promise<void> => {
     const { executeClientAgent, startOperation, completeOperation } = this.#get();
 
@@ -389,6 +391,14 @@ export class ConversationControlActionImpl {
     // 1. Get tool message and verify it exists
     const toolMessage = dbMessageSelectors.getDbMessageById(toolMessageId)(this.#get());
     if (!toolMessage) return;
+
+    // An approval covers the rest of this request ('request') or every later
+    // request in this topic ('chat'). Record it before the resume run reads
+    // its approval config.
+    this.#get().grantToolApproval(options?.scope ?? 'request', {
+      anchorMessageId: toolMessageId,
+      topicId,
+    });
 
     // Create an operation to carry the context for optimistic updates
     // This ensures optimistic updates use the correct agentId/topicId

@@ -1,4 +1,5 @@
 import { useChatStore } from '@/store/chat';
+import { type ToolApprovalScope } from '@/store/chat/slices/agentRun/actions/state/toolApproval';
 import { type StoreSetter } from '@/store/types';
 
 import { type Store as ConversationStore } from '../../action';
@@ -22,7 +23,11 @@ export class ToolActionImpl {
     this.#get = get;
   }
 
-  approveToolCall = async (toolMessageId: string, assistantGroupId: string): Promise<void> => {
+  approveToolCall = async (
+    toolMessageId: string,
+    assistantGroupId: string,
+    options?: { scope?: ToolApprovalScope },
+  ): Promise<void> => {
     const { hooks, context, waitForPendingArgsUpdate } = this.#get();
 
     // Wait for any pending args update to complete before approval
@@ -36,7 +41,7 @@ export class ToolActionImpl {
 
     // Delegate to global ChatStore with context for correct conversation scope
     const chatStore = useChatStore.getState();
-    await chatStore.approveToolCalling(toolMessageId, assistantGroupId, context);
+    await chatStore.approveToolCalling(toolMessageId, assistantGroupId, context, options);
 
     // ===== Hook: onToolCallComplete =====
     if (hooks.onToolCallComplete) {

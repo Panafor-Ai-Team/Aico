@@ -79,7 +79,8 @@ const ToolTitle = memo<ToolTitleProps>(
 
     const pluginMeta = useToolStore(toolSelectors.getMetaById(identifier), isEqual);
     const isBuiltinPlugin = builtinToolIdentifiers.includes(identifier);
-    const pluginTitle = pluginHelpers.getPluginTitle(pluginMeta) ?? identifier;
+    const pluginTitle =
+      pluginHelpers.getPluginTitle(pluginMeta) ?? pluginHelpers.getToolFallbackName(identifier);
 
     const params = useMemo(() => {
       const argsToUse = args || partialArgs || {};
@@ -107,7 +108,9 @@ const ToolTitle = memo<ToolTitleProps>(
       >
         <span>
           {isBuiltinPlugin
-            ? t(`builtins.${identifier}.title`, { defaultValue: identifier })
+            ? t(`builtins.${identifier}.title`, {
+                defaultValue: pluginHelpers.getToolFallbackName(identifier),
+              })
             : pluginTitle}
         </span>
         <Icon icon={ChevronRight} style={{ marginInline: 4 }} />
