@@ -75,6 +75,63 @@ export const revokeComposioConnectedAccount = async (
   }
 };
 
+export interface ComposioToolOutcome {
+  content: string;
+  /** Composio's error text; set only when the tool failed. */
+  error?: string;
+  success: boolean;
+}
+
+const stringifyComposioPayload = (payload: unknown): string => {
+  if (typeof payload === 'string') return payload;
+  if (Array.isArray(payload)) {
+    return payload
+      .map((item: any) => {
+        if (typeof item === 'string') return item;
+        if (item?.type === 'text' && item.text) return item.text;
+        return JSON.stringify(item);
+      })
+      .join('\n');
+  }
+  return JSON.stringify(payload ?? null);
+};
+
+const isEmptyPayload = (payload: unknown) =>
+  payload === undefined ||
+  payload === null ||
+  payload === '' ||
+  (typeof payload === 'object' && Object.keys(payload as object).length === 0);
+
+/**
+ * Maps a `tools.execute` response (`{ data, error, successful }`) to a tool result.
+ *
+ * Use when:
+ * - Returning a Composio execution to the model, from any executor
+ *
+ * Expects:
+ * - The raw SDK response; Composio reports a failed upstream call (e.g. GitHub
+ *   404) as a resolved response with `successful: false`, not as a throw
+ *
+ * Returns:
+ * - `success: false` with Composio's error text (plus any data it returned) when
+ *   the tool failed, so the model sees why instead of an empty "success"
+ */
+export const toComposioToolOutcome = (result: unknown): ComposioToolOutcome => {
+  const record = toRecord(result);
+  const payload = record ? (record.data ?? record.result ?? result) : result;
+  const errorText = typeof record?.error === 'string' && record.error ? record.error : undefined;
+
+  if (record?.successful === false || errorText) {
+    const error = errorText ?? 'Composio tool execution failed';
+    const content = isEmptyPayload(payload)
+      ? error
+      : `${error}\n\n${stringifyComposioPayload(payload)}`;
+    return { content, error, success: false };
+  }
+
+  return { content: stringifyComposioPayload(payload), success: true };
+};
+
 export const getComposioClient = (): Composio => {
   const apiKey = getServerComposioApiKey();
 

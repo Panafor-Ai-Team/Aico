@@ -11,6 +11,7 @@ import {
   getComposioClient,
   isComposioClientAvailable,
   isComposioConnectedAccountNotFoundError,
+  toComposioToolOutcome,
 } from '@/libs/composio';
 import { type ToolExecutionResult } from '@/server/services/toolExecution/types';
 
@@ -158,25 +159,16 @@ export class ComposioService {
 
       log('executeComposioTool: response: %O', result);
 
-      const data = result as any;
-      const content = data?.data || data?.result || data;
-
-      let resultContent = '';
-      if (typeof content === 'string') {
-        resultContent = content;
-      } else if (Array.isArray(content)) {
-        resultContent = content
-          .map((item: any) => {
-            if (typeof item === 'string') return item;
-            if (item.type === 'text' && item.text) return item.text;
-            return JSON.stringify(item);
-          })
-          .join('\n');
-      } else {
-        resultContent = JSON.stringify(content);
+      const outcome = toComposioToolOutcome(result);
+      if (!outcome.success) {
+        return {
+          content: outcome.content,
+          error: { code: 'COMPOSIO_TOOL_FAILED', message: outcome.error! },
+          success: false,
+        };
       }
 
-      return { content: resultContent, success: true };
+      return { content: outcome.content, success: true };
     } catch (error) {
       const err = error as Error;
       if (

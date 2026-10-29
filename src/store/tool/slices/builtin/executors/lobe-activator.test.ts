@@ -7,6 +7,10 @@ import { ComposioServerStatus } from '@/store/tool/slices/composioStore';
 import { activatorExecutor } from './lobe-activator';
 
 vi.mock('@/store/tool', () => ({ getToolStoreState: vi.fn() }));
+vi.mock('@/store/serverConfig', () => ({
+  getServerConfigStoreState: () => ({ serverConfig: { enableComposio: true } }),
+  serverConfigSelectors: { enableComposio: (s: any) => !!s.serverConfig.enableComposio },
+}));
 vi.mock('@/services/skill', () => ({
   agentSkillService: {
     getById: vi.fn(),
@@ -37,6 +41,7 @@ const storeState = (overrides: Record<string, unknown> = {}) =>
     builtinSkills: [],
     builtinTools: [],
     composioServers: [driveServer],
+    ensureRuntimeToolsReady: vi.fn().mockResolvedValue(undefined),
     // The plugin list is fetched once at page load, so it has no entry for an
     // app connected afterwards.
     installedPlugins: [],
@@ -94,5 +99,34 @@ describe('activator (browser) tool lookup', () => {
     );
 
     expect((result.state as any).notFound).toEqual(['gdrive']);
+  });
+
+  // Regression: the chat page's menus are popup-scoped, so after a page load
+  // nothing had fetched the Composio connections and `activateTools({ identifiers:
+  // ['github'] })` answered "Not found: github" for a connected app.
+  it('loads the connected apps before resolving when the store is still empty', async () => {
+    const githubServer = {
+      ...driveServer,
+      appSlug: 'GITHUB',
+      identifier: 'github',
+      label: 'GitHub',
+      tools: [{ description: 'List repos', inputSchema: { type: 'object' }, name: 'GITHUB_LIST' }],
+    };
+    let loaded = false;
+    const ensureRuntimeToolsReady = vi.fn(async () => {
+      loaded = true;
+    });
+    vi.mocked(getToolStoreState).mockImplementation(() =>
+      storeState({ composioServers: loaded ? [githubServer] : [], ensureRuntimeToolsReady }),
+    );
+
+    const result = await activatorExecutor.activateTools(
+      { identifiers: ['github'], reason: 'list repos' } as any,
+      ctx,
+    );
+
+    expect(ensureRuntimeToolsReady).toHaveBeenCalledWith({ composio: true });
+    expect((result.state as any).notFound).toEqual([]);
+    expect(result.content).toContain('GITHUB_LIST');
   });
 });

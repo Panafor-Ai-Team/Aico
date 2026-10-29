@@ -20,6 +20,7 @@ import { SkillsExecutionRuntime } from '@lobechat/builtin-tool-skills/executionR
 
 import { filterBuiltinSkills } from '@/helpers/skillFilters';
 import { agentSkillService } from '@/services/skill';
+import { getServerConfigStoreState, serverConfigSelectors } from '@/store/serverConfig';
 import { getToolStoreState } from '@/store/tool';
 import { composioStoreSelectors } from '@/store/tool/selectors';
 import { toolSelectors } from '@/store/tool/selectors/tool';
@@ -39,6 +40,12 @@ const service: ActivatorRuntimeService = {
   activateSkill: (args) => skillsRuntime.activateSkill(args),
   getActivatedToolIds: () => [],
   getToolManifests: async (identifiers: string[]): Promise<ToolManifestInfo[]> => {
+    // Connected apps / installed plugins may not be loaded yet (nothing on the
+    // chat page guarantees it); answering from an empty store says "Not found".
+    const serverConfig = getServerConfigStoreState();
+    await getToolStoreState().ensureRuntimeToolsReady({
+      composio: !!serverConfig && serverConfigSelectors.enableComposio(serverConfig),
+    });
     const s = getToolStoreState();
 
     // Only allow activation of tools that passed discovery filters

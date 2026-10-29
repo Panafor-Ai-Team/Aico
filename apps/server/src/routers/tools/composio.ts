@@ -4,7 +4,11 @@ import { z } from 'zod';
 import { wsCompatProcedure } from '@/business/server/trpc-middlewares/workspaceAuth';
 import { ConnectorModel } from '@/database/models/connector';
 import { PluginModel } from '@/database/models/plugin';
-import { getComposioClient, isComposioConnectedAccountNotFoundError } from '@/libs/composio';
+import {
+  getComposioClient,
+  isComposioConnectedAccountNotFoundError,
+  toComposioToolOutcome,
+} from '@/libs/composio';
 import { publicProcedure, router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import {
@@ -101,13 +105,11 @@ export const composioToolsRouter = router({
         };
       }
 
-      const data = result as any;
-      const content = data?.data || data?.result || data;
-      const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
+      const outcome = toComposioToolOutcome(result);
 
       return await MCPService.processToolCallResult({
-        content: [{ text: contentStr, type: 'text' }],
-        isError: false,
+        content: [{ text: outcome.content, type: 'text' }],
+        isError: !outcome.success,
       });
     }),
 

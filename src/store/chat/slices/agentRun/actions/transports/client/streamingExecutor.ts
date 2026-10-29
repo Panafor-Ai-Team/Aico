@@ -64,6 +64,7 @@ import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 import { getElectronStoreState } from '@/store/electron';
 import { getServerConfigStoreState, serverConfigSelectors } from '@/store/serverConfig';
 import { getTaskStoreState } from '@/store/task';
+import { getToolStoreState } from '@/store/tool';
 import { pageAgentRuntime } from '@/store/tool/slices/builtin/executors/pageAgentRuntime';
 import { type StoreSetter } from '@/store/types';
 
@@ -609,7 +610,16 @@ export class StreamingExecutorActionImpl {
     // payload and the `/webapi/chat/[provider]` route forwards it to the provider
     // without rechecking capability. Wait (bounded) for the list so a fast first
     // send after reload never attaches tools to a model that can't use them.
-    await getAiInfraStoreState().ensureAiProviderRuntimeStateReady();
+    // Same for the tool state the tool set is built from: connected apps and
+    // installed plugins are not guaranteed to be loaded by the chat page.
+    const runtimeServerConfig = getServerConfigStoreState();
+    await Promise.all([
+      getAiInfraStoreState().ensureAiProviderRuntimeStateReady(),
+      getToolStoreState().ensureRuntimeToolsReady({
+        composio:
+          !!runtimeServerConfig && serverConfigSelectors.enableComposio(runtimeServerConfig),
+      }),
+    ]);
 
     // ===========================================
     // Step 1: Create Agent State (resolves config once)
