@@ -25,6 +25,49 @@ const n = setNamespace('composioStore');
 
 const VALID_COMPOSIO_IDENTIFIERS = new Set(COMPOSIO_APP_TYPES.map((t) => t.identifier));
 
+type ComposioPluginRow = Awaited<
+  ReturnType<typeof lambdaClient.composio.getComposioPlugins.query>
+>[number];
+
+const COMPOSIO_STATUS_MAP: Record<string, ComposioServerStatus> = {
+  ACTIVE: ComposioServerStatus.ACTIVE,
+  FAILED: ComposioServerStatus.ERROR,
+  PENDING: ComposioServerStatus.PENDING_AUTH,
+};
+
+/**
+ * Map the user's Composio plugin rows to store servers. Only surface connections
+ * this client knows how to render. Identifiers outside the static catalog are
+ * hidden locally — never deleted: an outdated bundle (missing a newly-added app)
+ * would otherwise silently destroy a legitimate remote connection. Deprecating an
+ * app is a server-side concern, not a side effect of a client fetch.
+ */
+const toComposioServers = (composioPlugins: ComposioPluginRow[]): ComposioServer[] =>
+  composioPlugins
+    .filter((plugin) => plugin.customParams?.composio)
+    .filter((plugin) => VALID_COMPOSIO_IDENTIFIERS.has(plugin.identifier))
+    .map((plugin) => {
+      const params = plugin.customParams!.composio!;
+      const appType = COMPOSIO_APP_TYPES.find((t) => t.identifier === plugin.identifier);
+      const tools: ComposioTool[] = (plugin.manifest?.api || []).map((api) => ({
+        description: api.description,
+        inputSchema: api.parameters as ComposioTool['inputSchema'],
+        name: api.name,
+      }));
+
+      return {
+        appSlug: params.appSlug || '',
+        authConfigId: params.authConfigId || '',
+        connectedAccountId: params.connectedAccountId,
+        createdAt: 0,
+        identifier: plugin.identifier,
+        label: appType?.label || plugin.identifier,
+        redirectUrl: params.redirectUrl,
+        status: COMPOSIO_STATUS_MAP[params.status] || ComposioServerStatus.PENDING_AUTH,
+        tools,
+      };
+    });
+
 type Setter = StoreSetter<ToolStore>;
 export const createComposioStoreSlice = (set: Setter, get: () => ToolStore, _api?: unknown) =>
   new ComposioStoreActionImpl(set, get, _api);
@@ -334,66 +377,42 @@ export class ComposioStoreActionImpl {
     );
   };
 
+  /**
+   * Load the user's Composio connections imperatively (outside React), e.g. when
+   * an agent run needs the connected apps before it builds its tool set.
+   */
+  refreshComposioConnections = async (): Promise<void> => {
+    const composioPlugins = await lambdaClient.composio.getComposioPlugins.query();
+    this.internal_upsertComposioServers(toComposioServers(composioPlugins));
+  };
+
+  /**
+   * Merge fetched connections into the store by identifier. Fetched rows replace
+   * existing entries (a connection that became ACTIVE, or got a new tool set, in
+   * another tab or on the server must not stay stale); entries the fetch doesn't
+   * know about yet (e.g. a connect started in this tab) are kept.
+   */
+  internal_upsertComposioServers = (servers: ComposioServer[]): void => {
+    this.#set(
+      produce((draft: ComposioStoreState) => {
+        for (const server of servers) {
+          const index = draft.composioServers.findIndex((s) => s.identifier === server.identifier);
+          if (index === -1) draft.composioServers.push(server);
+          else draft.composioServers[index] = server;
+        }
+        draft.isComposioServersInit = true;
+      }),
+      false,
+      n('upsertComposioServers'),
+    );
+  };
+
   useFetchUserComposioConnections = (enabled: boolean): SWRResponse<ComposioServer[]> => {
     return useSWR<ComposioServer[]>(
       enabled ? toolKeys.composioConnections() : null,
-      async () => {
-        const composioPlugins = await lambdaClient.composio.getComposioPlugins.query();
-
-        if (composioPlugins.length === 0) return [];
-
-        const validPlugins = composioPlugins.filter((plugin) => plugin.customParams?.composio);
-
-        // Only surface connections this client knows how to render. Identifiers
-        // outside the static catalog are hidden locally — never deleted: an
-        // outdated bundle (missing a newly-added app) would otherwise silently
-        // destroy a legitimate remote connection. Deprecating an app is a
-        // server-side concern, not a side effect of a client fetch.
-        return validPlugins
-          .filter((plugin) => VALID_COMPOSIO_IDENTIFIERS.has(plugin.identifier))
-          .map((plugin) => {
-            const params = plugin.customParams!.composio!;
-            const appType = COMPOSIO_APP_TYPES.find((t) => t.identifier === plugin.identifier);
-            const tools: ComposioTool[] = (plugin.manifest?.api || []).map((api) => ({
-              description: api.description,
-              inputSchema: api.parameters as ComposioTool['inputSchema'],
-              name: api.name,
-            }));
-
-            const statusMap: Record<string, ComposioServerStatus> = {
-              ACTIVE: ComposioServerStatus.ACTIVE,
-              FAILED: ComposioServerStatus.ERROR,
-              PENDING: ComposioServerStatus.PENDING_AUTH,
-            };
-
-            return {
-              appSlug: params.appSlug || '',
-              authConfigId: params.authConfigId || '',
-              connectedAccountId: params.connectedAccountId,
-              createdAt: 0,
-              identifier: plugin.identifier,
-              label: appType?.label || plugin.identifier,
-              redirectUrl: params.redirectUrl,
-              status: statusMap[params.status] || ComposioServerStatus.PENDING_AUTH,
-              tools,
-            };
-          });
-      },
+      async () => toComposioServers(await lambdaClient.composio.getComposioPlugins.query()),
       {
-        onSuccess: (data) => {
-          this.#set(
-            produce((draft: ComposioStoreState) => {
-              if (data.length > 0) {
-                const existingIdentifiers = new Set(draft.composioServers.map((s) => s.identifier));
-                const newServers = data.filter((s) => !existingIdentifiers.has(s.identifier));
-                draft.composioServers = [...draft.composioServers, ...newServers];
-              }
-              draft.isComposioServersInit = true;
-            }),
-            false,
-            n('useFetchUserComposioConnections'),
-          );
-        },
+        onSuccess: (data) => this.internal_upsertComposioServers(data),
         revalidateOnFocus: false,
       },
     );

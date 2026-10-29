@@ -18,6 +18,7 @@ vi.mock('@/libs/trpc/client', () => ({
     composio: {
       createConnection: { mutate: vi.fn() },
       deleteConnection: { mutate: vi.fn() },
+      getComposioPlugins: { query: vi.fn() },
     },
   },
   toolsClient: {},
@@ -86,5 +87,65 @@ describe('removeComposioConnection', () => {
 
     expect(useToolStore.getState().composioServers).toEqual([githubServer]);
     expect(toast.error).toHaveBeenCalledTimes(1);
+  });
+});
+
+const githubPluginRow = (status: string, apiNames: string[]) =>
+  ({
+    customParams: {
+      composio: { appSlug: 'GITHUB', authConfigId: 'ac_1', connectedAccountId: 'ca-1', status },
+    },
+    identifier: 'github',
+    manifest: { api: apiNames.map((name) => ({ description: name, name, parameters: {} })) },
+  }) as any;
+
+describe('refreshComposioConnections', () => {
+  it('loads the connections outside React and marks the store initialised', async () => {
+    vi.mocked(lambdaClient.composio.getComposioPlugins.query).mockResolvedValue([
+      githubPluginRow('ACTIVE', ['GITHUB_LIST']),
+    ]);
+    useToolStore.setState({ isComposioServersInit: false });
+
+    await act(async () => {
+      await useToolStore.getState().refreshComposioConnections();
+    });
+
+    const [server] = useToolStore.getState().composioServers;
+    expect(server).toMatchObject({ identifier: 'github', status: ComposioServerStatus.ACTIVE });
+    expect(server.tools?.map((t) => t.name)).toEqual(['GITHUB_LIST']);
+    expect(useToolStore.getState().isComposioServersInit).toBe(true);
+  });
+
+  // Regression: the fetch only appended identifiers the store didn't have, so an
+  // entry already present (e.g. still PENDING from this tab) never became ACTIVE
+  // and kept its old tools.
+  it('updates an entry that is already in the store', async () => {
+    useToolStore.setState({
+      composioServers: [{ ...githubServer, status: ComposioServerStatus.PENDING_AUTH, tools: [] }],
+    });
+    vi.mocked(lambdaClient.composio.getComposioPlugins.query).mockResolvedValue([
+      githubPluginRow('ACTIVE', ['GITHUB_LIST']),
+    ]);
+
+    await act(async () => {
+      await useToolStore.getState().refreshComposioConnections();
+    });
+
+    const servers = useToolStore.getState().composioServers;
+    expect(servers).toHaveLength(1);
+    expect(servers[0].status).toBe(ComposioServerStatus.ACTIVE);
+    expect(servers[0].tools?.map((t) => t.name)).toEqual(['GITHUB_LIST']);
+  });
+
+  it('keeps entries the fetch does not know about', async () => {
+    const pendingSlack = { ...githubServer, identifier: 'slack', label: 'Slack' };
+    useToolStore.setState({ composioServers: [pendingSlack] });
+    vi.mocked(lambdaClient.composio.getComposioPlugins.query).mockResolvedValue([]);
+
+    await act(async () => {
+      await useToolStore.getState().refreshComposioConnections();
+    });
+
+    expect(useToolStore.getState().composioServers).toEqual([pendingSlack]);
   });
 });

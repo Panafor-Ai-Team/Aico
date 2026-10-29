@@ -40,6 +40,7 @@ import TodoProgress from '../TodoProgress';
 import InputCompletionErrorAlert from './InputCompletionErrorAlert';
 import OpStatusTray from './OpStatusTray';
 import QueueTray from './QueueTray';
+import RuntimeToolsHydration from './RuntimeToolsHydration';
 import {
   getContextWindowMessages,
   getConversationChatInputUiState,
@@ -470,6 +471,7 @@ const ChatInput = memo<ChatInputProps>(
         onMarkdownContentChange={handleMarkdownContentChange}
         onSend={handleSend}
       >
+        <RuntimeToolsHydration />
         {children ?? defaultContent}
       </ChatInputProvider>
     );

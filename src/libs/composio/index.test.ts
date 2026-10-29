@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isComposioConnectedAccountLookupNotFoundError,
   isComposioConnectedAccountNotFoundError,
+  toComposioToolOutcome,
 } from './index';
 
 describe('isComposioConnectedAccountNotFoundError', () => {
@@ -39,5 +40,49 @@ describe('isComposioConnectedAccountNotFoundError', () => {
         new ComposioToolExecutionError('tool failed', { cause: { status: 404 } }),
       ),
     ).toBe(false);
+  });
+});
+
+// Regression: both executors read only `data` and dropped `successful` / `error`,
+// so a failed upstream call (Composio resolves `{ successful: false }` instead of
+// throwing) reached the model as an empty success.
+describe('toComposioToolOutcome', () => {
+  it('keeps a successful response as-is', () => {
+    expect(
+      toComposioToolOutcome({ data: { login: 'octocat' }, error: null, successful: true }),
+    ).toEqual({ content: '{"login":"octocat"}', success: true });
+  });
+
+  it("reports a failed call with Composio's error text", () => {
+    expect(toComposioToolOutcome({ data: {}, error: 'Not Found', successful: false })).toEqual({
+      content: 'Not Found',
+      error: 'Not Found',
+      success: false,
+    });
+  });
+
+  it('keeps the data Composio returned next to the error', () => {
+    const outcome = toComposioToolOutcome({
+      data: { message: 'Not Found', status: '404' },
+      error: 'Request failed',
+      successful: false,
+    });
+
+    expect(outcome.success).toBe(false);
+    expect(outcome.content).toBe('Request failed\n\n{"message":"Not Found","status":"404"}');
+  });
+
+  it('falls back to a generic message when a failure carries no error text', () => {
+    expect(toComposioToolOutcome({ data: {}, error: null, successful: false })).toMatchObject({
+      error: 'Composio tool execution failed',
+      success: false,
+    });
+  });
+
+  it('joins text blocks and passes plain strings through', () => {
+    expect(
+      toComposioToolOutcome({ data: [{ text: 'a', type: 'text' }, 'b'], successful: true }).content,
+    ).toBe('a\nb');
+    expect(toComposioToolOutcome('raw').content).toBe('raw');
   });
 });

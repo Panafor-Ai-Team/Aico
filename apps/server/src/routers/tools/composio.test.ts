@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type * as ComposioLib from '@/libs/composio';
+
 import { composioToolsRouter } from './composio';
 
 const mocks = vi.hoisted(() => ({
@@ -25,7 +27,8 @@ vi.mock('@/database/models/plugin', () => ({
   PluginModel: vi.fn().mockImplementation(() => ({ findById: mocks.pluginFindById })),
 }));
 
-vi.mock('@/libs/composio', () => ({
+vi.mock('@/libs/composio', async (importOriginal) => ({
+  ...(await importOriginal<typeof ComposioLib>()),
   getComposioClient: () => ({ tools: { execute: mocks.toolsExecute } }),
   isComposioConnectedAccountNotFoundError: mocks.isComposioNotFound,
 }));
@@ -54,6 +57,22 @@ beforeEach(() => {
 });
 
 describe('composioToolsRouter.executeAction', () => {
+  // Regression: `{ successful: false, error }` was passed on as a plain success
+  // with only `data`, so the model never saw why the tool failed.
+  it('passes a failed Composio call on as an error result with its message', async () => {
+    mocks.connectorQueryByIdentifiers.mockResolvedValue([
+      { id: 'conn-gmail', metadata: { composio: { connectedAccountId: 'ca-connector' } } },
+    ]);
+    mocks.toolsExecute.mockResolvedValue({ data: {}, error: 'Not Found', successful: false });
+
+    await caller().executeAction(input);
+
+    expect(mocks.processToolCallResult).toHaveBeenCalledWith({
+      content: [{ text: 'Not Found', type: 'text' }],
+      isError: true,
+    });
+  });
+
   it('resolves connectedAccountId from connector metadata (new path)', async () => {
     mocks.connectorQueryByIdentifiers.mockResolvedValue([
       { id: 'conn-gmail', metadata: { composio: { connectedAccountId: 'ca-connector' } } },

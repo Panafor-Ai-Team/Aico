@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type * as ComposioLib from '@/libs/composio';
+
 import type * as CurateModule from './curate';
 import { COMPOSIO_TOOLS_VERSION } from './curate';
 import { ComposioService } from './index';
@@ -49,7 +51,8 @@ vi.mock('@/database/models/plugin', () => ({
   })),
 }));
 
-vi.mock('@/libs/composio', () => ({
+vi.mock('@/libs/composio', async (importOriginal) => ({
+  ...(await importOriginal<typeof ComposioLib>()),
   getComposioClient: () => ({ tools: { execute: mocks.toolsExecute } }),
   isComposioClientAvailable: mocks.isClientAvailable,
   isComposioConnectedAccountNotFoundError: mocks.isComposioNotFound,
@@ -404,6 +407,20 @@ describe('ComposioService.executeComposioTool', () => {
 
     expect(result.success).toBe(false);
     expect(mocks.markComposioUnavailable).not.toHaveBeenCalled();
+  });
+
+  // Regression: Composio resolves a failed upstream call (e.g. GitHub 404) as
+  // `{ successful: false, error }`; it was returned as a success with the error
+  // text dropped, so the model only saw an opaque "not found".
+  it("returns a failure with Composio's error when the tool call was not successful", async () => {
+    mocks.connectorQueryByIdentifiers.mockResolvedValue([activeConnectorRow()]);
+    mocks.toolsExecute.mockResolvedValue({ data: {}, error: 'Not Found', successful: false });
+
+    const result = await service().executeComposioTool(params);
+
+    expect(result.success).toBe(false);
+    expect(result.content).toBe('Not Found');
+    expect(result.error).toEqual({ code: 'COMPOSIO_TOOL_FAILED', message: 'Not Found' });
   });
 
   it('executes under the account OWNER entity, not the caller (workspace-shared connector)', async () => {

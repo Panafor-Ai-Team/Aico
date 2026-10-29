@@ -11,6 +11,7 @@ import { chatService } from '@/services/chat';
 import * as agentConfigResolver from '@/services/chat/mecha/agentConfigResolver';
 import { useAgentStore } from '@/store/agent';
 import { useAiInfraStore } from '@/store/aiInfra';
+import { useToolStore } from '@/store/tool';
 import { pageAgentRuntime } from '@/store/tool/slices/builtin/executors/pageAgentRuntime';
 
 import { useChatStore } from '../../../../store';
@@ -120,6 +121,7 @@ vi.mock('@/store/serverConfig', () => ({
     serverConfig: { enableVisualUnderstanding: serverConfigMock.enableVisualUnderstanding },
   }),
   serverConfigSelectors: {
+    enableComposio: () => false,
     enableVisualUnderstanding: (state: { serverConfig: { enableVisualUnderstanding?: boolean } }) =>
       !!state.serverConfig.enableVisualUnderstanding,
   },
@@ -194,6 +196,8 @@ beforeEach(() => {
     // executeClientAgent waits for the aiProvider runtime-state before building
     // tools; mark it ready so that guard is a no-op in these tests.
     useAiInfraStore.setState({ isInitAiProviderRuntimeState: true });
+    // Same for the tool state (installed plugins / connected apps).
+    useToolStore.setState({ isComposioServersInit: true, loadingInstallPlugins: false });
     useChatStore.setState({
       refreshMessages: vi.fn(),
       executeClientAgent: vi.fn(),
