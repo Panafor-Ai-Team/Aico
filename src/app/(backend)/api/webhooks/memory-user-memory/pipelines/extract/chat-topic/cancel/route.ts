@@ -18,7 +18,7 @@ import {
 } from '@/database/models/asyncTask';
 import { asyncTasks } from '@/database/schemas';
 import { getServerDB } from '@/database/server';
-import { parseMemoryExtractionConfig } from '@/server/globalConfig/parseMemoryExtractionConfig';
+import { verifyMemoryWebhookHeaders } from '@/server/services/memory/userMemory/webhookAuth';
 
 const cancelPayloadSchema = z.object({
   // Optional human-readable cancellation reason.
@@ -66,18 +66,9 @@ const initMemoryExtractionMetadata = (task: typeof asyncTasks.$inferSelect) => {
 };
 
 export const POST = async (req: Request) => {
-  const { webhook } = parseMemoryExtractionConfig();
-
-  if (webhook.headers && Object.keys(webhook.headers).length > 0) {
-    for (const [key, value] of Object.entries(webhook.headers)) {
-      const headerValue = req.headers.get(key);
-      if (headerValue !== value) {
-        return NextResponse.json(
-          { error: `Unauthorized: Missing or invalid header '${key}'` },
-          { status: 403 },
-        );
-      }
-    }
+  const authFailure = verifyMemoryWebhookHeaders(req.headers);
+  if (authFailure) {
+    return NextResponse.json({ error: authFailure.error }, { status: authFailure.status });
   }
 
   try {
