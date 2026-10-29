@@ -10,6 +10,7 @@ import { useFetchAvailableAgents } from '@/hooks/useFetchAvailableAgents';
 import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 
 import AssistantTurnSettledWatcher from './AssistantTurnSettledWatcher';
+import PendingApprovalAutoResolver from './PendingApprovalAutoResolver';
 import { createStore, Provider } from './store';
 import StoreUpdater from './StoreUpdater';
 import {
@@ -121,6 +122,7 @@ export const ConversationProvider = memo<ConversationProviderProps>(
           onMessagesChange={onMessagesChange}
         />
         <AssistantTurnSettledWatcher />
+        <PendingApprovalAutoResolver />
         <ConversationContextPrefetcher context={context} />
         {children}
       </Provider>

@@ -66,8 +66,6 @@ import { getServerConfigStoreState, serverConfigSelectors } from '@/store/server
 import { getTaskStoreState } from '@/store/task';
 import { pageAgentRuntime } from '@/store/tool/slices/builtin/executors/pageAgentRuntime';
 import { type StoreSetter } from '@/store/types';
-import { toolInterventionSelectors } from '@/store/user/selectors';
-import { getUserStoreState } from '@/store/user/store';
 
 import { buildRunLifecycle } from '../../lifecycle/buildRunLifecycle';
 import type { RunParkedReason, RunScope } from '../../lifecycle/types';
@@ -310,12 +308,12 @@ export class StreamingExecutorActionImpl {
       Object.keys(toolManifestMap).length,
     );
 
-    // Get user intervention config
-    const userStore = getUserStoreState();
-    const userInterventionConfig = {
-      approvalMode: toolInterventionSelectors.approvalMode(userStore),
-      allowList: toolInterventionSelectors.allowList(userStore),
-    };
+    // Get user intervention config (raised to auto-run when the user approved
+    // tools for this request or for the whole chat)
+    const userInterventionConfig = this.#get().resolveUserInterventionConfig({
+      anchorMessageId: parentMessageId,
+      topicId,
+    });
 
     // Build modelRuntimeConfig for compression and other runtime features
     const modelRuntimeConfig = {

@@ -1479,8 +1479,11 @@ export default {
   'tool.intervention.approvalMode': 'Approval Mode',
   'tool.intervention.approve': 'Approve',
   'tool.intervention.cancel': 'Cancel',
+  'tool.intervention.chatAutoApprove.active': 'Tools are auto-approved in this chat',
+  'tool.intervention.chatAutoApprove.turnOff': 'Turn off',
   'tool.intervention.confirm': 'Confirm',
-  'tool.intervention.optionApprove': 'Approve',
+  'tool.intervention.optionApprove': 'Approve for this request',
+  'tool.intervention.optionApproveChat': 'Always approve in this chat',
   'tool.intervention.optionApproveRemember': "Approve, and don't ask again for similar actions",
   'tool.intervention.rememberSimilar': "Don't ask again for similar actions",
   'tool.intervention.renderFallback.description':

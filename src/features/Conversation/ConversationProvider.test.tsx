@@ -73,6 +73,12 @@ vi.mock('@/features/Conversation/Messages/Contexts/MessageActionProvider', () =>
   MessageActionProvider: ({ children }: { children?: ReactNode }) => <>{children}</>,
 }));
 
+// Approval auto-resolution reads the global chat / tool / agent stores, which
+// this test only stubs for the list surface.
+vi.mock('@/features/Conversation/PendingApprovalAutoResolver', () => ({
+  default: () => null,
+}));
+
 vi.mock('@/features/WideScreenContainer', () => ({
   default: ({ children, style }: { children?: ReactNode; style?: React.CSSProperties }) => (
     <div data-testid={'welcome'} style={style}>

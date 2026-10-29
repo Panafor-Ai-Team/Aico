@@ -56,6 +56,13 @@ vi.mock('@/store/user/selectors', () => ({
   },
 }));
 
+// The chat store resolves the approval config (user settings raised by any
+// request / chat grant); these fake states have no grants, so it is the user's.
+const resolveUserInterventionConfig = () => ({
+  allowList: mockToolInterventionConfig.allowList,
+  approvalMode: mockToolInterventionConfig.approvalMode,
+});
+
 // ─── Local-device activation (本机) test seams ───
 // Controlled per-test; default off so the rest of the suite runs as web (no
 // device resolution, no electron IPC).
@@ -127,7 +134,10 @@ function createMockClient(): GatewayConnection['client'] & {
 const TEST_TOPIC_ID = 'topic-test';
 
 function createTestAction() {
-  const state: Record<string, any> = { gatewayConnections: {} };
+  const state: Record<string, any> = {
+    resolveUserInterventionConfig,
+    gatewayConnections: {},
+  };
   const set = vi.fn((updater: any) => {
     if (typeof updater === 'function') {
       Object.assign(state, updater(state));
@@ -510,7 +520,11 @@ describe('GatewayActionImpl', () => {
     function createExecuteTestAction() {
       const mockClient = createMockClient();
       const moveQueuedMessages = vi.fn();
-      const state: Record<string, any> = { gatewayConnections: {}, topicDataMap: {} };
+      const state: Record<string, any> = {
+        resolveUserInterventionConfig,
+        gatewayConnections: {},
+        topicDataMap: {},
+      };
       const associateMessageWithOperation = vi.fn();
       const connectToGateway = vi.fn();
       const internalDispatchTopic = vi.fn();
@@ -978,7 +992,10 @@ describe('GatewayActionImpl', () => {
       controller.abort('user cancelled');
 
       const mockClient = createMockClient();
-      const state: Record<string, any> = { gatewayConnections: {} };
+      const state: Record<string, any> = {
+        resolveUserInterventionConfig,
+        gatewayConnections: {},
+      };
       const set = vi.fn((updater: any) => {
         if (typeof updater === 'function') Object.assign(state, updater(state));
         else Object.assign(state, updater);
@@ -1055,7 +1072,11 @@ describe('GatewayActionImpl', () => {
       const startOperation = vi.fn(() => ({ operationId: 'gw-op-local' }));
 
       const mockClient = createMockClient();
-      const state: Record<string, any> = { gatewayConnections: {}, topicDataMap: {} };
+      const state: Record<string, any> = {
+        resolveUserInterventionConfig,
+        gatewayConnections: {},
+        topicDataMap: {},
+      };
       const set = vi.fn((updater: any) => {
         if (typeof updater === 'function') Object.assign(state, updater(state));
         else Object.assign(state, updater);
@@ -1127,6 +1148,7 @@ describe('GatewayActionImpl', () => {
       const internalDispatchTopic = vi.fn();
       const startOperation = vi.fn(() => ({ operationId: 'gw-op-1' }));
       const state: Record<string, any> = {
+        resolveUserInterventionConfig,
         activeAgentId: 'agent-1',
         activeTopicId: 'topic-1',
         gatewayConnections: {},
@@ -1213,6 +1235,7 @@ describe('GatewayActionImpl', () => {
       const internalDispatchTopic = vi.fn();
       const startOperation = vi.fn(() => ({ operationId: 'gw-op-1' }));
       const state: Record<string, any> = {
+        resolveUserInterventionConfig,
         activeAgentId: 'agent-1',
         activeTopicId: 'topic-1',
         gatewayConnections: {},
@@ -1303,6 +1326,7 @@ describe('GatewayActionImpl', () => {
       const internalDispatchTopic = vi.fn();
       const startOperation = vi.fn(() => ({ operationId: 'gw-op-1' }));
       const state: Record<string, any> = {
+        resolveUserInterventionConfig,
         activeAgentId: 'agent-1',
         activeTopicId: 'topic-1',
         gatewayConnections: {},
@@ -1478,6 +1502,7 @@ describe('GatewayActionImpl', () => {
       const startOperation = vi.fn(() => ({ operationId: 'gw-op-reconnect' }));
       const mockClient = createMockClient();
       const state: Record<string, any> = {
+        resolveUserInterventionConfig,
         activeAgentId: 'agent-1',
         gatewayConnections: {},
         messagesMap: { 'agent-1_topic-1': assistantMessage ? [assistantMessage] : [] },
@@ -1569,6 +1594,7 @@ describe('GatewayActionImpl', () => {
       const updateTopicStatus = vi.fn();
       const startOperation = vi.fn(() => ({ operationId: 'gw-op-reconnect' }));
       const state: Record<string, any> = {
+        resolveUserInterventionConfig,
         activeAgentId: 'agent-1',
         activeTopicId: 'topic-1',
         gatewayConnections: {},
@@ -1692,6 +1718,7 @@ describe('GatewayActionImpl', () => {
       const completeOperation = vi.fn();
       const startOperation = vi.fn(() => ({ operationId: 'gw-op-reconnect' }));
       const state: Record<string, any> = {
+        resolveUserInterventionConfig,
         activeAgentId: 'agent-1',
         activeTopicId: 'topic-1',
         gatewayConnections: {},

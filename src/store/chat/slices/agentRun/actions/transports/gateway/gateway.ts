@@ -30,7 +30,7 @@ import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 import { topicMapKey } from '@/store/chat/utils/topicMapKey';
 import type { StoreSetter } from '@/store/types';
 import { useUserStore } from '@/store/user';
-import { settingsSelectors, toolInterventionSelectors } from '@/store/user/selectors';
+import { settingsSelectors } from '@/store/user/selectors';
 import { isTrpcErrorCode } from '@/utils/trpcError';
 
 import { buildRunLifecycle } from '../../lifecycle/buildRunLifecycle';
@@ -505,10 +505,10 @@ export class GatewayActionImpl {
       : undefined;
 
     const localDeviceId = await resolveLocalDeviceId(executionContext.agentId);
-    const userInterventionConfig = {
-      approvalMode: toolInterventionSelectors.approvalMode(useUserStore.getState()),
-      allowList: toolInterventionSelectors.allowList(useUserStore.getState()),
-    };
+    const userInterventionConfig = this.#get().resolveUserInterventionConfig({
+      anchorMessageId: parentMessageId,
+      topicId: executionContext.topicId,
+    });
 
     const result = await aiAgentService.execAgentTask(
       {

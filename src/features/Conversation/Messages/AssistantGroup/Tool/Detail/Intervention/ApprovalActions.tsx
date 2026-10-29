@@ -158,10 +158,11 @@ const ApprovalActions = memo<ApprovalActionsProps>(
     // Workspace topics are shared: a view-only member can be LOOKING at a
     // teammate's running conversation — they must not drive its tool approvals.
     const { canUseResource } = useConversationResourceAccess();
+    const canApproveChat = useConversationStore((s) => !!s.context.topicId);
 
     const choices = useMemo<Choice[]>(
-      () => resolveApprovalChoices({ confirmCancel, isAllowListMode }),
-      [confirmCancel, isAllowListMode],
+      () => resolveApprovalChoices({ canApproveChat, confirmCancel, isAllowListMode }),
+      [canApproveChat, confirmCancel, isAllowListMode],
     );
     const footerButtons = useMemo(
       () => resolveApprovalFooterButtons({ confirmCancel }),
@@ -192,7 +193,9 @@ const ApprovalActions = memo<ApprovalActionsProps>(
           await rejectAndContinueToolCall(messageId, reason.trim() || undefined);
         } else {
           if (onBeforeApprove) await onBeforeApprove();
-          await approveToolCall(messageId, assistantGroupId ?? '');
+          await approveToolCall(messageId, assistantGroupId ?? '', {
+            scope: choice === 'approve-chat' ? 'chat' : 'request',
+          });
           if (isAllowListMode && choice === 'approve-remember') {
             await addToolToAllowList(`${identifier}/${apiName}`);
           }
@@ -310,8 +313,9 @@ const ApprovalActions = memo<ApprovalActionsProps>(
 
     const rejectNumber = choices.indexOf('reject') + 1;
 
-    const approveLabel: Record<'approve' | 'approve-remember', string> = {
+    const approveLabel: Record<Exclude<Choice, 'reject'>, string> = {
       'approve': t('tool.intervention.optionApprove'),
+      'approve-chat': t('tool.intervention.optionApproveChat'),
       'approve-remember': t('tool.intervention.optionApproveRemember'),
     };
 

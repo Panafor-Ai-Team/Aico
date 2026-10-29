@@ -51,6 +51,7 @@ vi.mock('@/store/tool/selectors', () => ({
 vi.mock('@/store/tool', () => ({
   pluginHelpers: {
     getPluginTitle: (meta?: { title?: string }) => meta?.title,
+    getToolFallbackName: (identifier: string) => identifier.replace(/^lobe-/, ''),
   },
   useToolStore: (selector: (state: unknown) => unknown) => selector({}),
 }));
