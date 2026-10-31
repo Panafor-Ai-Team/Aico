@@ -111,7 +111,9 @@ const schemaSnapshot = async (executor: MigrationExecutor): Promise<Set<string>>
   const indexes = await executor.query<Record<string, string>>(
     `SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'public'`,
   );
-  for (const i of indexes) lines.add(`idx ${i.indexname} ${i.indexdef}`);
+  // Collapse whitespace: index options can embed JSON (BM25 `text_fields`) whose layout
+  // differs between equivalent migration file versions.
+  for (const i of indexes) lines.add(`idx ${i.indexname} ${i.indexdef.replaceAll(/\s+/g, ' ')}`);
   const constraints = await executor.query<Record<string, string>>(`
     SELECT conrelid::regclass::text AS rel, conname, pg_get_constraintdef(oid) AS def
     FROM pg_constraint WHERE connamespace = 'public'::regnamespace`);

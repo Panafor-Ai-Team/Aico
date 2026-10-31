@@ -107,16 +107,19 @@ const runDualJournal = async ({
   skip,
   tracks,
 }) => {
-  await executor.exec('CREATE SCHEMA IF NOT EXISTS "drizzle"');
-  await executor.exec(
-    'CREATE TABLE IF NOT EXISTS "drizzle"."__drizzle_migrations" (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)',
-  );
+  // Lock before bootstrapping the ledger: `CREATE … IF NOT EXISTS` is not safe under
+  // concurrency, so two runners on a fresh database (e.g. blue/green slots booting together)
+  // would otherwise race on creating the schema.
   await executor.query('SELECT pg_advisory_lock($1)', [lockKey]);
 
   /** @type {DualJournalReport} */
   const report = { applied: [], drift: [], equivalent: [], skipped: [], unknownRows: [] };
 
   try {
+    await executor.exec('CREATE SCHEMA IF NOT EXISTS "drizzle"');
+    await executor.exec(
+      'CREATE TABLE IF NOT EXISTS "drizzle"."__drizzle_migrations" (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)',
+    );
     const rows = await readLedger(executor);
     /** @type {Map<number, LedgerRow[]>} */
     const rowsByWhen = new Map();
