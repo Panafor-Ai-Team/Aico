@@ -3,7 +3,7 @@
  * Product code unmodified; failing assertions = release blockers.
  */
 // @vitest-environment node
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { LobeChatDatabase } from '@lobechat/database';
@@ -164,8 +164,9 @@ describe('Phase 3 Env C — unsafe production configuration (fail-closed)', () =
       (process.env as any).NODE_ENV = 'production';
       __resetOpenRouterManagementClientForTests();
       // `AICO_OPENROUTER_MOCK` is a non-production QA convenience only — production
-      // must ignore it and fail closed rather than serving a mock client.
-      expect(() => createOpenRouterManagementClient({})).toThrow(/OPENROUTER_MANAGEMENT_API_KEY/);
+      // must ignore it and fail closed rather than serving a mock client. The product
+      // server reaches OpenRouter management only through the control plane.
+      expect(() => createOpenRouterManagementClient({})).toThrow(/AICO_CONTROL_PLANE_URL/);
     } finally {
       process.env.OPENROUTER_MANAGEMENT_API_KEY = prevKey;
       process.env.AICO_OPENROUTER_MOCK = prevMock;
@@ -277,34 +278,24 @@ describe('Phase 3 Journey 4 — external-service partial failure', () => {
 });
 
 describe('Phase 3 Journey 6 — alternate model execution paths', () => {
-  it('AICO-P3-J6: all initModelRuntimeFromDB call sites must enforce assertModelAllowed', () => {
-    const collect = (dir: string, acc: string[] = []): string[] => {
-      if (!existsSync(dir)) return acc;
-      for (const name of readdirSync(dir)) {
-        if (name === 'node_modules' || name === 'dist' || name === '.git') continue;
-        const p = join(dir, name);
-        const st = statSync(p);
-        if (st.isDirectory()) collect(p, acc);
-        else if (/\.(?:ts|tsx)$/.test(name) && !name.includes('.test.')) acc.push(p);
-      }
-      return acc;
-    };
-    const offenders: string[] = [];
-    for (const root of [
-      join(REPO_ROOT, 'src/app'),
-      join(REPO_ROOT, 'apps/server/src'),
-      join(REPO_ROOT, 'packages/business-server/src'),
-    ]) {
-      for (const file of collect(root)) {
-        const src = readFileSync(file, 'utf8');
-        if (!src.includes('initModelRuntimeFromDB')) continue;
-        if (file.replaceAll('\\', '/').endsWith('modules/ModelRuntime/index.ts')) continue;
-        if (!src.includes('assertModelAllowed')) {
-          offenders.push(file.replace(REPO_ROOT, '').replaceAll('\\', '/'));
-        }
-      }
-    }
-    expect(offenders).toEqual([]);
+  it('AICO-P3-J6: managed runtime creation enforces the model allowlist centrally', () => {
+    // Model access is enforced centrally: every managed runtime goes through
+    // AicoManagedPolicy.authorize with the requested model, which refuses a missing model
+    // id and checks it against grants / trial allowlists / the catalog (behaviour is
+    // covered in managedPolicy.test.ts). Pin that wiring so a refactor cannot drop it.
+    const runtime = readFileSync(
+      join(REPO_ROOT, 'apps/server/src/modules/ModelRuntime/index.ts'),
+      'utf8',
+    );
+    const policy = readFileSync(
+      join(REPO_ROOT, 'apps/server/src/services/aico/managedPolicy.ts'),
+      'utf8',
+    );
+    expect(runtime).toMatch(
+      /if \(managed\) \{[\s\S]*?policy\.authorize\(\{[\s\S]*?modelId: options\??\.modelId/,
+    );
+    expect(policy).toMatch(/MODEL_ID_REQUIRED/);
+    expect(policy).toMatch(/await this\.assertModelAllowed\(/);
   });
 
   it('AICO-P3-J6: trial without managed key must not fall through (denies via throw)', async () => {

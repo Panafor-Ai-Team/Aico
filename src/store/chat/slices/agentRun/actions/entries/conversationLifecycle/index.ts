@@ -8,7 +8,6 @@ import {
 import { isDesktop, LOADING_FLAT } from '@lobechat/const';
 import { formatSelectedSkillsContext, formatSelectedToolsContext } from '@lobechat/context-engine';
 import { isRemoteHeterogeneousType } from '@lobechat/heterogeneous-agents';
-import { chainCompressContext } from '@lobechat/prompts';
 import type {
   ChatImageItem,
   ChatThreadType,
@@ -40,7 +39,6 @@ import { resolveExecutionTarget, resolveWorkspaceScoped } from '@/helpers/execut
 import { globalAgentContextManager } from '@/helpers/GlobalAgentContextManager';
 import { agentService } from '@/services/agent';
 import { aiChatService } from '@/services/aiChat';
-import { chatService } from '@/services/chat';
 import { resolveSelectedSkillsWithContent } from '@/services/chat/mecha/skillPreload';
 import { resolveSelectedToolsWithContent } from '@/services/chat/mecha/toolPreload';
 import { messageService } from '@/services/message';
@@ -72,11 +70,7 @@ import {
   mergeAgentRuntimeInitialContexts,
   resolveActiveTopicDocumentInitialContext,
 } from '@/store/chat/utils/activeTopicDocumentContext';
-import {
-  createPendingCompressedGroup,
-  getCompressionCandidateMessageIds,
-  hasRunningCompressionOperation,
-} from '@/store/chat/utils/compression';
+import { hasRunningCompressionOperation } from '@/store/chat/utils/compression';
 import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 import { snapshotAgentModel } from '@/store/chat/utils/snapshotAgentModel';
 import { topicMapKey } from '@/store/chat/utils/topicMapKey';
@@ -90,8 +84,8 @@ import { userProfileSelectors } from '@/store/user/selectors';
 import { useUserMemoryStore } from '@/store/userMemory';
 import { markdownToTxt } from '@/utils/markdownToTxt';
 
-import { materializeLocalSystemToolSnapshots } from '../transports/client/localSystemToolSnapshots';
-import type { CommandSendOverrides, SingleAgentMentionDirectRoute } from './commandBus';
+import { materializeLocalSystemToolSnapshots } from '../../transports/client/localSystemToolSnapshots';
+import type { CommandSendOverrides, SingleAgentMentionDirectRoute } from '../commandBus';
 import {
   hasNonActionContent,
   injectReferTopicNode,
@@ -102,9 +96,10 @@ import {
   parseSelectedToolsFromEditorData,
   parseSingleAgentMentionDirectRoute,
   processCommands,
-} from './commandBus';
-import { describeSendFailure } from './describeSendFailure';
-import { resolveExistingTopicForRun } from './resolveExistingTopic';
+} from '../commandBus';
+import { describeSendFailure } from '../describeSendFailure';
+import { resolveExistingTopicForRun } from '../resolveExistingTopic';
+import { type ContextCompressionOptions, executeContextCompression } from './compression';
 
 /**
  * Extended params for sendMessage with context
@@ -167,16 +162,6 @@ interface OptimisticTopicPlaceholder {
 type Setter = StoreSetter<ChatStore>;
 export const conversationLifecycle = (set: Setter, get: () => ChatStore, _api?: unknown) =>
   new ConversationLifecycleActionImpl(set, get, _api);
-
-const isAbortError = (error: unknown, abortController?: AbortController) =>
-  !!abortController?.signal.aborted ||
-  (error instanceof Error &&
-    (error.name === 'AbortError' ||
-      error.message.includes('aborted') ||
-      error.message.includes('cancelled')));
-
-const createAbortError = () =>
-  Object.assign(new Error('Compression cancelled'), { name: 'AbortError' });
 
 const QUEUE_BLOCKING_OPERATION_TYPE_SET = new Set<OperationType>(QUEUE_BLOCKING_OPERATION_TYPES);
 
@@ -1053,7 +1038,7 @@ export class ConversationLifecycleActionImpl {
 
       try {
         const { executeHeterogeneousAgent } =
-          await import('../transports/hetero/heterogeneousAgentExecutor');
+          await import('../../transports/hetero/heterogeneousAgentExecutor');
         // Extract imageList from the persisted user message (chatUploadFileList
         // may already be cleared by this point, so we read from DB instead)
         const userMsg = heteroData.messages.find((m: any) => m.id === heteroData.userMessageId);
@@ -1793,111 +1778,15 @@ export class ConversationLifecycleActionImpl {
 
   /**
    * Execute context compression for /compact command.
-   * Reuses the same service methods as the agent runtime's compress_context executor.
+   *
+   * @returns Whether the history was replaced by a summary.
    */
   executeCompression = async (
     context: Record<string, any>,
     parentOperationId: string,
-  ): Promise<void> => {
-    const { agentId, topicId } = context;
-    if (!topicId) return;
-
-    const contextKey = messageMapKey(context as any);
-    const dbMessages = dbMessageSelectors.getDbMessagesByKey(contextKey)(this.#get()) || [];
-    const messageIds = getCompressionCandidateMessageIds(dbMessages);
-
-    if (messageIds.length === 0) return;
-
-    const tempId = 'tmp_compress_' + nanoid();
-    const { abortController, operationId } = this.#get().startOperation({
-      context: { ...context, messageId: tempId },
-      parentOperationId,
-      type: 'contextCompression',
-    });
-
-    // Immediate UI feedback: render a pending compressed group from the first frame
-    this.#get().internal_dispatchMessage(
-      {
-        id: tempId,
-        type: 'createMessage',
-        value: createPendingCompressedGroup({
-          agentId,
-          groupId: context.groupId,
-          id: tempId,
-          threadId: context.threadId,
-          topicId,
-        }) as any,
-      },
-      { operationId },
-    );
-
-    try {
-      // 1. Create compression group on server
-      const result = await messageService.createCompressionGroup({
-        agentId,
-        messageIds,
-        topicId,
-      });
-      const { messageGroupId, messages: serverMessages, messagesToSummarize } = result;
-
-      // Replace local pending group with server compression group
-      this.#get().replaceMessages(serverMessages, { context: context as any });
-      this.#get().associateMessageWithOperation(messageGroupId, operationId);
-
-      // 2. Generate summary via LLM
-      const { model, provider } = agentSelectors.getAgentConfigById(agentId)(getAgentStoreState());
-      const compressionPayload = chainCompressContext(messagesToSummarize);
-      let summaryContent = '';
-
-      await chatService.fetchPresetTaskResult({
-        abortController,
-        onMessageHandle: (chunk) => {
-          if (chunk.type === 'text') {
-            summaryContent += chunk.text || '';
-            this.#get().internal_dispatchMessage(
-              { id: messageGroupId, type: 'updateMessage', value: { content: summaryContent } },
-              { operationId },
-            );
-          }
-        },
-        params: { ...compressionPayload, model, provider },
-      });
-
-      if (abortController.signal.aborted) throw createAbortError();
-
-      // 3. Finalize compression
-      const finalResult = await messageService.finalizeCompression({
-        agentId,
-        content: summaryContent,
-        messageGroupId,
-        topicId,
-      });
-
-      if (finalResult.messages) {
-        this.#get().replaceMessages(finalResult.messages, { context: context as any });
-      }
-
-      this.#get().completeOperation(operationId);
-    } catch (error) {
-      if (isAbortError(error, abortController)) {
-        this.#get().internal_dispatchMessage(
-          { type: 'deleteMessages', ids: [tempId] },
-          { operationId },
-        );
-        return;
-      }
-
-      console.error('[/compact] Compression failed:', error);
-      this.#get().internal_dispatchMessage(
-        { type: 'deleteMessages', ids: [tempId] },
-        { operationId },
-      );
-      this.#get().failOperation(operationId, {
-        message: error instanceof Error ? error.message : String(error),
-        type: 'compression_failed',
-      });
-    }
-  };
+    options?: ContextCompressionOptions,
+  ): Promise<boolean> =>
+    executeContextCompression({ ...options, context, parentOperationId }, this.#get);
 }
 
 export type ConversationLifecycleAction = Pick<

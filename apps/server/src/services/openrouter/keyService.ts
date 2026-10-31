@@ -275,6 +275,22 @@ export class AicoOpenRouterKeyService {
    * `AicoManagedPolicy.authorize()` first. The key is recorded rather than
    * silently forgotten, so the inventory of live-but-unused keys stays visible.
    */
+  /**
+   * A create-key response without a secret or an id cannot back a spendable key. The real
+   * gateway clients already reject one; checking again before anything is persisted keeps
+   * every client honest, and retires whatever the gateway did create.
+   */
+  private async assertUsableCreatedKey(
+    created: Awaited<ReturnType<ManagedProviderClient['createKey']>>,
+  ): Promise<void> {
+    if (created?.key && created?.hash) return;
+
+    if (created?.hash) {
+      await this.retireManagedKey({ apiKey: created.key || undefined, hash: created.hash });
+    }
+    throw new Error('Managed provider createKey response is missing the key or its id');
+  }
+
   private async retireManagedKey(credential: { apiKey?: string; hash: string }): Promise<void> {
     const { hash } = credential;
     const { readKeyBySecret, revoke, updateLimit } = this.managed.capabilities;
@@ -891,6 +907,7 @@ export class AicoOpenRouterKeyService {
       limitUsd: microToOpenRouterLimitUsd(nextLimitMicro),
       name: `aico-member-${params.orgMemberId}`,
     });
+    await this.assertUsableCreatedKey(created);
 
     try {
       const encrypted = await this.encryptKey(created.key);
@@ -971,6 +988,7 @@ export class AicoOpenRouterKeyService {
       limitUsd: microToOpenRouterLimitUsd(nextLimitMicro),
       name: `aico-member-${params.orgMemberId}`,
     });
+    await this.assertUsableCreatedKey(created);
 
     try {
       const encrypted = await this.encryptKey(created.key);
@@ -1523,6 +1541,7 @@ export class AicoOpenRouterKeyService {
         limitUsd: freshCheckpoint ? microToOpenRouterLimitUsd(mintLimitMicro) : limitUsd,
         name: `aico-member-${orgMemberId}`,
       });
+      await this.assertUsableCreatedKey(created);
       try {
         const encrypted = await this.encryptKey(created.key);
         const row = await this.orgModel.updateMemberOpenRouterKey({
@@ -1661,6 +1680,7 @@ export class AicoOpenRouterKeyService {
       limitUsd: params.limitUsd,
       name: params.name,
     });
+    await this.assertUsableCreatedKey(created);
     try {
       const encrypted = await this.encryptKey(created.key);
       const compare = aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY && params.replacing !== undefined;
