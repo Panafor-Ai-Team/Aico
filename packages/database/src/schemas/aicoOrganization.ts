@@ -554,7 +554,8 @@ export const walletTransactions = pgTable(
      * adjustment | reclaim | personal_freeze | personal_unfreeze
      */
     type: text('type').notNull(),
-    amountToman: bigint('amount_toman', { mode: 'number' }).notNull().default(0),
+    /** No default (the column never had one in the database): every insert must state it. */
+    amountToman: bigint('amount_toman', { mode: 'number' }).notNull(),
     amountMicroUsd: bigint('amount_micro_usd', { mode: 'number' }).notNull().default(0),
     /**
      * Wallet balance snapshot for audit trail (FIN-005).

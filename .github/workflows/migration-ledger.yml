@@ -4,7 +4,8 @@ name: Migration Ledger
 # ParadeDB: fresh install vs upgrade of a today-shaped database must end at an identical
 # catalog with existing rows untouched, a skipped 0142 is picked up, a mid-batch failure
 # resumes, the previous image stays a no-op, drift is never re-run, and two concurrent
-# runners serialize. Upstream is pinned so this job only changes when we bump it.
+# runners serialize. It also fails when Aico's migrations and aicoOrganization.ts describe
+# different schemas. Upstream is pinned so this job only changes when we bump it.
 on:
   pull_request:
     branches: [canary]
@@ -58,6 +59,9 @@ jobs:
         run: pnpm install --no-frozen-lockfile
         env:
           NODE_OPTIONS: --max-old-space-size=8192
+
+      - name: Check Aico migrations match aicoOrganization.ts
+        run: bunx tsx scripts/migrateServerDB/dualJournal/schemaDrift.ts
 
       - name: Run scenarios
         run: >-

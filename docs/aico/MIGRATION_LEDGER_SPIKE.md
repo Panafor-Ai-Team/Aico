@@ -59,7 +59,7 @@ Tracks: upstream 198 entries, Aico own 28, Aico today 160.
 Adopt **D2**. Next PR-sized steps, in order:
 
 1. ✅ **Done (#728):** the runner ships as `scripts/migrateServerDB/dualJournalRunner.cjs`; `docker.cjs` and `pnpm db:migrate` use it over today's single journal when `AICO_MIGRATION_RUNNER=dual` (unset = stock Drizzle). Enable per environment after `db:audit-ledger` on a restored backup.
-2. ✅ **Done:** `.github/workflows/migration-ledger.yml` runs the scenarios on ParadeDB (`spike.ts --pg-url … --assert`), including **S8** — two runners started together on separate connections must serialize (no duplicate ledger rows, one of them applies nothing). Upstream is pinned in the workflow (`UPSTREAM_SHA`). Covers gates 2–3.
+2. ✅ **Done:** `.github/workflows/migration-ledger.yml` runs the scenarios on ParadeDB (`spike.ts --pg-url … --assert`), including **S8** — two runners started together on separate connections must serialize (no duplicate ledger rows, one of them applies nothing). Upstream is pinned in the workflow (`UPSTREAM_SHA`). Covers gates 2–3. The same job runs `dualJournal/schemaDrift.ts`, which fails when the database built from Aico's migrations differs from the one `drizzle-kit` generates from `aicoOrganization.ts` (it found five FKs the schema declared but no migration created; `0160_aico_billing_foreign_keys` adds them).
 3. Split the journal: move Aico's 28 entries to `packages/database/migrations-aico/`, add the equivalence entry, move the Aico schema file, generate the Aico baseline snapshot.
 4. Only then take the first upstream merge stage, whose journal comes over verbatim.
 

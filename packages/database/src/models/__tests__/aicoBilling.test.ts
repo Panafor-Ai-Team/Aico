@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { getTestDB } from '../../core/getTestDB';
 import {
+  organizations,
   platformFxConfig,
   platformTrialConfig,
   trialAbuseBlocklist,
@@ -24,6 +25,7 @@ beforeEach(async () => {
   await serverDB.delete(platformTrialConfig);
   await serverDB.delete(walletTransactions);
   await serverDB.delete(userWallets);
+  await serverDB.delete(organizations);
   await serverDB.delete(users);
   await serverDB.insert(users).values({ email: 'billing@example.com', id: userId });
 });
@@ -35,6 +37,7 @@ afterEach(async () => {
   await serverDB.delete(platformTrialConfig);
   await serverDB.delete(walletTransactions);
   await serverDB.delete(userWallets);
+  await serverDB.delete(organizations);
   await serverDB.delete(users);
 });
 
@@ -46,6 +49,10 @@ describe('AicoBillingModel', () => {
   });
 
   it('persists billing preference for SPA pre-select', async () => {
+    await serverDB
+      .insert(organizations)
+      .values({ id: 'org-pref', name: 'Pref Org', ownerUserId: userId, slug: 'pref-org' });
+
     const preference = await model.setBillingPreference({
       organizationId: 'org-pref',
       source: 'organization',
