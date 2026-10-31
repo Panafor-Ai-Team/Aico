@@ -1,3 +1,4 @@
+import { DEFAULT_PROVIDER } from '@lobechat/business-const';
 import { DEFAULT_SUB_AGENT_MODEL, resolveSubAgentModel } from '@lobechat/const';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -72,7 +73,7 @@ describe('resolveSubAgentModel', () => {
   it('falls back to the global default when the agent has no subagent config', () => {
     expect(resolveSubAgentModel(undefined)).toEqual({
       model: DEFAULT_SUB_AGENT_MODEL,
-      provider: 'deepseek',
+      provider: DEFAULT_PROVIDER,
     });
   });
 
@@ -86,7 +87,7 @@ describe('resolveSubAgentModel', () => {
   it('ignores a provider-only config rather than pairing it with a foreign model', () => {
     expect(resolveSubAgentModel({ provider: 'openai' })).toEqual({
       model: DEFAULT_SUB_AGENT_MODEL,
-      provider: 'deepseek',
+      provider: DEFAULT_PROVIDER,
     });
   });
 });

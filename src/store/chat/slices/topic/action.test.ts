@@ -1,3 +1,4 @@
+import { DEFAULT_MODEL, DEFAULT_PROVIDER } from '@lobechat/business-const';
 import type { LobeUser, UIChatMessage } from '@lobechat/types';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { type Mock } from 'vitest';
@@ -2326,9 +2327,10 @@ describe('topic action', () => {
         expect(topicId).toBe(newTopicId);
       });
 
+      // A new topic pins the agent's model; with no agent config that is the managed default.
       expect(createTopicSpy).toHaveBeenCalledWith({
-        model: 'deepseek-v4-pro',
-        provider: 'deepseek',
+        model: DEFAULT_MODEL,
+        provider: DEFAULT_PROVIDER,
         sessionId: activeAgentId,
         messages: messages.map((m) => m.id),
         title: 'defaultTitle',

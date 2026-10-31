@@ -51,6 +51,8 @@ vi.mock('@/services/electron/localFileService', () => ({
 
 // Mock lambdaClient to prevent network requests
 vi.mock('@/libs/trpc/client', () => ({
+  // Used by describeSendFailure to name non-JSON HTTP errors; plain errors have no status.
+  getNonJsonHttpStatus: vi.fn(() => undefined),
   lambdaClient: {
     session: {
       updateSession: {
