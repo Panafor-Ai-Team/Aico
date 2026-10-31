@@ -1,8 +1,133 @@
+import type * as LobeConst from '@lobechat/const';
 import { TRPCError } from '@trpc/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { MCPClient } from '@/libs/mcp';
+
+import { MCPService } from './index';
+
+const environment = vi.hoisted(() => ({ isDesktop: false }));
+
+vi.mock('@lobechat/const', async (importOriginal) => ({
+  ...(await importOriginal<typeof LobeConst>()),
+  get isDesktop() {
+    return environment.isDesktop;
+  },
+}));
 
 // Mock 依赖
 vi.mock('@/libs/mcp');
+
+describe('MCPService transport boundary', () => {
+  const stdioParams = {
+    args: ['serve'],
+    command: 'local-mcp',
+    name: 'local-connector',
+    type: 'stdio' as const,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    environment.isDesktop = false;
+    vi.stubEnv('SSRF_ALLOW_PRIVATE_IP_ADDRESS', '');
+    vi.mocked(MCPClient.prototype.listTools).mockResolvedValue([]);
+    vi.mocked(MCPClient.prototype.callTool).mockResolvedValue({ content: [] });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    environment.isDesktop = false;
+  });
+
+  it('rejects connector tool sync on the web before initializing a stdio client', async () => {
+    await expect(new MCPService().listRawTools(stdioParams)).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: 'Stdio MCP type is not supported in web environment.',
+    });
+    expect(MCPClient).not.toHaveBeenCalled();
+  });
+
+  it('rejects server-side stdio tool execution without initializing a client', async () => {
+    await expect(
+      new MCPService().callTool({
+        argsStr: '{}',
+        clientParams: stdioParams,
+        toolName: 'read_file',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(MCPClient).not.toHaveBeenCalled();
+  });
+
+  it('rejects stdio on the web even when a client for the same params is cached', async () => {
+    environment.isDesktop = true;
+    const service = new MCPService();
+    await service.listRawTools(stdioParams);
+    expect(MCPClient).toHaveBeenCalledOnce();
+
+    environment.isDesktop = false;
+    await expect(service.listRawTools(stdioParams)).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    });
+    expect(MCPClient.prototype.listTools).toHaveBeenCalledOnce();
+  });
+
+  it('keeps stdio available on Desktop', async () => {
+    environment.isDesktop = true;
+
+    await expect(new MCPService().listRawTools(stdioParams)).resolves.toEqual([]);
+    expect(MCPClient.prototype.initialize).toHaveBeenCalledOnce();
+  });
+
+  it('keeps public HTTP MCP available on the web', async () => {
+    await expect(
+      new MCPService().listRawTools({
+        name: 'remote-connector',
+        type: 'http',
+        url: 'https://mcp.example.com',
+      }),
+    ).resolves.toEqual([]);
+    expect(MCPClient.prototype.initialize).toHaveBeenCalledOnce();
+  });
+
+  it.each(['http://localhost:3020/mcp', 'http://127.0.0.1:8080', 'http://10.0.0.5/mcp'])(
+    'rejects the private-network HTTP endpoint %s on the web',
+    async (url) => {
+      await expect(
+        new MCPService().callTool({
+          argsStr: '{}',
+          clientParams: { name: 'lan', type: 'http', url },
+          toolName: 'read',
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      expect(MCPClient).not.toHaveBeenCalled();
+    },
+  );
+
+  it('allows private-network HTTP endpoints when the SSRF allow switch is set', async () => {
+    vi.stubEnv('SSRF_ALLOW_PRIVATE_IP_ADDRESS', '1');
+
+    await expect(
+      new MCPService().listRawTools({ name: 'lan', type: 'http', url: 'http://10.0.0.5/mcp' }),
+    ).resolves.toEqual([]);
+  });
+
+  it('allows private-network HTTP endpoints on Desktop', async () => {
+    environment.isDesktop = true;
+
+    await expect(
+      new MCPService().listRawTools({ name: 'lan', type: 'http', url: 'http://localhost:3000' }),
+    ).resolves.toEqual([]);
+  });
+
+  it('never runs installation dependency checks on the web', async () => {
+    const result = await new MCPService().checkMcpInstall({
+      deploymentOptions: [{ installationMethod: 'npm' } as any],
+    });
+
+    expect(result.success).toBe(false);
+  });
+});
 
 describe('MCPService', () => {
   let mcpService: any;
