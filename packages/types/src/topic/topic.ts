@@ -1,7 +1,6 @@
 import { z } from 'zod';
 
 import type { SerializedAgentHook } from '../agentHook';
-import { serializedAgentHookSchema } from '../agentHook';
 import type { WorkingDirConfig } from '../device';
 import { workingDirConfigSchema } from '../device';
 import type { BaseDataModel } from '../meta';
@@ -432,20 +431,15 @@ export const chatTopicMetadataUpdateSchema = z.object({
     .optional(),
   provider: z.string().optional(),
   repos: z.array(z.string()).optional(),
-  runningOperation: z
-    .object({
-      assistantMessageId: z.string(),
-      hooks: z.array(serializedAgentHookSchema).optional(),
-      operationId: z.string(),
-      scope: z.string().optional(),
-      threadId: z.string().nullish(),
-    })
-    .nullable()
-    .optional(),
+  // Runtime state and hooks are server-owned; clients may only clear a stale marker.
+  runningOperation: z.null().optional(),
   scheduledRun: topicScheduledRunSchema.nullish(),
   workingDirectory: z.string().optional(),
   workingDirectoryConfig: workingDirConfigSchema.optional(),
 });
+
+/** Public topic metadata patch, distinct from the full persisted metadata. */
+export type UpdateTopicMetadataInput = z.input<typeof chatTopicMetadataUpdateSchema>;
 
 export interface ChatTopicSummary {
   content: string;
