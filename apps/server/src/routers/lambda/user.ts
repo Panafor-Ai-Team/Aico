@@ -396,21 +396,17 @@ export const userRouter = router({
 
     // If it's Base64 data, need to upload to S3
     if (input.startsWith('data:image')) {
+      // Avatars are served from the app origin, so only accept raster formats the
+      // avatar editor produces (it encodes WebP, with a PNG fallback). Anything
+      // else — SVG in particular — could carry active content.
+      const avatarDataUrl = /^data:(image\/(webp|png));base64,/.exec(input);
+      if (!avatarDataUrl) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'INVALID_AVATAR_IMAGE' });
+      }
+      const [, mimeType, fileType] = avatarDataUrl;
+      const base64Data = input.slice(avatarDataUrl[0].length);
+
       try {
-        // Extract mimeType, e.g., "image/png"
-        const prefix = 'data:';
-        const semicolonIndex = input.indexOf(';');
-        const mimeType =
-          semicolonIndex !== -1 ? input.slice(prefix.length, semicolonIndex) : 'image/png';
-        const fileType = mimeType.split('/')[1];
-
-        // Split string to get the Base64 part
-        const commaIndex = input.indexOf(',');
-        if (commaIndex === -1) {
-          throw new Error('Invalid Base64 data');
-        }
-        const base64Data = input.slice(commaIndex + 1);
-
         // Create S3 client
         const s3 = new FileS3();
 

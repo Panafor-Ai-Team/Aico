@@ -18,6 +18,7 @@ import { SessionModel } from '@/database/models/session';
 import { UserModel } from '@/database/models/user';
 import { serverDB } from '@/database/server';
 import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
+import { FileS3 } from '@/server/modules/S3';
 import { UnderstandingWorkflowUnavailableError } from '@/server/workflows/onboardingUnderstanding';
 
 import { userRouter } from '../user';
@@ -452,6 +453,59 @@ describe('userRouter', () => {
 
       expect(result).toEqual(mockProviders);
       expect(UserModel).toHaveBeenCalledWith(serverDB, mockUserId);
+    });
+  });
+
+  describe('updateAvatar', () => {
+    const mockUpdateUser = vi.fn().mockResolvedValue({ rowCount: 1 });
+    const mockUploadBuffer = vi.fn().mockResolvedValue(undefined);
+
+    beforeEach(() => {
+      mockUpdateUser.mockClear();
+      mockUploadBuffer.mockClear();
+      vi.mocked(UserModel).mockImplementation(
+        () =>
+          ({
+            getUserState: vi.fn().mockResolvedValue({ avatar: undefined }),
+            updateUser: mockUpdateUser,
+          }) as any,
+      );
+      vi.mocked(FileS3).mockImplementation(
+        () => ({ deleteFile: vi.fn(), uploadBuffer: mockUploadBuffer }) as any,
+      );
+    });
+
+    it.each([
+      ['image/webp', 'webp'],
+      ['image/png', 'png'],
+    ])('uploads %s avatars produced by the avatar editor', async (mimeType, extension) => {
+      await userRouter
+        .createCaller({ ...mockCtx })
+        .updateAvatar(`data:${mimeType};base64,${Buffer.from('img').toString('base64')}`);
+
+      expect(mockUploadBuffer).toHaveBeenCalledWith(
+        expect.stringMatching(new RegExp(`^user/avatar/${mockUserId}/[\\w-]+\\.${extension}$`)),
+        expect.any(Buffer),
+        mimeType,
+      );
+      expect(mockUpdateUser).toHaveBeenCalledWith({
+        avatar: expect.stringMatching(new RegExp(`\\.${extension}$`)),
+      });
+    });
+
+    it.each([
+      'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',
+      'data:image/svg;base64,PHN2Zz48L3N2Zz4=',
+      'data:image/png,not-base64',
+      'data:image/png;charset=utf-8;base64,aW1n',
+      'data:image/gif;base64,R0lGODlh',
+    ])('rejects %s without uploading anything', async (input) => {
+      await expect(
+        userRouter.createCaller({ ...mockCtx }).updateAvatar(input),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'INVALID_AVATAR_IMAGE' });
+
+      expect(mockUploadBuffer).not.toHaveBeenCalled();
+      expect(mockUpdateUser).not.toHaveBeenCalled();
     });
   });
 
