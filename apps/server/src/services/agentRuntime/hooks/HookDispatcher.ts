@@ -16,6 +16,25 @@ import type {
 
 const log = debug('lobe-server:hook-dispatcher');
 
+const toOrigin = (value: string | undefined): string | undefined => {
+  if (!value) return undefined;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return undefined;
+  }
+};
+
+/** True only for URLs on this app's own origin (INTERNAL_APP_URL or APP_URL). */
+export const isAppOriginUrl = (url: string): boolean => {
+  const target = toOrigin(url);
+  if (!target) return false;
+
+  return [process.env.INTERNAL_APP_URL, process.env.APP_URL].some(
+    (base) => toOrigin(base) === target,
+  );
+};
+
 /**
  * Delivers a webhook via HTTP POST (fetch or QStash)
  */
@@ -29,6 +48,13 @@ export async function deliverWebhook(
   const resolvedUrl = url.startsWith('http')
     ? url
     : urlJoin(process.env.INTERNAL_APP_URL || process.env.APP_URL || '', url);
+
+  // Every hook the server registers targets its own `/api/...` routes. Hook
+  // configs can be persisted (topic / operation metadata), so never let one
+  // turn into a request to an arbitrary host.
+  if (!isAppOriginUrl(resolvedUrl)) {
+    throw new Error(`Refusing to deliver webhook outside the app origin: ${url}`);
+  }
 
   if (delivery === 'qstash') {
     try {

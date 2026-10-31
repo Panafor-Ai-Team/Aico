@@ -2,6 +2,7 @@ import type {
   HeteroSessionImportPayload,
   HeteroSessionImportResult,
   HeteroSessionImportStatus,
+  UpdateTopicMetadataInput,
 } from '@lobechat/types';
 
 import { INBOX_SESSION_ID } from '@/const/session';
@@ -9,7 +10,6 @@ import { lambdaClient } from '@/libs/trpc/client';
 import { type BatchTaskResult } from '@/types/service';
 import {
   type ChatTopic,
-  type ChatTopicMetadata,
   type CreateTopicParams,
   type QueryTopicParams,
   type RecentTopic,
@@ -33,12 +33,6 @@ export interface TopicListItem extends ChatTopic {
 }
 
 export type TopicBatchDeleteScope = 'own' | 'workspace';
-
-type OnboardingSessionMetadataPatch = Partial<NonNullable<ChatTopicMetadata['onboardingSession']>>;
-
-type UpdateTopicMetadataInput = Omit<Partial<ChatTopicMetadata>, 'onboardingSession'> & {
-  onboardingSession?: OnboardingSessionMetadataPatch;
-};
 
 export class TopicService {
   createTopic = (params: CreateTopicParams): Promise<string> => {
