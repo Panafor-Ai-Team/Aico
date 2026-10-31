@@ -3,7 +3,7 @@
  * Maps: AICO-P1-003, AICO-P1-009, AICO-P1-014, AICO-P1-015, secret hygiene
  */
 // @vitest-environment node
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { LobeChatDatabase } from '@lobechat/database';
@@ -37,46 +37,25 @@ process.env.KEY_VAULTS_SECRET = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
 
 const REPO_ROOT = join(__dirname, '../../../../..'); // apps/server/src/services/aico → repo root
 
-const collectTsFiles = (dir: string, acc: string[] = []): string[] => {
-  for (const name of readdirSync(dir)) {
-    if (name === 'node_modules' || name === 'dist' || name === '.git') continue;
-    const p = join(dir, name);
-    const st = statSync(p);
-    if (st.isDirectory()) collectTsFiles(p, acc);
-    else if (/\.(?:ts|tsx)$/.test(name) && !name.includes('.test.')) acc.push(p);
-  }
-  return acc;
-};
-
 describe('Aico chat-path bypass probes (Phase 2)', () => {
-  it('AICO-P1-009: every initModelRuntimeFromDB call site must also enforce assertModelAllowed', () => {
-    const roots = [
-      join(REPO_ROOT, 'src/app'),
-      join(REPO_ROOT, 'apps/server/src'),
-      join(REPO_ROOT, 'packages/business-server/src'),
-    ];
-    const offenders: string[] = [];
-    for (const root of roots) {
-      let files: string[];
-      try {
-        files = collectTsFiles(root);
-      } catch {
-        continue;
-      }
-      for (const file of files) {
-        const src = readFileSync(file, 'utf8');
-        if (!src.includes('initModelRuntimeFromDB')) continue;
-        // File that only defines the function is ModelRuntime/index.ts — skip definition.
-        if (file.replaceAll('\\', '/').endsWith('modules/ModelRuntime/index.ts')) continue;
-        if (!src.includes('assertModelAllowed')) {
-          offenders.push(file.replace(REPO_ROOT, '').replaceAll('\\', '/'));
-        }
-      }
-    }
-
-    // Chat route should be the only intentional call with assert — others are bypasses.
-    // Invariant: zero offenders.
-    expect(offenders).toEqual([]);
+  it('AICO-P1-009: managed runtime creation enforces the model allowlist centrally', () => {
+    // Model access is enforced centrally: every managed runtime goes through
+    // AicoManagedPolicy.authorize with the requested model, which refuses a missing model
+    // id and checks it against grants / trial allowlists / the catalog (behaviour is
+    // covered in managedPolicy.test.ts). Pin that wiring so a refactor cannot drop it.
+    const runtime = readFileSync(
+      join(REPO_ROOT, 'apps/server/src/modules/ModelRuntime/index.ts'),
+      'utf8',
+    );
+    const policy = readFileSync(
+      join(REPO_ROOT, 'apps/server/src/services/aico/managedPolicy.ts'),
+      'utf8',
+    );
+    expect(runtime).toMatch(
+      /if \(managed\) \{[\s\S]*?policy\.authorize\(\{[\s\S]*?modelId: options\??\.modelId/,
+    );
+    expect(policy).toMatch(/MODEL_ID_REQUIRED/);
+    expect(policy).toMatch(/await this\.assertModelAllowed\(/);
   });
 
   it('AICO-P1-015: chat route must call recordUsage or syncMemberUsage', () => {
@@ -211,7 +190,7 @@ describe('Aico production safety (Phase 2)', () => {
       delete process.env.AICO_OPENROUTER_MOCK;
       (process.env as any).NODE_ENV = 'production';
       __resetOpenRouterManagementClientForTests();
-      expect(() => createOpenRouterManagementClient({})).toThrow(/OPENROUTER_MANAGEMENT_API_KEY/);
+      expect(() => createOpenRouterManagementClient({})).toThrow(/AICO_CONTROL_PLANE_URL/);
     } finally {
       process.env.OPENROUTER_MANAGEMENT_API_KEY = prev;
       process.env.AICO_OPENROUTER_MOCK = prevMock;
@@ -229,7 +208,7 @@ describe('Aico production safety (Phase 2)', () => {
       process.env.AICO_OPENROUTER_MOCK = '1';
       (process.env as any).NODE_ENV = 'production';
       __resetOpenRouterManagementClientForTests();
-      expect(() => createOpenRouterManagementClient({})).toThrow(/OPENROUTER_MANAGEMENT_API_KEY/);
+      expect(() => createOpenRouterManagementClient({})).toThrow(/AICO_CONTROL_PLANE_URL/);
     } finally {
       process.env.OPENROUTER_MANAGEMENT_API_KEY = prevKey;
       process.env.AICO_OPENROUTER_MOCK = prevMock;
