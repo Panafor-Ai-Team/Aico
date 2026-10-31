@@ -103,6 +103,13 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:3210/_spa/icons/icon-192x192.png)" = 200
           # Next can write its cache as the image user.
           docker exec app /bin/sh -c 'id; mkdir -p /app/.next/cache && touch /app/.next/cache/.smoke'
+          # The opt-in dual-journal runner (AICO_MIGRATION_RUNNER=dual) must agree with the
+          # stock migrator's ledger: re-running over the migrated DB applies nothing, finds no
+          # unknown rows and no drift.
+          out=$(docker exec -e AICO_MIGRATION_RUNNER=dual -e DATABASE_URL app /bin/node /app/docker.cjs)
+          echo "$out"
+          echo "$out" | grep -q 'database migration pass'
+          echo "$out" | grep -q 'applied=0 skipped=0 equivalent=0 drift=0 unknownRows=0'
           # Every MCP SDK copy in the image is at or above the security floor
           # (no lockfile, so a cached install layer could otherwise keep an old one).
           docker exec -w /app app /bin/node -e "
