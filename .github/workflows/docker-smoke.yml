@@ -11,6 +11,7 @@ on:
       - Dockerfile
       - .dockerignore
       - apps/aico-control-plane/Dockerfile
+      - package.json
       - pnpm-workspace.yaml
       - .npmrc
       - patches/**
@@ -102,6 +103,25 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:3210/_spa/icons/icon-192x192.png)" = 200
           # Next can write its cache as the image user.
           docker exec app /bin/sh -c 'id; mkdir -p /app/.next/cache && touch /app/.next/cache/.smoke'
+          # Every MCP SDK copy in the image is at or above the security floor
+          # (no lockfile, so a cached install layer could otherwise keep an old one).
+          docker exec -w /app app /bin/node -e "
+            const fs = require('fs');
+            const floor = [1, 32, 2];
+            const dir = 'node_modules/.pnpm';
+            const prefix = '@modelcontextprotocol+sdk@';
+            const found = fs.existsSync(dir)
+              ? fs.readdirSync(dir).filter((d) => d.startsWith(prefix))
+              : [];
+            if (found.length === 0) console.log('::warning::no @modelcontextprotocol/sdk copy found in ' + dir);
+            for (const d of found) {
+              // e.g. @modelcontextprotocol+sdk@1.32.2_@cfworker+json-schema@4.1.4_zod@3.25.76
+              const v = d.slice(prefix.length).split('_')[0].split('.').map(Number);
+              const ok = v[0] !== floor[0] ? v[0] > floor[0] : v[1] !== floor[1] ? v[1] > floor[1] : v[2] >= floor[2];
+              console.log(d, ok ? 'ok' : 'BELOW FLOOR');
+              if (!ok) process.exitCode = 1;
+            }
+          "
 
       - name: Logs
         if: always()
