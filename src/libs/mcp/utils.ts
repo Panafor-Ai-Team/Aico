@@ -1,3 +1,5 @@
+import { isRecord } from '@lobechat/utils/object';
+
 import type { ToolCRUDType } from '@/database/schemas';
 
 // Prefix-based matching (anchored at ^) handles camelCase names like getReactions, listPins.
@@ -11,6 +13,36 @@ const READ_PREFIX =
 const stripNamespace = (name: string) => {
   const separator = name.indexOf('_');
   return separator === -1 ? name : name.slice(separator + 1);
+};
+
+export interface MCPErrorLogMetadata {
+  code?: number;
+  name: string;
+}
+
+/**
+ * Error messages and objects are untrusted remote data, so MCP logs only keep fixed metadata.
+ */
+export const getMCPErrorLogMetadata = (error: unknown): MCPErrorLogMetadata => {
+  const errorRecord = isRecord(error) ? error : undefined;
+  const rawCode = errorRecord?.code;
+  const code = typeof rawCode === 'number' ? rawCode : undefined;
+
+  return {
+    code,
+    name: error instanceof Error ? 'Error' : typeof error,
+  };
+};
+
+/**
+ * URL paths can contain session keys or signed values, so logs retain the origin only.
+ */
+export const getMCPLogOrigin = (endpoint: string): string | undefined => {
+  try {
+    return new URL(endpoint).origin;
+  } catch {
+    return undefined;
+  }
 };
 
 /**
