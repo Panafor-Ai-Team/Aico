@@ -58,8 +58,8 @@ Tracks: upstream 198 entries, Aico own 28, Aico today 160.
 
 Adopt **D2**. Next PR-sized steps, in order:
 
-1. Wire the runner behind a flag: `scripts/migrateServerDB/{index.ts,docker.cjs}` and `getTestDB` use it with a single track (today's journal) — behaviour-identical, exercised in production before any split.
-2. Add the ParadeDB CI job running the spike scenarios (gates 2–3).
+1. ✅ **Done (#728):** the runner ships as `scripts/migrateServerDB/dualJournalRunner.cjs`; `docker.cjs` and `pnpm db:migrate` use it over today's single journal when `AICO_MIGRATION_RUNNER=dual` (unset = stock Drizzle). Enable per environment after `db:audit-ledger` on a restored backup.
+2. ✅ **Done:** `.github/workflows/migration-ledger.yml` runs the scenarios on ParadeDB (`spike.ts --pg-url … --assert`), including **S8** — two runners started together on separate connections must serialize (no duplicate ledger rows, one of them applies nothing). Upstream is pinned in the workflow (`UPSTREAM_SHA`). Covers gates 2–3.
 3. Split the journal: move Aico's 28 entries to `packages/database/migrations-aico/`, add the equivalence entry, move the Aico schema file, generate the Aico baseline snapshot.
 4. Only then take the first upstream merge stage, whose journal comes over verbatim.
 

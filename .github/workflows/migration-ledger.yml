@@ -1,0 +1,67 @@
+name: Migration Ledger
+
+# Runs the dual-journal migration scenarios (docs/aico/MIGRATION_LEDGER_SPIKE.md) on real
+# ParadeDB: fresh install vs upgrade of a today-shaped database must end at an identical
+# catalog with existing rows untouched, a skipped 0142 is picked up, a mid-batch failure
+# resumes, the previous image stays a no-op, drift is never re-run, and two concurrent
+# runners serialize. Upstream is pinned so this job only changes when we bump it.
+on:
+  pull_request:
+    branches: [canary]
+    paths:
+      - packages/database/migrations/**
+      - packages/database/src/schemas/**
+      - scripts/migrateServerDB/**
+      - scripts/aico/migrationLedger.ts
+      - .github/workflows/migration-ledger.yml
+  workflow_dispatch: {}
+
+concurrency:
+  group: migration-ledger-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Upstream lobehub/lobehub commit the scenarios merge against; bump deliberately.
+  UPSTREAM_SHA: 7bc8d7ea4b25e226dd014552d51442b5048f5aa8
+
+jobs:
+  scenarios:
+    name: Dual-journal scenarios on ParadeDB
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: paradedb/paradedb:latest-pg17
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Fetch pinned upstream migrations
+        run: |
+          git fetch --no-tags --depth=1 https://github.com/lobehub/lobehub.git "$UPSTREAM_SHA"
+          git update-ref refs/remotes/upstream/pinned FETCH_HEAD
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
+
+      - name: Install dependencies
+        # Lockfile-free repo; see type-check.yml for why --frozen-lockfile is wrong here.
+        run: pnpm install --no-frozen-lockfile
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+
+      - name: Run scenarios
+        run: >-
+          bunx tsx scripts/migrateServerDB/dualJournal/spike.ts
+          --upstream-ref=upstream/pinned
+          --pg-url=postgres://postgres:postgres@localhost:5432/postgres
+          --assert

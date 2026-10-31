@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import { migrationUsesPgSearchOrBm25 } from '../bm25Compatibility';
 import {
+  createPgExecutor,
   DualJournalMigrationError,
   type MigrationExecutor,
   type MigrationTrack,
@@ -20,11 +21,13 @@ import {
 } from './tracks';
 
 /**
- * SPIKE harness for design D2 (see docs/aico/MIGRATION_LEDGER_SPIKE.md). Runs every
- * scenario on a fresh in-memory PGlite (with pgvector, like getTestDB) and prints a JSON
- * report. Needs the `upstream/canary` ref locally:
+ * Harness for design D2 (see docs/aico/MIGRATION_LEDGER_SPIKE.md). Runs every scenario on a
+ * fresh database and prints a JSON report. Needs the upstream ref locally.
  *
  *   bunx tsx scripts/migrateServerDB/dualJournal/spike.ts [--upstream-ref=upstream/canary]
+ *     [--pg-url=postgres://…/postgres]   real Postgres (one throwaway database per scenario);
+ *                                        default is in-memory PGlite + pgvector
+ *     [--assert]                         exit 1 unless every scenario meets its criterion
  */
 
 const repoRoot = path.join(__dirname, '../../..');
@@ -33,7 +36,52 @@ const upstreamRef =
 
 const dbRequire = createRequire(path.join(repoRoot, 'packages/database/package.json'));
 
-const createDb = async () => {
+const argValue = (name: string) =>
+  process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
+const pgUrl = argValue('pg-url');
+const shouldAssert = process.argv.includes('--assert');
+
+interface SpikeDb {
+  close: () => Promise<void>;
+  executor: MigrationExecutor;
+  /** A second connection to the same database (real Postgres only). */
+  openConnection?: () => Promise<MigrationExecutor>;
+}
+
+let pgDbCounter = 0;
+
+/** A throwaway database on the `--pg-url` server, dropped on close. */
+const createPgDb = async (): Promise<SpikeDb> => {
+  const { default: pg } = await import('pg');
+  const admin = new pg.Client({ connectionString: pgUrl });
+  await admin.connect();
+  const name = `aico_spike_${process.pid}_${++pgDbCounter}`;
+  await admin.query(`CREATE DATABASE ${name}`);
+
+  const url = new URL(pgUrl!);
+  url.pathname = `/${name}`;
+  const pool = new pg.Pool({ connectionString: url.toString(), max: 4 });
+  const clients = [await pool.connect()];
+
+  return {
+    close: async () => {
+      for (const client of clients) client.release();
+      await pool.end();
+      await admin.query(`DROP DATABASE ${name}`);
+      await admin.end();
+    },
+    executor: createPgExecutor(clients[0]),
+    openConnection: async () => {
+      const client = await pool.connect();
+      clients.push(client);
+      return createPgExecutor(client);
+    },
+  };
+};
+
+const createDb = async (): Promise<SpikeDb> => {
+  if (pgUrl) return createPgDb();
+
   const { PGlite } = await import(dbRequire.resolve('@electric-sql/pglite'));
   const { vector } = await import(dbRequire.resolve('@electric-sql/pglite/vector'));
   const pg = new PGlite({ extensions: { vector } });
@@ -46,7 +94,8 @@ const createDb = async () => {
   return { close: () => pg.close(), executor };
 };
 
-const skip = (entry: { statements: string[] }) => migrationUsesPgSearchOrBm25(entry.statements);
+/** Set in main: BM25/pg_search migrations are recorded as skipped only where unavailable. */
+let skip: ((entry: { statements: string[] }) => boolean) | undefined;
 
 /** Normalized catalog of the public schema, for fresh-vs-upgraded comparison. */
 const schemaSnapshot = async (executor: MigrationExecutor): Promise<Set<string>> => {
@@ -137,7 +186,16 @@ const main = async () => {
   const tracks: MigrationTrack[] = [upstream, aicoOwn];
   const equivalences = { [UPSTREAM_0131]: whenOf(aicoFolder, AICO_EQUIVALENT_OF_UPSTREAM_0131) };
 
+  const probe = await createDb();
+  const [{ available }] = await probe.executor.query<{ available: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_search') AS available`,
+  );
+  await probe.close();
+  skip = available ? undefined : (entry) => migrationUsesPgSearchOrBm25(entry.statements);
+
   const results: Record<string, unknown> = {
+    backend: pgUrl ? 'postgres' : 'pglite',
+    pgSearch: available,
     tracks: {
       aico: aicoOwn.entries.length,
       aicoToday: aicoToday.entries.length,
@@ -272,7 +330,101 @@ const main = async () => {
     await db.close();
   }
 
+  // S8 — two runners at once on separate connections (real Postgres only)
+  if (pgUrl) {
+    const db = await createDb();
+    const second = await db.openConnection!();
+    const settled = await Promise.allSettled([
+      runDualJournal({ equivalences, executor: db.executor, skip, tracks }),
+      runDualJournal({ equivalences, executor: second, skip, tracks }),
+    ]);
+    const [counts] = await db.executor.query<{ rows: string; whens: string }>(
+      'SELECT count(*) AS rows, count(DISTINCT created_at) AS whens FROM drizzle.__drizzle_migrations',
+    );
+    results.S8_concurrentRunners = {
+      appliedPerRunner: settled.map((r) =>
+        r.status === 'fulfilled' ? r.value.applied.length : -1,
+      ),
+      errors: settled.flatMap((r) => (r.status === 'rejected' ? [String(r.reason?.message)] : [])),
+      expectedRows: upstream.entries.length + aicoOwn.entries.length,
+      ledgerRows: Number(counts.rows),
+      ledgerWhens: Number(counts.whens),
+    };
+    await db.close();
+  }
+
   console.log(JSON.stringify(results, null, 2));
+
+  if (shouldAssert) {
+    const failures = checkResults(results, { aicoOwnCount: aicoOwn.entries.length });
+    if (failures.length > 0) {
+      console.error(`❌ ${failures.length} scenario check(s) failed:\n- ${failures.join('\n- ')}`);
+      process.exit(1);
+    }
+    console.error('✅ all dual-journal scenarios passed');
+  }
+};
+
+const EXPECTED_UPSTREAM_DRIFT = new Set([
+  '0090_enable_pg_search',
+  '0093_add_bm25_indexes_with_icu',
+  '0111_workspace_device_and_ai_infra_surrogate_pk',
+]);
+
+/** Pass criteria per scenario; returns human-readable failures. */
+const checkResults = (results: Record<string, any>, { aicoOwnCount }: { aicoOwnCount: number }) => {
+  const failures: string[] = [];
+  const expect = (ok: boolean, message: string) => {
+    if (!ok) failures.push(message);
+  };
+  const emptyDiff = (diff: any) =>
+    diff.onlyInFresh.length === 0 && diff.onlyInUpgraded.length === 0;
+
+  const s2 = results.S2_upgrade;
+  expect(emptyDiff(s2.schemaDiff), 'S2: upgraded schema differs from a fresh install');
+  expect(s2.changedTables.length === 0, `S2: rows changed in ${s2.changedTables.join(', ')}`);
+  expect(
+    s2.seedFailures.length === 0,
+    `S2: fixtures failed to seed: ${s2.seedFailures.join('; ')}`,
+  );
+  expect(s2.unknownRows === 0, `S2: ${s2.unknownRows} ledger row(s) match no entry`);
+  expect(s2.equivalent.includes(UPSTREAM_0131), 'S2: upstream 0131 not satisfied by Aico 0134');
+  expect(
+    s2.drift.every((tag: string) => EXPECTED_UPSTREAM_DRIFT.has(tag)),
+    `S2: unexpected drift ${s2.drift.join(', ')}`,
+  );
+  expect(results.S4_oldImageAfterFullRun.pending.length === 0, 'S4: old image would migrate');
+  for (const variant of ['S3_tablesPresent', 'S3_tablesAndDependentsMissing']) {
+    expect(!results[variant].error, `${variant}: ${results[variant].error}`);
+    expect(emptyDiff(results[variant].schemaDiff), `${variant}: schema differs from fresh`);
+  }
+  const s5 = results.S5_failureResume;
+  expect(
+    s5.failedTag === '0150_agent_interventions_and_live_activity',
+    `S5: failed at ${s5.failedTag}`,
+  );
+  expect(s5.oldImagePendingAtPartialState.length === 0, 'S5: old image would migrate mid-way');
+  expect(emptyDiff(s5.schemaDiff), 'S5: resumed schema differs from fresh');
+  expect(!results.S6_hashDrift.reExecuted, 'S6: drifted 0132 was re-executed');
+  expect(
+    results.S6_hashDrift.drift.includes('0132_shocking_blizzard'),
+    'S6: 0132 drift not reported',
+  );
+  const s8 = results.S8_concurrentRunners;
+  if (s8) {
+    expect(s8.errors.length === 0, `S8: ${s8.errors.join('; ')}`);
+    expect(
+      s8.ledgerRows === s8.expectedRows,
+      `S8: ${s8.ledgerRows} rows, expected ${s8.expectedRows}`,
+    );
+    expect(s8.ledgerRows === s8.ledgerWhens, 'S8: duplicate ledger rows');
+    expect(
+      s8.appliedPerRunner.includes(0),
+      `S8: both runners applied migrations (${s8.appliedPerRunner.join(', ')})`,
+    );
+  }
+  expect(aicoOwnCount > 0, 'tracks: no Aico-only migrations found');
+  return failures;
 };
 
 main().catch((error) => {
