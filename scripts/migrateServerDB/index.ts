@@ -8,6 +8,7 @@ import { migrate as neonMigrate } from 'drizzle-orm/neon-serverless/migrator';
 import { migrate as nodeMigrate } from 'drizzle-orm/node-postgres/migrator';
 
 import { isPgSearchUnavailableError, migrationUsesPgSearchOrBm25 } from './bm25Compatibility';
+import { createPgExecutor, formatReport, readTrack, runDualJournal } from './dualJournal/runner';
 // @ts-ignore tsgo handle esm import cjs and compatibility issues
 import { DB_FAIL_INIT_HINT, DUPLICATE_EMAIL_HINT, PGVECTOR_HINT } from './errorHint';
 
@@ -74,10 +75,51 @@ const migrateSkippingUnavailableBm25 = async (serverDB: {
   }
 };
 
-const runMigrations = async () => {
-  const { serverDB } = await import('../../packages/database/src/server');
+/**
+ * Opt-in D2 runner (`AICO_MIGRATION_RUNNER=dual`, docs/aico/MIGRATION_LEDGER_SPIKE.md). When
+ * pg_search is unavailable it re-runs while recording BM25 migrations as skipped — safe,
+ * because the runner identifies applied entries by `when` and never re-executes one.
+ */
+const runDualJournalMigrations = async () => {
+  if (process.env.DATABASE_DRIVER !== 'node') {
+    throw new Error('AICO_MIGRATION_RUNNER=dual requires DATABASE_DRIVER=node');
+  }
 
+  const { Pool } = await import('pg');
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  const connection = await pool.connect();
+  const executor = createPgExecutor(connection);
+  const tracks = [readTrack('aico', migrationsFolder)];
+
+  try {
+    const report = await runDualJournal({ executor, tracks }).catch(async (error) => {
+      if (!isPgSearchUnavailableError(error?.cause ?? error)) throw error;
+      console.warn(
+        '⚠️ pg_search is not available; recording BM25/pg_search migrations as skipped…',
+      );
+      return runDualJournal({
+        executor,
+        skip: (entry) => migrationUsesPgSearchOrBm25(entry.statements),
+        tracks,
+      });
+    });
+    console.log('[Database] dual-journal runner: %s', formatReport(report));
+  } finally {
+    connection.release();
+    await pool.end();
+  }
+};
+
+const runMigrations = async () => {
   const time = Date.now();
+
+  if (process.env.AICO_MIGRATION_RUNNER === 'dual') {
+    await runDualJournalMigrations();
+    console.log('✅ database migration pass. use: %s ms', Date.now() - time);
+    process.exit(0);
+  }
+
+  const { serverDB } = await import('../../packages/database/src/server');
   const useNodeDriver = process.env.DATABASE_DRIVER === 'node';
 
   try {

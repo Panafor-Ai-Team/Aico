@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createPgExecutor,
   DualJournalMigrationError,
+  formatReport,
   type MigrationEntry,
   type MigrationExecutor,
   type MigrationTrack,
@@ -150,5 +152,49 @@ describe('runDualJournal', () => {
     });
 
     expect(report.unknownRows).toEqual([{ createdAt: 42, hash: 'stray', id: 1 }]);
+  });
+});
+
+describe('createPgExecutor', () => {
+  it('sends every statement through the one dedicated client', async () => {
+    const calls: Array<[string, unknown[] | undefined]> = [];
+    const client = {
+      query: async (sql: string, params?: unknown[]) => {
+        calls.push([sql, params]);
+        return { rows: [{ ok: 1 }] };
+      },
+    };
+    const executor = createPgExecutor(client);
+
+    await executor.exec('BEGIN');
+    const rows = await executor.query('SELECT $1', [1]);
+    await executor.exec('COMMIT');
+
+    expect(rows).toEqual([{ ok: 1 }]);
+    expect(calls).toEqual([
+      ['BEGIN', undefined],
+      ['SELECT $1', [1]],
+      ['COMMIT', undefined],
+    ]);
+  });
+});
+
+describe('formatReport', () => {
+  it('summarizes a report on one line, naming drifted entries', () => {
+    expect(
+      formatReport({
+        applied: ['a'],
+        drift: [{ appliedHash: 'x', currentHash: 'y', tag: '0132' }],
+        equivalent: [],
+        skipped: [],
+        unknownRows: [],
+      }),
+    ).toBe('applied=1 skipped=0 equivalent=0 drift=1 (0132) unknownRows=0');
+  });
+
+  it('prints the no-op line the Docker smoke test expects', () => {
+    expect(
+      formatReport({ applied: [], drift: [], equivalent: [], skipped: [], unknownRows: [] }),
+    ).toBe('applied=0 skipped=0 equivalent=0 drift=0 unknownRows=0');
   });
 });

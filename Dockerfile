@@ -176,6 +176,7 @@ COPY --link --chown=1001:1001 --from=builder /app/packages/database/migrations /
 COPY --link --chown=1001:1001 --from=builder /app/docs/changelog /app/docs/changelog
 COPY --link --chown=1001:1001 --from=builder /app/scripts/migrateServerDB/docker.cjs /app/docker.cjs
 COPY --link --chown=1001:1001 --from=builder /app/scripts/migrateServerDB/errorHint.js /app/errorHint.js
+COPY --link --chown=1001:1001 --from=builder /app/scripts/migrateServerDB/dualJournalRunner.cjs /app/dualJournalRunner.cjs
 
 # Copy server launcher and shared scripts
 COPY --link --chown=1001:1001 --from=builder /app/scripts/serverLauncher/startServer.js /app/startServer.js
