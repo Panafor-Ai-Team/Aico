@@ -91,6 +91,9 @@ export default {
   'compression.cancel': 'Uncompress',
   'compression.cancelConfirm':
     'Are you sure you want to uncompress? This will restore the original messages.',
+  'compression.emptySummary': 'The model returned an empty summary',
+  'compression.failed': 'Context compression failed, original messages kept',
+  'compression.failedReason': 'Summary generation failed: {{reason}}',
   'compression.history': 'History',
   'compression.summary': 'Summary',
   'confirmClearCurrentMessages':
