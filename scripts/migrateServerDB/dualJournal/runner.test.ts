@@ -15,11 +15,13 @@ import {
 const createFakeDb = (rows: Array<{ created_at: number; hash: string }> = []) => {
   const ledger = rows.map((row, index) => ({ ...row, id: index + 1 }));
   const executed: string[] = [];
+  const calls: string[] = [];
   let pendingInserts: Array<{ created_at: number; hash: string }> = [];
   let pendingStatements: string[] = [];
 
   const executor: MigrationExecutor = {
     exec: async (sql) => {
+      calls.push(sql);
       if (sql === 'BEGIN') {
         pendingInserts = [];
         pendingStatements = [];
@@ -40,6 +42,7 @@ const createFakeDb = (rows: Array<{ created_at: number; hash: string }> = []) =>
       }
     },
     query: async (sql, params = []) => {
+      calls.push(sql);
       if (sql.startsWith('SELECT id, hash, created_at')) return ledger as any[];
       if (sql.startsWith('INSERT INTO')) {
         pendingInserts.push({ created_at: params[1] as number, hash: params[0] as string });
@@ -48,7 +51,7 @@ const createFakeDb = (rows: Array<{ created_at: number; hash: string }> = []) =>
     },
   };
 
-  return { executed, executor, ledger };
+  return { calls, executed, executor, ledger };
 };
 
 const entry = (tag: string, when: number, statements = [`-- ${tag}`]): MigrationEntry => ({
@@ -141,6 +144,17 @@ describe('runDualJournal', () => {
     expect(report.skipped).toEqual(['u-bm25']);
     expect(db.executed).toEqual([]);
     expect(db.ledger).toHaveLength(1);
+  });
+
+  it('takes the advisory lock before bootstrapping the ledger schema', async () => {
+    // CREATE … IF NOT EXISTS races when two runners hit a fresh database at once.
+    const db = createFakeDb();
+
+    await runDualJournal({ executor: db.executor, tracks: [track('upstream', [entry('u1', 1)])] });
+
+    expect(db.calls[0]).toBe('SELECT pg_advisory_lock($1)');
+    expect(db.calls.findIndex((sql) => sql.startsWith('CREATE SCHEMA'))).toBeGreaterThan(0);
+    expect(db.calls.at(-1)).toBe('SELECT pg_advisory_unlock($1)');
   });
 
   it('reports ledger rows that match no entry', async () => {
