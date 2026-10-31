@@ -56,8 +56,10 @@ const IR_MOBILE_E164 = /^\+989\d{9}$/;
 const PERSIAN_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
 const ARABIC_INDIC_DIGITS = '٠١٢٣٤٥٦٧٨٩';
 
+// Mirrors `toAsciiDigits` in src/libs/better-auth/phone.ts so a number accepted at sign-in
+// fingerprints to the same E.164 value (NFKC folds fullwidth digits and `＋`).
 const toAsciiDigits = (value: string): string =>
-  [...value]
+  [...value.normalize('NFKC')]
     .map((ch) => {
       const persian = PERSIAN_DIGITS.indexOf(ch);
       if (persian >= 0) return String(persian);

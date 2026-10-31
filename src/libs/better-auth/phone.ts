@@ -11,9 +11,12 @@ const IR_MOBILE_E164 = /^\+989\d{9}$/;
 const PERSIAN_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
 const ARABIC_INDIC_DIGITS = '٠١٢٣٤٥٦٧٨٩';
 
-/** Map Eastern digits → ASCII 0-9. */
+/**
+ * Map Eastern digits → ASCII 0-9. NFKC first folds compatibility forms such as
+ * fullwidth digits and `＋` from CJK-style input methods.
+ */
 export const toAsciiDigits = (value: string): string =>
-  value.replaceAll(/[\u06F0-\u06F9\u0660-\u0669]/g, (ch) => {
+  value.normalize('NFKC').replaceAll(/[\u06F0-\u06F9\u0660-\u0669]/g, (ch) => {
     const persian = PERSIAN_DIGITS.indexOf(ch);
     if (persian >= 0) return String(persian);
     const arabic = ARABIC_INDIC_DIGITS.indexOf(ch);
