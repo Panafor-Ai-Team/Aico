@@ -1,7 +1,12 @@
 // Note: To make the code more logic and readable, we just disable the auto sort key eslint rule
 // DON'T REMOVE THE FIRST LINE
 import { chainSummaryTitle } from '@lobechat/prompts';
-import { type ChatTopicMetadata, type MessageMapScope, type UIChatMessage } from '@lobechat/types';
+import {
+  type ChatTopicMetadata,
+  type MessageMapScope,
+  type UIChatMessage,
+  type UpdateTopicMetadataInput,
+} from '@lobechat/types';
 import { TraceNameMap } from '@lobechat/types';
 import { toast } from '@lobehub/ui/base-ui';
 import isEqual from 'fast-deep-equal';
@@ -378,7 +383,10 @@ export class ChatTopicActionImpl {
     );
   };
 
-  updateTopicMetadata = async (id: string, metadata: Partial<ChatTopicMetadata>): Promise<void> => {
+  updateTopicMetadata = async (
+    id: string,
+    metadata: UpdateTopicMetadataInput & Pick<ChatTopicMetadata, 'onboardingSession'>,
+  ): Promise<void> => {
     const topic = topicSelectors.getTopicById(id)(this.#get());
     if (!topic) return;
 

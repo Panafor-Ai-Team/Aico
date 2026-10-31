@@ -33,6 +33,29 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  # Release gate: nothing reaches the production host unless the commit
+  # type-checks. (The full test suite is not gated yet — see test.yml.)
+  quality-gate:
+    name: Quality gate (type check)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
+
+      - name: Install dependencies
+        # Lockfile-free repo; see type-check.yml for why --frozen-lockfile is wrong here.
+        run: pnpm install --no-frozen-lockfile
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+
+      - name: Type check
+        run: pnpm type-check
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+
   build:
     name: Build and push Panachat image
     concurrency:
@@ -204,8 +227,8 @@ jobs:
     concurrency:
       group: deploy-canary-ssh
       cancel-in-progress: false
-    needs: [build, build-control-plane]
-    if: ${{ always() && needs.build.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.skip_deploy != true) }}
+    needs: [quality-gate, build, build-control-plane]
+    if: ${{ always() && needs.quality-gate.result == 'success' && needs.build.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.skip_deploy != true) }}
     runs-on: ubuntu-latest
     steps:
       - name: Deploy over SSH

@@ -1,3 +1,4 @@
+import { isDesktop } from '@lobechat/const';
 import {
   type CheckMcpInstallResult,
   type CustomPluginMetadata,
@@ -5,7 +6,7 @@ import {
   type ToolManifest,
   type ToolManifestSettings,
 } from '@lobechat/types';
-import { safeParseJSON } from '@lobechat/utils';
+import { isLocalOrPrivateUrl, safeParseJSON } from '@lobechat/utils';
 import { type DeploymentOption } from '@lobehub/market-sdk';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { TRPCError } from '@trpc/server';
@@ -282,6 +283,30 @@ export class MCPService {
 
   // Private method to get or initialize a client based on parameters
   private async getClient(params: MCPClientParams, skipCache = false): Promise<MCPClient> {
+    // Every server caller (including connector sync and agent tool execution)
+    // must enforce the same Desktop-only stdio boundary, even for cached clients.
+    if (params.type === 'stdio' && !isDesktop) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Stdio MCP type is not supported in web environment.',
+      });
+    }
+
+    // A shared web server must not fetch user-supplied loopback / private-network
+    // MCP endpoints on the user's behalf. Self-hosters who deliberately run MCP
+    // servers on their LAN can opt in with the existing SSRF allow switch.
+    if (
+      params.type === 'http' &&
+      !isDesktop &&
+      process.env.SSRF_ALLOW_PRIVATE_IP_ADDRESS !== '1' &&
+      isLocalOrPrivateUrl(params.url)
+    ) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Local or private-network MCP endpoints are not supported in web environment.',
+      });
+    }
+
     const key = this.serializeParams(params); // Use custom serialization
 
     if (!skipCache && this.clients.has(key)) {
@@ -435,6 +460,16 @@ export class MCPService {
   async checkMcpInstall(input: {
     deploymentOptions: DeploymentOption[];
   }): Promise<CheckMcpInstallResult> {
+    // The dependency checks run the manifest's check commands in a shell, which only
+    // makes sense on the user's own machine (Desktop). Never run them on the web server.
+    if (!isDesktop) {
+      return {
+        error: 'MCP installation checks are only available on Desktop.',
+        platform: process.platform,
+        success: false,
+      };
+    }
+
     try {
       const loggableInput = {
         deploymentOptions: input.deploymentOptions.map((o) => this.sanitizeForLogging(o)),
