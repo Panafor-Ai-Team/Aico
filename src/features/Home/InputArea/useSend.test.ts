@@ -306,13 +306,22 @@ describe('Home InputArea useSend', () => {
     expect(routerMock.push).toHaveBeenCalledWith('/tasks?agentId=agt_inbox&topicId=tpc-28');
   });
 
-  it('does not discard attachments that Task mode cannot persist', async () => {
-    fileState.chatUploadFileList = [{ id: 'file-1' }] as any;
+  it('folds uploaded files into the task instruction so the agent receives them', async () => {
+    fileState.chatUploadFileList = [
+      {
+        file: { name: 'report.pdf', size: 12 },
+        fileUrl: '/f/file-1',
+        id: 'file-1',
+        status: 'success',
+      },
+    ] as any;
+    createTaskMock.mockResolvedValue({ assigneeAgentId: 'agt_inbox', identifier: 'T-29' });
+    runTaskMock.mockResolvedValue({ topicId: 'tpc-29' });
     const { result } = renderHook(() => useSend('task'));
     const params: Parameters<SendButtonHandler>[0] = {
       clearContent: vi.fn(),
       editor: {} as Parameters<SendButtonHandler>[0]['editor'],
-      getEditorData: () => ({ type: 'doc' }),
+      getEditorData: () => ({ root: { children: [], type: 'root', version: 1 } }),
       getMarkdownContent: () => 'Prepare the weekly report',
     };
 
@@ -320,14 +329,49 @@ describe('Home InputArea useSend', () => {
       await result.current.send(params);
     });
 
-    expect(createTaskMock).not.toHaveBeenCalled();
-    expect(clearChatUploadFileListMock).not.toHaveBeenCalled();
-    expect(messageErrorMock).toHaveBeenCalledWith('dashboard.task.unsupportedContext');
+    expect(createTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        editorData: {
+          root: {
+            children: [
+              {
+                children: [
+                  {
+                    fileUrl: '/f/file-1',
+                    name: 'report.pdf',
+                    size: 12,
+                    status: 'uploaded',
+                    type: 'file',
+                    version: 1,
+                  },
+                ],
+                direction: 'ltr',
+                format: '',
+                indent: 0,
+                type: 'paragraph',
+                version: 1,
+              },
+            ],
+            type: 'root',
+            version: 1,
+          },
+        },
+      }),
+    );
+    expect(runTaskMock).toHaveBeenCalledWith('T-29', undefined, { throwOnError: true });
+    expect(clearChatUploadFileListMock).toHaveBeenCalledTimes(1);
   });
 
-  it('explains why an attachment-only Task submission cannot proceed', async () => {
+  it('asks for an instruction when only attachments are present', async () => {
     chatState.inputMessage = '';
-    fileState.chatUploadFileList = [{ id: 'file-1' }] as any;
+    fileState.chatUploadFileList = [
+      {
+        file: { name: 'report.pdf', size: 12 },
+        fileUrl: '/f/file-1',
+        id: 'file-1',
+        status: 'success',
+      },
+    ] as any;
     const { result } = renderHook(() => useSend('task'));
     const params: Parameters<SendButtonHandler>[0] = {
       clearContent: vi.fn(),
@@ -342,6 +386,25 @@ describe('Home InputArea useSend', () => {
 
     expect(createTaskMock).not.toHaveBeenCalled();
     expect(clearChatUploadFileListMock).not.toHaveBeenCalled();
+    expect(messageErrorMock).toHaveBeenCalledWith('dashboard.task.instructionRequired');
+  });
+
+  it('does not discard context selections that Task mode cannot persist', async () => {
+    fileState.chatContextSelections = [{ id: 'ctx-1' }] as any;
+    const { result } = renderHook(() => useSend('task'));
+    const params: Parameters<SendButtonHandler>[0] = {
+      clearContent: vi.fn(),
+      editor: {} as Parameters<SendButtonHandler>[0]['editor'],
+      getEditorData: () => ({ type: 'doc' }),
+      getMarkdownContent: () => 'Prepare the weekly report',
+    };
+
+    await act(async () => {
+      await result.current.send(params);
+    });
+
+    expect(createTaskMock).not.toHaveBeenCalled();
+    expect(clearChatContextSelectionsMock).not.toHaveBeenCalled();
     expect(messageErrorMock).toHaveBeenCalledWith('dashboard.task.unsupportedContext');
   });
 

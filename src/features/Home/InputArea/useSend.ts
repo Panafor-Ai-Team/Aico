@@ -20,6 +20,7 @@ import { fileChatSelectors, useFileStore } from '@/store/file';
 import { useGlobalStore } from '@/store/global';
 import { useHomeStore } from '@/store/home';
 import { useTaskStore } from '@/store/task';
+import type { UploadFileItem } from '@/types/files/upload';
 
 import { useResolvedHomeAgentId } from '../AgentSelect/useResolvedHomeAgentId';
 import type { HomeMode } from '../types';
@@ -30,6 +31,41 @@ import { taskNameFromMessage } from './taskName';
  * message doesn't carry the cosmetic suffix.
  */
 const stripHintEllipsis = (hint: string): string => hint.replace(/\s*(?:\.{3,}|…)\s*$/, '').trim();
+
+/**
+ * Task attachments live in the instruction's Lexical state — the server
+ * recovers fileIds from it (`extractFileIdsFromEditorData`) and forwards them
+ * to the agent on every run. The home composer keeps picked files in a
+ * separate store, so fold them in before the task row is written.
+ */
+const withUploadedFiles = (editorData: unknown, files: UploadFileItem[]): unknown => {
+  const uploaded = files.filter((file) => !!file.fileUrl);
+  if (uploaded.length === 0) return editorData;
+
+  const data = (editorData ?? {}) as { root?: Record<string, unknown> };
+  const root = data.root ?? { children: [], type: 'root', version: 1 };
+  const existing = Array.isArray(root.children) ? root.children : [];
+
+  const paragraphs = uploaded.map((file) => ({
+    children: [
+      {
+        fileUrl: file.fileUrl,
+        name: file.file?.name || file.id,
+        size: file.file?.size,
+        status: 'uploaded',
+        type: 'file',
+        version: 1,
+      },
+    ],
+    direction: 'ltr',
+    format: '',
+    indent: 0,
+    type: 'paragraph',
+    version: 1,
+  }));
+
+  return { ...data, root: { ...root, children: [...paragraphs, ...existing] } };
+};
 
 /**
  * Make sure the agent's config is hydrated into `agentMap` before we call
@@ -123,10 +159,10 @@ export const useSend = (mode: HomeMode = 'chat') => {
 
       if ((mode === 'task' || !inputActiveMode) && !canUseResource) return;
 
-      // Task persistence does not support attachments or context yet. Check
-      // this before the empty-message guard so an attachment-only submission
-      // explains why it cannot proceed instead of appearing inert.
-      if (mode === 'task' && (fileList.length > 0 || contextList.length > 0)) {
+      // Task persistence does not support selected context yet. Check this
+      // before the empty-message guard so a context-only submission explains
+      // why it cannot proceed instead of appearing inert.
+      if (mode === 'task' && contextList.length > 0) {
         toast.error(t('dashboard.task.unsupportedContext'));
         return;
       }
@@ -143,7 +179,13 @@ export const useSend = (mode: HomeMode = 'chat') => {
         // outcomes to a model that is told elsewhere not to start work on its
         // own — pressing send in this mode IS the instruction to start.
         if (mode === 'task') {
-          if (!message || !selectedAgentId) return;
+          // The task instruction is required server-side, so an
+          // attachment-only submission has nothing to run.
+          if (!message) {
+            toast.error(t('dashboard.task.instructionRequired'));
+            return;
+          }
+          if (!selectedAgentId) return;
           setIsSubmitting(true);
           const pendingTaskRun = pendingTaskRunRef.current;
           const canRetryPendingTask =
@@ -155,7 +197,7 @@ export const useSend = (mode: HomeMode = 'chat') => {
           if (!taskRun) {
             const created = await createTask({
               assigneeAgentId: selectedAgentId,
-              editorData,
+              editorData: withUploadedFiles(editorData, fileList),
               instruction: message,
               name: taskNameFromMessage(message),
               visibility: activeWorkspaceId ? 'private' : undefined,

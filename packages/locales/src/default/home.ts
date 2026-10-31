@@ -78,9 +78,11 @@ export default {
   'dashboard.rail.show': 'Show activity',
   'dashboard.submitFailed': 'Could not submit. Your draft has been kept.',
   'dashboard.task.empty': 'No tasks yet',
+  'dashboard.task.instructionRequired':
+    'Task mode needs a description. Tell the agent what to do; your attachments have been kept.',
   'dashboard.task.title': 'Tasks',
   'dashboard.task.unsupportedContext':
-    'Task mode does not support attachments or selected context yet. Remove them or switch to Agent mode; your draft has been kept.',
+    'Task mode does not support selected context yet. Remove it or switch to Agent mode; your draft has been kept.',
   'inbox.author.scheduled': 'Scheduled',
   'inbox.error.title': 'Run failed',
   'inbox.needsYou.title': 'Needs you',
