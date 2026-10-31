@@ -562,14 +562,64 @@ describe('initModelRuntimeWithUserPayload method', () => {
       expect(runtime['_runtime'].baseURL).toBe('http://custom-comfyui:8188');
     });
 
-    it('Unknown Provider', async () => {
-      const jwtPayload = {};
-      const runtime = await initModelRuntimeWithUserPayload('unknown', jwtPayload);
-
-      // 根据实际实现，你可能需要检查是否返回了默认的 runtime 实例，或者是否抛出了异常
-      // 例如，如果默认使用 OpenAI:
-      expect(runtime['_runtime']).toBeInstanceOf(LobeOpenAI);
+    it('Unknown Provider: requires user credentials', () => {
+      expect(() => initModelRuntimeWithUserPayload('unknown', {})).toThrow();
     });
+  });
+});
+
+describe('initModelRuntimeWithUserPayload server credential isolation', () => {
+  const apiKeyOf = (runtime: ModelRuntime) => (runtime['_runtime'] as any).client?.apiKey;
+
+  // Without the deployment key these providers have no credentials at all, so the
+  // runtime refuses to build instead of borrowing the server's secret.
+  it('never pairs a user-supplied endpoint with the deployment key', () => {
+    expect(() =>
+      initModelRuntimeWithUserPayload(ModelProvider.OpenAI, {
+        baseURL: 'https://user-endpoint.example.com/v1',
+      }),
+    ).toThrow(expect.objectContaining({ errorType: 'InvalidProviderAPIKey' }));
+  });
+
+  it('does not lend a built-in SDK key to a custom provider using that SDK type', () => {
+    expect(() =>
+      initModelRuntimeWithUserPayload('my-custom-provider', {
+        runtimeProvider: ModelProvider.OpenAI,
+      }),
+    ).toThrow(expect.objectContaining({ errorType: 'InvalidProviderAPIKey' }));
+  });
+
+  it('uses the user key with a user-supplied endpoint', () => {
+    const runtime = initModelRuntimeWithUserPayload(ModelProvider.OpenAI, {
+      apiKey: 'user-key',
+      baseURL: 'https://user-endpoint.example.com/v1',
+    });
+
+    expect(runtime['_runtime'].baseURL).toBe('https://user-endpoint.example.com/v1');
+    expect(apiKeyOf(runtime)).toBe('user-key');
+  });
+
+  it('keeps the deployment key for the deployment-owned provider and endpoint', () => {
+    const runtime = initModelRuntimeWithUserPayload(ModelProvider.OpenRouter, {});
+
+    expect(apiKeyOf(runtime)).toBe('test-openrouter-key');
+  });
+
+  it('keeps an explicitly authorized key on the managed OpenRouter path', () => {
+    const runtime = initModelRuntimeWithUserPayload(ModelProvider.OpenRouter, {
+      apiKey: 'sk-or-member-key',
+    });
+
+    expect(runtime['_runtime']).toBeInstanceOf(LobeOpenRouterAI);
+    expect(apiKeyOf(runtime)).toBe('sk-or-member-key');
+  });
+
+  it('keeps an explicitly authorized key on the managed CheapVibeCode path', () => {
+    const runtime = initModelRuntimeWithUserPayload(ModelProvider.CheapVibeCode, {
+      apiKey: 'cvc-member-key',
+    });
+
+    expect(apiKeyOf(runtime)).toBe('cvc-member-key');
   });
 });
 
