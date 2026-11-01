@@ -1,7 +1,8 @@
 /**
  * "Dual journal, single ledger" migration runner (design D2, see
- * docs/aico/MIGRATION_LEDGER_SPIKE.md). The default migration runner; `AICO_MIGRATION_RUNNER=stock`
- * switches back to Drizzle's own migrator.
+ * docs/aico/MIGRATION_LEDGER_SPIKE.md) — the only migrator for this repo's two journals:
+ * `migrations/` (upstream-shaped, taken verbatim from LobeHub) then `migrations-aico/`
+ * (Aico's own). Drizzle's stock migrator can run only one journal.
  *
  * Journal entries record into the existing `drizzle.__drizzle_migrations` table. An entry
  * counts as applied when a ledger row's `created_at` equals the entry's `when` (journal
@@ -76,6 +77,30 @@ const readTrack = (name, migrationsFolder) => {
     name,
   };
 };
+
+/** Folder names of the two journals, in the order they apply. */
+const TRACK_FOLDERS = [
+  { folder: 'migrations', name: 'main' },
+  { folder: 'migrations-aico', name: 'aico' },
+];
+
+/**
+ * Upstream entries already satisfied by an Aico ledger row. Aico shipped upstream's
+ * `0131_agents_add_name_column` as its own `0134_agents_add_name_column` (same SQL) with
+ * this `when`; once upstream's journal is merged, its 0131 must not run again. Inert until
+ * then: no journal entry carries that tag today.
+ * @type {Record<string, number>}
+ */
+const AICO_EQUIVALENCES = Object.freeze({ '0131_agents_add_name_column': 1_785_657_510_456 });
+
+/**
+ * Both journals under `rootDir`, main first: Aico migrations may depend on upstream tables,
+ * never the reverse.
+ * @param {string} rootDir directory holding `migrations/` and `migrations-aico/`
+ * @returns {MigrationTrack[]}
+ */
+const readTracks = (rootDir) =>
+  TRACK_FOLDERS.map(({ folder, name }) => readTrack(name, path.join(rootDir, folder)));
 
 /**
  * @param {MigrationExecutor} executor
@@ -275,6 +300,7 @@ const formatPlan = (plan) => {
 };
 
 module.exports = {
+  AICO_EQUIVALENCES,
   createPgExecutor,
   DualJournalMigrationError,
   formatPlan,
@@ -282,6 +308,8 @@ module.exports = {
   planDualJournal,
   readLedger,
   readTrack,
+  readTracks,
   runDualJournal,
   stockDrizzlePending,
+  TRACK_FOLDERS,
 };

@@ -13,9 +13,10 @@ import { beforeAll, describe, expect, it } from 'vitest';
  * row), leave valid references and money columns alone, and be re-runnable.
  */
 const TAG = '0160_aico_billing_foreign_keys';
-const migrations = readMigrationFiles({
-  migrationsFolder: path.join(__dirname, '../../../migrations'),
-});
+// Both journals in production order: upstream-shaped `migrations/`, then `migrations-aico/`.
+const migrations = ['migrations', 'migrations-aico'].flatMap((folder) =>
+  readMigrationFiles({ migrationsFolder: path.join(__dirname, '../../..', folder) }),
+);
 const target = migrations.find((m) => m.folderMillis === 1_793_469_018_920);
 if (!target) throw new Error(`${TAG} not found in the journal`);
 const before = migrations.filter((m) => m.folderMillis !== target.folderMillis);

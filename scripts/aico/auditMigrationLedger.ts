@@ -23,16 +23,24 @@ const { Pool } = pg;
  *
  * Usage:
  *   DATABASE_URL=postgres://… tsx scripts/aico/auditMigrationLedger.ts
- *   … --journal-dir=/path/to/other/migrations   # simulate another journal
+ *   … --journal-dir=/path/to/a --journal-dir=/path/to/b   # simulate other journals
+ *
+ * By default it reads both journals, `migrations/` then `migrations-aico/`, which record into
+ * the one ledger table.
  *   … --json
  */
 
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');
-const journalDirArg = args.find((arg) => arg.startsWith('--journal-dir='));
-const migrationsFolder = journalDirArg
-  ? journalDirArg.slice('--journal-dir='.length)
-  : path.join(__dirname, '../../packages/database/migrations');
+const journalDirArgs = args
+  .filter((arg) => arg.startsWith('--journal-dir='))
+  .map((arg) => arg.slice('--journal-dir='.length));
+const migrationsFolders =
+  journalDirArgs.length > 0
+    ? journalDirArgs
+    : ['migrations', 'migrations-aico'].map((folder) =>
+        path.join(__dirname, '../../packages/database', folder),
+      );
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error('DATABASE_URL is required');
@@ -40,7 +48,7 @@ if (!connectionString) throw new Error('DATABASE_URL is required');
 const formatWhen = (when: number | null) => (when === null ? 'n/a' : new Date(when).toISOString());
 
 const printReport = (report: LedgerReport, tablePresence: Record<string, boolean>) => {
-  console.log(`Journal: ${migrationsFolder}`);
+  console.log(`Journals: ${migrationsFolders.join(', ')}`);
   console.log(`Matched entries: ${report.matched}`);
   console.log(`Newest applied created_at: ${formatWhen(report.maxCreatedAt)}`);
 
@@ -80,7 +88,7 @@ const printReport = (report: LedgerReport, tablePresence: Record<string, boolean
 };
 
 const main = async () => {
-  const journal = readJournal(migrationsFolder);
+  const journal = migrationsFolders.flatMap((folder) => readJournal(folder));
   const pool = new Pool({ connectionString });
   const client = await pool.connect();
 
@@ -111,7 +119,7 @@ const main = async () => {
     await client.query('ROLLBACK');
 
     if (asJson) {
-      console.log(JSON.stringify({ migrationsFolder, report, tablePresence }, null, 2));
+      console.log(JSON.stringify({ migrationsFolders, report, tablePresence }, null, 2));
     } else {
       printReport(report, tablePresence);
     }

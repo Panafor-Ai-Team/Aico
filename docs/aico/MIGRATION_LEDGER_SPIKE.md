@@ -52,7 +52,7 @@ Tracks: upstream 198 entries, Aico own 28, Aico today 160.
 2. **Real Postgres + ParadeDB:** run the S1–S6 harness against ParadeDB in CI — PGlite skips the pg_search/BM25 statements and is single-connection.
 3. **Concurrency:** two runners started together must serialize on the advisory lock (real Postgres only). The real executor must use one dedicated client (`pool.connect()`) for `BEGIN`/`COMMIT`.
 4. **Lock / timing rehearsal** on a production-sized clone with the `CONCURRENTLY` pre-builds for upstream `0153`/`0156`/`0167`/`0196`.
-5. **Schema layout for drizzle-kit:** the main config scans all of `packages/database/src/schemas`, so `aicoOrganization.ts` must move outside it (e.g. `schemas-aico/`) or the upstream config must list files; generate a no-op baseline for the Aico track.
+5. ✅ **Schema layout for drizzle-kit:** closed by #744. The main config lists its files explicitly; each journal has a no-op baseline snapshot, and CI checks that both generators stay empty.
 
 ## Recommendation
 
@@ -61,8 +61,13 @@ Adopt **D2**. Next PR-sized steps, in order:
 1. ✅ **Done (#728):** the runner ships as `scripts/migrateServerDB/dualJournalRunner.cjs`; `docker.cjs` and `pnpm db:migrate` use it over today's single journal when `AICO_MIGRATION_RUNNER=dual` (unset = stock Drizzle). Enable per environment after `db:audit-ledger` on a restored backup.
 2. ✅ **Done:** `.github/workflows/migration-ledger.yml` runs the scenarios on ParadeDB (`spike.ts --pg-url … --assert`), including **S8** — two runners started together on separate connections must serialize (no duplicate ledger rows, one of them applies nothing). Upstream is pinned in the workflow (`UPSTREAM_SHA`). Covers gates 2–3. The same job runs `dualJournal/schemaDrift.ts`, which fails when the database built from Aico's migrations differs from the one `drizzle-kit` generates from `aicoOrganization.ts` (it found five FKs the schema declared but no migration created; `0160_aico_billing_foreign_keys` adds them).
 3. ✅ **Done (#737):** on the stock path, every boot logs a read-only `dual-journal preview` and the deploy copies it into the Actions log. Canary production, 2026-11-01 (deploy of `637ce38fbb`): `pending=0 equivalent=0 drift=0 unknownRows=0` — every ledger row maps to a journal entry by `when`, nothing is missing (no skipped 0142) and no applied file changed. Closes gate 1 for canary production.
-4. **Default runner:** `docker.cjs` (and `pnpm db:migrate` with the node driver) use the runner unless `AICO_MIGRATION_RUNNER=stock`. The previous image is the stock migrator, which stays a no-op after a runner pass (S4), so rolling back needs no env change.
-5. Split the journal: move Aico's own entries to `packages/database/migrations-aico/`, add the equivalence entry, move the Aico schema file, generate the Aico baseline snapshot.
+4. ✅ **Done (#739):** the runner became the default. Canary production, deploy of `70b2fc2b59`: `dual-journal runner: applied=0 skipped=0 equivalent=0 drift=0 unknownRows=0`.
+5. ✅ **Done (#744):** the journal split.
+   - `packages/database/migrations/` holds the upstream-shaped journal: 0000–0130 plus `0134_agents_add_name_column`, Aico's copy of upstream 0131, at idx 131. Its baseline snapshot is generated from the main schema.
+   - `packages/database/migrations-aico/` holds Aico's 29 migrations (0131–0133, 0135–0160). Files, tags and `when` values are unchanged; only `idx` is renumbered. It has a single baseline snapshot.
+   - drizzle-kit: `drizzle.config.ts` lists every schema file except `aicoOrganization.ts`; `drizzle.aico.config.ts` (`bun run db:generate:aico`) covers that file alone, with timestamp prefixes.
+   - The runner applies main, then Aico (`readTracks`), with `AICO_EQUIVALENCES` (upstream 0131 ⇐ Aico 0134) ready for the merge. `AICO_MIGRATION_RUNNER=stock` is refused, because Drizzle's migrator runs one journal.
+   - Gate 5 (schema layout) is closed. The new scenarios check that the split runner on a pre-split database applies nothing (S9), that a fresh split install equals a legacy install (S10), and that the previous image stays a no-op after a split install (S11). `legacyJournal.test.ts` pins the rebuilt pre-split journal to `__fixtures__/legacyJournal.json`, and `migrationLayout.test.ts` keeps Aico tables out of the main journal.
 6. Only then take the first upstream merge stage, whose journal comes over verbatim.
 
 D0 (renumber and re-stamp upstream on every sync) stays the fallback if a production ledger turns out not to map by `when`.

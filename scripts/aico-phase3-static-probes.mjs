@@ -5,7 +5,7 @@ const mgmt = fs.readFileSync('apps/server/src/services/openrouter/management.ts'
 const sms = fs.readFileSync('apps/server/src/services/sms/impls/index.ts', 'utf8');
 const bill = fs.readFileSync('apps/server/src/routers/lambda/aicoBilling.ts', 'utf8');
 const orgR = fs.readFileSync('apps/server/src/routers/lambda/organization.ts', 'utf8');
-const mig = fs.readFileSync('packages/database/migrations/0132_shocking_blizzard.sql', 'utf8');
+const mig = fs.readFileSync('packages/database/migrations-aico/0132_shocking_blizzard.sql', 'utf8');
 const wallet = fs.readFileSync('src/features/AicoWallet/index.tsx', 'utf8');
 const web = fs.readFileSync('src/spa/router/desktopRouter.config.tsx', 'utf8');
 const desk = fs.readFileSync('src/spa/router/desktopRouter.config.desktop.tsx', 'utf8');
@@ -46,7 +46,7 @@ for (const r of roots) {
 }
 
 const journal = JSON.parse(
-  fs.readFileSync('packages/database/migrations/meta/_journal.json', 'utf8'),
+  fs.readFileSync('packages/database/migrations-aico/meta/_journal.json', 'utf8'),
 );
 const last = journal.entries.slice(-3).map((e) => e.tag);
 

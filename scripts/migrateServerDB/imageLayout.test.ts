@@ -7,7 +7,8 @@ import { describe, expect, it } from 'vitest';
  * Regression: `docker.cjs` requires `./dualJournalRunner.cjs` (the default migrator since
  * #739), but only the root Dockerfile shipped it. Images built with Dockerfile.prebuilt or
  * staged by `deploy-local.sh` (`moz -u`) would fail to migrate on boot and never start.
- * Every recipe that ships the migration entry point must ship everything it requires.
+ * Every recipe that ships the migration entry point must ship everything it requires,
+ * including both journals.
  */
 const root = path.join(__dirname, '../..');
 const read = (file: string) => readFileSync(path.join(root, file), 'utf8');
@@ -29,6 +30,12 @@ describe('migration entry point image layout', () => {
       for (const required of localRequires) {
         const file = required.includes('.') ? required : `${required}.js`;
         expect(source, `${recipe} must copy ${file}`).toContain(`migrateServerDB/${file}`);
+      }
+      // The runner reads both journals beside docker.cjs (TRACK_FOLDERS).
+      for (const folder of ['migrations', 'migrations-aico']) {
+        expect(source, `${recipe} must copy ${folder}`).toMatch(
+          new RegExp(String.raw`packages/database/${folder}\b[^\n]*\b${folder}\b`),
+        );
       }
     },
   );

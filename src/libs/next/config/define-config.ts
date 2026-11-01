@@ -46,6 +46,7 @@ export function defineConfig(config: CustomNextConfig) {
               'dist/mobile/**',
 
               'packages/database/migrations/**',
+              'packages/database/migrations-aico/**',
 
               // Ensure native bindings are included in standalone output.
               // `@napi-rs/canvas` is loaded via dynamic `require()` (see packages/file-loaders),

@@ -1022,7 +1022,7 @@ show_status() {
   # Migration packaging inside the running app image
   if docker inspect lobehub >/dev/null 2>&1; then
     docker_cjs="$(docker exec lobehub sh -c 'test -f /app/docker.cjs && echo ok || echo missing' 2>/dev/null || echo unreachable)"
-    migrations_dir="$(docker exec lobehub sh -c 'test -d /app/migrations && echo ok || echo missing' 2>/dev/null || echo unreachable)"
+    migrations_dir="$(docker exec lobehub sh -c 'test -d /app/migrations && test -d /app/migrations-aico && echo ok || echo missing' 2>/dev/null || echo unreachable)"
     printf "Auto-migrate: docker.cjs=%s migrations=%s\n" "$docker_cjs" "$migrations_dir"
     if [[ "$docker_cjs" != "ok" || "$migrations_dir" != "ok" ]]; then
       echo "  (broken packaging — app should refuse to start until next moz -u)"
@@ -1040,7 +1040,8 @@ show_status() {
     fi
   fi
 
-  expected_migrations="$(python3 -c "import json; print(len(json.load(open('$ROOT/packages/database/migrations/meta/_journal.json'))['entries']))" 2>/dev/null || echo "?")"
+  # Both journals record into the one ledger table.
+  expected_migrations="$(python3 -c "import json; print(sum(len(json.load(open('$ROOT/packages/database/' + d + '/meta/_journal.json'))['entries']) for d in ('migrations', 'migrations-aico')))" 2>/dev/null || echo "?")"
   if docker inspect "$POSTGRES_CONTAINER" >/dev/null 2>&1 \
     && [[ "$(docker inspect -f '{{.State.Status}}' "$POSTGRES_CONTAINER" 2>/dev/null || true)" == "running" ]]; then
     applied_migrations="$(
@@ -1196,6 +1197,7 @@ if [[ $BUILD -eq 1 ]]; then
     "$ROOT/public/_spa-auth"
     "$ROOT/public/_spa-workbench"
     "$ROOT/packages/database/migrations"
+    "$ROOT/packages/database/migrations-aico"
     "$ROOT/scripts/migrateServerDB/docker.cjs"
     "$ROOT/scripts/migrateServerDB/errorHint.js"
     "$ROOT/scripts/migrateServerDB/dualJournalRunner.cjs"
@@ -1217,7 +1219,8 @@ if [[ $BUILD -eq 1 ]]; then
   trap cleanup_stage EXIT
 
   # Layout must match startServer.js + docker.cjs expectations:
-  #   /app/docker.cjs, /app/errorHint.js, /app/dualJournalRunner.cjs, /app/migrations
+  #   /app/docker.cjs, /app/errorHint.js, /app/dualJournalRunner.cjs, /app/migrations,
+  #   /app/migrations-aico
   # (same as root Dockerfile / Dockerfile.prebuilt — not nested under scripts/)
   mkdir -p "$STAGE/.next" "$STAGE/public" "$STAGE/scripts/_shared"
 
@@ -1225,6 +1228,7 @@ if [[ $BUILD -eq 1 ]]; then
   cp -a "$ROOT/.next/static" "$STAGE/.next/static"
   cp -a "$ROOT/public/_spa" "$ROOT/public/_spa-auth" "$ROOT/public/_spa-workbench" "$STAGE/public/"
   cp -a "$ROOT/packages/database/migrations" "$STAGE/migrations"
+  cp -a "$ROOT/packages/database/migrations-aico" "$STAGE/migrations-aico"
   cp "$ROOT/scripts/migrateServerDB/docker.cjs" "$STAGE/docker.cjs"
   cp "$ROOT/scripts/migrateServerDB/errorHint.js" "$STAGE/errorHint.js"
   cp "$ROOT/scripts/migrateServerDB/dualJournalRunner.cjs" "$STAGE/dualJournalRunner.cjs"

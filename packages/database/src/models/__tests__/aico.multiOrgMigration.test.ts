@@ -132,7 +132,7 @@ describe('Aico multi-organization billing context (Phase 2)', () => {
 
 describe('Aico migration & schema safety (Phase 2)', () => {
   it('AICO-P1-012: migration 0132 adds usage_logs.user_id NOT NULL without DEFAULT', () => {
-    const sqlPath = join(__dirname, '../../../migrations/0132_shocking_blizzard.sql');
+    const sqlPath = join(__dirname, '../../../migrations-aico/0132_shocking_blizzard.sql');
     const body = readFileSync(sqlPath, 'utf8');
     expect(body).toContain('ADD COLUMN "user_id" text NOT NULL');
     // Safe migrations use DEFAULT or backfill before NOT NULL.
@@ -168,7 +168,7 @@ describe('Aico migration & schema safety (Phase 2)', () => {
   });
 
   it('AICO-P1-013: user_trials phone_fingerprint index is not UNIQUE in migration SQL', () => {
-    const sqlPath = join(__dirname, '../../../migrations/0132_shocking_blizzard.sql');
+    const sqlPath = join(__dirname, '../../../migrations-aico/0132_shocking_blizzard.sql');
     const body = readFileSync(sqlPath, 'utf8');
     expect(body).toContain('user_trials_phone_fingerprint_idx');
     expect(body).not.toMatch(/CREATE UNIQUE INDEX "user_trials_phone_fingerprint/);

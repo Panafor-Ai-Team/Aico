@@ -7,15 +7,15 @@ import path from 'node:path';
 import { migrationUsesPgSearchOrBm25 } from '../bm25Compatibility';
 import { diffSnapshots, schemaSnapshot } from './catalog';
 import { type MigrationExecutor, type MigrationTrack, readTrack, runDualJournal } from './runner';
-import { AICO_EQUIVALENT_OF_UPSTREAM_0131 } from './tracks';
+import { AICO_MIGRATIONS_FOLDER, MAIN_MIGRATIONS_FOLDER } from './tracks';
 
 /**
  * Fails when Aico's migrations and `aicoOrganization.ts` describe different schemas.
  *
  * Builds two in-memory PGlite databases and compares their full catalogs:
- *   - from migrations: every entry of `packages/database/migrations`;
- *   - from the schema: the upstream entries only (0000–0130, plus 0134, Aico's copy of
- *     upstream 0131), then the DDL `drizzle-kit generate` emits for `aicoOrganization.ts`.
+ *   - from migrations: `packages/database/migrations`, then `packages/database/migrations-aico`;
+ *   - from the schema: `packages/database/migrations` only, then the DDL
+ *     `drizzle-kit generate` emits for `aicoOrganization.ts` on its own.
  *
  *   bunx tsx scripts/migrateServerDB/dualJournal/schemaDrift.ts
  *
@@ -24,12 +24,10 @@ import { AICO_EQUIVALENT_OF_UPSTREAM_0131 } from './tracks';
  */
 
 const repoRoot = path.join(__dirname, '../../..');
-const migrationsFolder = path.join(repoRoot, 'packages/database/migrations');
+const mainFolder = path.join(repoRoot, MAIN_MIGRATIONS_FOLDER);
+const aicoFolder = path.join(repoRoot, AICO_MIGRATIONS_FOLDER);
 const aicoSchemaFile = path.join(repoRoot, 'packages/database/src/schemas/aicoOrganization.ts');
 const dbRequire = createRequire(path.join(repoRoot, 'packages/database/package.json'));
-
-/** Last upstream migration Aico shares with LobeHub before the journals diverge. */
-const LAST_SHARED_UPSTREAM_IDX = 130;
 
 const createDb = async () => {
   const { PGlite } = await import(dbRequire.resolve('@electric-sql/pglite'));
@@ -44,11 +42,11 @@ const createDb = async () => {
   return { close: () => pg.close(), executor };
 };
 
-const migrate = (executor: MigrationExecutor, track: MigrationTrack) =>
+const migrate = (executor: MigrationExecutor, tracks: MigrationTrack[]) =>
   runDualJournal({
     executor,
     skip: (entry) => migrationUsesPgSearchOrBm25(entry.statements),
-    tracks: [track],
+    tracks,
   });
 
 /** Runs drizzle-kit on the Aico schema file alone and returns its DDL statements. */
@@ -80,21 +78,14 @@ const generateAicoDdl = (): string[] => {
 const isUndeclarable = (line: string) => line.startsWith('trg ') || line.startsWith('fn ');
 
 const main = async () => {
-  const full = readTrack('aico', migrationsFolder);
-  const upstreamOnly: MigrationTrack = {
-    ...full,
-    entries: full.entries.filter(
-      (entry) =>
-        Number.parseInt(entry.tag, 10) <= LAST_SHARED_UPSTREAM_IDX ||
-        entry.tag === AICO_EQUIVALENT_OF_UPSTREAM_0131,
-    ),
-  };
+  const main = readTrack('main', mainFolder);
+  const aico = readTrack('aico', aicoFolder);
 
   const fromMigrations = await createDb();
-  await migrate(fromMigrations.executor, full);
+  await migrate(fromMigrations.executor, [main, aico]);
 
   const fromSchema = await createDb();
-  await migrate(fromSchema.executor, upstreamOnly);
+  await migrate(fromSchema.executor, [main]);
   for (const statement of generateAicoDdl()) await fromSchema.executor.exec(statement);
 
   const { onlyInFresh, onlyInUpgraded } = diffSnapshots(
@@ -111,7 +102,7 @@ const main = async () => {
 
   if (drift.length === 0) {
     console.log(
-      `✅ Aico migrations match aicoOrganization.ts (${full.entries.length - upstreamOnly.entries.length} Aico migrations compared).`,
+      `✅ Aico migrations match aicoOrganization.ts (${aico.entries.length} Aico migrations compared).`,
     );
     return;
   }
