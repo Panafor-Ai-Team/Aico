@@ -13,7 +13,14 @@ const h = vi.hoisted(() => ({
   createManagedBillingHooks: vi.fn(),
   gate: vi.fn(),
   order: [] as string[],
+  releaseTrialRequest: vi.fn(),
   tracingHooks: undefined as ModelRuntimeHooks | undefined,
+}));
+
+vi.mock('@/database/models/aicoBilling', () => ({
+  AicoBillingModel: class {
+    releaseTrialRequest = h.releaseTrialRequest;
+  },
 }));
 
 vi.mock('@/database/models/aiProvider', () => ({
@@ -109,5 +116,61 @@ describe('initModelRuntimeFromDB usage ledger wiring', () => {
 
     expect(h.gate).not.toHaveBeenCalled();
     expect(h.createManagedBillingHooks).not.toHaveBeenCalled();
+  });
+});
+
+describe('initModelRuntimeFromDB trial reservation (AICO-P1-010)', () => {
+  const reserved = {
+    apiKey: 'sk-subject',
+    billing: { source: 'personal' },
+    trialRequestReserved: true,
+    userId: 'u1',
+  };
+
+  it('gives the reserved trial unit back when the runtime cannot be built', async () => {
+    h.authorize.mockResolvedValue(reserved);
+    h.createManagedBillingHooks.mockImplementation(() => {
+      throw new Error('hooks failed');
+    });
+    h.releaseTrialRequest.mockResolvedValue(undefined);
+
+    await expect(
+      initModelRuntimeFromDB(db, 'u1', 'aico', undefined, managedOptions),
+    ).rejects.toThrow('hooks failed');
+    expect(h.releaseTrialRequest).toHaveBeenCalledExactlyOnceWith('u1');
+  });
+
+  it('keeps the reservation once the runtime exists', async () => {
+    h.authorize.mockResolvedValue(reserved);
+
+    await initModelRuntimeFromDB(db, 'u1', 'aico', undefined, managedOptions);
+
+    expect(h.releaseTrialRequest).not.toHaveBeenCalled();
+  });
+
+  it('releases nothing when no trial unit was reserved', async () => {
+    h.createManagedBillingHooks.mockImplementation(() => {
+      throw new Error('hooks failed');
+    });
+
+    await expect(
+      initModelRuntimeFromDB(db, 'u1', 'aico', undefined, managedOptions),
+    ).rejects.toThrow('hooks failed');
+    expect(h.releaseTrialRequest).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the original error even if giving the unit back fails', async () => {
+    h.authorize.mockResolvedValue(reserved);
+    h.createManagedBillingHooks.mockImplementation(() => {
+      throw new Error('hooks failed');
+    });
+    h.releaseTrialRequest.mockRejectedValue(new Error('db down'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(
+      initModelRuntimeFromDB(db, 'u1', 'aico', undefined, managedOptions),
+    ).rejects.toThrow('hooks failed');
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

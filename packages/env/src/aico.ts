@@ -7,7 +7,8 @@ declare global {
     interface ProcessEnv {
       /**
        * When `1`, Trial may be enabled via platform_trial_config in non-production.
-       * Production always rejects Trial activation/execution until atomic quota ships.
+       * Production always rejects Trial activation/execution (a product decision; the
+       * atomic request quota, AICO-P1-010, has shipped).
        */
       AICO_ALLOW_TRIAL?: string;
       /**
