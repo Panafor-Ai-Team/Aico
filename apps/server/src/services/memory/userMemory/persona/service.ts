@@ -21,6 +21,11 @@ import { type LobeChatDatabase } from '@/database/type';
 import { type MemoryAgentConfig } from '@/server/globalConfig/parseMemoryExtractionConfig';
 import { parseMemoryExtractionConfig } from '@/server/globalConfig/parseMemoryExtractionConfig';
 import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
+import {
+  initBilledMemoryRuntime,
+  isManagedMemoryProvider,
+  resolveMemoryBillingContext,
+} from '@/server/services/aico/memoryBilling';
 import { getUserScopedAiProviderRuntimeState } from '@/server/services/aiProviderAccess';
 import {
   type ProviderKeyVaultMap,
@@ -122,19 +127,29 @@ export class UserPersonaService {
 
     const hooks = getBusinessModelRuntimeHooks(payload.userId, 'lobehub');
 
-    const runtime = await resolveRuntimeAgentConfig(
-      agentConfig,
-      keyVaults,
-      {
-        fallback: {
-          apiKey: agentConfig.apiKey,
-          baseURL: agentConfig.baseURL,
-        },
-        preferred: { providerIds: [providerId] },
-        userId: payload.userId,
-      } satisfies RuntimeResolveOptions,
-      hooks,
-    );
+    // Aico: a managed persona writer is billed to the user's preferred source.
+    const runtime = isManagedMemoryProvider(agentConfig.provider)
+      ? await initBilledMemoryRuntime({
+          billingContext: await resolveMemoryBillingContext(this.db, payload.userId),
+          db: this.db,
+          kind: 'generation',
+          modelId: agentConfig.model,
+          provider: agentConfig.provider!,
+          userId: payload.userId,
+        })
+      : await resolveRuntimeAgentConfig(
+          agentConfig,
+          keyVaults,
+          {
+            fallback: {
+              apiKey: agentConfig.apiKey,
+              baseURL: agentConfig.baseURL,
+            },
+            preferred: { providerIds: [providerId] },
+            userId: payload.userId,
+          } satisfies RuntimeResolveOptions,
+          hooks,
+        );
 
     const personaModel = new UserPersonaModel(this.db, payload.userId);
     const lastDocument = await personaModel.getLatestPersonaDocument();

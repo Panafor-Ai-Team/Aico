@@ -122,6 +122,19 @@ export const processUserTopicsHandler = async (
 
     const activeExecutor = await getExecutor();
 
+    // Background runs bill the user: skip unfunded users before fanning out. Their
+    // topics stay un-extracted and are picked up on the first run after a top-up.
+    if (!params.userInitiated) {
+      const fundsStepName = `memory:user-memory:extract:users:${userId}:funds-check:${params.topicCursor?.userId === userId ? params.topicCursor.id : 'root'}`;
+      const fundsGuard = await checkGuard(context, WORKFLOW_PATH, { stepName: fundsStepName });
+      if (!fundsGuard.result) return fundsGuard.response;
+
+      const affordable = await context.run(fundsStepName, () =>
+        activeExecutor.canAffordExtraction(userId, params.workspaceId),
+      );
+      if (!affordable) continue;
+    }
+
     const topicCursor =
       params.topicCursor && params.topicCursor.userId === userId
         ? {

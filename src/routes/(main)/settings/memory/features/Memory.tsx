@@ -46,6 +46,19 @@ const MemorySetting = memo(() => {
       {
         children: (
           <Tooltip title={reason}>
+            <Switch disabled={!canManageMemory || memory?.enabled === false} />
+          </Tooltip>
+        ),
+        desc: t('memory.autoExtract.desc'),
+        label: t('memory.autoExtract.title'),
+        layout: 'horizontal',
+        minWidth: undefined,
+        name: 'autoExtract',
+        valuePropName: 'checked',
+      },
+      {
+        children: (
+          <Tooltip title={reason}>
             <LevelSlider<UserMemoryEffort>
               defaultValue="medium"
               disabled={!canManageMemory}
