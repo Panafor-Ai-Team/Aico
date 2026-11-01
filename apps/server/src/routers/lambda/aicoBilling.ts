@@ -43,8 +43,8 @@ const billingProcedure = authedProcedure.use(serverDatabase).use(async ({ ctx, n
 const isProduction = () => process.env.NODE_ENV === 'production';
 
 /**
- * Trial is disabled in production until atomic request quotas ship, and stays
- * disabled elsewhere unless both the env flag and the platform config opt in.
+ * Trial is disabled in production (a product decision; the atomic request quota,
+ * AICO-P1-010, has shipped), and stays disabled elsewhere unless both the env flag and the platform config opt in.
  * Missing/unset config defaults to disabled.
  */
 const assertTrialAllowed = async (billingModel: AicoBillingModel): Promise<void> => {

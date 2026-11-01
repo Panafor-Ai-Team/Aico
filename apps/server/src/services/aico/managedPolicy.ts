@@ -67,6 +67,11 @@ export interface ManagedExecutionContext {
   modelId?: string;
   orgId?: string;
   orgMemberId?: string;
+  /**
+   * A Trial request unit was reserved for this call (AICO-P1-010). If the provider call
+   * never starts, give it back with `AicoBillingModel.releaseTrialRequest`.
+   */
+  trialRequestReserved?: true;
   userId: string;
 }
 
@@ -132,7 +137,9 @@ export class AicoManagedPolicy {
   }
 
   /**
-   * Trial is disabled in production until atomic maxRequests ships.
+   * Trial stays disabled in production. The atomic request cap (AICO-P1-010) has shipped
+   * (`authorize` reserves a unit per call); enabling Trial in production is a separate
+   * product decision.
    * Missing config / unset flags default to disabled.
    */
   assertTrialAllowed = async (): Promise<void> => {
@@ -176,7 +183,8 @@ export class AicoManagedPolicy {
 
     if (billing.source === 'personal') {
       // Trial uses personal wallet key path but product Trial is disabled in prod.
-      if (await this.billingModel.isTrialActive(params.userId)) {
+      const trialActive = await this.billingModel.isTrialActive(params.userId);
+      if (trialActive) {
         await this.assertTrialAllowed();
       }
 
@@ -224,7 +232,7 @@ export class AicoManagedPolicy {
         : Number(wallet.balanceMicroUsd ?? 0) -
             Math.max(0, Number(wallet.settledUsageMicroUsd ?? 0)) <=
           0;
-      if (exhausted && !(await this.billingModel.isTrialActive(params.userId))) {
+      if (exhausted && !trialActive) {
         throw new AicoManagedPolicyError(
           'PERSONAL_FUNDS_UNAVAILABLE',
           ChatErrorType.InvalidUserKey,
@@ -240,11 +248,24 @@ export class AicoManagedPolicy {
         );
       }
 
+      // Reserved last, after every check that can refuse, so a refusal never spends a
+      // unit. Atomic against the platform cap: concurrent calls cannot overspend it.
+      if (trialActive) {
+        const reserved = await this.billingModel.incrementTrialRequest(params.userId);
+        if (!reserved) {
+          throw new AicoManagedPolicyError(
+            'TRIAL_REQUEST_LIMIT',
+            ChatErrorType.SubscriptionPlanLimit,
+          );
+        }
+      }
+
       return {
         apiKey,
         billing,
         userId: params.userId,
         modelId: params.modelId,
+        ...(trialActive && { trialRequestReserved: true as const }),
       };
     }
 

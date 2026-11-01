@@ -1081,10 +1081,38 @@ export class AicoBillingModel {
     }
   };
 
+  /**
+   * Reserves one Trial request (AICO-P1-010). A single conditional UPDATE: the row is
+   * counted only while the trial is active, unexpired and under the platform cap
+   * (`platform_trial_config.max_requests`, NULL = unlimited). Postgres re-checks the
+   * condition on the locked row, so concurrent callers for the last unit get exactly one
+   * row back. `undefined` means no unit is left: refuse before calling the provider.
+   */
   incrementTrialRequest = async (userId: string) => {
+    const maxRequests = sql`(SELECT ${platformTrialConfig.maxRequests} FROM ${platformTrialConfig} WHERE ${platformTrialConfig.id} = 'default')`;
     const [row] = await this.db
       .update(userTrials)
       .set({ requestCount: sql`${userTrials.requestCount} + 1` })
+      .where(
+        and(
+          eq(userTrials.userId, userId),
+          eq(userTrials.status, 'active'),
+          sql`${userTrials.expiresAt} > now()`,
+          sql`(${maxRequests} IS NULL OR ${userTrials.requestCount} < ${maxRequests})`,
+        ),
+      )
+      .returning();
+    return row;
+  };
+
+  /**
+   * Gives back a unit reserved by `incrementTrialRequest` when the provider call never
+   * started (e.g. the runtime failed to build). Never below zero.
+   */
+  releaseTrialRequest = async (userId: string) => {
+    const [row] = await this.db
+      .update(userTrials)
+      .set({ requestCount: sql`GREATEST(${userTrials.requestCount} - 1, 0)` })
       .where(and(eq(userTrials.userId, userId), eq(userTrials.status, 'active')))
       .returning();
     return row;

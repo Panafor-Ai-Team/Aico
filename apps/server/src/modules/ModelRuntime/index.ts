@@ -27,6 +27,7 @@ import { AiProviderBaseURLSchema } from 'model-bank/aiProvider';
 import { DEFAULT_MODEL_PROVIDER_LIST } from 'model-bank/modelProviders';
 
 import { getBusinessModelRuntimeHooks } from '@/business/server/model-runtime';
+import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { AiProviderModel } from '@/database/models/aiProvider';
 import { type LobeChatDatabase } from '@/database/type';
 import { aicoEnv } from '@/envs/aico';
@@ -536,6 +537,8 @@ export const initModelRuntimeFromDB = async (
   // Aico: every managed path must pass the centralized policy boundary.
   // Explicit billing context is mandatory — no first-match / env / BYOK fallback.
   let billingHooks: ModelRuntimeHooks | undefined;
+  // Set when authorize reserved a Trial request unit (AICO-P1-010).
+  let trialRequestReserved = false;
   if (managed) {
     if (options?.billingContext === undefined) {
       throw new AicoManagedPolicyError('BILLING_CONTEXT_REQUIRED');
@@ -560,26 +563,53 @@ export const initModelRuntimeFromDB = async (
       modelId: options.modelId,
       userId,
     });
+    trialRequestReserved = authorized.trialRequestReserved === true;
     keyVaults = { ...keyVaults, apiKey: authorized.apiKey };
-    billingHooks = createManagedBillingHooks({ authorized, db, gate: ledgerGate });
+    try {
+      billingHooks = createManagedBillingHooks({ authorized, db, gate: ledgerGate });
+    } catch (error) {
+      await releaseUnstartedTrialRequest(db, userId, trialRequestReserved);
+      throw error;
+    }
   }
 
-  const payload = buildPayloadFromKeyVaults(keyVaults, runtimeProvider);
+  try {
+    const payload = buildPayloadFromKeyVaults(keyVaults, runtimeProvider);
 
-  // 4. Get business hooks (billing in cloud, undefined in OSS)
-  const businessHooks = getBusinessModelRuntimeHooks(userId, runtimeLookupProvider, workspaceId);
+    // 4. Get business hooks (billing in cloud, undefined in OSS)
+    const businessHooks = getBusinessModelRuntimeHooks(userId, runtimeLookupProvider, workspaceId);
 
-  // 5. Compose with the per-call llm_generation_tracing hook (no-op when the
-  //    service is unconfigured, so OSS / self-hosted setups pay nothing for it).
-  const tracingHooks = createLLMGenerationTracingHook(userId, runtimeLookupProvider, workspaceId);
-  // Ledger billing goes first: a merged hook only runs the next one if it resolves.
-  const hooks = mergeModelRuntimeHooks(
-    billingHooks,
-    mergeModelRuntimeHooks(businessHooks, tracingHooks),
-  );
+    // 5. Compose with the per-call llm_generation_tracing hook (no-op when the
+    //    service is unconfigured, so OSS / self-hosted setups pay nothing for it).
+    const tracingHooks = createLLMGenerationTracingHook(userId, runtimeLookupProvider, workspaceId);
+    // Ledger billing goes first: a merged hook only runs the next one if it resolves.
+    const hooks = mergeModelRuntimeHooks(
+      billingHooks,
+      mergeModelRuntimeHooks(businessHooks, tracingHooks),
+    );
 
-  // 6. Initialize ModelRuntime with the payload and hooks
-  return initModelRuntimeWithUserPayload(runtimeLookupProvider, payload, { userId }, hooks);
+    // 6. Initialize ModelRuntime with the payload and hooks
+    return await initModelRuntimeWithUserPayload(runtimeLookupProvider, payload, { userId }, hooks);
+  } catch (error) {
+    await releaseUnstartedTrialRequest(db, userId, trialRequestReserved);
+    throw error;
+  }
+};
+
+/**
+ * A Trial unit reserved by `AicoManagedPolicy.authorize` counts once the runtime exists
+ * (the provider call starts right after). If building the runtime failed, no call was
+ * made: give the unit back. Best-effort — the original error is what the caller sees.
+ */
+const releaseUnstartedTrialRequest = async (
+  db: LobeChatDatabase,
+  userId: string,
+  reserved: boolean,
+) => {
+  if (!reserved) return;
+  await new AicoBillingModel(db).releaseTrialRequest(userId).catch((error) => {
+    console.warn('[aico] failed to release an unstarted trial request', error);
+  });
 };
 
 /**

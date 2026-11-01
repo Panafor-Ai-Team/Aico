@@ -851,8 +851,8 @@ export type NewAicoLedgerState = typeof aicoLedgerState.$inferInsert;
 export const platformTrialConfig = pgTable('platform_trial_config', {
   id: text('id').notNull().primaryKey().default('default'),
   /**
-   * Product default: Trial stays disabled until atomic maxRequests lands.
-   * Production also hard-rejects regardless of this flag (see aicoBilling router).
+   * Product default: Trial stays disabled. `max_requests` is enforced atomically per
+   * managed call (AICO-P1-010); production also hard-rejects regardless of this flag.
    */
   enabled: boolean('enabled').notNull().default(false),
   durationDays: integer('duration_days').notNull().default(3),
