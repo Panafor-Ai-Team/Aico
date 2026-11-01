@@ -89,6 +89,78 @@ const readLedger = async (executor) => {
 };
 
 /**
+ * @typedef {{
+ *   drift: DualJournalReport['drift'],
+ *   equivalent: string[],
+ *   pending: MigrationEntry[],
+ *   unknownRows: LedgerRow[],
+ * }} DualJournalPlan
+ */
+
+/**
+ * What the runner would do against a ledger, without touching the database: an entry is
+ * applied iff a row's `created_at` equals its `when`; an equivalence counts when its target
+ * is applied or pending earlier in the same run.
+ * @param {{
+ *   equivalences?: Record<string, number>,
+ *   rows: LedgerRow[],
+ *   tracks: MigrationTrack[],
+ * }} options
+ * @returns {DualJournalPlan}
+ */
+const planDualJournal = ({ equivalences = {}, rows, tracks }) => {
+  /** @type {Map<number, LedgerRow[]>} */
+  const rowsByWhen = new Map();
+  for (const row of rows) {
+    rowsByWhen.set(row.createdAt, [...(rowsByWhen.get(row.createdAt) ?? []), row]);
+  }
+
+  const knownWhens = new Set([
+    ...tracks.flatMap((track) => track.entries.map((entry) => entry.when)),
+    ...Object.values(equivalences),
+  ]);
+  /** @type {DualJournalPlan} */
+  const plan = {
+    drift: [],
+    equivalent: [],
+    pending: [],
+    unknownRows: rows.filter((row) => !knownWhens.has(row.createdAt)),
+  };
+  /** @type {Set<number>} */
+  const pendingWhens = new Set();
+
+  for (const track of tracks) {
+    for (const entry of track.entries) {
+      const applied = rowsByWhen.get(entry.when);
+      if (applied) {
+        if (!applied.some((row) => row.hash === entry.hash)) {
+          plan.drift.push({
+            appliedHash: applied[0].hash,
+            currentHash: entry.hash,
+            tag: entry.tag,
+          });
+        }
+        continue;
+      }
+
+      const equivalentWhen = equivalences[entry.tag];
+      if (
+        equivalentWhen !== undefined &&
+        (rowsByWhen.has(equivalentWhen) || pendingWhens.has(equivalentWhen))
+      ) {
+        plan.equivalent.push(entry.tag);
+        continue;
+      }
+
+      plan.pending.push(entry);
+      pendingWhens.add(entry.when);
+    }
+  }
+
+  return plan;
+};
+
+/**
  * @param {{
  *   equivalences?: Record<string, number>,
  *   executor: MigrationExecutor,
@@ -120,58 +192,29 @@ const runDualJournal = async ({
     await executor.exec(
       'CREATE TABLE IF NOT EXISTS "drizzle"."__drizzle_migrations" (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)',
     );
-    const rows = await readLedger(executor);
-    /** @type {Map<number, LedgerRow[]>} */
-    const rowsByWhen = new Map();
-    for (const row of rows) {
-      rowsByWhen.set(row.createdAt, [...(rowsByWhen.get(row.createdAt) ?? []), row]);
-    }
+    const plan = planDualJournal({ equivalences, rows: await readLedger(executor), tracks });
+    report.drift = plan.drift;
+    report.equivalent = plan.equivalent;
+    report.unknownRows = plan.unknownRows;
 
-    const knownWhens = new Set([
-      ...tracks.flatMap((track) => track.entries.map((entry) => entry.when)),
-      ...Object.values(equivalences),
-    ]);
-    report.unknownRows = rows.filter((row) => !knownWhens.has(row.createdAt));
-
-    for (const track of tracks) {
-      for (const entry of track.entries) {
-        const applied = rowsByWhen.get(entry.when);
-        if (applied) {
-          if (!applied.some((row) => row.hash === entry.hash)) {
-            report.drift.push({
-              appliedHash: applied[0].hash,
-              currentHash: entry.hash,
-              tag: entry.tag,
-            });
-          }
-          continue;
+    for (const entry of plan.pending) {
+      const skipped = skip ? skip(entry) : false;
+      await executor.exec('BEGIN');
+      try {
+        if (!skipped) {
+          for (const statement of entry.statements) await executor.exec(statement);
         }
-
-        const equivalentWhen = equivalences[entry.tag];
-        if (equivalentWhen !== undefined && rowsByWhen.has(equivalentWhen)) {
-          report.equivalent.push(entry.tag);
-          continue;
-        }
-
-        const skipped = skip ? skip(entry) : false;
-        await executor.exec('BEGIN');
-        try {
-          if (!skipped) {
-            for (const statement of entry.statements) await executor.exec(statement);
-          }
-          await executor.query(
-            'INSERT INTO "drizzle"."__drizzle_migrations" (hash, created_at) VALUES ($1, $2)',
-            [entry.hash, entry.when],
-          );
-          await executor.exec('COMMIT');
-        } catch (error) {
-          await executor.exec('ROLLBACK');
-          throw new DualJournalMigrationError(entry.tag, report, { cause: error });
-        }
-
-        rowsByWhen.set(entry.when, [{ createdAt: entry.when, hash: entry.hash, id: -1 }]);
-        (skipped ? report.skipped : report.applied).push(entry.tag);
+        await executor.query(
+          'INSERT INTO "drizzle"."__drizzle_migrations" (hash, created_at) VALUES ($1, $2)',
+          [entry.hash, entry.when],
+        );
+        await executor.exec('COMMIT');
+      } catch (error) {
+        await executor.exec('ROLLBACK');
+        throw new DualJournalMigrationError(entry.tag, report, { cause: error });
       }
+
+      (skipped ? report.skipped : report.applied).push(entry.tag);
     }
 
     return report;
@@ -217,10 +260,26 @@ const formatReport = (report) =>
     `unknownRows=${report.unknownRows.length}`,
   ].join(' ');
 
+/**
+ * One-line summary of a plan for deploy logs (tags and `created_at` values only).
+ * @param {DualJournalPlan} plan
+ */
+const formatPlan = (plan) => {
+  const list = (items) => (items.length ? ` (${items.join(', ')})` : '');
+  return [
+    `pending=${plan.pending.length}${list(plan.pending.map((entry) => entry.tag))}`,
+    `equivalent=${plan.equivalent.length}`,
+    `drift=${plan.drift.length}${list(plan.drift.map((d) => d.tag))}`,
+    `unknownRows=${plan.unknownRows.length}${list(plan.unknownRows.map((row) => row.createdAt))}`,
+  ].join(' ');
+};
+
 module.exports = {
   createPgExecutor,
   DualJournalMigrationError,
+  formatPlan,
   formatReport,
+  planDualJournal,
   readLedger,
   readTrack,
   runDualJournal,

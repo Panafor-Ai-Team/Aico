@@ -687,6 +687,11 @@ cmd_deploy() {
     exit 1
   fi
 
+  # Read-only migration-ledger evidence (docker.cjs): what the dual-journal runner would do.
+  local ledger_preview
+  ledger_preview="$(docker logs "$inactive_svc" 2>&1 | grep -F '[Database] dual-journal' | tail -n 1 || true)"
+  log "Migration ledger: ${ledger_preview:-no dual-journal line in $inactive_svc logs}"
+
   if ! verify_slot_spa "$(slot_port "$inactive")"; then
     err "SPA verify failed — leaving traffic on $active; stopping $inactive_svc"
     compose_with_profile "$inactive_profile" stop "$inactive_compose" || true

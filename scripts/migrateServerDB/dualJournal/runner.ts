@@ -77,3 +77,19 @@ export const createPgExecutor: (client: {
 }) => MigrationExecutor = impl.createPgExecutor;
 
 export const formatReport: (report: DualJournalReport) => string = impl.formatReport;
+
+export interface DualJournalPlan {
+  drift: DualJournalReport['drift'];
+  equivalent: string[];
+  pending: MigrationEntry[];
+  unknownRows: LedgerRowSnapshot[];
+}
+
+/** What `runDualJournal` would do against these ledger rows; touches no database. */
+export const planDualJournal: (options: {
+  equivalences?: Record<string, number>;
+  rows: LedgerRowSnapshot[];
+  tracks: MigrationTrack[];
+}) => DualJournalPlan = impl.planDualJournal;
+
+export const formatPlan: (plan: DualJournalPlan) => string = impl.formatPlan;
