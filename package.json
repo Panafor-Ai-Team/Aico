@@ -60,6 +60,7 @@
     "db:audit-ledger": "tsx ./scripts/aico/auditMigrationLedger.ts",
     "db:check-persistence": "tsx ./scripts/checkDbPersistence/index.ts run",
     "db:generate": "drizzle-kit generate && npm run workflow:dbml",
+    "db:generate:aico": "drizzle-kit generate --config drizzle.aico.config.ts && npm run workflow:dbml",
     "db:migrate": "cross-env MIGRATION_DB=1 tsx ./scripts/migrateServerDB/index.ts",
     "db:studio": "drizzle-kit studio",
     "db:visualize": "dbdocs build docs/development/database-schema.dbml --project lobe-chat",

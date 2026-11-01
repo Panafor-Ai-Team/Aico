@@ -2,15 +2,17 @@ import { join } from 'node:path';
 
 import * as dotenv from 'dotenv';
 import dotenvExpand from 'dotenv-expand';
-import { sql } from 'drizzle-orm';
-import { readMigrationFiles } from 'drizzle-orm/migrator';
-import { migrate as neonMigrate } from 'drizzle-orm/neon-serverless/migrator';
-import { migrate as nodeMigrate } from 'drizzle-orm/node-postgres/migrator';
 
 import { isPgSearchUnavailableError, migrationUsesPgSearchOrBm25 } from './bm25Compatibility';
-import { createPgExecutor, formatReport, readTrack, runDualJournal } from './dualJournal/runner';
+import {
+  AICO_EQUIVALENCES,
+  createPgExecutor,
+  formatReport,
+  readTracks,
+  runDualJournal,
+} from './dualJournal/runner';
 // @ts-ignore tsgo handle esm import cjs and compatibility issues
-import { DB_FAIL_INIT_HINT, DUPLICATE_EMAIL_HINT, PGVECTOR_HINT } from './errorHint';
+import { DUPLICATE_EMAIL_HINT, PGVECTOR_HINT } from './errorHint';
 
 // Load environment variables in priority order:
 // 1. .env (lowest priority)
@@ -22,89 +24,55 @@ dotenvExpand.expand(dotenv.config()); // Load .env
 dotenvExpand.expand(dotenv.config({ override: true, path: `.env.${env}` })); // Load .env.[env] and override
 dotenvExpand.expand(dotenv.config({ override: true, path: `.env.${env}.local` })); // Load .env.[env].local and override
 
-const migrationsFolder = join(__dirname, '../../packages/database/migrations');
-
-const migrateSkippingUnavailableBm25 = async (serverDB: {
-  execute: (query: unknown) => Promise<unknown>;
-}) => {
-  const migrations = readMigrationFiles({ migrationsFolder });
-
-  await serverDB.execute(sql`CREATE SCHEMA IF NOT EXISTS "drizzle"`);
-  await serverDB.execute(sql`
-    CREATE TABLE IF NOT EXISTS "drizzle"."__drizzle_migrations" (
-      id SERIAL PRIMARY KEY,
-      hash text NOT NULL,
-      created_at bigint
-    )
-  `);
-
-  const applied = (await serverDB.execute(sql`
-    SELECT hash FROM "drizzle"."__drizzle_migrations"
-  `)) as { rows?: Array<{ hash: string }> } | Array<{ hash: string }>;
-
-  const appliedRows = Array.isArray(applied) ? applied : (applied.rows ?? []);
-  const appliedHashes = new Set(appliedRows.map((row) => row.hash));
-
-  let skipped = 0;
-
-  for (const migration of migrations) {
-    if (appliedHashes.has(migration.hash)) continue;
-
-    const skipSql = migrationUsesPgSearchOrBm25(migration.sql);
-
-    if (skipSql) {
-      skipped += 1;
-      console.warn(
-        `⚠️ Skipping BM25/pg_search migration "${migration.hash}" (extension unavailable)`,
-      );
-    } else {
-      for (const stmt of migration.sql) {
-        await serverDB.execute(sql.raw(stmt));
-      }
-    }
-
-    await serverDB.execute(
-      sql`INSERT INTO "drizzle"."__drizzle_migrations" (hash, created_at) VALUES (${migration.hash}, ${migration.folderMillis})`,
-    );
-  }
-
-  if (skipped > 0) {
-    console.warn(
-      `⚠️ Skipped ${skipped} ParadeDB BM25 migration(s). Full-text BM25 search will be unavailable until pg_search is supported.`,
-    );
-  }
-};
+/** Directory holding both journals: `migrations/` (upstream-shaped) and `migrations-aico/`. */
+const migrationsRoot = join(__dirname, '../../packages/database');
 
 /**
- * D2 runner (docs/aico/MIGRATION_LEDGER_SPIKE.md), the default with the node driver; set
- * `AICO_MIGRATION_RUNNER=stock` for Drizzle's own migrator. When pg_search is unavailable it
- * re-runs while recording BM25 migrations as skipped — safe, because the runner identifies
- * applied entries by `when` and never re-executes one.
+ * Both journals through the dual-journal runner (docs/aico/MIGRATION_LEDGER_SPIKE.md), with
+ * any `DATABASE_DRIVER`: migrations go over a plain `pg` connection. Use a direct (session)
+ * URL, not a transaction-pooling one, so the advisory lock holds for the whole run.
+ *
+ * When pg_search is unavailable (common on Neon) it re-runs while recording BM25 migrations
+ * as skipped: safe, because the runner identifies applied entries by `when`, keeps every
+ * migration that already committed, and never re-executes one.
  */
 const runDualJournalMigrations = async () => {
-  if (process.env.DATABASE_DRIVER !== 'node') {
-    throw new Error('AICO_MIGRATION_RUNNER=dual requires DATABASE_DRIVER=node');
+  if (process.env.AICO_MIGRATION_RUNNER === 'stock') {
+    throw new Error(
+      "AICO_MIGRATION_RUNNER=stock is no longer supported: Drizzle's migrator runs one journal " +
+        'and would skip migrations-aico.',
+    );
   }
 
   const { Pool } = await import('pg');
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   const connection = await pool.connect();
   const executor = createPgExecutor(connection);
-  const tracks = [readTrack('aico', migrationsFolder)];
+  const tracks = readTracks(migrationsRoot);
 
   try {
-    const report = await runDualJournal({ executor, tracks }).catch(async (error) => {
+    const report = await runDualJournal({
+      equivalences: AICO_EQUIVALENCES,
+      executor,
+      tracks,
+    }).catch(async (error) => {
       if (!isPgSearchUnavailableError(error?.cause ?? error)) throw error;
       console.warn(
         '⚠️ pg_search is not available; recording BM25/pg_search migrations as skipped…',
       );
       return runDualJournal({
+        equivalences: AICO_EQUIVALENCES,
         executor,
         skip: (entry) => migrationUsesPgSearchOrBm25(entry.statements),
         tracks,
       });
     });
     console.log('[Database] dual-journal runner: %s', formatReport(report));
+    if (report.skipped.length > 0) {
+      console.warn(
+        `⚠️ Skipped ${report.skipped.length} ParadeDB BM25 migration(s). Full-text BM25 search will be unavailable until pg_search is supported.`,
+      );
+    }
   } finally {
     connection.release();
     await pool.end();
@@ -114,35 +82,7 @@ const runDualJournalMigrations = async () => {
 const runMigrations = async () => {
   const time = Date.now();
 
-  // The runner needs one dedicated `pg` connection, so the Neon driver stays on the stock
-  // migrator unless `dual` is asked for explicitly (which then fails with a clear error).
-  const runner = process.env.AICO_MIGRATION_RUNNER;
-  const useDualJournal =
-    runner === 'dual' || (runner !== 'stock' && process.env.DATABASE_DRIVER === 'node');
-
-  if (useDualJournal) {
-    await runDualJournalMigrations();
-    console.log('✅ database migration pass. use: %s ms', Date.now() - time);
-    process.exit(0);
-  }
-
-  const { serverDB } = await import('../../packages/database/src/server');
-  const useNodeDriver = process.env.DATABASE_DRIVER === 'node';
-
-  try {
-    if (useNodeDriver) {
-      await nodeMigrate(serverDB, { migrationsFolder });
-    } else {
-      await neonMigrate(serverDB, { migrationsFolder });
-    }
-  } catch (error) {
-    if (!isPgSearchUnavailableError(error)) throw error;
-
-    console.warn(
-      '⚠️ pg_search is not available on this database (common on Neon). Replaying migrations while skipping BM25/pg_search statements…',
-    );
-    await migrateSkippingUnavailableBm25(serverDB);
-  }
+  await runDualJournalMigrations();
 
   console.log('✅ database migration pass. use: %s ms', Date.now() - time);
 
@@ -156,16 +96,17 @@ if (connectionString) {
   runMigrations().catch((err) => {
     console.error('❌ Database migrate failed:', err);
 
-    const errMsg = err.message as string;
+    // The dual-journal runner wraps the database error as `cause`.
+    const errMsg = `${err.message} ${err.cause?.message ?? ''}`;
 
-    const constraint = (err as { constraint?: string })?.constraint;
+    const constraint =
+      (err as { constraint?: string })?.constraint ??
+      (err.cause as { constraint?: string } | undefined)?.constraint;
 
     if (errMsg.includes('extension "vector" is not available')) {
       console.info(PGVECTOR_HINT);
     } else if (constraint === 'users_email_unique' || errMsg.includes('users_email_unique')) {
       console.info(DUPLICATE_EMAIL_HINT);
-    } else if (errMsg.includes(`Cannot read properties of undefined (reading 'migrate')`)) {
-      console.info(DB_FAIL_INIT_HINT);
     }
 
     process.exit(1);

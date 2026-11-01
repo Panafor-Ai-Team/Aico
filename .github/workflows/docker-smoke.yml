@@ -17,6 +17,8 @@ on:
       - patches/**
       - scripts/migrateServerDB/**
       - scripts/serverLauncher/**
+      - packages/database/migrations/**
+      - packages/database/migrations-aico/**
       - .github/workflows/docker-smoke.yml
   workflow_dispatch: {}
 
@@ -103,19 +105,21 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:3210/_spa/icons/icon-192x192.png)" = 200
           # Next can write its cache as the image user.
           docker exec app /bin/sh -c 'id; mkdir -p /app/.next/cache && touch /app/.next/cache/.smoke'
-          # The boot migrated a fresh database with the default dual-journal runner.
-          docker logs app 2>&1 | grep -F '[Database] dual-journal runner: applied='
+          # The image ships both journals beside the runner.
+          docker exec app /bin/sh -c 'test -f /app/migrations/meta/_journal.json && test -f /app/migrations-aico/meta/_journal.json && test -f /app/dualJournalRunner.cjs'
+          # The boot migrated the fresh database from both journals: every entry once.
+          expected=$(python3 -c "import json; print(sum(len(json.load(open(f'packages/database/{d}/meta/_journal.json'))['entries']) for d in ('migrations', 'migrations-aico')))")
+          docker logs app 2>&1 | grep -F "[Database] dual-journal runner: applied=${expected} skipped=0 equivalent=0 drift=0 unknownRows=0"
           # Re-running applies nothing, finds no unknown rows and no drift.
           out=$(docker exec -e DATABASE_URL app /bin/node /app/docker.cjs)
           echo "$out"
           echo "$out" | grep -q 'database migration pass'
           echo "$out" | grep -q 'applied=0 skipped=0 equivalent=0 drift=0 unknownRows=0'
-          # The escape hatch: Drizzle's own migrator agrees there is nothing to do (the
-          # previous image's behaviour), and its read-only preview matches.
-          out=$(docker exec -e AICO_MIGRATION_RUNNER=stock -e DATABASE_URL app /bin/node /app/docker.cjs)
-          echo "$out"
-          echo "$out" | grep -q 'database migration pass'
-          echo "$out" | grep -qF '[Database] dual-journal preview: pending=0 equivalent=0 drift=0 unknownRows=0'
+          # Drizzle's single-journal migrator would skip migrations-aico, so it is refused.
+          if out=$(docker exec -e AICO_MIGRATION_RUNNER=stock -e DATABASE_URL app /bin/node /app/docker.cjs 2>&1); then
+            echo "$out"; echo "::error::AICO_MIGRATION_RUNNER=stock must be refused"; exit 1
+          fi
+          echo "$out" | grep -qF 'AICO_MIGRATION_RUNNER=stock is no longer supported'
           # Every MCP SDK copy in the image is at or above the security floor
           # (no lockfile, so a cached install layer could otherwise keep an old one).
           docker exec -w /app app /bin/node -e "

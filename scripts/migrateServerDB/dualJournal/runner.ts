@@ -62,6 +62,15 @@ export const DualJournalMigrationError: new (
 
 export const readTrack: (name: string, migrationsFolder: string) => MigrationTrack = impl.readTrack;
 
+/** Both journals under `rootDir` (`migrations/`, then `migrations-aico/`). */
+export const readTracks: (rootDir: string) => MigrationTrack[] = impl.readTracks;
+
+/** Folder names of the two journals, in the order they apply. */
+export const TRACK_FOLDERS: ReadonlyArray<{ folder: string; name: string }> = impl.TRACK_FOLDERS;
+
+/** Upstream tags already satisfied by an Aico ledger row (tag → that row's `when`). */
+export const AICO_EQUIVALENCES: Readonly<Record<string, number>> = impl.AICO_EQUIVALENCES;
+
 export const readLedger: (executor: MigrationExecutor) => Promise<LedgerRowSnapshot[]> =
   impl.readLedger;
 

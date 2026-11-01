@@ -24,12 +24,12 @@ Default base for the sync PR: **`canary`**. Never force-push `canary` / `main`.
 
 ## Ownership split
 
-| Concern                                      | Use                  |
-| -------------------------------------------- | -------------------- |
-| GitHub issue + PR closeout                   | `aico-ship`          |
-| Branch / commit / `gh pr create` mechanics   | `pr` (ignore Linear) |
-| Migration renumber after merge               | `db-migrations`      |
-| Risk gates, conflict policy, protected paths | **this skill**       |
+| Concern                                      | Use                                                         |
+| -------------------------------------------- | ----------------------------------------------------------- |
+| GitHub issue + PR closeout                   | `aico-ship`                                                 |
+| Branch / commit / `gh pr create` mechanics   | `pr` (ignore Linear)                                        |
+| Migration journals after merge               | **this skill** § Migrations; SQL review per `db-migrations` |
+| Risk gates, conflict policy, protected paths | **this skill**                                              |
 
 Do **not** edit upstream skills under `.agents/skills/` for process overrides.
 
@@ -107,13 +107,13 @@ Classify paths that appear in **both** sides against [PROTECTED.md](PROTECTED.md
 
 Produce an **Impact brief** before merging:
 
-| Bucket                          | Action                                                 |
-| ------------------------------- | ------------------------------------------------------ |
-| Upstream-only, non-protected    | Safe to take upstream                                  |
-| Text conflict on protected      | Prefer Aico; verify still compiles/tests               |
-| Semantic overlap on protected   | **Ask user** with options                              |
-| Migration sequence clash        | Keep Aico numbers; renumber upstream (`db-migrations`) |
-| Deleted-by-upstream + Aico edit | **Ask user**                                           |
+| Bucket                          | Action                                                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Upstream-only, non-protected    | Safe to take upstream                                                                                   |
+| Text conflict on protected      | Prefer Aico; verify still compiles/tests                                                                |
+| Semantic overlap on protected   | **Ask user** with options                                                                               |
+| Migration files                 | Take upstream's `packages/database/migrations/` verbatim; never touch `migrations-aico/` (§ Migrations) |
+| Deleted-by-upstream + Aico edit | **Ask user**                                                                                            |
 
 If the user only wanted analysis: stop after this brief. Do not create branch/PR unless they confirm.
 
@@ -150,7 +150,10 @@ If merge aborts due to unrelated local state, fix preconditions — do not `--fo
 
 4. Never leave `<<<<<<<` markers. After each batch: `git add` resolved files; do not commit until markers are gone and migrations are consistent.
 
-5. **Migrations**: keep Aico migration chain/journal; move upstream SQL to the next free id (e.g. Aico ends at `0133` → upstream becomes `0134_…`); update `_journal.json` + `migrations.json` per `db-migrations`. Prefer `IF NOT EXISTS` / idempotent forms.
+5. **Migrations** (two journals, one ledger — see § Migrations below): take upstream's `packages/database/migrations/` **verbatim**, journal and snapshots included; do not renumber or re-stamp anything. Aico's migrations stay untouched in `packages/database/migrations-aico/`. Then:
+   - run `bun run check --test scripts/aico/migrationLayout.test.ts scripts/migrateServerDB/dualJournal/legacyJournal.test.ts`: no upstream migration may touch a table declared in `aicoOrganization.ts`, and every shipped migration must keep its tag / hash / `when` (or be covered by `AICO_EQUIVALENCES`, as upstream `0131_agents_add_name_column` is by Aico 0134);
+   - review every new upstream migration for locks on large tables (`db-migrations` § online index creation) before it reaches production;
+   - the Migration Ledger CI job (schema drift, drizzle-kit baselines, ParadeDB scenarios) must pass.
 
 6. **Branding**: defaults stay Aico via `packages/business/const` (`BRANDING_NAME`, `BRANDING_PROVIDER`, …). Do not reintroduce hard-coded `LobeHub` in user-facing Aico surfaces. Env overrides: `BRANDING_*` / `NEXT_PUBLIC_BRANDING_*`.
 
@@ -199,8 +202,22 @@ PR description must include:
 
 - Behind/ahead summary
 - Conflict strategy (what stayed Aico vs taken upstream)
-- Migration renumbers
+- New upstream migrations taken (tags), and any that need a manual `CONCURRENTLY` step
 - Explicit “risks / follow-ups” if anything was deferred with user agreement
+
+## Migrations
+
+Aico has **two journals and one ledger** (since #744):
+
+| Folder                               | Owner            | How it changes                                                                           |
+| ------------------------------------ | ---------------- | ---------------------------------------------------------------------------------------- |
+| `packages/database/migrations/`      | upstream LobeHub | taken verbatim on sync (journal + snapshots)                                             |
+| `packages/database/migrations-aico/` | Aico             | `bun run db:generate:aico` only (`drizzle.aico.config.ts`, schema `aicoOrganization.ts`) |
+
+- `scripts/migrateServerDB/dualJournalRunner.cjs` applies main, then Aico, into the single `drizzle.__drizzle_migrations` table. A migration counts as applied iff a row's `created_at` equals its journal `when`, so **never edit a shipped migration file or its `when`**: a changed file is reported as drift and never re-run; a changed `when` would run it again (Aico's historical migrations reset FX rates, re-seed and delete data).
+- Drizzle's own migrator can run only one journal and is refused (`AICO_MIGRATION_RUNNER=stock`).
+- `AICO_EQUIVALENCES` maps an upstream tag to an Aico ledger row that already did its work (upstream `0131_agents_add_name_column` ⇐ Aico `0134_agents_add_name_column`, `when` 1785657510456). Add an entry only for an upstream migration Aico already shipped under another tag.
+- Guards: `scripts/aico/migrationLayout.test.ts`, `scripts/migrateServerDB/dualJournal/legacyJournal.test.ts`, `scripts/aico/migrationLedger.test.ts`, and the Migration Ledger workflow.
 
 ## Anti-patterns
 

@@ -1,37 +1,41 @@
-const path = require('node:path');
 const { Pool } = require('pg');
-const { drizzle } = require('drizzle-orm/node-postgres');
-const migrator = require('drizzle-orm/node-postgres/migrator');
+const {
+  AICO_EQUIVALENCES,
+  createPgExecutor,
+  formatReport,
+  readTracks,
+  runDualJournal,
+} = require('./dualJournalRunner.cjs');
 const { PGVECTOR_HINT } = require('./errorHint');
 
 if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL is not set, please set it in your environment variables.');
 }
 
-const client = new Pool({ connectionString: process.env.DATABASE_URL });
-
-const db = drizzle(client);
-
-const migrationsFolder = path.join(__dirname, './migrations');
-
 /**
- * Default runner, design D2 (docs/aico/MIGRATION_LEDGER_SPIKE.md): same journal, but entries
- * missing from the ledger are applied even when older than the newest row, each migration
- * commits on its own, concurrent runners serialize on an advisory lock, and drift is never
- * re-run. `AICO_MIGRATION_RUNNER=stock` switches back to Drizzle's own migrator.
+ * Migrations ship as two journals beside this file: `migrations/` (upstream-shaped) and
+ * `migrations-aico/` (Aico's own). The dual-journal runner (docs/aico/MIGRATION_LEDGER_SPIKE.md)
+ * applies them in that order: an entry runs once, identified by its `when`, each migration
+ * commits on its own, concurrent runners serialize on an advisory lock, and a file changed
+ * after it was applied is reported, never re-run.
  */
-const runDualJournalMigrations = async () => {
-  const {
-    createPgExecutor,
-    formatReport,
-    readTrack,
-    runDualJournal,
-  } = require('./dualJournalRunner.cjs');
+const runMigrations = async () => {
+  console.log('[Database] Start to migration...');
+
+  if (process.env.AICO_MIGRATION_RUNNER === 'stock') {
+    throw new Error(
+      "AICO_MIGRATION_RUNNER=stock is no longer supported: Drizzle's migrator runs one journal " +
+        'and would skip migrations-aico. Unset it; to go back, deploy the previous image instead.',
+    );
+  }
+
+  const client = new Pool({ connectionString: process.env.DATABASE_URL });
   const connection = await client.connect();
   try {
     const report = await runDualJournal({
+      equivalences: AICO_EQUIVALENCES,
       executor: createPgExecutor(connection),
-      tracks: [readTrack('aico', migrationsFolder)],
+      tracks: readTracks(__dirname),
     });
     console.log(`[Database] dual-journal runner: ${formatReport(report)}`);
     if (report.unknownRows.length > 0) {
@@ -42,38 +46,6 @@ const runDualJournalMigrations = async () => {
     }
   } finally {
     connection.release();
-  }
-};
-
-/**
- * Read-only, stock path only: after Drizzle's migrator, log what the dual-journal runner
- * would do against this database's ledger (one SELECT, no lock, no writes), so switching back
- * is always checkable from the deploy log. It never fails the boot.
- */
-const logDualJournalPreview = async () => {
-  try {
-    const {
-      createPgExecutor,
-      formatPlan,
-      planDualJournal,
-      readLedger,
-      readTrack,
-    } = require('./dualJournalRunner.cjs');
-    const rows = await readLedger(createPgExecutor(client));
-    const plan = planDualJournal({ rows, tracks: [readTrack('aico', migrationsFolder)] });
-    console.log(`[Database] dual-journal preview: ${formatPlan(plan)}`);
-  } catch (error) {
-    console.warn(`[Database] dual-journal preview unavailable: ${error?.message ?? error}`);
-  }
-};
-
-const runMigrations = async () => {
-  console.log('[Database] Start to migration...');
-  if (process.env.AICO_MIGRATION_RUNNER === 'stock') {
-    await migrator.migrate(db, { migrationsFolder });
-    await logDualJournalPreview();
-  } else {
-    await runDualJournalMigrations();
   }
 
   console.log('✅ database migration pass.');

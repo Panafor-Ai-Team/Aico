@@ -11,6 +11,9 @@ on:
     branches: [canary]
     paths:
       - packages/database/migrations/**
+      - packages/database/migrations-aico/**
+      - drizzle.config.ts
+      - drizzle.aico.config.ts
       - packages/database/src/schemas/**
       - scripts/migrateServerDB/**
       - scripts/aico/migrationLedger.ts
@@ -62,6 +65,18 @@ jobs:
 
       - name: Check Aico migrations match aicoOrganization.ts
         run: bunx tsx scripts/migrateServerDB/dualJournal/schemaDrift.ts
+
+      - name: Check both drizzle-kit baselines are current
+        # Each journal's latest snapshot must equal its schema, or the next `db:generate` /
+        # `db:generate:aico` would emit unrelated SQL.
+        run: |
+          bunx drizzle-kit generate --config=drizzle.config.ts --name=ci_must_be_empty
+          bunx drizzle-kit generate --config=drizzle.aico.config.ts --name=ci_must_be_empty
+          if [ -n "$(git status --porcelain packages/database/migrations packages/database/migrations-aico)" ]; then
+            git status --porcelain packages/database/migrations packages/database/migrations-aico
+            echo "::error::a drizzle-kit baseline is stale; regenerate it (see .agents/skills/db-migrations)"
+            exit 1
+          fi
 
       - name: Run scenarios
         run: >-

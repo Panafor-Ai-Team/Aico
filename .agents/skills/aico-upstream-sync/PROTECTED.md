@@ -58,11 +58,11 @@ Treat **globs** as high-care: prefer keeping Aico behavior unless the user appro
 
 ### Database
 
-- Aico-owned migrations (historically `0131+` / tags containing `aico`) under `packages/database/migrations/`
-- `packages/database/migrations/meta/_journal.json`
+- Aico-owned migrations: everything under `packages/database/migrations-aico/` (journal, snapshot, SQL)
+- `scripts/migrateServerDB/dualJournalRunner.cjs`, `docker.cjs`, `drizzle.aico.config.ts`, and the main `drizzle.config.ts` schema list (which leaves out `aicoOrganization.ts`)
 - Schema/repos touching wallets, OpenRouter key columns, trial/budget tables
 
-When upstream adds a migration with the **same numeric prefix**, keep Aico’s files and renumber upstream — never delete Aico SQL to “match” lobehub numbering.
+`packages/database/migrations/` is upstream's and is taken verbatim; never renumber, re-stamp or delete a migration in either journal (see `SKILL.md` § Migrations).
 
 ### Deploy / ops
 
@@ -126,4 +126,4 @@ Confirm still true:
 2. Platform admin can still credit / manage within RBAC tests.
 3. Branding strings remain Aico (or env override), not hard-coded LobeHub on primary surfaces.
 4. fa-IR auth and RTL direction still apply.
-5. Migrations journal is a single linear sequence including both Aico and renumbered upstream entries.
+5. Upstream's migrations journal is unchanged from upstream; Aico's is unchanged except for new `db:generate:aico` entries, and the layout / legacy-journal guards pass.

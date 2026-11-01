@@ -16,6 +16,7 @@ const vercelConfig = {
       'dist/mobile/**',
       'apps/desktop/**',
       'packages/database/migrations/**',
+      'packages/database/migrations-aico/**',
     ],
   },
 };

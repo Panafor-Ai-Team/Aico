@@ -400,7 +400,7 @@ describe('Phase 3 UI / route / secret static probes', () => {
   });
 
   it('migration 0132 usage_logs user_id NOT NULL must be upgrade-safe (DEFAULT or backfill)', () => {
-    const sqlPath = join(REPO_ROOT, 'packages/database/migrations/0132_shocking_blizzard.sql');
+    const sqlPath = join(REPO_ROOT, 'packages/database/migrations-aico/0132_shocking_blizzard.sql');
     const sql = readFileSync(sqlPath, 'utf8');
     const risky =
       /ALTER TABLE "usage_logs"[\s\S]*ADD COLUMN "user_id" text NOT NULL/i.test(sql) &&

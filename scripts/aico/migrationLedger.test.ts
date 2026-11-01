@@ -10,7 +10,9 @@ import {
   readJournal,
 } from './migrationLedger';
 
-const migrationsFolder = path.join(__dirname, '../../packages/database/migrations');
+const migrationsFolders = ['migrations', 'migrations-aico'].map((folder) =>
+  path.join(__dirname, '../../packages/database', folder),
+);
 
 const entry = (tag: string, when: number, hash = `hash-${tag}`): JournalEntry => ({
   createdTables: [],
@@ -21,17 +23,17 @@ const entry = (tag: string, when: number, hash = `hash-${tag}`): JournalEntry =>
 });
 
 describe('readJournal', () => {
-  const journal = readJournal(migrationsFolder);
-
-  it('hashes every migration exactly like drizzle-orm', () => {
-    const drizzle = readMigrationFiles({ migrationsFolder });
+  it.each(migrationsFolders)('hashes every migration in %s exactly like drizzle-orm', (folder) => {
+    const journal = readJournal(folder);
+    const drizzle = readMigrationFiles({ migrationsFolder: folder });
 
     expect(journal.map((e) => e.hash)).toEqual(drizzle.map((m) => m.hash));
     expect(journal.map((e) => e.when)).toEqual(drizzle.map((m) => m.folderMillis));
   });
 
-  it('keeps journal `when` values unique, so ledger rows map to one entry', () => {
-    const whens = journal.map((e) => e.when);
+  it('keeps `when` values unique across both journals, so ledger rows map to one entry', () => {
+    // Both journals record into the one `drizzle.__drizzle_migrations` table.
+    const whens = migrationsFolders.flatMap((folder) => readJournal(folder).map((e) => e.when));
 
     expect(new Set(whens).size).toBe(whens.length);
   });

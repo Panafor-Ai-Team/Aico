@@ -6,6 +6,8 @@ user-invocable: false
 
 # Database Migrations Guide
 
+> **Aico fork — two journals.** `packages/database/migrations/` is upstream LobeHub's journal, taken verbatim on every sync; Aico's own migrations live in `packages/database/migrations-aico/` (schema `aicoOrganization.ts`). For an Aico schema change run `bun run db:generate:aico` (config `drizzle.aico.config.ts`, timestamp-prefixed files), never `db:generate`. Both journals run through `scripts/migrateServerDB/dualJournalRunner.cjs`, which identifies applied migrations by their `when`: never edit a shipped migration or its `when`, and never renumber. Details: `aico-upstream-sync` § Migrations.
+
 ## Choose the rollout strategy
 
 Classify every database change into one of these three rollout paths before generating or editing a migration.

@@ -146,7 +146,7 @@ RUN set -eux; \
         mkdir -p "/out/node_modules/${pkg}"; \
         cp -a "/deps/node_modules/${pkg}/." "/out/node_modules/${pkg}/"; \
     done; \
-    find /out/node_modules packages/database/migrations -exec touch -h -d @0 {} +
+    find /out/node_modules packages/database/migrations packages/database/migrations-aico -exec touch -h -d @0 {} +
 
 ## Production image. Not flattened: one layer per part (--link keeps each layer
 ## independent of the ones before it), ownership set via --chown instead of
@@ -173,6 +173,7 @@ COPY --link --chown=1001:1001 --from=builder /app/public/_spa-auth /app/public/_
 COPY --link --chown=1001:1001 --from=builder /app/public/_spa-workbench /app/public/_spa-workbench
 # Copy database migrations
 COPY --link --chown=1001:1001 --from=builder /app/packages/database/migrations /app/migrations
+COPY --link --chown=1001:1001 --from=builder /app/packages/database/migrations-aico /app/migrations-aico
 COPY --link --chown=1001:1001 --from=builder /app/docs/changelog /app/docs/changelog
 COPY --link --chown=1001:1001 --from=builder /app/scripts/migrateServerDB/docker.cjs /app/docker.cjs
 COPY --link --chown=1001:1001 --from=builder /app/scripts/migrateServerDB/errorHint.js /app/errorHint.js

@@ -4,9 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 /**
- * SPIKE — builds the two migration folders design D2 would ship, in a temp directory:
- * upstream's migrations verbatim from a git ref, and Aico's own migrations as a second
- * journal that keeps their original `when` values (the ledger identity).
+ * Track helpers for the dual-journal scenarios: upstream's migrations verbatim from a git
+ * ref, and the pre-split single journal rebuilt from `migrations/` + `migrations-aico/`.
  */
 
 interface JournalFile {
@@ -16,6 +15,9 @@ interface JournalFile {
 }
 
 const MIGRATIONS_PATH = 'packages/database/migrations';
+
+export const MAIN_MIGRATIONS_FOLDER = 'packages/database/migrations';
+export const AICO_MIGRATIONS_FOLDER = 'packages/database/migrations-aico';
 
 /** Aico's renumbered copy of upstream `0131_agents_add_name_column` (same SQL). */
 export const AICO_EQUIVALENT_OF_UPSTREAM_0131 = '0134_agents_add_name_column';
@@ -35,26 +37,34 @@ export const extractMigrationsAtRef = (repoRoot: string, ref: string): string =>
   return path.join(target, MIGRATIONS_PATH);
 };
 
+/** Numeric prefix of a migration tag (`0131_x` → 131, `20261101094543_x` → 20261101094543). */
+const tagNumber = (tag: string) => Number.parseInt(tag, 10);
+
 /**
- * Writes the Aico-only track: entries of the Aico journal that upstream does not have,
- * minus Aico's renumbered copy of upstream 0131, with their original `when` values.
+ * Rebuilds the single journal Aico shipped before the split (0000–0160 in one folder) from
+ * the two journals, ordered by tag number: what a database migrated before the split, or an
+ * image built before it, saw. `legacyJournal.test.ts` pins it to the pre-split journal.
  */
-export const buildAicoTrack = (aicoFolder: string, upstreamFolder: string): string => {
+export const buildLegacyJournal = (mainFolder: string, aicoFolder: string): string => {
+  const main = readJournalFile(mainFolder);
   const aico = readJournalFile(aicoFolder);
-  const upstreamTags = new Set(readJournalFile(upstreamFolder).entries.map((entry) => entry.tag));
+  const entries = [
+    ...main.entries.map((entry) => ({ entry, folder: mainFolder })),
+    ...aico.entries.map((entry) => ({ entry, folder: aicoFolder })),
+  ].sort((a, b) => tagNumber(a.entry.tag) - tagNumber(b.entry.tag));
 
-  const own = aico.entries.filter(
-    (entry) => !upstreamTags.has(entry.tag) && entry.tag !== AICO_EQUIVALENT_OF_UPSTREAM_0131,
-  );
-
-  const target = path.join(mkdtempSync(path.join(tmpdir(), 'aico-track-')), 'migrations-aico');
+  const target = path.join(mkdtempSync(path.join(tmpdir(), 'aico-legacy-')), 'migrations');
   mkdirSync(path.join(target, 'meta'), { recursive: true });
-  for (const entry of own) {
-    copyFileSync(path.join(aicoFolder, `${entry.tag}.sql`), path.join(target, `${entry.tag}.sql`));
+  for (const { entry, folder } of entries) {
+    copyFileSync(path.join(folder, `${entry.tag}.sql`), path.join(target, `${entry.tag}.sql`));
   }
   writeFileSync(
     path.join(target, 'meta/_journal.json'),
-    JSON.stringify({ ...aico, entries: own.map((entry, idx) => ({ ...entry, idx })) }, null, 2),
+    JSON.stringify(
+      { ...main, entries: entries.map(({ entry }, idx) => ({ ...entry, idx })) },
+      null,
+      2,
+    ),
   );
   return target;
 };

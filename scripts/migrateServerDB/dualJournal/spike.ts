@@ -4,6 +4,7 @@ import path from 'node:path';
 import { migrationUsesPgSearchOrBm25 } from '../bm25Compatibility';
 import { diffSnapshots, schemaSnapshot } from './catalog';
 import {
+  AICO_EQUIVALENCES,
   createPgExecutor,
   DualJournalMigrationError,
   type MigrationExecutor,
@@ -15,8 +16,10 @@ import {
 } from './runner';
 import {
   AICO_EQUIVALENT_OF_UPSTREAM_0131,
-  buildAicoTrack,
+  AICO_MIGRATIONS_FOLDER,
+  buildLegacyJournal,
   extractMigrationsAtRef,
+  MAIN_MIGRATIONS_FOLDER,
   UPSTREAM_0131,
   whenOf,
 } from './tracks';
@@ -133,15 +136,23 @@ const seedBilling = async (executor: MigrationExecutor) => {
 };
 
 const main = async () => {
-  const aicoFolder = path.join(repoRoot, 'packages/database/migrations');
+  const mainFolder = path.join(repoRoot, MAIN_MIGRATIONS_FOLDER);
+  const aicoFolder = path.join(repoRoot, AICO_MIGRATIONS_FOLDER);
   const upstreamFolder = extractMigrationsAtRef(repoRoot, upstreamRef);
-  const aicoTrackFolder = buildAicoTrack(aicoFolder, upstreamFolder);
 
-  const aicoToday = readTrack('aico-today', aicoFolder);
+  // The single journal every database and image before the split used (0000–0160).
+  const aicoToday = readTrack('aico-today', buildLegacyJournal(mainFolder, aicoFolder));
   const upstream = readTrack('upstream', upstreamFolder);
-  const aicoOwn = readTrack('aico', aicoTrackFolder);
+  const main = readTrack('main', mainFolder);
+  const aicoOwn = readTrack('aico', aicoFolder);
+  // After the first upstream merge: upstream's journal verbatim, then Aico's.
   const tracks: MigrationTrack[] = [upstream, aicoOwn];
-  const equivalences = { [UPSTREAM_0131]: whenOf(aicoFolder, AICO_EQUIVALENT_OF_UPSTREAM_0131) };
+  // Today, before that merge: the two journals as shipped.
+  const splitTracks: MigrationTrack[] = [main, aicoOwn];
+  const equivalences = AICO_EQUIVALENCES;
+  if (equivalences[UPSTREAM_0131] !== whenOf(mainFolder, AICO_EQUIVALENT_OF_UPSTREAM_0131)) {
+    throw new Error('AICO_EQUIVALENCES no longer points upstream 0131 at Aico 0134');
+  }
 
   const probe = await createDb();
   const [{ available }] = await probe.executor.query<{ available: boolean }>(
@@ -156,6 +167,7 @@ const main = async () => {
     tracks: {
       aico: aicoOwn.entries.length,
       aicoToday: aicoToday.entries.length,
+      main: main.entries.length,
       upstream: upstream.entries.length,
     },
     upstreamRef,
@@ -287,6 +299,65 @@ const main = async () => {
     await db.close();
   }
 
+  // S9 — the split journals on a database migrated before the split: nothing to do
+  {
+    const db = await buildToday();
+    const report = await runDualJournal({
+      equivalences,
+      executor: db.executor,
+      skip,
+      tracks: splitTracks,
+    });
+    results.S9_splitOnLegacyDatabase = {
+      applied: report.applied,
+      drift: report.drift.map((d) => d.tag),
+      equivalent: report.equivalent,
+      skipped: report.skipped,
+      unknownRows: report.unknownRows.length,
+    };
+    await db.close();
+  }
+
+  // S10 — fresh install from the split journals = a legacy install; a re-run applies nothing.
+  // S11 — the previous image's migrators (stock, and the single-journal runner) stay no-ops.
+  {
+    const legacy = await buildToday();
+    const legacySchema = await schemaSnapshot(legacy.executor);
+    await legacy.close();
+
+    const db = await createDb();
+    const first = await runDualJournal({
+      equivalences,
+      executor: db.executor,
+      skip,
+      tracks: splitTracks,
+    });
+    const diff = diffSnapshots(legacySchema, await schemaSnapshot(db.executor));
+    const again = await runDualJournal({
+      equivalences,
+      executor: db.executor,
+      skip,
+      tracks: splitTracks,
+    });
+    const previousImage = await runDualJournal({
+      executor: db.executor,
+      skip,
+      tracks: [aicoToday],
+    });
+    results.S10_freshSplitInstall = {
+      applied: first.applied.length + first.skipped.length,
+      expected: main.entries.length + aicoOwn.entries.length,
+      reRunApplied: again.applied.length + again.skipped.length,
+      schemaDiff: diff,
+    };
+    results.S11_previousImageAfterSplit = {
+      singleJournalRunnerApplied: previousImage.applied.length + previousImage.skipped.length,
+      singleJournalUnknownRows: previousImage.unknownRows.length,
+      stockPending: stockDrizzlePending(aicoToday, await readLedger(db.executor)),
+    };
+    await db.close();
+  }
+
   // S8 — two runners at once on separate connections (real Postgres only)
   if (pgUrl) {
     const db = await createDb();
@@ -380,6 +451,22 @@ const checkResults = (results: Record<string, any>, { aicoOwnCount }: { aicoOwnC
       `S8: both runners applied migrations (${s8.appliedPerRunner.join(', ')})`,
     );
   }
+  const s9 = results.S9_splitOnLegacyDatabase;
+  expect(
+    s9.applied.length + s9.skipped.length + s9.equivalent.length + s9.drift.length === 0 &&
+      s9.unknownRows === 0,
+    `S9: split runner on a legacy database was not a no-op: ${JSON.stringify(s9)}`,
+  );
+  const s10 = results.S10_freshSplitInstall;
+  expect(s10.applied === s10.expected, `S10: applied ${s10.applied} of ${s10.expected}`);
+  expect(emptyDiff(s10.schemaDiff), 'S10: fresh split install differs from a legacy install');
+  expect(s10.reRunApplied === 0, `S10: re-run applied ${s10.reRunApplied}`);
+  const s11 = results.S11_previousImageAfterSplit;
+  expect(s11.stockPending.length === 0, 'S11: previous stock image would migrate');
+  expect(
+    s11.singleJournalRunnerApplied === 0 && s11.singleJournalUnknownRows === 0,
+    `S11: previous single-journal runner was not a no-op: ${JSON.stringify(s11)}`,
+  );
   expect(aicoOwnCount > 0, 'tracks: no Aico-only migrations found');
   return failures;
 };
