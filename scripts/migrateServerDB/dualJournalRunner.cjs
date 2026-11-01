@@ -1,7 +1,7 @@
 /**
  * "Dual journal, single ledger" migration runner (design D2, see
- * docs/aico/MIGRATION_LEDGER_SPIKE.md). Opt-in via `AICO_MIGRATION_RUNNER=dual`; the stock
- * Drizzle migrator stays the default.
+ * docs/aico/MIGRATION_LEDGER_SPIKE.md). The default migration runner; `AICO_MIGRATION_RUNNER=stock`
+ * switches back to Drizzle's own migrator.
  *
  * Journal entries record into the existing `drizzle.__drizzle_migrations` table. An entry
  * counts as applied when a ledger row's `created_at` equals the entry's `when` (journal

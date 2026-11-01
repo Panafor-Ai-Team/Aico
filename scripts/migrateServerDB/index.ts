@@ -76,9 +76,10 @@ const migrateSkippingUnavailableBm25 = async (serverDB: {
 };
 
 /**
- * Opt-in D2 runner (`AICO_MIGRATION_RUNNER=dual`, docs/aico/MIGRATION_LEDGER_SPIKE.md). When
- * pg_search is unavailable it re-runs while recording BM25 migrations as skipped — safe,
- * because the runner identifies applied entries by `when` and never re-executes one.
+ * D2 runner (docs/aico/MIGRATION_LEDGER_SPIKE.md), the default with the node driver; set
+ * `AICO_MIGRATION_RUNNER=stock` for Drizzle's own migrator. When pg_search is unavailable it
+ * re-runs while recording BM25 migrations as skipped — safe, because the runner identifies
+ * applied entries by `when` and never re-executes one.
  */
 const runDualJournalMigrations = async () => {
   if (process.env.DATABASE_DRIVER !== 'node') {
@@ -113,7 +114,13 @@ const runDualJournalMigrations = async () => {
 const runMigrations = async () => {
   const time = Date.now();
 
-  if (process.env.AICO_MIGRATION_RUNNER === 'dual') {
+  // The runner needs one dedicated `pg` connection, so the Neon driver stays on the stock
+  // migrator unless `dual` is asked for explicitly (which then fails with a clear error).
+  const runner = process.env.AICO_MIGRATION_RUNNER;
+  const useDualJournal =
+    runner === 'dual' || (runner !== 'stock' && process.env.DATABASE_DRIVER === 'node');
+
+  if (useDualJournal) {
     await runDualJournalMigrations();
     console.log('✅ database migration pass. use: %s ms', Date.now() - time);
     process.exit(0);
