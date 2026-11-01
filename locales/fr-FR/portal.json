@@ -21,6 +21,7 @@
   "artifacts.deploy.writeInProgress": "Une autre modification de déploiement est en cours. Réessayez sous peu.",
   "artifacts.display.code": "Code",
   "artifacts.display.preview": "Aperçu",
+  "artifacts.download": "Télécharger",
   "artifacts.svg.copyAsImage": "Copier comme image",
   "artifacts.svg.copyFail": "Échec de la copie : {{error}}. Veuillez réessayer.",
   "artifacts.svg.copySuccess": "Image copiée avec succès",
