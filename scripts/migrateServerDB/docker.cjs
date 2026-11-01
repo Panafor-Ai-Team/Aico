@@ -15,9 +15,10 @@ const db = drizzle(client);
 const migrationsFolder = path.join(__dirname, './migrations');
 
 /**
- * Opt-in D2 runner (docs/aico/MIGRATION_LEDGER_SPIKE.md): same journal, but entries missing
- * from the ledger are applied even when older than the newest row, each migration commits
- * on its own, concurrent runners serialize on an advisory lock, and drift is never re-run.
+ * Default runner, design D2 (docs/aico/MIGRATION_LEDGER_SPIKE.md): same journal, but entries
+ * missing from the ledger are applied even when older than the newest row, each migration
+ * commits on its own, concurrent runners serialize on an advisory lock, and drift is never
+ * re-run. `AICO_MIGRATION_RUNNER=stock` switches back to Drizzle's own migrator.
  */
 const runDualJournalMigrations = async () => {
   const {
@@ -45,9 +46,9 @@ const runDualJournalMigrations = async () => {
 };
 
 /**
- * Read-only: after the stock migrator, log what the dual-journal runner would do against
- * this database's ledger (one SELECT, no lock, no writes). This is the production evidence
- * for switching runners; it never fails the boot.
+ * Read-only, stock path only: after Drizzle's migrator, log what the dual-journal runner
+ * would do against this database's ledger (one SELECT, no lock, no writes), so switching back
+ * is always checkable from the deploy log. It never fails the boot.
  */
 const logDualJournalPreview = async () => {
   try {
@@ -68,11 +69,11 @@ const logDualJournalPreview = async () => {
 
 const runMigrations = async () => {
   console.log('[Database] Start to migration...');
-  if (process.env.AICO_MIGRATION_RUNNER === 'dual') {
-    await runDualJournalMigrations();
-  } else {
+  if (process.env.AICO_MIGRATION_RUNNER === 'stock') {
     await migrator.migrate(db, { migrationsFolder });
     await logDualJournalPreview();
+  } else {
+    await runDualJournalMigrations();
   }
 
   console.log('✅ database migration pass.');

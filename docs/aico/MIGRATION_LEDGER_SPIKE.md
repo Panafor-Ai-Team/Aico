@@ -1,6 +1,6 @@
 # Spike: dual-journal migration ledger (design D2)
 
-> **Date:** 2026-10-31 · **Status:** spike complete — **GO for D2, conditional on the production gates below** · **Code:** `scripts/migrateServerDB/dualJournal/` (prototype, not wired into any deploy path)
+> **Date:** 2026-10-31 (updated 2026-11-01) · **Status:** **D2 adopted** — canary production ledger verified clean; the runner is the default · **Code:** `scripts/migrateServerDB/dualJournal/` (prototype, not wired into any deploy path)
 
 ## Why
 
@@ -60,7 +60,9 @@ Adopt **D2**. Next PR-sized steps, in order:
 
 1. ✅ **Done (#728):** the runner ships as `scripts/migrateServerDB/dualJournalRunner.cjs`; `docker.cjs` and `pnpm db:migrate` use it over today's single journal when `AICO_MIGRATION_RUNNER=dual` (unset = stock Drizzle). Enable per environment after `db:audit-ledger` on a restored backup.
 2. ✅ **Done:** `.github/workflows/migration-ledger.yml` runs the scenarios on ParadeDB (`spike.ts --pg-url … --assert`), including **S8** — two runners started together on separate connections must serialize (no duplicate ledger rows, one of them applies nothing). Upstream is pinned in the workflow (`UPSTREAM_SHA`). Covers gates 2–3. The same job runs `dualJournal/schemaDrift.ts`, which fails when the database built from Aico's migrations differs from the one `drizzle-kit` generates from `aicoOrganization.ts` (it found five FKs the schema declared but no migration created; `0160_aico_billing_foreign_keys` adds them).
-3. Split the journal: move Aico's 28 entries to `packages/database/migrations-aico/`, add the equivalence entry, move the Aico schema file, generate the Aico baseline snapshot.
-4. Only then take the first upstream merge stage, whose journal comes over verbatim.
+3. ✅ **Done (#737):** on the stock path, every boot logs a read-only `dual-journal preview` and the deploy copies it into the Actions log. Canary production, 2026-11-01 (deploy of `637ce38fbb`): `pending=0 equivalent=0 drift=0 unknownRows=0` — every ledger row maps to a journal entry by `when`, nothing is missing (no skipped 0142) and no applied file changed. Closes gate 1 for canary production.
+4. **Default runner:** `docker.cjs` (and `pnpm db:migrate` with the node driver) use the runner unless `AICO_MIGRATION_RUNNER=stock`. The previous image is the stock migrator, which stays a no-op after a runner pass (S4), so rolling back needs no env change.
+5. Split the journal: move Aico's own entries to `packages/database/migrations-aico/`, add the equivalence entry, move the Aico schema file, generate the Aico baseline snapshot.
+6. Only then take the first upstream merge stage, whose journal comes over verbatim.
 
 D0 (renumber and re-stamp upstream on every sync) stays the fallback if a production ledger turns out not to map by `when`.
