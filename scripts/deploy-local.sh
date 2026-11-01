@@ -1198,6 +1198,7 @@ if [[ $BUILD -eq 1 ]]; then
     "$ROOT/packages/database/migrations"
     "$ROOT/scripts/migrateServerDB/docker.cjs"
     "$ROOT/scripts/migrateServerDB/errorHint.js"
+    "$ROOT/scripts/migrateServerDB/dualJournalRunner.cjs"
     "$ROOT/scripts/_shared"
     "$ROOT/scripts/serverLauncher/startServer.js"
     "$ROOT/scripts/docker/Dockerfile.staged"
@@ -1216,7 +1217,7 @@ if [[ $BUILD -eq 1 ]]; then
   trap cleanup_stage EXIT
 
   # Layout must match startServer.js + docker.cjs expectations:
-  #   /app/docker.cjs, /app/errorHint.js, /app/migrations
+  #   /app/docker.cjs, /app/errorHint.js, /app/dualJournalRunner.cjs, /app/migrations
   # (same as root Dockerfile / Dockerfile.prebuilt — not nested under scripts/)
   mkdir -p "$STAGE/.next" "$STAGE/public" "$STAGE/scripts/_shared"
 
@@ -1226,6 +1227,7 @@ if [[ $BUILD -eq 1 ]]; then
   cp -a "$ROOT/packages/database/migrations" "$STAGE/migrations"
   cp "$ROOT/scripts/migrateServerDB/docker.cjs" "$STAGE/docker.cjs"
   cp "$ROOT/scripts/migrateServerDB/errorHint.js" "$STAGE/errorHint.js"
+  cp "$ROOT/scripts/migrateServerDB/dualJournalRunner.cjs" "$STAGE/dualJournalRunner.cjs"
   cp -a "$ROOT/scripts/_shared/." "$STAGE/scripts/_shared/"
   cp "$ROOT/scripts/serverLauncher/startServer.js" "$STAGE/startServer.js"
   cp "$ROOT/scripts/docker/Dockerfile.staged" "$STAGE/Dockerfile"
