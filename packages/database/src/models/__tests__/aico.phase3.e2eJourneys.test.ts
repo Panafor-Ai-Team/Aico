@@ -152,22 +152,28 @@ describe('Phase 3 Journey 2 — Organization lifecycle', () => {
 
   it('owner/default team/invite/credit/allocate happy path + over-allocation deny', async () => {
     const { member, org } = await setupOrg();
-    await orgModel.allocateMemberCredit({
-      periodAmountMicroUsd: 40000000,
-      period: 'daily',
-      createdByUserId: P3.orgOwner,
-      orgId: org.id,
-      orgMemberId: member.id,
-    });
-    await expect(
+    const allocate = (periodAmountMicroUsd: number) =>
       orgModel.allocateMemberCredit({
-        periodAmountMicroUsd: 80000000,
+        periodAmountMicroUsd,
         period: 'daily',
         createdByUserId: P3.orgOwner,
         orgId: org.id,
         orgMemberId: member.id,
-      }),
-    ).rejects.toThrow(/INSUFFICIENT/);
+      });
+    const walletOf = async () => Number((await orgModel.getById(org.id))?.walletBalanceMicroUsd);
+
+    // Wallet 100. Allocating sets the member's cap and debits only the difference.
+    await allocate(40_000_000);
+    expect(await walletOf()).toBe(60_000_000);
+    await allocate(80_000_000);
+    expect(await walletOf()).toBe(20_000_000);
+
+    // Raising the cap by more than the wallet holds is refused and changes nothing.
+    await expect(allocate(120_000_000)).rejects.toThrow(/INSUFFICIENT/);
+    expect(await walletOf()).toBe(20_000_000);
+    expect(Number((await orgModel.getMemberBudget(member.id))?.periodAmountMicroUsd)).toBe(
+      80_000_000,
+    );
 
     const final = await orgModel.getById(org.id);
     expect(Number(final?.walletBalanceMicroUsd)).toBeGreaterThanOrEqual(0);

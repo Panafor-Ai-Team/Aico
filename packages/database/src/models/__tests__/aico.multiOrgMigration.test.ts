@@ -36,110 +36,61 @@ afterEach(async () => {
 });
 
 describe('Aico multi-organization billing context (Phase 2)', () => {
-  it('AICO-P1-008: two org memberships — listForUser order is nondeterministic (no orderBy)', async () => {
+  it('AICO-P1-008: a user holds one active org membership, so no first-match org is ever picked', async () => {
+    // The finding: with two active memberships, key resolution silently used whichever
+    // org listForUser returned first. Fixed structurally: a user may be active in at
+    // most one organization (organization_members_unique_active_user_idx), and managed
+    // calls name their org in an explicit billing context (AicoManagedPolicy.authorize).
     const orgA = await orgModel.createOrganization({ name: 'OrgA', ownerUserId: ownerA });
     const orgB = await orgModel.createOrganization({ name: 'OrgB', ownerUserId: ownerB });
-
-    for (const [org, email] of [
-      [orgA, 'multi@example.com'],
-      [orgB, 'multi@example.com'],
-    ] as const) {
-      const invite = await orgModel.createInvite({
+    const invite = (org: typeof orgA) =>
+      orgModel.createInvite({
         identifierType: 'email',
-        identifierValue: email,
+        identifierValue: 'multi@example.com',
         invitedByUserId: org.ownerUserId,
         orgId: org.id,
         role: 'member',
       });
-      await orgModel.acceptInvite({ email, token: invite.token, userId });
-    }
+
+    const inviteA = await invite(orgA);
+    const inviteB = await invite(orgB);
+    await orgModel.acceptInvite({ email: 'multi@example.com', token: inviteA.token, userId });
+
+    await expect(
+      orgModel.acceptInvite({ email: 'multi@example.com', token: inviteB.token, userId }),
+    ).rejects.toThrow('USER_ALREADY_IN_ORGANIZATION');
 
     const listed = await orgModel.listForUser(userId);
-    expect(listed).toHaveLength(2);
+    expect(listed.map((org) => org.id)).toEqual([orgA.id]);
+    expect(await orgModel.getMemberByUser({ orgId: orgB.id, userId })).toBeFalsy();
+  });
 
-    // Install distinct keys on each membership budget
-    const membersA = await orgModel.listMembers(orgA.id);
-    const membersB = await orgModel.listMembers(orgB.id);
-    const meA = membersA.find((m) => m.userId === userId)!;
-    const meB = membersB.find((m) => m.userId === userId)!;
+  it('AICO-P1-008: the database refuses a second active membership even if the check is bypassed', async () => {
+    const orgA = await orgModel.createOrganization({ name: 'OrgA', ownerUserId: ownerA });
+    const orgB = await orgModel.createOrganization({ name: 'OrgB', ownerUserId: ownerB });
+    await serverDB.execute(
+      sql`INSERT INTO organization_members (id, org_id, user_id, role, status) VALUES ('p2-m-a', ${orgA.id}, ${userId}, 'member', 'active')`,
+    );
 
-    await orgModel.addManualCredit({
-      amountToman: 50_000,
-      amountMicroUsd: 10000000,
-      createdByUserId: ownerA,
-      fxRateTomanPerUsd: 5000,
-      orgId: orgA.id,
-    });
-    await orgModel.addManualCredit({
-      amountToman: 250_000,
-      amountMicroUsd: 50000000,
-      createdByUserId: ownerB,
-      fxRateTomanPerUsd: 5000,
-      orgId: orgB.id,
-    });
-    await orgModel.allocateMemberCredit({
-      periodAmountMicroUsd: 5000000,
-      period: 'daily',
-      createdByUserId: ownerA,
-      orgId: orgA.id,
-      orgMemberId: meA.id,
-    });
-    await orgModel.allocateMemberCredit({
-      periodAmountMicroUsd: 40000000,
-      period: 'daily',
-      createdByUserId: ownerB,
-      orgId: orgB.id,
-      orgMemberId: meB.id,
-    });
-    await orgModel.updateMemberOpenRouterKey({
-      ciphertext: 'enc-org-a',
-      keyId: 'key-org-a',
-      orgMemberId: meA.id,
-    });
-    await orgModel.updateMemberOpenRouterKey({
-      ciphertext: 'enc-org-b',
-      keyId: 'key-org-b',
-      orgMemberId: meB.id,
-    });
-
-    // Mimic resolveUserApiKey selection: first org with active budget key wins.
-    const picks: string[] = [];
-    for (let i = 0; i < 20; i++) {
-      const orgs = await orgModel.listForUser(userId);
-      for (const org of orgs) {
-        const members = await orgModel.listMembers(org.id);
-        const me = members.find((m) => m.userId === userId && m.status === 'active');
-        if (!me) continue;
-        const budget = await orgModel.getMemberBudget(me.id);
-        if (budget?.openrouterKeyId && budget.isActive) {
-          picks.push(budget.openrouterKeyId!);
-          break;
-        }
-      }
-    }
-
-    // Invariant: billing context must be explicit — silent first-match is unsafe.
-    // If all picks are identical, order happened to be stable; still no client selection API.
-    const unique = new Set(picks);
-    // Document: there is no explicit orgId parameter on resolve — ambiguity is structural.
-    expect(unique.size).toBe(1); // if flaky across runs, still proves single silent choice
-    // Stronger invariant for safe product: require explicit context (not implemented).
-    // Fail if API cannot distinguish — we assert a sentinel that product must provide.
-    const hasExplicitBillingContextApi = false;
-    expect(hasExplicitBillingContextApi).toBe(true);
+    await expect(
+      serverDB.execute(
+        sql`INSERT INTO organization_members (id, org_id, user_id, role, status) VALUES ('p2-m-b', ${orgB.id}, ${userId}, 'member', 'active')`,
+      ),
+    ).rejects.toThrow();
   });
 });
 
 describe('Aico migration & schema safety (Phase 2)', () => {
-  it('AICO-P1-012: migration 0132 adds usage_logs.user_id NOT NULL without DEFAULT', () => {
+  it('AICO-P1-012: migration 0132 adds usage_logs.user_id nullable, then guards NOT NULL', () => {
     const sqlPath = join(__dirname, '../../../migrations-aico/0132_shocking_blizzard.sql');
     const body = readFileSync(sqlPath, 'utf8');
-    expect(body).toContain('ADD COLUMN "user_id" text NOT NULL');
-    // Safe migrations use DEFAULT or backfill before NOT NULL.
-    const hasDefault =
-      /ADD COLUMN "user_id" text NOT NULL DEFAULT/i.test(body) ||
-      /ADD COLUMN "user_id" text DEFAULT/i.test(body);
-    expect(hasDefault).toBe(true);
+    // The unsafe one-step form (fails on any table with rows) must not be used.
+    expect(body).not.toMatch(/ADD COLUMN (IF NOT EXISTS )?"user_id" text NOT NULL(?! DEFAULT)/);
+    // Added nullable, and NOT NULL only once no row is NULL; otherwise stop loudly.
+    expect(body).toContain('ALTER TABLE "usage_logs" ADD COLUMN IF NOT EXISTS "user_id" text;');
+    expect(body).toMatch(
+      /IF NOT EXISTS \(SELECT 1 FROM "usage_logs" WHERE "user_id" IS NULL\) THEN\s+ALTER TABLE "usage_logs" ALTER COLUMN "user_id" SET NOT NULL;\s+ELSE\s+RAISE EXCEPTION/,
+    );
   });
 
   it('AICO-P1-012: adding NOT NULL column without default fails when usage_logs has rows', async () => {
