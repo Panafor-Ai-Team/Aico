@@ -5,6 +5,7 @@ import { createOpenAICompatibleRuntime } from '../../core/openaiCompatibleFactor
 import { resolveAutoModel } from './autoRouting';
 import { createCheapVibeCodeVideo, pollCheapVibeCodeVideoStatus } from './createVideo';
 import { fetchCheapVibeCodeModels } from './modelFetch';
+import { collapseNullableParameterTypes } from './toolSchema';
 
 export type { CheapVibeCodeAutoRoute } from './autoRouting';
 export {
@@ -61,6 +62,8 @@ export const params = {
         // to a concrete model here — see ./autoRouting. Any other id passes
         // through untouched.
         model: resolveAutoModel(payload),
+        // See ./toolSchema: a `[T, "null"]` parameter type makes CVC drop the call.
+        ...(rest.tools ? { tools: collapseNullableParameterTypes(rest.tools) } : {}),
         ...(reasoning_effort ? { reasoning_effort } : {}),
         stream: payload.stream ?? true,
       } as any;

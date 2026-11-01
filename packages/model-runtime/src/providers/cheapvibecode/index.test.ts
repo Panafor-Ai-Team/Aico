@@ -61,6 +61,87 @@ describe('LobeCheapVibeCodeAI', () => {
       expect(result).not.toHaveProperty('thinking');
       expect(result).not.toHaveProperty('thinkingLevel');
     });
+
+    // CVC turns some models' text-format tool calls into JSON by the top-level
+    // parameter type. A `[T, "null"]` list breaks it: arguments arrive cut off at
+    // `{"details": ` and the call leaks into `content` as `<tool_call>` text.
+    describe('nullable tool parameter types', () => {
+      const tool = (properties: Record<string, any>) => ({
+        function: {
+          name: 'lobe-user-memory____addIdentityMemory',
+          parameters: { properties, required: Object.keys(properties), type: 'object' },
+        },
+        type: 'function' as const,
+      });
+
+      it('rewrites a top-level [T, "null"] type to T', () => {
+        const result = handlePayload({
+          messages: [{ content: 'Hello', role: 'user' }],
+          model: 'mimo-v2.6-pro',
+          tools: [
+            tool({
+              details: { description: 'Optional detailed information', type: ['string', 'null'] },
+              enabled: { type: ['null', 'boolean'] },
+              limit: { type: ['number', 'null'] },
+              sourceIds: { items: { type: 'string' }, type: ['array', 'null'] },
+            }),
+          ],
+        } as any) as any;
+
+        expect(result.tools[0].function.parameters.properties).toEqual({
+          details: { description: 'Optional detailed information', type: 'string' },
+          enabled: { type: 'boolean' },
+          limit: { type: 'number' },
+          sourceIds: { items: { type: 'string' }, type: 'array' },
+        });
+        expect(result.tools[0].function.parameters.required).toEqual([
+          'details',
+          'enabled',
+          'limit',
+          'sourceIds',
+        ]);
+      });
+
+      it('leaves plain types, nested schemas and other unions untouched', () => {
+        const properties = {
+          either: { type: ['string', 'number'] },
+          title: { type: 'string' },
+          withIdentity: {
+            properties: { episodicDate: { type: ['string', 'null'] } },
+            type: 'object',
+          },
+        };
+
+        const result = handlePayload({
+          messages: [{ content: 'Hello', role: 'user' }],
+          model: 'mimo-v2.6-pro',
+          tools: [tool(properties)],
+        } as any) as any;
+
+        expect(result.tools[0].function.parameters.properties).toEqual(properties);
+      });
+
+      it('does not mutate the caller payload', () => {
+        const tools = [tool({ details: { type: ['string', 'null'] } })];
+
+        handlePayload({
+          messages: [{ content: 'Hello', role: 'user' }],
+          model: 'mimo-v2.6-pro',
+          tools,
+        } as any);
+
+        expect(tools[0].function.parameters.properties.details.type).toEqual(['string', 'null']);
+      });
+
+      it('sends no tools key when the request has none', () => {
+        const result = handlePayload({
+          messages: [{ content: 'Hello', role: 'user' }],
+          model: 'mimo-v2.6-pro',
+        } as any);
+
+        expect(result).not.toHaveProperty('tools');
+      });
+    });
   });
 });
 
