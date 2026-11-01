@@ -458,6 +458,8 @@ export class UserModel {
 
     // User memory defaults to enabled=true when user settings are missing.
     const memoryEnabledCondition = sql`COALESCE((${userSettings.memory} ->> 'enabled')::boolean, true) = true`;
+    // Background extraction is on by default; users opt out with autoExtract=false.
+    const autoExtractCondition = sql`COALESCE((${userSettings.memory} ->> 'autoExtract')::boolean, true) = true`;
     // Eligible users must have at least one topic with at least one user message.
     const hasChattedTopicCondition = sql`
       EXISTS (
@@ -479,7 +481,13 @@ export class UserModel {
       .from(users)
       .leftJoin(userSettings, eq(users.id, userSettings.id))
       .where(
-        and(cursorCondition, whitelistCondition, memoryEnabledCondition, hasChattedTopicCondition),
+        and(
+          cursorCondition,
+          whitelistCondition,
+          memoryEnabledCondition,
+          autoExtractCondition,
+          hasChattedTopicCondition,
+        ),
       )
       .orderBy(asc(users.createdAt), asc(users.id));
 

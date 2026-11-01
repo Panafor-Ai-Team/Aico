@@ -640,6 +640,9 @@ export default {
   'llm.waitingForMore': 'More models are <1>planned to be added</1>, stay tuned',
   'llm.waitingForMoreLinkAriaLabel': 'Open the Provider request form',
   'marketPublish.status.underReview': 'Under Review',
+  'memory.autoExtract.desc':
+    'Periodically review your past conversations in the background to learn new memories. This uses your balance, like chatting does. Turn it off anytime.',
+  'memory.autoExtract.title': 'Learn from conversations automatically',
   'memory.effort.desc': 'Control how aggressively the AI retrieves and updates memory.',
   'memory.effort.high': 'High — Proactive retrieval and updates',
   'memory.effort.level.high': 'High',

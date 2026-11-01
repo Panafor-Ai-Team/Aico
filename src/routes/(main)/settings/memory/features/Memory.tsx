@@ -22,7 +22,7 @@ const MemorySetting = memo(() => {
   const { t } = useTranslation('setting');
   const { allowed: canManageMemory, reason } = usePermission('manage_settings');
   const [form] = Form.useForm();
-  const { memory } = useUserStore(settingsSelectors.currentSettings, isEqual);
+  const memory = useUserStore(settingsSelectors.currentMemorySettings, isEqual);
   const [setSettings, isUserStateInit] = useUserStore((s) => [s.setSettings, s.isUserStateInit]);
   const { status: saveStatus, lastSavedAt, save, retry } = useSaveState();
 
@@ -41,6 +41,19 @@ const MemorySetting = memo(() => {
         layout: 'horizontal',
         minWidth: undefined,
         name: 'enabled',
+        valuePropName: 'checked',
+      },
+      {
+        children: (
+          <Tooltip title={reason}>
+            <Switch disabled={!canManageMemory || memory?.enabled === false} />
+          </Tooltip>
+        ),
+        desc: t('memory.autoExtract.desc'),
+        label: t('memory.autoExtract.title'),
+        layout: 'horizontal',
+        minWidth: undefined,
+        name: 'autoExtract',
         valuePropName: 'checked',
       },
       {

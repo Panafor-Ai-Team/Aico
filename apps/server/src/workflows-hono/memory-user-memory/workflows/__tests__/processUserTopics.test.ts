@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { processUserTopicsHandler } from '../processUserTopics';
 
 const mocks = vi.hoisted(() => ({
+  canAffordExtraction: vi.fn(),
   createExecutor: vi.fn(),
   filterTopicIdsForUser: vi.fn(),
   getTopicsForUser: vi.fn(),
@@ -62,9 +63,11 @@ describe('processUserTopicsHandler per-user fan-out ceiling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.createExecutor.mockResolvedValue({
+      canAffordExtraction: mocks.canAffordExtraction,
       filterTopicIdsForUser: mocks.filterTopicIdsForUser,
       getTopicsForUser: mocks.getTopicsForUser,
     });
+    mocks.canAffordExtraction.mockResolvedValue(true);
     mocks.filterTopicIdsForUser.mockImplementation(async (_userId, topicIds: string[]) => topicIds);
     mocks.triggerProcessTopics.mockResolvedValue({ workflowRunId: 'process-topics-run' });
     mocks.triggerProcessUserTopics.mockResolvedValue({ workflowRunId: 'next-page-run' });
@@ -135,5 +138,31 @@ describe('processUserTopicsHandler per-user fan-out ceiling', () => {
       expect.objectContaining({ topicIds }),
       { extraHeaders: {} },
     );
+  });
+
+  it('skips an unfunded user in background runs without listing or fanning out topics', async () => {
+    mocks.canAffordExtraction.mockResolvedValue(false);
+
+    const result = await processUserTopicsHandler({
+      requestPayload: { ...basePayload, userIds: ['u1'] },
+      ...createContext(),
+    } as never);
+
+    expect(mocks.canAffordExtraction).toHaveBeenCalledWith('u1', undefined);
+    expect(mocks.getTopicsForUser).not.toHaveBeenCalled();
+    expect(mocks.triggerProcessTopics).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty('error');
+  });
+
+  it('does not run the funds check for user-initiated extraction', async () => {
+    mocks.getTopicsForUser.mockResolvedValue({ ids: ['t1'] });
+
+    await processUserTopicsHandler({
+      requestPayload: { ...basePayload, userInitiated: true },
+      ...createContext(),
+    } as never);
+
+    expect(mocks.canAffordExtraction).not.toHaveBeenCalled();
+    expect(mocks.triggerProcessTopics).toHaveBeenCalledTimes(1);
   });
 });

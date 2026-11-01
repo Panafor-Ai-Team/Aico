@@ -2,6 +2,7 @@ import { type WorkflowContext } from '@upstash/workflow';
 import { z } from 'zod';
 
 import { getServerDB } from '@/database/server';
+import { isMemoryFundsError } from '@/server/services/aico/memoryBilling';
 import {
   buildUserPersonaJobInput,
   UserPersonaService,
@@ -67,17 +68,23 @@ export const personaUpdateHandler = async (context: WorkflowContext) => {
     });
     if (!guard.result) return guard.response;
 
-    await context.run(stepName, async () => {
+    const outcome = await context.run(stepName, async () => {
       const jobInput = await buildUserPersonaJobInput(db, userId);
-      const result = await service.composeWriting({ ...jobInput, userId });
-      return {
-        diffId: result.diff?.id,
-        documentId: result.document.id,
-        userId,
-        version: result.document.version,
-      };
+      try {
+        const result = await service.composeWriting({ ...jobInput, userId });
+        return {
+          diffId: result.diff?.id,
+          documentId: result.document.id,
+          userId,
+          version: result.document.version,
+        };
+      } catch (error) {
+        // Unfunded wallet / budget: skip quietly; the next update after a top-up rewrites it.
+        if (isMemoryFundsError(error)) return { deferred: true as const, userId };
+        throw error;
+      }
     });
-    processedUsers += 1;
+    if (!('deferred' in outcome)) processedUsers += 1;
   }
 
   return {
