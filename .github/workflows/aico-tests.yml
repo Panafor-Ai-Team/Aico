@@ -1,0 +1,63 @@
+name: Aico Tests
+
+# The suites that guard money, migrations and security boundaries: wallets, budgets,
+# usage ledger, managed keys and policy, trial quota, migration journals, MCP/connector
+# SSRF, phone auth. Runs on PRs to canary and, via workflow_call, gates the canary
+# deploy (deploy-canary.yml). The upstream LobeHub suite (test.yml) stays disabled.
+on:
+  pull_request:
+    branches: [canary]
+  workflow_call: {}
+  workflow_dispatch: {}
+
+concurrency:
+  # PR runs replace each other; a deploy-gate call gets its own group and is never cancelled.
+  group: aico-tests-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  suites:
+    name: Aico billing, migration and security suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
+
+      - name: Install dependencies
+        # Lockfile-free repo; see type-check.yml for why --frozen-lockfile is wrong here.
+        run: pnpm install --no-frozen-lockfile
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+
+      - name: Database models and migrations (PGlite, both journals)
+        working-directory: packages/database
+        run: >-
+          bunx vitest run --silent='passed-only'
+          src/core/__tests__
+          src/models/__tests__/drizzleMigration.test.ts
+          src/models/__tests__/aico
+          src/models/__tests__/organization
+
+      - name: Billing, managed keys, policy, MCP / connector and auth
+        run: >-
+          bunx vitest run --silent='passed-only'
+          apps/server/src/services/aico
+          apps/server/src/services/openrouter
+          apps/server/src/services/managedProvider
+          apps/server/src/modules/ModelRuntime
+          apps/server/src/routers/lambda/__tests__/aico
+          apps/server/src/routers/lambda/__tests__/organization
+          apps/server/src/services/mcp
+          apps/server/src/services/connector
+          src/libs/mcp
+          src/libs/better-auth
+
+      - name: Migration journal guards
+        run: bunx vitest run --silent='passed-only' scripts/aico scripts/migrateServerDB
