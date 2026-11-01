@@ -10,6 +10,7 @@ import { type Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { type Progress } from '@modelcontextprotocol/sdk/types.js';
 import debug from 'debug';
 
+import { getMcpServerFetch } from './serverFetch';
 import {
   type MCPClientParams,
   type MCPError,
@@ -207,6 +208,7 @@ export class MCPClient {
 
         // Create StreamableHTTPClientTransport and pass headers
         this.transport = new StreamableHTTPClientTransport(new URL(params.url), {
+          fetch: getMcpServerFetch(),
           requestInit: { headers },
         });
 

@@ -221,6 +221,21 @@ describe('GenerationService', () => {
           'Network error',
         );
       });
+
+      it('should cancel the unread body of a non-OK response', async () => {
+        const cancel = vi.fn().mockResolvedValue(undefined);
+        mockSsrfSafeFetch.mockResolvedValueOnce({
+          body: { cancel },
+          ok: false,
+          status: 500,
+          statusText: 'Internal Server Error',
+        });
+
+        await expect(fetchImageFromUrl('https://example.com/image.jpg')).rejects.toThrow(
+          'Failed to fetch image from https://example.com/image.jpg: 500 Internal Server Error',
+        );
+        expect(cancel).toHaveBeenCalledOnce();
+      });
     });
 
     // Regression: user-supplied image URLs (e.g. updateTopicCover's coverUrl) must be fetched

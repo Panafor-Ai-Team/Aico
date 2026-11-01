@@ -303,6 +303,9 @@ export class MCPService {
     // A shared web server must not fetch user-supplied loopback / private-network
     // MCP endpoints on the user's behalf. Self-hosters who deliberately run MCP
     // servers on their LAN can opt in with the existing SSRF allow switch.
+    // This literal check only fails fast with a clear message: the transport's
+    // ssrfSafeFetch (`getMcpServerFetch`) also refuses hostnames that resolve to
+    // such addresses, at connect time and on every redirect.
     if (
       params.type === 'http' &&
       !isDesktop &&

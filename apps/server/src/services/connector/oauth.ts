@@ -16,6 +16,7 @@ import type {
 import debug from 'debug';
 
 import { appEnv } from '@/envs/app';
+import { getMcpServerFetch } from '@/libs/mcp/serverFetch';
 
 const log = debug('lobe-server:connector:oauth');
 
@@ -52,20 +53,27 @@ export interface DiscoveredOAuth {
  * resource does not advertise PRM (some servers co-locate the AS).
  */
 export const discoverConnectorOAuth = async (mcpServerUrl: string): Promise<DiscoveredOAuth> => {
+  const fetchFn = getMcpServerFetch();
   let resourceMetadataUrl: URL | undefined;
   try {
-    const res = await fetch(mcpServerUrl, {
+    const res = await (fetchFn ?? fetch)(mcpServerUrl, {
       headers: { accept: 'application/json, text/event-stream' },
       method: 'GET',
     });
     if (res.status === 401) resourceMetadataUrl = extractResourceMetadataUrl(res);
+    // Only the status and headers matter; the body may be a never-ending SSE stream.
+    await res.body?.cancel().catch(() => {});
   } catch (err) {
     log('probe request failed, falling back to well-known discovery: %O', err);
   }
 
   let authorizationServerUrl: string | undefined;
   try {
-    const prm = await discoverOAuthProtectedResourceMetadata(mcpServerUrl, { resourceMetadataUrl });
+    const prm = await discoverOAuthProtectedResourceMetadata(
+      mcpServerUrl,
+      { resourceMetadataUrl },
+      fetchFn,
+    );
     authorizationServerUrl = prm?.authorization_servers?.[0]?.toString();
   } catch (err) {
     log('protected-resource-metadata discovery failed: %O', err);
@@ -74,7 +82,7 @@ export const discoverConnectorOAuth = async (mcpServerUrl: string): Promise<Disc
   // Fallback: assume the authorization server lives at the MCP server origin.
   if (!authorizationServerUrl) authorizationServerUrl = new URL(mcpServerUrl).origin;
 
-  const metadata = await discoverAuthorizationServerMetadata(authorizationServerUrl);
+  const metadata = await discoverAuthorizationServerMetadata(authorizationServerUrl, { fetchFn });
   if (!metadata) {
     throw new Error(`Failed to discover OAuth metadata for ${authorizationServerUrl}`);
   }
@@ -102,6 +110,7 @@ export const registerDynamicClient = async (params: {
       scope: params.scopes?.join(' '),
       token_endpoint_auth_method: 'client_secret_post',
     },
+    fetchFn: getMcpServerFetch(),
     metadata: params.metadata,
     scope: params.scopes?.join(' '),
   });
@@ -149,6 +158,7 @@ export const exchangeConnectorCode = async (params: {
     authorizationCode: params.authorizationCode,
     clientInformation: params.clientInformation,
     codeVerifier: params.codeVerifier,
+    fetchFn: getMcpServerFetch(),
     metadata: params.metadata,
     redirectUri: params.redirectUri,
     resource: params.resource ? new URL(params.resource) : undefined,
@@ -165,6 +175,7 @@ export const refreshConnectorToken = async (params: {
 }): Promise<OAuthTokens> => {
   return refreshAuthorization(params.authorizationServerUrl, {
     clientInformation: params.clientInformation,
+    fetchFn: getMcpServerFetch(),
     metadata: params.metadata,
     refreshToken: params.refreshToken,
     resource: params.resource ? new URL(params.resource) : undefined,
