@@ -1,9 +1,10 @@
 import { ArtifactType } from '@lobechat/types';
+import { exportFile } from '@lobechat/utils/client';
 import { ActionIcon, Flexbox, Icon, Text } from '@lobehub/ui';
 import { Tabs } from '@lobehub/ui/base-ui';
 import { ConfigProvider } from 'antd';
 import { cx } from 'antd-style';
-import { ArrowLeft, CodeIcon, EyeIcon } from 'lucide-react';
+import { ArrowLeft, CodeIcon, DownloadIcon, EyeIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import ArtifactDeploymentActions from '@/business/client/features/ArtifactDeploymentActions';
@@ -11,6 +12,8 @@ import { useChatStore } from '@/store/chat';
 import { chatPortalSelectors } from '@/store/chat/selectors';
 import { ArtifactDisplayMode } from '@/store/chat/slices/portal/initialState';
 import { oneLineEllipsis } from '@/styles';
+
+import { getArtifactFileName } from './getArtifactFileName';
 
 const Title = () => {
   const { t } = useTranslation('portal');
@@ -22,6 +25,7 @@ const Title = () => {
     displayMode,
     artifactType,
     artifactTitle,
+    artifactCodeLanguage,
     isArtifactTagClosed,
     closeArtifact,
   ] = useChatStore((s) => {
@@ -35,6 +39,7 @@ const Title = () => {
       s.portalArtifactDisplayMode,
       chatPortalSelectors.artifactType(s),
       chatPortalSelectors.artifactTitle(s),
+      chatPortalSelectors.artifactCodeLanguage(s),
       chatPortalSelectors.isArtifactTagClosed(messageId, identifier)(s),
       s.closeArtifact,
     ];
@@ -42,6 +47,24 @@ const Title = () => {
 
   // show switch only when artifact is closed and the type is not code
   const showSwitch = isArtifactTagClosed && artifactType !== ArtifactType.Code;
+
+  // read the content on click so the header doesn't re-render on every streamed token
+  const downloadArtifact = () => {
+    const content = chatPortalSelectors.artifactCode(
+      messageId,
+      artifactIdentifier,
+    )(useChatStore.getState());
+
+    exportFile(
+      content,
+      getArtifactFileName({
+        identifier: artifactIdentifier,
+        language: artifactCodeLanguage,
+        title: artifactTitle,
+        type: artifactType,
+      }),
+    );
+  };
 
   return (
     <Flexbox horizontal align={'center'} flex={1} gap={12} justify={'space-between'} width={'100%'}>
@@ -70,6 +93,14 @@ const Title = () => {
             messageId={messageId}
             topicId={topicId}
           />
+          {isArtifactTagClosed && (
+            <ActionIcon
+              icon={DownloadIcon}
+              size={'small'}
+              title={t('artifacts.download')}
+              onClick={downloadArtifact}
+            />
+          )}
           {showSwitch && (
             <Tabs
               activeKey={displayMode}

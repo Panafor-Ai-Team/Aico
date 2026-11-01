@@ -4,6 +4,7 @@ export default {
   'Plugins': 'Skills',
   'artifacts.display.code': 'Code',
   'artifacts.display.preview': 'Preview',
+  'artifacts.download': 'Download',
   'artifacts.deploy.copy': 'Copy URL',
   'artifacts.deploy.copySuccess': 'Deployment URL copied',
   'artifacts.deploy.confirm.action': 'Publish artifact',
