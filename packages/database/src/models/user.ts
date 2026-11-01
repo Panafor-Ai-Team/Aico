@@ -458,8 +458,8 @@ export class UserModel {
 
     // User memory defaults to enabled=true when user settings are missing.
     const memoryEnabledCondition = sql`COALESCE((${userSettings.memory} ->> 'enabled')::boolean, true) = true`;
-    // Background extraction is billed to the user, so it runs only for users who opted in.
-    const autoExtractCondition = sql`COALESCE((${userSettings.memory} ->> 'autoExtract')::boolean, false) = true`;
+    // Background extraction is on by default; users opt out with autoExtract=false.
+    const autoExtractCondition = sql`COALESCE((${userSettings.memory} ->> 'autoExtract')::boolean, true) = true`;
     // Eligible users must have at least one topic with at least one user message.
     const hasChattedTopicCondition = sql`
       EXISTS (

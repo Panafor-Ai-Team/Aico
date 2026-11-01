@@ -508,7 +508,7 @@
   "llm.waitingForMore": "D'autres modèles <1>seront ajoutés prochainement</1>, restez à l'écoute",
   "llm.waitingForMoreLinkAriaLabel": "Ouvrir le formulaire de demande de fournisseur",
   "marketPublish.status.underReview": "En cours d'examen",
-  "memory.autoExtract.desc": "Analyser périodiquement vos conversations passées en arrière-plan pour apprendre de nouveaux souvenirs. Cela utilise votre solde, comme les conversations.",
+  "memory.autoExtract.desc": "Analyser périodiquement vos conversations passées en arrière-plan pour apprendre de nouveaux souvenirs. Cela utilise votre solde, comme les conversations. Vous pouvez le désactiver à tout moment.",
   "memory.autoExtract.title": "Apprendre automatiquement des conversations",
   "memory.effort.desc": "Contrôlez l'intensité avec laquelle l'IA récupère et met à jour la mémoire.",
   "memory.effort.high": "Élevé — Récupération et mises à jour proactives",

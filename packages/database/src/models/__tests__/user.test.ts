@@ -693,15 +693,16 @@ describe('UserModel', () => {
     });
 
     describe('listUsersForHourlyMemoryExtractor', () => {
-      it('should return only opted-in users with memory enabled and at least one chatted topic', async () => {
+      it('should return users with memory and auto-extract enabled and at least one chatted topic', async () => {
         await serverDB.delete(users);
         await serverDB.insert(users).values([
-          { id: 'u1', createdAt: new Date('2024-01-01T00:00:00Z') }, // no settings => not opted in
+          { id: 'u1', createdAt: new Date('2024-01-01T00:00:00Z') }, // no settings => enabled
           { id: 'u2', createdAt: new Date('2024-01-02T00:00:00Z') }, // memory disabled
           { id: 'u3', createdAt: new Date('2024-01-03T00:00:00Z') }, // no messages
           { id: 'u4', createdAt: new Date('2024-01-04T00:00:00Z') }, // assistant-only messages
-          { id: 'u5', createdAt: new Date('2024-01-05T00:00:00Z') }, // opted in + chatted
-          { id: 'u6', createdAt: new Date('2024-01-06T00:00:00Z') }, // enabled, not opted in
+          { id: 'u5', createdAt: new Date('2024-01-05T00:00:00Z') }, // explicit auto-extract + chatted
+          { id: 'u6', createdAt: new Date('2024-01-06T00:00:00Z') }, // auto-extract unset => enabled
+          { id: 'u7', createdAt: new Date('2024-01-07T00:00:00Z') }, // auto-extract turned off
         ]);
 
         await serverDB.insert(userSettings).values([
@@ -710,6 +711,7 @@ describe('UserModel', () => {
           { id: 'u4', memory: { autoExtract: true, enabled: true } },
           { id: 'u5', memory: { autoExtract: true, enabled: true } },
           { id: 'u6', memory: { enabled: true } },
+          { id: 'u7', memory: { autoExtract: false, enabled: true } },
         ]);
 
         await serverDB.insert(topics).values([
@@ -719,6 +721,7 @@ describe('UserModel', () => {
           { id: 't4', userId: 'u4' },
           { id: 't5', userId: 'u5' },
           { id: 't6', userId: 'u6' },
+          { id: 't7', userId: 'u7' },
         ]);
 
         await serverDB.insert(messages).values([
@@ -727,11 +730,12 @@ describe('UserModel', () => {
           { id: 'm4', role: 'assistant', topicId: 't4', userId: 'u4' },
           { id: 'm5', role: 'user', topicId: 't5', userId: 'u5' },
           { id: 'm6', role: 'user', topicId: 't6', userId: 'u6' },
+          { id: 'm7', role: 'user', topicId: 't7', userId: 'u7' },
         ]);
 
         const result = await UserModel.listUsersForHourlyMemoryExtractor(serverDB);
 
-        expect(result.map((u) => u.id)).toEqual(['u5']);
+        expect(result.map((u) => u.id)).toEqual(['u1', 'u5', 'u6']);
       });
 
       it('should support whitelist and cursor pagination', async () => {
@@ -740,12 +744,6 @@ describe('UserModel', () => {
           { id: 'user-a', createdAt: new Date('2024-01-01T00:00:00Z') },
           { id: 'user-b', createdAt: new Date('2024-01-02T00:00:00Z') },
           { id: 'user-c', createdAt: new Date('2024-01-03T00:00:00Z') },
-        ]);
-
-        await serverDB.insert(userSettings).values([
-          { id: 'user-a', memory: { autoExtract: true } },
-          { id: 'user-b', memory: { autoExtract: true } },
-          { id: 'user-c', memory: { autoExtract: true } },
         ]);
 
         await serverDB.insert(topics).values([
