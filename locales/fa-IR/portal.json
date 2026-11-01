@@ -21,7 +21,6 @@
   "artifacts.deploy.writeInProgress": "تغییر دیگری در حال انتشار است. کمی بعد دوباره تلاش کنید.",
   "artifacts.display.code": "کد",
   "artifacts.display.preview": "پیش‌نمایش",
-  "artifacts.download": "دانلود",
   "artifacts.svg.copyAsImage": "کپی به‌صورت تصویر",
   "artifacts.svg.copyFail": "کپی ناموفق بود: {{error}}. دوباره تلاش کنید.",
   "artifacts.svg.copySuccess": "تصویر با موفقیت کپی شد",

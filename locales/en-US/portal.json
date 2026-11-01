@@ -21,7 +21,6 @@
   "artifacts.deploy.writeInProgress": "Another deployment change is in progress. Try again shortly.",
   "artifacts.display.code": "Code",
   "artifacts.display.preview": "Preview",
-  "artifacts.download": "Download",
   "artifacts.svg.copyAsImage": "Copy as Image",
   "artifacts.svg.copyFail": "Copy failed: {{error}}. Try again.",
   "artifacts.svg.copySuccess": "Image copied successfully",

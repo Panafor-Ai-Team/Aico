@@ -13,7 +13,15 @@ import { chatPortalSelectors } from '@/store/chat/selectors';
 import { ArtifactDisplayMode } from '@/store/chat/slices/portal/initialState';
 import { oneLineEllipsis } from '@/styles';
 
-import { getArtifactFileName } from './getArtifactFileName';
+// file extension per artifact type; anything else is HTML
+const DOWNLOAD_EXTENSIONS: Record<string, string> = {
+  'application/lobe.artifacts.mermaid': 'mmd',
+  [ArtifactType.Code]: 'txt',
+  [ArtifactType.Python]: 'py',
+  [ArtifactType.React]: 'tsx',
+  'image/svg+xml': 'svg',
+  'text/markdown': 'md',
+};
 
 const Title = () => {
   const { t } = useTranslation('portal');
@@ -25,7 +33,6 @@ const Title = () => {
     displayMode,
     artifactType,
     artifactTitle,
-    artifactCodeLanguage,
     isArtifactTagClosed,
     closeArtifact,
   ] = useChatStore((s) => {
@@ -39,7 +46,6 @@ const Title = () => {
       s.portalArtifactDisplayMode,
       chatPortalSelectors.artifactType(s),
       chatPortalSelectors.artifactTitle(s),
-      chatPortalSelectors.artifactCodeLanguage(s),
       chatPortalSelectors.isArtifactTagClosed(messageId, identifier)(s),
       s.closeArtifact,
     ];
@@ -48,22 +54,14 @@ const Title = () => {
   // show switch only when artifact is closed and the type is not code
   const showSwitch = isArtifactTagClosed && artifactType !== ArtifactType.Code;
 
-  // read the content on click so the header doesn't re-render on every streamed token
   const downloadArtifact = () => {
     const content = chatPortalSelectors.artifactCode(
       messageId,
       artifactIdentifier,
     )(useChatStore.getState());
+    const extension = (artifactType && DOWNLOAD_EXTENSIONS[artifactType]) || 'html';
 
-    exportFile(
-      content,
-      getArtifactFileName({
-        identifier: artifactIdentifier,
-        language: artifactCodeLanguage,
-        title: artifactTitle,
-        type: artifactType,
-      }),
-    );
+    exportFile(content, `${artifactIdentifier || 'artifact'}.${extension}`);
   };
 
   return (
@@ -97,7 +95,7 @@ const Title = () => {
             <ActionIcon
               icon={DownloadIcon}
               size={'small'}
-              title={t('artifacts.download')}
+              title={t('download', { ns: 'common' })}
               onClick={downloadArtifact}
             />
           )}
