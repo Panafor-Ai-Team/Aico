@@ -110,6 +110,8 @@ jobs:
           echo "$out"
           echo "$out" | grep -q 'database migration pass'
           echo "$out" | grep -q 'applied=0 skipped=0 equivalent=0 drift=0 unknownRows=0'
+          # The stock boot logged the read-only preview the deploy log relies on.
+          docker logs app 2>&1 | grep -F '[Database] dual-journal preview: pending=0 equivalent=0 drift=0 unknownRows=0'
           # Every MCP SDK copy in the image is at or above the security floor
           # (no lockfile, so a cached install layer could otherwise keep an old one).
           docker exec -w /app app /bin/node -e "

@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   createPgExecutor,
   DualJournalMigrationError,
+  formatPlan,
   formatReport,
   type MigrationEntry,
   type MigrationExecutor,
   type MigrationTrack,
+  planDualJournal,
   runDualJournal,
   stockDrizzlePending,
 } from './runner';
@@ -166,6 +168,66 @@ describe('runDualJournal', () => {
     });
 
     expect(report.unknownRows).toEqual([{ createdAt: 42, hash: 'stray', id: 1 }]);
+  });
+});
+
+describe('planDualJournal', () => {
+  const row = (createdAt: number, hash = `hash-${createdAt}`) => ({
+    createdAt,
+    hash,
+    id: createdAt,
+  });
+
+  it('lists entries the ledger lacks, including ones older than the newest row', () => {
+    const plan = planDualJournal({
+      rows: [row(1, 'hash-a1'), row(3, 'hash-a3')],
+      tracks: [track('aico', [entry('a1', 1), entry('a2', 2), entry('a3', 3), entry('a4', 4)])],
+    });
+
+    expect(plan.pending.map((candidate) => candidate.tag)).toEqual(['a2', 'a4']);
+    expect(plan.drift).toEqual([]);
+    expect(plan.unknownRows).toEqual([]);
+  });
+
+  it('reports drift and unknown rows', () => {
+    const plan = planDualJournal({
+      rows: [row(1, 'old-hash'), row(42, 'stray')],
+      tracks: [track('aico', [entry('a1', 1)])],
+    });
+
+    expect(plan.pending).toEqual([]);
+    expect(plan.drift).toEqual([{ appliedHash: 'old-hash', currentHash: 'hash-a1', tag: 'a1' }]);
+    expect(plan.unknownRows).toEqual([row(42, 'stray')]);
+  });
+
+  it('counts an equivalence satisfied by a row or by an entry pending earlier in the run', () => {
+    const tracks = [track('aico', [entry('a134', 555)]), track('upstream', [entry('u131', 100)])];
+
+    const fromRow = planDualJournal({
+      equivalences: { u131: 555 },
+      rows: [row(555, 'hash-a134')],
+      tracks,
+    });
+    const fromPending = planDualJournal({ equivalences: { u131: 555 }, rows: [], tracks });
+
+    expect(fromRow.equivalent).toEqual(['u131']);
+    expect(fromRow.pending).toEqual([]);
+    expect(fromPending.equivalent).toEqual(['u131']);
+    expect(fromPending.pending.map((candidate) => candidate.tag)).toEqual(['a134']);
+  });
+
+  it('formats the read-only deploy-log line', () => {
+    expect(
+      formatPlan(
+        planDualJournal({
+          rows: [row(1, 'old-hash'), row(42, 'stray')],
+          tracks: [track('aico', [entry('a1', 1), entry('a2', 2)])],
+        }),
+      ),
+    ).toBe('pending=1 (a2) equivalent=0 drift=1 (a1) unknownRows=1 (42)');
+    expect(formatPlan({ drift: [], equivalent: [], pending: [], unknownRows: [] })).toBe(
+      'pending=0 equivalent=0 drift=0 unknownRows=0',
+    );
   });
 });
 

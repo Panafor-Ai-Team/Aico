@@ -44,12 +44,35 @@ const runDualJournalMigrations = async () => {
   }
 };
 
+/**
+ * Read-only: after the stock migrator, log what the dual-journal runner would do against
+ * this database's ledger (one SELECT, no lock, no writes). This is the production evidence
+ * for switching runners; it never fails the boot.
+ */
+const logDualJournalPreview = async () => {
+  try {
+    const {
+      createPgExecutor,
+      formatPlan,
+      planDualJournal,
+      readLedger,
+      readTrack,
+    } = require('./dualJournalRunner.cjs');
+    const rows = await readLedger(createPgExecutor(client));
+    const plan = planDualJournal({ rows, tracks: [readTrack('aico', migrationsFolder)] });
+    console.log(`[Database] dual-journal preview: ${formatPlan(plan)}`);
+  } catch (error) {
+    console.warn(`[Database] dual-journal preview unavailable: ${error?.message ?? error}`);
+  }
+};
+
 const runMigrations = async () => {
   console.log('[Database] Start to migration...');
   if (process.env.AICO_MIGRATION_RUNNER === 'dual') {
     await runDualJournalMigrations();
   } else {
     await migrator.migrate(db, { migrationsFolder });
+    await logDualJournalPreview();
   }
 
   console.log('✅ database migration pass.');
