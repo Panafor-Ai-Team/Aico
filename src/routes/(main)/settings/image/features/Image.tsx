@@ -4,7 +4,7 @@ import { type UserImageConfig } from '@lobechat/types';
 import { type FormGroupItemType } from '@lobehub/ui';
 import { Form, Icon, Skeleton, Tooltip } from '@lobehub/ui';
 import { Loader2Icon } from 'lucide-react';
-import { memo, useState } from 'react';
+import { type ComponentProps, memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { FormSliderWithInput } from '@/components/FormInput';
@@ -14,6 +14,19 @@ import { SettingsSearchAnchor } from '@/features/SettingsSearch/anchor';
 import { usePermission } from '@/hooks/usePermission';
 import { useUserStore } from '@/store/user';
 import { settingsSelectors } from '@/store/user/slices/settings/selectors';
+
+type FormSliderWithInputProps = ComponentProps<typeof FormSliderWithInput>;
+
+// Form.Item injects value/onChange into its direct child. Tooltip returns its child
+// untouched when there is no title, which drops those props, so the slider is the child here.
+const GuardedSliderWithInput = ({
+  reason,
+  ...props
+}: FormSliderWithInputProps & { reason?: string }) => (
+  <Tooltip title={reason}>
+    <FormSliderWithInput {...props} />
+  </Tooltip>
+);
 
 const ImageSettings = memo(() => {
   const { t } = useTranslation('setting');
@@ -33,14 +46,13 @@ const ImageSettings = memo(() => {
       children: [
         {
           children: (
-            <Tooltip title={reason}>
-              <FormSliderWithInput
-                disabled={isUpdating || !canManageServiceModel}
-                max={MAX_DEFAULT_IMAGE_NUM}
-                min={MIN_DEFAULT_IMAGE_NUM}
-                step={1}
-              />
-            </Tooltip>
+            <GuardedSliderWithInput
+              disabled={isUpdating || !canManageServiceModel}
+              max={MAX_DEFAULT_IMAGE_NUM}
+              min={MIN_DEFAULT_IMAGE_NUM}
+              reason={reason}
+              step={1}
+            />
           ),
           desc: t('settingImage.defaultCount.desc'),
           label: t('settingImage.defaultCount.label'),
