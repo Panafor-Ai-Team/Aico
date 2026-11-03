@@ -258,6 +258,23 @@ const isAgentRuntimeRunningByContext =
   };
 
 /**
+ * Check if a `sendMessage` (persist / create-topic phase) is running in a
+ * specific context bucket — the window between the optimistic tmp_* messages
+ * and the server's persisted ones, before any agent-runtime op exists.
+ */
+const isSendingMessageByContext =
+  (context: MessageMapKeyInput) =>
+  (s: ChatStoreState): boolean => {
+    if (!context.agentId) return false;
+
+    const operations = getOperationsByContext(context)(s);
+
+    return operations.some(
+      (op) => op.type === 'sendMessage' && op.status === 'running' && !op.metadata.isAborting,
+    );
+  };
+
+/**
  * Check if agent runtime should still show visible loading in a specific context.
  * The underlying operation may remain running for terminal bookkeeping after a
  * producer has emitted visible_output_end.
@@ -893,6 +910,7 @@ export const operationSelectors = {
   isMessageRegenerating,
   isRegenerating,
   isSendingMessage,
+  isSendingMessageByContext,
   isTopicUnreadCompleted,
   unreadCompletedCountForTopics,
 

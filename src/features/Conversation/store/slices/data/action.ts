@@ -242,6 +242,12 @@ export const dataSlice: StateCreator<
           if (operationSelectors.isAgentRuntimeRunningByContext(context)(getChatStoreState()))
             return;
 
+          // Same gate for the send window before the runtime op exists: the
+          // store holds optimistic tmp_* messages the server list cannot
+          // contain yet, and the merge below keeps only fetched ids — so a
+          // focus/reconnect refetch landing here erased the user's follow-up.
+          if (operationSelectors.isSendingMessageByContext(context)(getChatStoreState())) return;
+
           const prevDbMessages = get().dbMessages;
           const mergedMessages = mergeFetchedMessagesWithLocalState(data, prevDbMessages);
           const storeContextKey = messageMapKey(get().context);
