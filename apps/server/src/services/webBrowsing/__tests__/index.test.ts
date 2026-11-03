@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { WebBrowsingDocumentService } from '../index';
+import { MAX_CRAWLED_DOCUMENT_LENGTH, WebBrowsingDocumentService } from '../index';
 
 const mocks = vi.hoisted(() => ({
   documentModel: {
@@ -237,5 +237,51 @@ describe('WebBrowsingDocumentService.upsertCrawledDocument ()', () => {
 
     expect(mocks.documentService.updateDocument).toHaveBeenCalled();
     expect(result).toEqual({ id: 'doc-legacy', status: 'updated' });
+  });
+
+  // A crawled REST API dump reached the server as 6.2 MB and the editor conversion
+  // blocked the event loop for 15+ minutes, taking production down.
+  it('caps the content it converts and stores, noting the truncation', async () => {
+    mocks.documentModel.findBySource.mockResolvedValueOnce(undefined);
+    mocks.documentModel.create.mockResolvedValueOnce({ id: 'doc-1' });
+
+    await service.upsertCrawledDocument({
+      content: 'a'.repeat(MAX_CRAWLED_DOCUMENT_LENGTH * 3),
+      title: 'Huge',
+      url: 'https://example.com/huge',
+    });
+
+    const { content } = mocks.documentModel.create.mock.calls[0][0];
+    expect(content.startsWith('a'.repeat(MAX_CRAWLED_DOCUMENT_LENGTH))).toBe(true);
+    expect(content).not.toContain('a'.repeat(MAX_CRAWLED_DOCUMENT_LENGTH + 1));
+    expect(content).toContain(`of ${MAX_CRAWLED_DOCUMENT_LENGTH * 3} characters`);
+  });
+
+  it('stores JSON pages inside a code fence', async () => {
+    mocks.documentModel.findBySource.mockResolvedValueOnce(undefined);
+    mocks.documentModel.create.mockResolvedValueOnce({ id: 'doc-1' });
+
+    await service.upsertCrawledDocument({
+      content: JSON.stringify([{ content: '```nested fence```', id: 1 }], null, 2),
+      title: 'API',
+      url: 'https://example.com/wp-json/wp/v2/posts',
+    });
+
+    const { content } = mocks.documentModel.create.mock.calls[0][0];
+    expect(content.startsWith('````json\n[')).toBe(true);
+    expect(content.endsWith(']\n````')).toBe(true);
+  });
+
+  it('leaves ordinary page content unchanged', async () => {
+    mocks.documentModel.findBySource.mockResolvedValueOnce(undefined);
+    mocks.documentModel.create.mockResolvedValueOnce({ id: 'doc-1' });
+
+    await service.upsertCrawledDocument({
+      content: '[not json] # Title',
+      title: 'Page',
+      url: 'https://example.com/p',
+    });
+
+    expect(mocks.documentModel.create.mock.calls[0][0].content).toBe('[not json] # Title');
   });
 });
