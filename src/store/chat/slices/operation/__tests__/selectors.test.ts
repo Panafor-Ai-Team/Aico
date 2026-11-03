@@ -679,6 +679,35 @@ describe('Operation Selectors', () => {
     });
   });
 
+  describe('isSendingMessageByContext', () => {
+    it('is true only for a running sendMessage in the same bucket', () => {
+      const { result } = renderHook(() => useChatStore());
+      const context = { agentId: 'agent1', topicId: 'topic1' };
+      let operationId = '';
+
+      act(() => {
+        operationId = result.current.startOperation({ type: 'sendMessage', context }).operationId;
+      });
+
+      expect(operationSelectors.isSendingMessageByContext(context)(result.current)).toBe(true);
+      expect(
+        operationSelectors.isSendingMessageByContext({ agentId: 'agent1', topicId: 'topic2' })(
+          result.current,
+        ),
+      ).toBe(false);
+      // The runtime gate alone misses this window — that is what the new selector covers.
+      expect(operationSelectors.isAgentRuntimeRunningByContext(context)(result.current)).toBe(
+        false,
+      );
+
+      act(() => {
+        result.current.completeOperation(operationId);
+      });
+
+      expect(operationSelectors.isSendingMessageByContext(context)(result.current)).toBe(false);
+    });
+  });
+
   describe('visible loading selectors', () => {
     it('should hide a no-tool terminal tail without unblocking the operation', () => {
       const { result } = renderHook(() => useChatStore());

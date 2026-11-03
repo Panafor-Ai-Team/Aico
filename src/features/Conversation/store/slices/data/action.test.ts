@@ -9,6 +9,7 @@ import {
   MESSAGE_LIST_VERIFICATION_INTERVAL,
   runMessageListQuery,
 } from '@/services/message/cache';
+import { useChatStore } from '@/store/chat';
 
 import { createStore } from '../../index';
 import { dataSelectors } from './selectors';
@@ -927,6 +928,65 @@ describe('DataSlice', () => {
           type: 'AgentRuntimeError',
         });
         expect(store.getState().dbMessages[0].updatedAt).toBe(3000);
+      });
+    });
+  });
+
+  describe('useFetchMessages during a follow-up send', () => {
+    const context = { agentId: 'test-session', topicId: 'test-topic', threadId: null };
+    const persisted: UIChatMessage[] = [
+      { id: 'msg-hello', content: 'hello', role: 'user', createdAt: 1000, updatedAt: 1000 },
+      { id: 'msg-reply', content: 'hi!', role: 'assistant', createdAt: 1001, updatedAt: 1001 },
+    ] as any;
+    const optimistic: UIChatMessage[] = [
+      { id: 'tmp_user', content: 'how are you?', role: 'user', createdAt: 2000, updatedAt: 2000 },
+      { id: 'tmp_assistant', content: '...', role: 'assistant', createdAt: 2001, updatedAt: 2001 },
+    ] as any;
+
+    it('keeps the optimistic follow-up while its sendMessage is still persisting', async () => {
+      // A focus/reconnect refetch that resolves before the server has the
+      // follow-up returns only the earlier turn.
+      vi.mocked(messageService.getMessages).mockResolvedValue(persisted);
+
+      const { operationId } = useChatStore
+        .getState()
+        .startOperation({ context, label: 'Send Message', type: 'sendMessage' });
+
+      const store = createStore({ context });
+      store.setState({ dbMessages: [...persisted, ...optimistic] } as any);
+
+      try {
+        store.getState().useFetchMessages(context);
+
+        await waitFor(() => {
+          expect(vi.mocked(messageService.getMessages)).toHaveBeenCalled();
+        });
+        // Let the fetch promise and its onData run.
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+
+        expect(store.getState().dbMessages.map((m) => m.id)).toEqual([
+          'msg-hello',
+          'msg-reply',
+          'tmp_user',
+          'tmp_assistant',
+        ]);
+      } finally {
+        useChatStore.getState().completeOperation(operationId);
+      }
+    });
+
+    it('applies the fetched list once no send is in flight', async () => {
+      vi.mocked(messageService.getMessages).mockResolvedValue(persisted);
+
+      const store = createStore({ context });
+      store.setState({ dbMessages: [...persisted, ...optimistic] } as any);
+
+      store.getState().useFetchMessages(context);
+
+      await waitFor(() => {
+        expect(store.getState().dbMessages.map((m) => m.id)).toEqual(['msg-hello', 'msg-reply']);
       });
     });
   });

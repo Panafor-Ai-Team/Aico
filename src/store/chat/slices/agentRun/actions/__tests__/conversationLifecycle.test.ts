@@ -310,6 +310,95 @@ describe('ConversationLifecycle actions', () => {
         expect(setDocument).not.toHaveBeenCalled();
       });
 
+      describe('follow-up send failure that is not a user cancel', () => {
+        const followUpContext = {
+          agentId: TEST_IDS.SESSION_ID,
+          threadId: null,
+          topicId: 'tpc_followup_test',
+        };
+
+        const sendFollowUp = async (error: unknown) => {
+          const { result } = renderHook(() => useChatStore());
+          const setDocument = vi.fn();
+          const setJSONState = vi.fn();
+
+          vi.spyOn(aiChatService, 'sendMessageInServer').mockRejectedValue(error);
+          act(() => {
+            useChatStore.setState({
+              mainInputEditor: {
+                getJSONState: vi.fn().mockReturnValue(undefined),
+                setDocument,
+                setJSONState,
+              } as any,
+            });
+          });
+
+          await act(async () => {
+            await result.current.sendMessage({
+              context: followUpContext,
+              message: 'how are you?',
+            });
+          });
+
+          const sendMessageOperation = Object.values(result.current.operations).find(
+            (operation) => operation.type === 'sendMessage',
+          );
+
+          return { sendMessageOperation, setDocument };
+        };
+
+        it('surfaces a non-tRPC error instead of silently dropping the message', async () => {
+          const { sendMessageOperation, setDocument } = await sendFollowUp(new TypeError('boom'));
+
+          expect(sendMessageOperation?.status).toBe('failed');
+          expect(sendMessageOperation?.metadata.inputSendErrorMsg).toBe('boom');
+          expect(setDocument).toHaveBeenCalledWith('markdown', 'how are you?');
+        });
+
+        it('surfaces a network abort the user did not trigger', async () => {
+          const { sendMessageOperation, setDocument } = await sendFollowUp(
+            new TRPCClientError('signal is aborted without reason'),
+          );
+
+          expect(sendMessageOperation?.metadata.inputSendErrorMsg).toBe(
+            'signal is aborted without reason',
+          );
+          expect(setDocument).toHaveBeenCalledWith('markdown', 'how are you?');
+        });
+
+        it('stays silent when the user cancelled the send', async () => {
+          const { result } = renderHook(() => useChatStore());
+          const setDocument = vi.fn();
+
+          vi.spyOn(aiChatService, 'sendMessageInServer').mockImplementation(async () => {
+            const op = Object.values(useChatStore.getState().operations).find(
+              (operation) => operation.type === 'sendMessage' && operation.status === 'running',
+            );
+            useChatStore.getState().cancelOperation(op!.id, 'User cancelled');
+            throw new TRPCClientError('The operation was aborted');
+          });
+          act(() => {
+            useChatStore.setState({
+              mainInputEditor: {
+                getJSONState: vi.fn().mockReturnValue(undefined),
+                setDocument,
+                setJSONState: vi.fn(),
+              } as any,
+            });
+          });
+
+          await act(async () => {
+            await result.current.sendMessage({ context: followUpContext, message: 'how are you?' });
+          });
+
+          const sendMessageOperation = Object.values(result.current.operations).find(
+            (operation) => operation.type === 'sendMessage',
+          );
+          expect(sendMessageOperation?.metadata.inputSendErrorMsg).toBeUndefined();
+          expect(setDocument).not.toHaveBeenCalled();
+        });
+      });
+
       it('should create user message and trigger AI processing', async () => {
         const { result } = renderHook(() => useChatStore());
 

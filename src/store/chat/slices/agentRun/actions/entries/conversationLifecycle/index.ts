@@ -27,7 +27,6 @@ import {
 } from '@lobechat/types';
 import { nanoid } from '@lobechat/utils';
 import { toast } from '@lobehub/ui/base-ui';
-import { TRPCClientError } from '@trpc/client';
 import { t } from 'i18next';
 
 import { type ChatInputEditor } from '@/features/ChatInput';
@@ -1405,6 +1404,16 @@ export class ConversationLifecycleActionImpl {
       }
     } catch (e) {
       console.error(e);
+      // Only a real user cancel may drop the message silently — the Stop flow
+      // restores the editor itself. Anything else (a non-tRPC error, or a
+      // network abort whose text merely contains "aborted") used to delete the
+      // optimistic bubble with no error and no restored text, so the follow-up
+      // looked sent and then vanished. Read this before failOperation rewrites
+      // the status.
+      const isUserCancel =
+        abortController.signal.aborted ||
+        this.#get().operations[operationId]?.status === 'cancelled';
+
       rollbackOptimisticTopic('sendMessage/rollbackOptimisticTopic');
       // Fail operation on error
       this.#get().failOperation(operationId, {
@@ -1412,19 +1421,15 @@ export class ConversationLifecycleActionImpl {
         message: e instanceof Error ? e.message : 'Unknown error',
       });
 
-      if (e instanceof TRPCClientError) {
-        const isAbort = e.message.includes('aborted') || e.name === 'AbortError';
-        // Check if error is due to cancellation
-        if (!isAbort) {
-          this.#get().updateOperationMetadata(operationId, {
-            inputSendErrorMsg: describeSendFailure(e),
-          });
-          const op = this.#get().operations[operationId];
-          if (op?.metadata.inputEditorTempState) {
-            targetInputEditor?.setJSONState(op.metadata.inputEditorTempState);
-          } else {
-            targetInputEditor?.setDocument('markdown', message);
-          }
+      if (!isUserCancel) {
+        this.#get().updateOperationMetadata(operationId, {
+          inputSendErrorMsg: e instanceof Error ? describeSendFailure(e) : String(e),
+        });
+        const op = this.#get().operations[operationId];
+        if (op?.metadata.inputEditorTempState) {
+          targetInputEditor?.setJSONState(op.metadata.inputEditorTempState);
+        } else {
+          targetInputEditor?.setDocument('markdown', message);
         }
       }
     } finally {
