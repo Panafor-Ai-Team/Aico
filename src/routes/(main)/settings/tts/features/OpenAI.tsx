@@ -2,7 +2,7 @@
 
 import { type FormGroupItemType } from '@lobehub/ui';
 import { Form, Icon, Skeleton, Tooltip } from '@lobehub/ui';
-import { Select } from '@lobehub/ui/base-ui';
+import { Select, type SelectProps } from '@lobehub/ui/base-ui';
 import isEqual from 'fast-deep-equal';
 import { Loader2Icon } from 'lucide-react';
 import { memo, useState } from 'react';
@@ -16,6 +16,14 @@ import { useUserStore } from '@/store/user';
 import { settingsSelectors } from '@/store/user/selectors';
 
 import { opeanaiTTSOptions } from './const';
+
+// Form.Item injects value/onChange into its direct child. Tooltip returns its child
+// untouched when there is no title, which drops those props, so the select is the child here.
+const GuardedSelect = ({ reason, ...props }: SelectProps & { reason?: string }) => (
+  <Tooltip title={reason}>
+    <Select {...props} />
+  </Tooltip>
+);
 
 const OpenAI = memo(() => {
   const { t } = useTranslation('setting');
@@ -32,13 +40,12 @@ const OpenAI = memo(() => {
       {
         className: serviceModelFormStyles.centeredLabel,
         children: (
-          <Tooltip title={reason}>
-            <Select
-              disabled={!canManageServiceModel}
-              options={opeanaiTTSOptions}
-              style={{ width: 'min(100%, 448px)' }}
-            />
-          </Tooltip>
+          <GuardedSelect
+            disabled={!canManageServiceModel}
+            options={opeanaiTTSOptions}
+            reason={reason}
+            style={{ width: 'min(100%, 448px)' }}
+          />
         ),
         label: (
           <SettingsSearchAnchor id={'service-model-tts'}>
