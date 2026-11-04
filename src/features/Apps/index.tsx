@@ -1,5 +1,6 @@
 'use client';
 
+import { BRANDING_NAME } from '@lobechat/business-const';
 import { DOWNLOAD_URL, isDesktop } from '@lobechat/const';
 import { Button, Tag, Text } from '@lobehub/ui/base-ui';
 import { ArrowUpRight, Check, Copy } from 'lucide-react';
@@ -38,7 +39,7 @@ const AppsPage = () => {
   return (
     <div className={styles.page}>
       <main className={styles.content}>
-        <h1 className={styles.headline}>{t('apps.title')}</h1>
+        <h1 className={styles.headline}>{t('apps.title', { appName: BRANDING_NAME })}</h1>
 
         <div className={styles.grid}>
           <article className={`${styles.card} ${styles.spanFull}`}>
@@ -95,7 +96,7 @@ const AppsPage = () => {
             <div className={styles.cardBody} style={{ paddingBottom: 20 }}>
               <h2 className={styles.cardTitle}>{t('apps.messenger.title')}</h2>
               <Text style={{ marginTop: 8 }} type="secondary">
-                {t('apps.messenger.desc')}
+                {t('apps.messenger.desc', { appName: BRANDING_NAME })}
               </Text>
             </div>
             {SUPPORTED_MESSENGER_PLATFORMS.map((platform) => (
@@ -121,7 +122,7 @@ const AppsPage = () => {
               <div className={styles.cardBody}>
                 <h2 className={styles.cardTitle}>{t('apps.cli.title')}</h2>
                 <Text style={{ marginTop: 8 }} type="secondary">
-                  {t('apps.cli.desc')}
+                  {t('apps.cli.desc', { appName: BRANDING_NAME })}
                 </Text>
                 <div className={styles.command}>
                   {CLI_INSTALL_COMMAND}

@@ -673,7 +673,8 @@ export default {
   'devices.workingDirectory': 'Working dir: {{path}}',
   'apps.cli.copied': 'Copied',
   'apps.cli.copy': 'Copy',
-  'apps.cli.desc': 'Scripts, cron jobs, and headless agents — the same LobeHub, from any terminal.',
+  'apps.cli.desc':
+    'Scripts, cron jobs, and headless agents — the same {{appName}}, from any terminal.',
   'apps.cli.title': 'CLI',
   'apps.desktop.cta': 'Get desktop app',
   'apps.desktop.desc': 'Chat, build, and automate in one app, with full access to this machine:',
@@ -687,13 +688,13 @@ export default {
   'apps.desktop.inUseDesc': "You're already in the desktop app.",
   'apps.desktop.title': 'Desktop',
   'apps.messenger.desc':
-    'Talk to your agents where your team already is — replies land back in LobeHub.',
+    'Talk to your agents where your team already is — replies land back in {{appName}}.',
   'apps.messenger.setup': 'Set up',
   'apps.messenger.title': 'Messenger',
   'apps.mobile.cta': 'Get mobile app',
   'apps.mobile.desc': 'Pick up where you left off — your chats, agents, and files travel with you.',
   'apps.mobile.title': 'Mobile',
-  'apps.title': 'Do more with LobeHub, everywhere you work',
+  'apps.title': 'Do more with {{appName}}, everywhere you work',
   'downloads.messenger.desc':
     'Connect {{appName}} to the messaging platforms you already use, with quick setup or your own bot configuration.',
   'downloads.messenger.quickSetupTooltip':
