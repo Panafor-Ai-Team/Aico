@@ -151,9 +151,12 @@ If merge aborts due to unrelated local state, fix preconditions — do not `--fo
 4. Never leave `<<<<<<<` markers. After each batch: `git add` resolved files; do not commit until markers are gone and migrations are consistent.
 
 5. **Migrations** (two journals, one ledger — see § Migrations below): take upstream's `packages/database/migrations/` **verbatim**, journal and snapshots included; do not renumber or re-stamp anything. Aico's migrations stay untouched in `packages/database/migrations-aico/`. Then:
-   - run `bun run check --test scripts/aico/migrationLayout.test.ts scripts/migrateServerDB/dualJournal/legacyJournal.test.ts`: no upstream migration may touch a table declared in `aicoOrganization.ts`, and every shipped migration must keep its tag / hash / `when` (or be covered by `AICO_EQUIVALENCES`, as upstream `0131_agents_add_name_column` is by Aico 0134);
+   - run `bun run check --test scripts/aico/migrationLayout.test.ts scripts/migrateServerDB/dualJournal/legacyJournal.test.ts`: no upstream migration may touch a table declared in `aicoOrganization.ts`, and every shipped migration must stay reachable once (by `when`, or through `AICO_EQUIVALENCES`, as upstream `0131_agents_add_name_column` is by Aico 0134) with an unchanged hash. When upstream edited a migration Aico already applied, review the diff and add it to `UPSTREAM_EDITS_OF_SHIPPED` in `legacyJournal.test.ts` with its new hash and a reason (M1: `0111`, comments only) — the runner reports it as `drift`, never re-runs it;
+   - run `bunx tsx scripts/migrateServerDB/dualJournal/spike.ts --upstream-ref=HEAD --today-ref=<canary before the merge> --assert`: a production-shaped database must apply exactly the new upstream migrations;
    - review every new upstream migration for locks on large tables (`db-migrations` § online index creation) before it reaches production;
-   - the Migration Ledger CI job (schema drift, drizzle-kit baselines, ParadeDB scenarios) must pass.
+   - the Migration Ledger CI job (schema drift, drizzle-kit baselines, ParadeDB scenarios) must pass; after the stage ships, bump its `AICO_TODAY_SHA` to the canary commit before the next stage;
+   - new upstream features that can start work without a user (goals, background runs, ingestion) stay off behind the Aico capability gate (`apps/server/src/services/aico/capabilityGate.ts`, operator flags in `packages/app-config/src/featureFlags/schema.ts`) until product sign-off;
+   - merge the sync PR with **"Create a merge commit"** — a squash or rebase loses the upstream merge base and the next stage re-conflicts everything.
 
 6. **Branding**: defaults stay Aico via `packages/business/const` (`BRANDING_NAME`, `BRANDING_PROVIDER`, …). Do not reintroduce hard-coded `LobeHub` in user-facing Aico surfaces. Env overrides: `BRANDING_*` / `NEXT_PUBLIC_BRANDING_*`.
 
