@@ -44,6 +44,7 @@ export default {
     'Memory retrieval is a gradual process. Please engage in more conversations to enrich the content available for recall. Try having deeper interactions with the agent to better capture and store valuable information.',
   'empty.search': 'No matching memories found',
   'empty.title': 'No Memories Yet',
+  'edit.error': 'Failed to save the memory. Please try again.',
   'experience.actions.delete': 'Delete',
   'experience.actions.edit': 'Edit',
   'experience.defaultType': 'Experience',

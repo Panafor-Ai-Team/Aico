@@ -47,8 +47,11 @@ import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { getServerDefaultFilesConfig } from '@/server/globalConfig';
 import { initEmbeddingRuntimeFromDB } from '@/server/modules/ModelRuntime';
 import { resolvePreferredGenerationBilling } from '@/server/services/aico/generationBilling';
-import type { UserMemoryEmbeddingRuntime } from '@/server/services/memory/userMemory/embedding';
 import { embedUserMemoryTexts } from '@/server/services/memory/userMemory/embedding';
+import {
+  createUserMemoryEmbedder as createEmbedder,
+  getUserMemoryEmbeddingRuntime as getEmbeddingRuntime,
+} from '@/server/services/memory/userMemory/embeddingRuntime';
 import { normalizeSearchMemoryParams } from '@/server/services/memory/userMemory/searchParams';
 
 const EMPTY_SEARCH_RESULT: SearchMemoryResult = {
@@ -176,42 +179,6 @@ const searchUserMemories = async (
     { ...normalizedInput, queries: normalizedQueries, topK: effortConstrainedLimits },
     queryEmbeddings,
   ) as Promise<SearchMemoryResult>;
-};
-
-const getEmbeddingRuntime = async (serverDB: LobeChatDatabase, userId: string) => {
-  const { provider, model: embeddingModel } =
-    getServerDefaultFilesConfig().embeddingModel || DEFAULT_USER_MEMORY_EMBEDDING_MODEL_ITEM;
-  const billingModel = new AicoBillingModel(serverDB);
-  const billingContext = await resolvePreferredGenerationBilling(
-    async (uid) => (await billingModel.getUserWallet(uid)) ?? null,
-    userId,
-  );
-  const agentRuntime = await initEmbeddingRuntimeFromDB(serverDB, userId, provider, undefined, {
-    billingContext,
-    modelId: embeddingModel,
-  });
-
-  return { agentRuntime, embeddingModel };
-};
-
-const createEmbedder = (
-  agentRuntime: UserMemoryEmbeddingRuntime,
-  embeddingModel: string,
-  userId: string,
-) => {
-  return async (value?: string | null): Promise<number[] | undefined> => {
-    if (!value || value.trim().length === 0) return undefined;
-
-    const [embedding] = await embedUserMemoryTexts({
-      input: [value],
-      model: embeddingModel,
-      runtime: agentRuntime,
-      source: 'lambda:userMemories.tool',
-      userId,
-    });
-
-    return embedding;
-  };
 };
 
 const REEMBED_TABLE_KEYS = [

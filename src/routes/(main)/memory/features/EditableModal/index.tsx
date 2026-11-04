@@ -1,10 +1,13 @@
+import { toast } from '@lobehub/ui/base-ui';
 import { memo } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { EditorModal } from '@/features/EditorModal';
 import { useUserMemoryStore } from '@/store/userMemory';
 import { LayersEnum } from '@/types/userMemory';
 
 const EditableModal = memo(() => {
+  const { t } = useTranslation('memory');
   const editingMemoryId = useUserMemoryStore((s) => s.editingMemoryId);
   const editingMemoryContent = useUserMemoryStore((s) => s.editingMemoryContent);
   const editingMemoryLayer = useUserMemoryStore((s) => s.editingMemoryLayer);
@@ -26,7 +29,13 @@ const EditableModal = memo(() => {
       onCancel={clearEditingMemory}
       onConfirm={async (value) => {
         if (!editingMemoryId || !editingMemoryLayer) return;
-        await updateMemory(editingMemoryId, value, layerMap[editingMemoryLayer]);
+        try {
+          await updateMemory(editingMemoryId, value, layerMap[editingMemoryLayer]);
+        } catch (error) {
+          // The modal stays open with the user's text so they can retry.
+          console.error('[memory] failed to save edited memory', error);
+          toast.error(t('edit.error'));
+        }
       }}
     />
   );

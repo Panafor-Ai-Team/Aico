@@ -22,6 +22,15 @@ const mockRestorePersonaVersion = vi.fn();
 const { mockTriggerProcessUsers } = vi.hoisted(() => ({
   mockTriggerProcessUsers: vi.fn(),
 }));
+const mockActivityUpdate = vi.fn();
+const mockContextUpdate = vi.fn();
+const mockExperienceUpdate = vi.fn();
+const mockPreferenceUpdate = vi.fn();
+const mockUpdateIdentityEntry = vi.fn();
+const { mockEmbed, mockGetEmbeddingRuntime } = vi.hoisted(() => ({
+  mockEmbed: vi.fn(),
+  mockGetEmbeddingRuntime: vi.fn(),
+}));
 
 vi.mock('@/database/models/asyncTask', () => ({
   AsyncTaskModel: vi.fn(() => ({
@@ -40,14 +49,20 @@ vi.mock('@/database/models/topic', () => ({
 }));
 
 vi.mock('@/database/models/userMemory', () => ({
-  UserMemoryActivityModel: vi.fn(() => ({})),
-  UserMemoryContextModel: vi.fn(() => ({})),
-  UserMemoryExperienceModel: vi.fn(() => ({})),
+  UserMemoryActivityModel: vi.fn(() => ({ update: mockActivityUpdate })),
+  UserMemoryContextModel: vi.fn(() => ({ update: mockContextUpdate })),
+  UserMemoryExperienceModel: vi.fn(() => ({ update: mockExperienceUpdate })),
   UserMemoryIdentityModel: vi.fn(() => ({})),
   UserMemoryModel: vi.fn(() => ({
     deleteAll: mockDeleteAll,
+    updateIdentityEntry: mockUpdateIdentityEntry,
   })),
-  UserMemoryPreferenceModel: vi.fn(() => ({})),
+  UserMemoryPreferenceModel: vi.fn(() => ({ update: mockPreferenceUpdate })),
+}));
+
+vi.mock('@/server/services/memory/userMemory/embeddingRuntime', () => ({
+  createUserMemoryEmbedder: vi.fn(() => mockEmbed),
+  getUserMemoryEmbeddingRuntime: mockGetEmbeddingRuntime,
 }));
 
 vi.mock('@/database/models/userMemory/persona', () => ({
@@ -326,6 +341,98 @@ describe('userMemoryRouter.deleteAll', () => {
     expect(mockDeleteAll).toHaveBeenCalledOnce();
     expect(mockDeletePersona).toHaveBeenCalledOnce();
     expect(result).toEqual({ success: true });
+  });
+});
+
+describe('userMemoryRouter manual edits', () => {
+  const vectorOf = (text: string) => [text.length, 1];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetEmbeddingRuntime.mockResolvedValue({ agentRuntime: {}, embeddingModel: 'embed-model' });
+    mockEmbed.mockImplementation(async (text: string) => vectorOf(text));
+  });
+
+  it('re-embeds an edited activity narrative', async () => {
+    await createCaller().updateActivity({ data: { narrative: 'new narrative' }, id: 'act-1' });
+
+    expect(mockActivityUpdate).toHaveBeenCalledWith('act-1', {
+      narrative: 'new narrative',
+      narrativeVector: vectorOf('new narrative'),
+    });
+  });
+
+  it('re-embeds an edited context description', async () => {
+    await createCaller().updateContext({ data: { description: 'new context' }, id: 'ctx-1' });
+
+    expect(mockContextUpdate).toHaveBeenCalledWith('ctx-1', {
+      description: 'new context',
+      descriptionVector: vectorOf('new context'),
+    });
+  });
+
+  it('re-embeds every edited experience field', async () => {
+    await createCaller().updateExperience({
+      data: { action: 'act', keyLearning: 'learned', situation: 'sit' },
+      id: 'exp-1',
+    });
+
+    expect(mockExperienceUpdate).toHaveBeenCalledWith('exp-1', {
+      action: 'act',
+      actionVector: vectorOf('act'),
+      keyLearning: 'learned',
+      keyLearningVector: vectorOf('learned'),
+      situation: 'sit',
+      situationVector: vectorOf('sit'),
+    });
+  });
+
+  it('re-embeds an edited identity description', async () => {
+    await createCaller().updateIdentity({ data: { description: 'new identity' }, id: 'id-1' });
+
+    expect(mockUpdateIdentityEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identity: expect.objectContaining({
+          description: 'new identity',
+          descriptionVector: vectorOf('new identity'),
+        }),
+        identityId: 'id-1',
+      }),
+    );
+  });
+
+  it('re-embeds an edited preference directive', async () => {
+    await createCaller().updatePreference({
+      data: { conclusionDirectives: 'new directive' },
+      id: 'pref-1',
+    });
+
+    expect(mockPreferenceUpdate).toHaveBeenCalledWith('pref-1', {
+      conclusionDirectives: 'new directive',
+      conclusionDirectivesVector: vectorOf('new directive'),
+    });
+  });
+
+  it('keeps the stored vector when the edited text is empty', async () => {
+    await createCaller().updateContext({ data: { description: '  ' }, id: 'ctx-1' });
+
+    expect(mockGetEmbeddingRuntime).not.toHaveBeenCalled();
+    expect(mockContextUpdate).toHaveBeenCalledWith('ctx-1', { description: '  ' });
+  });
+
+  it('still saves the text when embedding fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockEmbed.mockRejectedValue(new Error('provider down'));
+
+    await createCaller().updatePreference({
+      data: { conclusionDirectives: 'new directive' },
+      id: 'pref-1',
+    });
+
+    expect(mockPreferenceUpdate).toHaveBeenCalledWith('pref-1', {
+      conclusionDirectives: 'new directive',
+    });
+    consoleError.mockRestore();
   });
 });
 

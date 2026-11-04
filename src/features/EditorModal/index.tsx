@@ -35,10 +35,13 @@ export const EditorModal = memo<EditorModalProps>(
         }}
         onOk={async () => {
           setConfirmLoading(true);
-          const finalValue = (editor?.getDocument('markdown') as unknown as string) || '';
-          const editorData = editor?.getDocument('json');
-          await onConfirm?.(finalValue, editorData);
-          setConfirmLoading(false);
+          try {
+            const finalValue = (editor?.getDocument('markdown') as unknown as string) || '';
+            const editorData = editor?.getDocument('json');
+            await onConfirm?.(finalValue, editorData);
+          } finally {
+            setConfirmLoading(false);
+          }
         }}
         {...rest}
       >

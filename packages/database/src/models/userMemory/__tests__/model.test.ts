@@ -1855,6 +1855,25 @@ describe('UserMemoryModel', () => {
       expect(currentUserMemories).toHaveLength(0);
       expect(otherUserMemories).toHaveLength(1);
     });
+
+    // Contexts link to base memories through a jsonb id list, not a foreign key,
+    // so deleting the base rows alone does not cascade to them.
+    it('should delete context rows for the current user only', async () => {
+      await createContextPair();
+      await createContextPair({ user: otherUserId });
+
+      await memoryModel.deleteAll();
+
+      const currentUserContexts = await serverDB.query.userMemoriesContexts.findMany({
+        where: eq(userMemoriesContexts.userId, userId),
+      });
+      const otherUserContexts = await serverDB.query.userMemoriesContexts.findMany({
+        where: eq(userMemoriesContexts.userId, otherUserId),
+      });
+
+      expect(currentUserContexts).toHaveLength(0);
+      expect(otherUserContexts).toHaveLength(1);
+    });
   });
 
   // ========== parseAssociatedObjects with valid schema ==========
