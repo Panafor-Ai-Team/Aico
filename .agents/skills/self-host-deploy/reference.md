@@ -53,7 +53,7 @@ Browser ──► Reverse proxy / CDN ──► lobehub:3210 (Next.js + SPA)
 
 Observed failure pattern on `chat.panafor.com`:
 
-- `/_spa/icons/*` → 200
+- `/_spa/app-icons/*` → 200
 - `/_spa/assets/*.js` → 500
 - `/_spa-auth/assets/*.js` → 500
 

@@ -25,7 +25,7 @@ describe('branding env configuration', () => {
     expect(ORG_NAME).toBe('Panachat');
     expect(BRANDING_CLOUD_NAME).toBe('Panachat Cloud');
     expect(BRANDING_CLOUD_NAME_FA).toBe('ابر پاناچت');
-    expect(BRANDING_LOGO_URL).toBe('/icons/icon-192x192.png');
+    expect(BRANDING_LOGO_URL).toBe('/app-icons/icon-192x192.png');
     expect(getLocalizedBrandingName('fa-IR')).toBe('پاناچت');
     expect(getLocalizedBrandingName('en-US')).toBe('Panachat');
     expect(getLocalizedBrandingInboxName('fa-IR')).toBe('پاناچت AI');

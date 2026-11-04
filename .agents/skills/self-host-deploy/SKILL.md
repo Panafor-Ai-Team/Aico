@@ -118,7 +118,7 @@ Proxy **all** paths to port `3210`. SPA static assets live at:
 
 - `/_spa/assets/*` — main app JS/CSS
 - `/_spa-auth/assets/*` — sign-in/sign-up
-- `/_spa/icons/*`, `/_spa-auth/favicon.ico`
+- `/_spa/app-icons/*`, `/_spa-auth/favicon.ico`
 
 **Do not** add CDN rules that rewrite or block `/_spa*/assets/*`. A common failure: icons return 200 but JS chunks return 500/404 → browser shows `Failed to fetch dynamically imported module`.
 
@@ -182,7 +182,7 @@ Manual spot-checks:
 curl -sI https://chat.example.com/ | head -3
 
 # SPA chunks must be 200, not 500/404
-curl -sI https://chat.example.com/_spa/icons/icon-192x192.png | head -3
+curl -sI https://chat.example.com/_spa/app-icons/icon-192x192.png | head -3
 # Pick a current hash from page source:
 curl -sI https://chat.example.com/_spa-auth/assets/index.auth-*.js | head -3
 
