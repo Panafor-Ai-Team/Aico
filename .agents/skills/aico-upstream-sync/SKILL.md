@@ -156,6 +156,7 @@ If merge aborts due to unrelated local state, fix preconditions — do not `--fo
    - review every new upstream migration for locks on large tables (`db-migrations` § online index creation) before it reaches production;
    - the Migration Ledger CI job (schema drift, drizzle-kit baselines, ParadeDB scenarios) must pass; after the stage ships, bump its `AICO_TODAY_SHA` to the canary commit before the next stage;
    - new upstream features that can start work without a user (goals, background runs, ingestion) stay off behind the Aico capability gate (`apps/server/src/services/aico/capabilityGate.ts`, operator flags in `packages/app-config/src/featureFlags/schema.ts`) until product sign-off;
+   - new upstream GitHub workflows stay `workflow_dispatch`-only unless reviewed; `scripts/aico/workflowTriggers.test.ts` fails on any unreviewed automatic workflow and on any automatic registry publish (M1 brought `release-sdk.yml`, which publishes `@lobehub/sdk`);
    - merge the sync PR with **"Create a merge commit"** — a squash or rebase loses the upstream merge base and the next stage re-conflicts everything.
 
 6. **Branding**: defaults stay Aico via `packages/business/const` (`BRANDING_NAME`, `BRANDING_PROVIDER`, …). Do not reintroduce hard-coded `LobeHub` in user-facing Aico surfaces. Env overrides: `BRANDING_*` / `NEXT_PUBLIC_BRANDING_*`.
