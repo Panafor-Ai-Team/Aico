@@ -1,3 +1,4 @@
+import { type LobeChatDatabase } from '@lobechat/database';
 import {
   AsyncTaskError,
   AsyncTaskErrorType,
@@ -32,6 +33,10 @@ import { appEnv } from '@/envs/app';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { parseMemoryExtractionConfig } from '@/server/globalConfig/parseMemoryExtractionConfig';
+import {
+  createUserMemoryEmbedder,
+  getUserMemoryEmbeddingRuntime,
+} from '@/server/services/memory/userMemory/embeddingRuntime';
 import {
   buildWorkflowPayloadInput,
   MemoryExtractionWorkflowService,
@@ -84,6 +89,47 @@ const userMemoryExtractionTaskInputSchema = z
 // NOTICE(@nekomeowww): Memory extraction time scales with topic count. We estimate
 // an average of ~5 minutes per topic to derive a dynamic timeout budget.
 const USER_MEMORY_EXTRACTION_TIMEOUT_PER_TOPIC_MS = 5 * 60 * 1000;
+
+/**
+ * Embeds the text fields a manual edit changed, so semantic search ranks the
+ * memory by its new wording instead of the original one.
+ *
+ * Only keys whose text produced a vector are returned: empty text or a failed
+ * embedding keeps the stored vector, and the text edit itself still saves.
+ */
+const embedEditedFields = async <K extends string>(
+  ctx: { serverDB: LobeChatDatabase; userId: string },
+  fields: Partial<Record<K, string | undefined>>,
+): Promise<Partial<Record<K, number[]>>> => {
+  const entries = (Object.entries(fields) as [K, string | undefined][]).filter(
+    ([, value]) => typeof value === 'string' && value.trim().length > 0,
+  );
+  if (entries.length === 0) return {};
+
+  try {
+    const { agentRuntime, embeddingModel } = await getUserMemoryEmbeddingRuntime(
+      ctx.serverDB,
+      ctx.userId,
+    );
+    const embed = createUserMemoryEmbedder(
+      agentRuntime,
+      embeddingModel,
+      ctx.userId,
+      'lambda:userMemory.update',
+    );
+
+    const vectors: Partial<Record<K, number[]>> = {};
+    for (const [key, value] of entries) {
+      const vector = await embed(value);
+      if (vector) vectors[key] = vector;
+    }
+
+    return vectors;
+  } catch (error) {
+    console.error('[userMemory] failed to re-embed edited memory, keeping old vectors', error);
+    return {};
+  }
+};
 
 const getUserMemoryExtractionTimeoutMs = (metadata: UserMemoryExtractionMetadata) => {
   const totalTopics = metadata.progress.totalTopics;
@@ -383,7 +429,9 @@ export const userMemoryRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      return ctx.activityModel.update(input.id, input.data);
+      const vectors = await embedEditedFields(ctx, { narrativeVector: input.data.narrative });
+
+      return ctx.activityModel.update(input.id, { ...input.data, ...vectors });
     }),
 
   updateContext: userMemoryWriteProcedure
@@ -398,7 +446,9 @@ export const userMemoryRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      return ctx.contextModel.update(input.id, input.data);
+      const vectors = await embedEditedFields(ctx, { descriptionVector: input.data.description });
+
+      return ctx.contextModel.update(input.id, { ...input.data, ...vectors });
     }),
 
   updateExperience: userMemoryWriteProcedure
@@ -413,7 +463,13 @@ export const userMemoryRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      return ctx.experienceModel.update(input.id, input.data);
+      const vectors = await embedEditedFields(ctx, {
+        actionVector: input.data.action,
+        keyLearningVector: input.data.keyLearning,
+        situationVector: input.data.situation,
+      });
+
+      return ctx.experienceModel.update(input.id, { ...input.data, ...vectors });
     }),
 
   updateIdentity: userMemoryWriteProcedure
@@ -424,8 +480,11 @@ export const userMemoryRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const vectors = await embedEditedFields(ctx, { descriptionVector: input.data.description });
+
       return ctx.userMemoryModel.updateIdentityEntry({
         identity: {
+          ...vectors,
           description: input.data.description,
           episodicDate: input.data.episodicDate,
           relationship: input.data.relationship,
@@ -448,7 +507,11 @@ export const userMemoryRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      return ctx.preferenceModel.update(input.id, input.data);
+      const vectors = await embedEditedFields(ctx, {
+        conclusionDirectivesVector: input.data.conclusionDirectives,
+      });
+
+      return ctx.preferenceModel.update(input.id, { ...input.data, ...vectors });
     }),
 });
 

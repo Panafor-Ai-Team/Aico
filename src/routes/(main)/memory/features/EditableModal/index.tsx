@@ -1,4 +1,6 @@
+import { toast } from '@lobehub/ui/base-ui';
 import { memo, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { openEditorModal } from '@/features/EditorModal';
 import { useUserMemoryStore } from '@/store/userMemory';
@@ -13,6 +15,7 @@ const LAYER_MAP = {
 };
 
 const EditableModal = memo(() => {
+  const { t } = useTranslation('memory');
   const editingMemoryId = useUserMemoryStore((s) => s.editingMemoryId);
   const editingMemoryContent = useUserMemoryStore((s) => s.editingMemoryContent);
   const editingMemoryLayer = useUserMemoryStore((s) => s.editingMemoryLayer);
@@ -29,7 +32,13 @@ const EditableModal = memo(() => {
       onClose: clearEditingMemory,
       onConfirm: async (value) => {
         if (!editingMemoryId || !editingMemoryLayer) return;
-        await updateMemory(editingMemoryId, value, LAYER_MAP[editingMemoryLayer]);
+        try {
+          await updateMemory(editingMemoryId, value, LAYER_MAP[editingMemoryLayer]);
+        } catch (error) {
+          toast.error(t('edit.error'));
+          // Rethrow so the editor footer skips `close()` and the user keeps their text.
+          throw error;
+        }
       },
     });
 

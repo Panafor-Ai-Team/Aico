@@ -1,6 +1,5 @@
 'use client';
 
-import { isDesktop } from '@lobechat/const';
 import { Icon } from '@lobehub/ui';
 import { Button } from '@lobehub/ui/base-ui';
 import { BrainCircuit } from 'lucide-react';
@@ -11,9 +10,6 @@ import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwar
 export const ManageMemoryButton = () => {
   const { t } = useTranslation('setting');
   const navigate = useWorkspaceAwareNavigate();
-
-  // The `/memory` manager route is registered in the desktop router only.
-  if (!isDesktop) return null;
 
   return (
     <Button

@@ -2444,7 +2444,12 @@ export class UserMemoryModel {
   };
 
   deleteAll = async (): Promise<void> => {
-    await this.db.delete(userMemories).where(this.memoryWhere(userMemories));
+    await this.db.transaction(async (tx) => {
+      // Contexts reference base memories through a jsonb id list rather than a
+      // foreign key, so they don't cascade and must be removed explicitly.
+      await tx.delete(userMemoriesContexts).where(this.memoryWhere(userMemoriesContexts));
+      await tx.delete(userMemories).where(this.memoryWhere(userMemories));
+    });
   };
 
   searchActivities = async (params: {
