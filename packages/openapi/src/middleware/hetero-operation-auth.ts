@@ -11,7 +11,9 @@ import {
 import { extractBearerToken } from '@/utils/server/auth';
 
 export const requireHeteroModelInvocation = async (c: Context, next: Next) => {
-  if (process.env.ENABLE_SERVER_DEFAULT_HETEROGENEOUS_AGENT === '0') {
+  // Aico: opt-in, same rule as `@/server/services/aico/serverDefaultAgent` (inlined here
+  // because this package's test config has no `@/server` alias).
+  if (process.env.ENABLE_SERVER_DEFAULT_HETEROGENEOUS_AGENT !== '1') {
     throw new HTTPException(403, { message: 'Server-default agents are disabled' });
   }
 

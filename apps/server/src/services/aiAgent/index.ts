@@ -3466,7 +3466,11 @@ export class AiAgentService {
     }
     try {
       const preference = await new UserModel(this.db, this.userId).getUserPreference();
-      enableExpertise = preference?.lab?.enableSelfLearning === true;
+      // Aico: self-learning is the Expertise feature; the user's Labs toggle only applies once
+      // the operator enabled the `expertise` capability.
+      enableExpertise =
+        preference?.lab?.enableSelfLearning === true &&
+        (await isCapabilityEnabled(this.userId, 'expertise'));
     } catch (error) {
       console.error('Failed to resolve expertise injection Lab preference:', error);
     }

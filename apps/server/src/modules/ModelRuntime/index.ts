@@ -36,10 +36,11 @@ import { AiProviderModel } from '@/database/models/aiProvider';
 import { type LobeChatDatabase } from '@/database/type';
 import { aicoEnv } from '@/envs/aico';
 import { getLLMConfig } from '@/envs/llm';
+import { getServerGlobalConfig } from '@/server/globalConfig';
 import { assertManagedTrafficAllowed } from '@/server/services/aico/ledger/gate';
 import { createManagedBillingHooks } from '@/server/services/aico/ledger/managedBillingHooks';
 import { AicoManagedPolicy, AicoManagedPolicyError } from '@/server/services/aico/managedPolicy';
-import { getServerGlobalConfig } from '@/server/globalConfig';
+import { isServerDefaultHeterogeneousAgentEnabled } from '@/server/services/aico/serverDefaultAgent';
 import { createLLMGenerationTracingHook } from '@/server/services/llmGenerationTracing/hook';
 import { ensureFreshOAuthToken } from '@/server/services/oauthDeviceFlow/refresh';
 import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
@@ -785,6 +786,9 @@ export const initModelRuntimeFromServerConfig = async (params: {
   actorUserId: string;
   workspaceId?: string;
 }): Promise<ModelRuntime> => {
+  if (!isServerDefaultHeterogeneousAgentEnabled()) {
+    throw new Error('Server-default agents are disabled');
+  }
   const businessHooks = getBusinessModelRuntimeHooks(
     params.actorUserId,
     ModelProvider.LobeHub,

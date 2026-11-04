@@ -184,6 +184,15 @@ describe('Labs settings page', () => {
     expect(screen.getByText('features.projects.title')).toBeInTheDocument();
   });
 
+  it('offers the self-learning toggle only when the operator enabled the expertise capability', () => {
+    renderPage();
+    expect(screen.queryByText('features.selfLearning.title')).not.toBeInTheDocument();
+    cleanup();
+
+    renderPage({ featureFlags: { enableExpertise: true } } as Partial<ServerConfigStore>);
+    expect(screen.getByText('features.selfLearning.title')).toBeInTheDocument();
+  });
+
   it('marks internal-testing experiments as alpha and usable ones as beta', () => {
     renderPage();
 

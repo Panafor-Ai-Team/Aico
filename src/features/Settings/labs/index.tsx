@@ -12,12 +12,8 @@ import { useTranslation } from 'react-i18next';
 import AsyncError from '@/components/AsyncError';
 import { FORM_STYLE } from '@/const/layoutTokens';
 import SettingHeader from '@/features/Settings/features/SettingHeader';
-import {
-  capabilitySelectors,
-  featureFlagsSelectors,
-  useServerConfigStore,
-} from '@/store/serverConfig';
 import { SettingsSearchAnchor } from '@/features/SettingsSearch/anchor';
+import { capabilitySelectors, useServerConfigStore } from '@/store/serverConfig';
 import { useUserStore } from '@/store/user';
 import { labPreferSelectors, preferenceSelectors } from '@/store/user/selectors';
 
@@ -47,8 +43,7 @@ const LabsForm = memo(() => {
   const { t: tLabs } = useTranslation('labs');
 
   const projectsCapability = useServerConfigStore(capabilitySelectors.projects);
-  const selfIterationEnabled =
-    useServerConfigStore(featureFlagsSelectors).enableAgentSelfIteration === true;
+  const expertiseCapability = useServerConfigStore(capabilitySelectors.expertise);
   const [isPreferenceInit, isUserStateInit, isUserStateInitError, refreshUserState, updateLab] =
     useUserStore((s) => [
       preferenceSelectors.isPreferenceInit(s),
@@ -102,12 +97,12 @@ const LabsForm = memo(() => {
   // Cross-surface experiments. Platform-specific ones (Electron main-process
   // features) live in the Desktop group below; everything else is General.
   // Aico: operator-gated features offer their Labs toggle only while the operator enabled them
-  // (Projects: `projects` capability; self-learning: the `agent_self_iteration` flag).
+  // (Projects: `projects` capability; self-learning is the Expertise feature: `expertise`).
   const generalItems = LAB_FEATURES.filter(
     (feature) =>
       !feature.desktopOnly &&
       (feature.flag !== 'enableProjects' || projectsCapability) &&
-      (feature.flag !== 'enableSelfLearning' || selfIterationEnabled),
+      (feature.flag !== 'enableSelfLearning' || expertiseCapability),
   );
   // Desktop-only experiments: local agent runtimes, iMessage bridge, and the
   // in-app browser (renderer-retained Electron webviews).

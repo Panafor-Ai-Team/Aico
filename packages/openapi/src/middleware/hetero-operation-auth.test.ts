@@ -86,4 +86,16 @@ describe('heterogeneous operation auth middleware', () => {
     expect(mockValidateHeteroOperationJWT).not.toHaveBeenCalled();
     expect(mockGetServerDB).not.toHaveBeenCalled();
   });
+
+  // Aico: the relay is opt-in (`ENABLE_SERVER_DEFAULT_HETEROGENEOUS_AGENT=1`).
+  it('rejects operation tokens when the deployment has not opted in', async () => {
+    vi.stubEnv('ENABLE_SERVER_DEFAULT_HETEROGENEOUS_AGENT', undefined);
+
+    const response = await createApp().request('/invoke', {
+      headers: { Authorization: 'Bearer operation-token' },
+    });
+
+    expect(response.status).toBe(403);
+    expect(mockValidateHeteroOperationJWT).not.toHaveBeenCalled();
+  });
 });

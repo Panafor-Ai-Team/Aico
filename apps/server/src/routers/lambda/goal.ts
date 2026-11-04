@@ -7,10 +7,14 @@ import { wsCompatProcedure } from '@/business/server/trpc-middlewares/workspaceA
 import { GoalModel } from '@/database/models/goal';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
+import { assertCapability } from '@/server/services/aico/capabilityGate';
 import { GoalService } from '@/server/services/goal';
 
-const goalProcedure = wsCompatProcedure.use(serverDatabase).use(async (opts) =>
-  opts.next({
+const goalProcedure = wsCompatProcedure.use(serverDatabase).use(async (opts) => {
+  // Aico: Goals (and the Goal Graph's background recovery runs) stay off until the operator
+  // enables the `goals` capability.
+  await assertCapability(opts.ctx.userId, 'goals');
+  return opts.next({
     ctx: {
       goalModel: new GoalModel(
         opts.ctx.serverDB,
@@ -23,8 +27,8 @@ const goalProcedure = wsCompatProcedure.use(serverDatabase).use(async (opts) =>
         opts.ctx.workspaceId ?? undefined,
       ),
     },
-  }),
-);
+  });
+});
 const goalWriteProcedure = goalProcedure.use(withScopedPermission('agent:update'));
 const idInput = z.object({ id: z.string() });
 

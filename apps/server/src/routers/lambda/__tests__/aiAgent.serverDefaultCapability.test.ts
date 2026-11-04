@@ -60,6 +60,17 @@ describe('resolveServerDefaultHeterogeneousCapability', () => {
     expect(getSupportedModels).not.toHaveBeenCalled();
   });
 
+  // Aico: the relay is not metered by Aico billing, so it is off unless enabled explicitly.
+  it('stays disabled when the deployment has not opted in', async () => {
+    vi.stubEnv('ENABLE_SERVER_DEFAULT_HETEROGENEOUS_AGENT', undefined);
+
+    await expect(resolveServerDefaultHeterogeneousCapability()).resolves.toMatchObject({
+      enabled: false,
+      reason: 'disabled',
+    });
+    expect(getSupportedModels).not.toHaveBeenCalled();
+  });
+
   it('reports an invalid configuration when the server catalog has no models', async () => {
     getSupportedModels.mockResolvedValue({ 'claude-code': [], 'codex': [] });
 

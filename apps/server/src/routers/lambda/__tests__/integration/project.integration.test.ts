@@ -5,6 +5,7 @@ import { getTestDB } from '@lobechat/database/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { expertiseRouter } from '../../expertise';
+import { goalRouter } from '../../goal';
 import { projectRouter } from '../../project';
 import { taskRouter } from '../../task';
 import { cleanupTestUser, createTestContext, createTestUser } from './setup';
@@ -14,7 +15,11 @@ vi.mock('@/database/core/db-adaptor', () => ({ getServerDB: vi.fn(() => testDB) 
 
 // Aico capability gate: these upstream flows run with the operator flags on; the
 // refusal case below turns them off.
-const capabilityFlags = vi.hoisted(() => ({ enableExpertise: true, enableProjects: true }));
+const capabilityFlags = vi.hoisted(() => ({
+  enableExpertise: true,
+  enableGoals: true,
+  enableProjects: true,
+}));
 vi.mock('@/server/featureFlags', () => ({
   getServerFeatureFlagsStateFromRuntimeConfig: vi.fn(async () => capabilityFlags),
 }));
@@ -33,6 +38,7 @@ describe('Project Router Integration', () => {
 
   afterEach(async () => {
     capabilityFlags.enableExpertise = true;
+    capabilityFlags.enableGoals = true;
     capabilityFlags.enableProjects = true;
     await cleanupTestUser(serverDB, userId);
   });
@@ -40,6 +46,7 @@ describe('Project Router Integration', () => {
   it('refuses projects, project tasks and expertise while their capabilities are off', async () => {
     capabilityFlags.enableProjects = false;
     capabilityFlags.enableExpertise = false;
+    capabilityFlags.enableGoals = false;
 
     await expect(caller.list({})).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(caller.create({ name: 'Blocked' } as never)).rejects.toMatchObject({
@@ -58,6 +65,18 @@ describe('Project Router Integration', () => {
     await expect(
       expertiseCaller.listByAgent({ agentId: 'agt_any' } as never),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
+    const goalCaller = goalRouter.createCaller(createTestContext(userId));
+    await expect(goalCaller.list({})).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(goalCaller.tick({ id: 'goal_any' })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+  });
+
+  it('serves the goal graph once the goals capability is on', async () => {
+    const goalCaller = goalRouter.createCaller(createTestContext(userId));
+
+    await expect(goalCaller.list({})).resolves.toBeDefined();
   });
 
   it('serves the complete project management and human review flow', async () => {

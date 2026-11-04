@@ -25,7 +25,11 @@ import { topicActionKeys } from '@/libs/swr/keys';
 import { useChatStore } from '@/store/chat';
 import { topicSelectors } from '@/store/chat/selectors';
 import { useGlobalStore } from '@/store/global';
-import { featureFlagsSelectors, useServerConfigStore } from '@/store/serverConfig';
+import {
+  capabilitySelectors,
+  featureFlagsSelectors,
+  useServerConfigStore,
+} from '@/store/serverConfig';
 import { useUserStore } from '@/store/user';
 import { labPreferSelectors } from '@/store/user/selectors';
 
@@ -61,7 +65,10 @@ const Nav = memo(() => {
   const [openNewTopicOrSaveTopic] = useChatStore((s) => [s.openNewTopicOrSaveTopic]);
   const isNewTopicSendInFlight = useChatStore(topicSelectors.isNewTopicSendInFlight);
   const enableTopicAcceptance = useUserStore(labPreferSelectors.enableTopicAcceptance);
-  const enableSelfLearning = useUserStore(labPreferSelectors.enableSelfLearning);
+  // Aico: the self-learning page is the Expertise feature, off until the operator enables it.
+  const expertiseCapability = useServerConfigStore(capabilitySelectors.expertise);
+  const enableSelfLearning =
+    useUserStore(labPreferSelectors.enableSelfLearning) && expertiseCapability;
 
   const { mutate } = useActionSWR(topicActionKeys.openNewOrSave(), openNewTopicOrSaveTopic);
   const handleNewTopic = () => {

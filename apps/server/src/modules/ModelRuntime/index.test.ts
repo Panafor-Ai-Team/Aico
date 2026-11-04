@@ -24,7 +24,7 @@ import {
 import { LobeVertexAI } from '@lobechat/model-runtime/vertexai';
 import { ChatErrorType, type ClientSecretPayload } from '@lobechat/types';
 import { ModelProvider } from 'model-bank';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildPayloadFromKeyVaults,
@@ -402,7 +402,25 @@ describe('resolveServerDefaultHeterogeneousModel', () => {
 });
 
 describe('initModelRuntimeFromServerConfig', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  // Aico: the relay is not metered by Aico billing, so it never starts without the opt-in.
+  it('refuses to start the relay unless the deployment opted in', async () => {
+    vi.stubEnv('ENABLE_SERVER_DEFAULT_HETEROGENEOUS_AGENT', undefined);
+    const initialize = vi.spyOn(ModelRuntime, 'initializeWithProvider');
+
+    await expect(
+      initModelRuntimeFromServerConfig({ actorUserId: 'user-1', workspaceId: 'workspace-1' }),
+    ).rejects.toThrow('Server-default agents are disabled');
+
+    expect(initialize).not.toHaveBeenCalled();
+    initialize.mockRestore();
+  });
+
   it('initializes the LobeHub router directly without protocol-provider credentials', async () => {
+    vi.stubEnv('ENABLE_SERVER_DEFAULT_HETEROGENEOUS_AGENT', '1');
     const runtime = {} as ModelRuntime;
     const initialize = vi.spyOn(ModelRuntime, 'initializeWithProvider').mockReturnValue(runtime);
 

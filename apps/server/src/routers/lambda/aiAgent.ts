@@ -79,6 +79,7 @@ import {
 import { AgentRuntimeService } from '@/server/services/agentRuntime';
 import { AiAgentService } from '@/server/services/aiAgent';
 import { AiChatService } from '@/server/services/aiChat';
+import { isServerDefaultHeterogeneousAgentEnabled } from '@/server/services/aico/serverDefaultAgent';
 import { getFileProxyUrl } from '@/server/services/file';
 import { HeterogeneousAgentService } from '@/server/services/heterogeneousAgent';
 import {
@@ -1562,7 +1563,9 @@ export const resolveServerDefaultHeterogeneousCapability = async () => {
   const base = {
     model: 'lobehub-default' as const,
   };
-  if (process.env.ENABLE_SERVER_DEFAULT_HETEROGENEOUS_AGENT === '0') {
+  // Aico: opt-in. The relay runs outside Aico's managed billing, so it stays off
+  // unless the operator enables it explicitly (upstream: on unless '0').
+  if (!isServerDefaultHeterogeneousAgentEnabled()) {
     return { ...base, agents: [], enabled: false as const, reason: 'disabled' as const };
   }
 
