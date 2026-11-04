@@ -50,11 +50,27 @@ const workflows = readdirSync(workflowsDir)
         : Array.isArray(on)
           ? (on as string[])
           : Object.keys((on as Record<string, unknown>) ?? {});
-    return { file, publishes: PUBLISH_COMMAND.test(source), triggers };
+    const calls = [...source.matchAll(/uses:\s*\.\/\.github\/workflows\/([\w.-]+)/g)].map(
+      ([, called]) => called,
+    );
+    return { calls, file, publishes: PUBLISH_COMMAND.test(source), triggers };
   });
 
-const automaticTriggers = (triggers: string[]) =>
-  triggers.filter((trigger) => trigger !== 'workflow_dispatch');
+/**
+ * Triggers that start a workflow without a person. A reusable workflow's `workflow_call`
+ * is automatic only when a workflow that calls it is.
+ */
+const automaticTriggers = (triggers: string[], file?: string, seen = new Set<string>()) =>
+  triggers.filter((trigger) => {
+    if (trigger === 'workflow_dispatch') return false;
+    if (trigger !== 'workflow_call' || !file) return true;
+    return workflows.some(
+      (caller) =>
+        caller.calls.includes(file) &&
+        !seen.has(caller.file) &&
+        automaticTriggers(caller.triggers, caller.file, new Set([...seen, file])).length > 0,
+    );
+  });
 
 describe('GitHub workflow triggers', () => {
   it('parses every workflow and finds its triggers', () => {
@@ -64,7 +80,10 @@ describe('GitHub workflow triggers', () => {
 
   it('never publishes to a package registry automatically', () => {
     const automaticPublishers = workflows
-      .filter((workflow) => workflow.publishes && automaticTriggers(workflow.triggers).length > 0)
+      .filter(
+        (workflow) =>
+          workflow.publishes && automaticTriggers(workflow.triggers, workflow.file).length > 0,
+      )
       .map(({ file, triggers }) => ({ file, triggers }));
 
     expect(automaticPublishers).toEqual([]);
@@ -74,11 +93,27 @@ describe('GitHub workflow triggers', () => {
     const unreviewed = workflows
       .filter(
         (workflow) =>
-          automaticTriggers(workflow.triggers).length > 0 && !REVIEWED_AUTOMATIC[workflow.file],
+          automaticTriggers(workflow.triggers, workflow.file).length > 0 &&
+          !REVIEWED_AUTOMATIC[workflow.file],
       )
       .map(({ file, triggers }) => ({ file, triggers }));
 
     expect(unreviewed).toEqual([]);
+  });
+
+  it('treats a reusable workflow as automatic only through an automatic caller', () => {
+    const reusable = workflows.filter((workflow) => workflow.triggers.includes('workflow_call'));
+    expect(reusable.length).toBeGreaterThan(0);
+
+    for (const workflow of reusable) {
+      const automaticCaller = workflows.some(
+        (caller) =>
+          caller.calls.includes(workflow.file) &&
+          automaticTriggers(caller.triggers, caller.file).length > 0,
+      );
+      expect(automaticTriggers(['workflow_call'], workflow.file).length > 0).toBe(automaticCaller);
+    }
+    expect(automaticTriggers(['workflow_call'], 'not-called-by-anything.yml')).toEqual([]);
   });
 
   it('keeps the reviewed list free of workflows that no longer exist', () => {

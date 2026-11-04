@@ -1,7 +1,10 @@
 name: Verify Workbench
 
+# Aico: upstream uploads a preview of its workbench worker to LobeHub's Cloudflare account and
+# comments the URL on the PR. Aico does not deploy the workbench, so this runs only by hand.
+# `scripts/aico/workflowTriggers.test.ts` keeps unreviewed upstream workflows dispatch-only.
 on:
-  pull_request: {}
+  workflow_dispatch: {}
 
 permissions:
   actions: read

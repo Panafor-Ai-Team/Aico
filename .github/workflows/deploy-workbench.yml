@@ -1,8 +1,9 @@
 name: Deploy Workbench
 
+# Aico: upstream LobeHub deploys its workbench micro app to its own Cloudflare account on every
+# canary push. Aico does not deploy the workbench, so this runs only by hand.
+# `scripts/aico/workflowTriggers.test.ts` keeps unreviewed upstream workflows dispatch-only.
 on:
-  push:
-    branches: [canary]
   workflow_dispatch: {}
 
 permissions:

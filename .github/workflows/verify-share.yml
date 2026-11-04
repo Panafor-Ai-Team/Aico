@@ -8,8 +8,11 @@
 # which carries its own verify-share workflow for PRs on its side.
 name: Verify Share
 
+# Aico: upstream uploads a preview of its share worker to LobeHub's Cloudflare account and
+# comments the URL on the PR. Aico has neither the account nor the overlay, so this runs only
+# by hand. `scripts/aico/workflowTriggers.test.ts` keeps unreviewed upstream workflows dispatch-only.
 on:
-  pull_request: {}
+  workflow_dispatch: {}
 
 permissions:
   actions: read
