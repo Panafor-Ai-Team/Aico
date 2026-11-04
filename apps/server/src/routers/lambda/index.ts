@@ -26,6 +26,7 @@ import { agentDocumentRouter } from './agentDocument';
 import { agentEvalRouter } from './agentEval';
 import { agentEvalExternalRouter } from './agentEvalExternal';
 import { agentGroupRouter } from './agentGroup';
+import { agentLabelRouter } from './agentLabel';
 import { agentNotifyRouter } from './agentNotify';
 import { agentQuotaRouter } from './agentQuota';
 import { agentSignalRouter } from './agentSignal';
@@ -47,6 +48,7 @@ import { configRouter } from './config';
 import { connectorRouter } from './connector';
 import { deviceRouter } from './device';
 import { documentRouter } from './document';
+import { expertiseRouter } from './expertise';
 import { exporterRouter } from './exporter';
 import { fileRouter } from './file';
 import { followUpActionRouter } from './followUpAction';
@@ -70,6 +72,7 @@ import { oauthAppRouter } from './oauthApp';
 import { oauthDeviceFlowRouter } from './oauthDeviceFlow';
 import { organizationRouter } from './organization';
 import { pluginRouter } from './plugin';
+import { projectRouter } from './project';
 import { pushTokenRouter } from './pushToken';
 import { ragEvalRouter } from './ragEval';
 import { recentRouter } from './recent';
@@ -103,7 +106,9 @@ export const lambdaRouter = router({
   agentDocument: agentDocumentRouter,
   agentEval: agentEvalRouter,
   agentEvalExternal: agentEvalExternalRouter,
+  agentLabel: agentLabelRouter,
   agentSkills: agentSkillsRouter,
+  expertise: expertiseRouter,
   agentSignal: agentSignalRouter,
   task: taskRouter,
   changelog: changelogRouter,
@@ -149,6 +154,7 @@ export const lambdaRouter = router({
   organization: organizationRouter,
   // platformAdmin lives on @aico/control-plane only — never mount on the product lambda.
   plugin: pluginRouter,
+  project: projectRouter,
   pushToken: pushTokenRouter,
   ragEval: ragEvalRouter,
   recent: recentRouter,

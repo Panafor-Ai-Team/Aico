@@ -67,7 +67,7 @@ export interface GlobalMemoryConfig {
   userMemory?: GlobalMemoryExtractionConfig;
 }
 
-export interface VisualUnderstandingConfig {
+export interface MultimodalUnderstandingConfig {
   model: string;
   provider: string;
 }
@@ -114,10 +114,11 @@ export interface GlobalServerConfig {
   enableLobehubSkill?: boolean;
   enableMagicLink?: boolean;
   enableMarketTrustedClient?: boolean;
+  enableMultimodalUnderstanding?: boolean;
   enableUploadFileToServer?: boolean;
-  enableVisualUnderstanding?: boolean;
   image?: PartialDeep<UserImageConfig>;
   memory?: GlobalMemoryConfig;
+  multimodalUnderstanding?: MultimodalUnderstandingConfig;
   oAuthSSOProviders?: string[];
   systemAgent?: PartialDeep<UserServiceModelConfig>;
   telemetry: {
@@ -132,7 +133,6 @@ export interface GlobalServerConfig {
    * Undefined means "not configured": the default (64) applies.
    */
   toolNameMaxLength?: number;
-  visualUnderstanding?: VisualUnderstandingConfig;
 }
 
 export interface GlobalBillboardItemLocaleFields {
@@ -142,6 +142,12 @@ export interface GlobalBillboardItemLocaleFields {
 }
 
 export interface GlobalBillboardItem {
+  /**
+   * In-app action enum as delivered by the platform (unvalidated string).
+   * The client narrows it at runtime against the registry in
+   * `src/features/Billboard/actions.ts`; unrecognized values fall back to `linkUrl`.
+   */
+  action?: string | null;
   cover?: string | null;
   description: string;
   /**

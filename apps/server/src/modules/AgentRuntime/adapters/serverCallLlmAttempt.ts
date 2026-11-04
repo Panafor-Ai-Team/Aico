@@ -5,6 +5,7 @@ import type {
   ChatStreamPayload,
   ContentPartData,
   ModelRuntime,
+  ModelRuntimeDiagnostics,
   OnFinishData,
 } from '@lobechat/model-runtime';
 import {
@@ -98,7 +99,6 @@ export class ServerCallLlmAttempt {
   private readonly attempt: number;
   private readonly base64ImageEvents: Base64ImageData[] = [];
   private readonly chatPayload: ChatStreamPayload;
-  private readonly clientIp?: string;
   private completion?: OnFinishData;
   private readonly contentPartEvents: ContentPartData[] = [];
   private readonly ctx: RuntimeExecutorContext;
@@ -116,6 +116,8 @@ export class ServerCallLlmAttempt {
   private readonly reasoningPartEvents: ContentPartData[] = [];
   private resolvedModel?: string;
   private readonly resolved: ServerCallLlmTooling['resolved'];
+  private readonly runtimeDiagnostics: ModelRuntimeDiagnostics = {};
+  private readonly runtimeMetadata: Record<string, unknown>;
   private speed?: ModelPerformance;
   private readonly streamSink: ServerCallLlmStreamSink;
   private streamError?: unknown;
@@ -123,7 +125,6 @@ export class ServerCallLlmAttempt {
   private toolsCalling: ChatToolPayload[] = [];
   private readonly topicId?: string;
   private readonly trigger?: unknown;
-  private readonly userAgent?: string;
   private usage?: ModelUsage;
 
   constructor({
@@ -147,7 +148,6 @@ export class ServerCallLlmAttempt {
   }: CreateServerCallLlmAttemptInput) {
     this.attempt = attempt;
     this.chatPayload = chatPayload;
-    this.clientIp = clientIp;
     this.ctx = ctx;
     this.maxAttempts = maxAttempts;
     this.messageCount = messageCount;
@@ -157,6 +157,13 @@ export class ServerCallLlmAttempt {
     this.operationLogId = operationLogId;
     this.provider = provider;
     this.resolved = resolved;
+    this.runtimeMetadata = {
+      clientIp,
+      operationId: ctx.operationId,
+      topicId,
+      trigger,
+      userAgent,
+    };
     this.streamSink = createServerCallLlmStreamSink({
       blobStore,
       ctx,
@@ -165,7 +172,6 @@ export class ServerCallLlmAttempt {
     });
     this.topicId = topicId;
     this.trigger = trigger;
-    this.userAgent = userAgent;
   }
 
   async execute(): Promise<void> {
@@ -308,13 +314,8 @@ export class ServerCallLlmAttempt {
         },
         guard.touchActivity,
       ),
-      metadata: {
-        clientIp: this.clientIp,
-        operationId: this.ctx.operationId,
-        topicId: this.topicId,
-        trigger: this.trigger,
-        userAgent: this.userAgent,
-      },
+      diagnostics: this.runtimeDiagnostics,
+      metadata: this.runtimeMetadata,
       user: this.ctx.userId,
     });
 
@@ -431,6 +432,16 @@ export class ServerCallLlmAttempt {
 
   private async recordCompletionFailure(reason: ModelCompletionFailureReason) {
     try {
+      const providerEvidence =
+        this.runtimeDiagnostics.providerRequest || this.runtimeDiagnostics.providerResponse
+          ? this.runtimeDiagnostics
+          : undefined;
+      const routeEvidence = this.runtimeMetadata.routeAttempt;
+      const runtimeEvidence =
+        providerEvidence === undefined && routeEvidence === undefined
+          ? undefined
+          : { provider: providerEvidence, route: routeEvidence };
+
       await recordModelCompletionFailure({
         attempt: this.attempt,
         maxAttempts: this.maxAttempts,
@@ -447,6 +458,7 @@ export class ServerCallLlmAttempt {
           output: this.snapshot(),
           reasoningPartEvents: [...this.reasoningPartEvents],
         },
+        ...(runtimeEvidence ? { runtime: runtimeEvidence } : {}),
         stepIndex: this.ctx.stepIndex,
         topicId: this.topicId,
         trigger: this.trigger,

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { toProviderRouteSegment } from '@/components/Branding/brandedProviderRoute';
-import { useCategory } from '@/routes/(main)/settings/hooks/useCategory';
+import { useCategory } from '@/features/Settings/hooks/useCategory';
 import { SettingsTabs } from '@/store/global/initialState';
 import {
   featureFlagsSelectors,

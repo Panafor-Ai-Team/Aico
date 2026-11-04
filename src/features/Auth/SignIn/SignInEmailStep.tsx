@@ -49,6 +49,7 @@ export interface SignInEmailStepProps {
   onSetPassword: () => void;
   onSocialSignIn: (provider: string) => void;
   serverConfigInit: boolean;
+  sessionExpired?: boolean;
   socialLoading: string | null;
 }
 
@@ -59,6 +60,7 @@ export const SignInEmailStep = ({
   loading,
   oAuthSSOProviders,
   serverConfigInit,
+  sessionExpired,
   socialLoading,
   onCheckUser,
   onGoToPhone,

@@ -1,5 +1,4 @@
-import { type SliderWithInputProps } from '@lobehub/ui';
-import { SliderWithInput } from '@lobehub/ui';
+import { SliderWithInput, type SliderWithInputProps } from '@lobehub/ui/base-ui';
 import { memo } from 'react';
 
 import { useClampedSliderValue } from './useClampedSliderValue';

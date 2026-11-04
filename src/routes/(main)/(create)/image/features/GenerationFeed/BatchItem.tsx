@@ -15,6 +15,7 @@ import { useActiveWorkspaceId } from '@/business/client/hooks/useActiveWorkspace
 import useRenderBusinessBatchItem from '@/business/client/hooks/useRenderBusinessBatchItem';
 import { BrandedModelTag } from '@/components/Branding/BrandedModelTag';
 import { GenerationInvalidAPIKey } from '@/routes/(main)/(create)/features/GenerationInput';
+import { aiProviderSelectors, useAiInfraStore } from '@/store/aiInfra';
 import { useImageStore } from '@/store/image';
 import { AsyncTaskErrorType } from '@/types/asyncTask';
 import { type GenerationBatch } from '@/types/generation';
@@ -68,6 +69,15 @@ export const GenerationBatchItem = memo<GenerationBatchItemProps>(({ batch }) =>
   const reuseSettings = useImageStore((s) => s.reuseSettings);
   const activeWorkspaceId = useActiveWorkspaceId();
   const { shouldRenderBusinessBatchItem, businessBatchItem } = useRenderBusinessBatchItem(batch);
+
+  const enabledImageModelList = useAiInfraStore(aiProviderSelectors.enabledImageModelList);
+  // Resolve the model's display name from the enabled model catalog, falling back
+  // to the raw model id when the model is not found (e.g. removed/renamed models).
+  const modelDisplayName = useMemo(() => {
+    const provider = enabledImageModelList.find((p) => p.id === batch.provider);
+    const model = provider?.children.find((m) => m.id === batch.model);
+    return model?.displayName || batch.model;
+  }, [enabledImageModelList, batch.provider, batch.model]);
 
   const creator = batch.creator;
   const showCreator = Boolean(activeWorkspaceId && creator?.id);

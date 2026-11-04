@@ -282,11 +282,11 @@ export const createServerAgentToolsEngine = (
     isChatMode,
   );
 
-  // Chat mode: strict outer whitelist. Drop user plugins, alwaysOn tools, and
-  // every other runtime-managed rule. Each entry below still passes through
-  // its own runtime gate (KB needs enabled bases, memory needs global toggle,
-  // web-browsing needs search on). `allowExplicitActivation` is off so the
-  // activator can't smuggle anything else in.
+  // Chat mode: strict outer whitelist. Drop alwaysOn tools and every other
+  // runtime-managed rule. Each entry still passes through its own gate (KB /
+  // memory / search). Image generation is opt-in via a pinned plugin — no
+  // automatic injection. `allowExplicitActivation` is off so the activator
+  // can't smuggle anything else in.
   const chatModeRules = {
     [ImageGenerationManifest.identifier]: imageGenerationEnabled,
     [KnowledgeBaseManifest.identifier]: hasEnabledKnowledgeBases,

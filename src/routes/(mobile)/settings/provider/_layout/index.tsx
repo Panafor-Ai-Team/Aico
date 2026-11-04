@@ -3,11 +3,10 @@
 import { Outlet, useParams } from 'react-router';
 
 import { toProviderRouteSegment } from '@/components/Branding/brandedProviderRoute';
+import ProviderMenu from '@/features/Settings/provider/ProviderMenu';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { useClientDataSWR } from '@/libs/swr';
 import { lambdaClient } from '@/libs/trpc/client';
-
-import ProviderMenu from '../../../../(main)/settings/provider/ProviderMenu';
 
 const Layout = () => {
   const params = useParams<{ providerId: string }>();

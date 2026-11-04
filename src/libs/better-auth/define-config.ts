@@ -33,6 +33,7 @@ import { phoneLoginGate } from '@/libs/better-auth/plugins/phone-login-gate';
 import { sessionOptions } from '@/libs/better-auth/session-options';
 import { initBetterAuthSSOProviders } from '@/libs/better-auth/sso';
 import { createSecondaryStorage, getTrustedOrigins } from '@/libs/better-auth/utils/config';
+import { expireLegacyHostOnlyCookies } from '@/libs/better-auth/utils/host-only-cookies';
 import { parseSSOProviders } from '@/libs/better-auth/utils/server';
 import { clearMismatchedOIDCSession } from '@/libs/oidc-provider/session-cleanup';
 import { EmailService } from '@/server/services/email';
@@ -105,6 +106,25 @@ const getPasskeyOrigins = (): string[] | undefined => {
     return undefined;
   }
 };
+/**
+ * Browsers silently drop a cookie whose `Domain` the current host is not a member of.
+ * Applying a production domain on a preview deployment (`*.vercel.app`) or localhost would
+ * therefore erase every auth cookie instead of widening it, so fall back to host-only there.
+ */
+const resolveCookieDomain = (cookieDomain?: string): string | undefined => {
+  if (!cookieDomain) return undefined;
+
+  const base = cookieDomain.replace(/^\./, '');
+  try {
+    const { hostname } = new URL(appEnv.APP_URL);
+    if (hostname !== base && !hostname.endsWith(`.${base}`)) return undefined;
+  } catch {
+    return undefined;
+  }
+
+  return cookieDomain;
+};
+
 const MAGIC_LINK_EXPIRES_IN = 900;
 // OTP expiration time (in seconds) - 5 minutes for mobile OTP verification
 const OTP_EXPIRES_IN = 300;
@@ -114,10 +134,19 @@ const enabledSSOProviders = parseSSOProviders(authEnv.AUTH_SSO_PROVIDERS);
 const { socialProviders, genericOAuthProviders } = initBetterAuthSSOProviders();
 
 interface CustomBetterAuthOptions {
+  /**
+   * Share auth cookies across every subdomain of this domain (e.g. `.example.com`).
+   * Omit to keep cookies host-only.
+   */
+  cookieDomain?: string;
+  /** Namespace every Better Auth cookie so colocated deployments cannot overwrite each other. */
+  cookiePrefix?: string;
   plugins: BetterAuthPlugin[];
 }
 
 export function defineConfig(customOptions: CustomBetterAuthOptions) {
+  const cookieDomain = resolveCookieDomain(customOptions.cookieDomain);
+
   const options = {
     account: {
       accountLinking: {
@@ -297,6 +326,10 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
         (process.env.APP_URL || '').startsWith('http://'))
         ? { useSecureCookies: false }
         : {}),
+      ...(cookieDomain && {
+        crossSubDomainCookies: { domain: cookieDomain, enabled: true },
+      }),
+      ...(customOptions.cookiePrefix && { cookiePrefix: customOptions.cookiePrefix }),
       database: {
         /**
          * Align Better Auth user IDs with our shared idGenerator for consistency.
@@ -462,5 +495,12 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
     ],
   } satisfies BetterAuthOptions;
 
-  return betterAuth(options);
+  const instance = betterAuth(options);
+  if (!cookieDomain) return instance;
+
+  const handleRequest = instance.handler;
+  instance.handler = async (request) =>
+    expireLegacyHostOnlyCookies(request, await handleRequest(request), cookieDomain);
+
+  return instance;
 }

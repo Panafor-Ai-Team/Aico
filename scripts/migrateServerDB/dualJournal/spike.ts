@@ -31,6 +31,8 @@ import {
  *   bunx tsx scripts/migrateServerDB/dualJournal/spike.ts [--upstream-ref=upstream/canary]
  *     [--pg-url=postgres://…/postgres]   real Postgres (one throwaway database per scenario);
  *                                        default is in-memory PGlite + pgvector
+ *     [--today-ref=<ref>]                read today's two journals from this ref instead of the
+ *                                        working tree (run on a tree that already merged upstream)
  *     [--assert]                         exit 1 unless every scenario meets its criterion
  */
 
@@ -136,8 +138,13 @@ const seedBilling = async (executor: MigrationExecutor) => {
 };
 
 const main = async () => {
-  const mainFolder = path.join(repoRoot, MAIN_MIGRATIONS_FOLDER);
-  const aicoFolder = path.join(repoRoot, AICO_MIGRATIONS_FOLDER);
+  const todayRef = argValue('today-ref');
+  const mainFolder = todayRef
+    ? extractMigrationsAtRef(repoRoot, todayRef, MAIN_MIGRATIONS_FOLDER)
+    : path.join(repoRoot, MAIN_MIGRATIONS_FOLDER);
+  const aicoFolder = todayRef
+    ? extractMigrationsAtRef(repoRoot, todayRef, AICO_MIGRATIONS_FOLDER)
+    : path.join(repoRoot, AICO_MIGRATIONS_FOLDER);
   const upstreamFolder = extractMigrationsAtRef(repoRoot, upstreamRef);
 
   // The single journal every database and image before the split used (0000–0160).
@@ -170,6 +177,7 @@ const main = async () => {
       main: main.entries.length,
       upstream: upstream.entries.length,
     },
+    todayRef: todayRef ?? 'working tree',
     upstreamRef,
   };
 
@@ -246,7 +254,14 @@ const main = async () => {
   // S5 — failure mid-batch, then resume
   {
     const db = await buildToday();
-    const failAt = '0150_agent_interventions_and_live_activity';
+    // The middle upstream migration still pending on today's database, so some upstream
+    // work commits before the failure and some is left for the resume.
+    const pendingUpstream = upstream.entries.filter(
+      (entry) =>
+        entry.tag !== UPSTREAM_0131 &&
+        !aicoToday.entries.some((shipped) => shipped.when === entry.when),
+    );
+    const failAt = pendingUpstream[Math.floor(pendingUpstream.length / 2)].tag;
     const broken: MigrationTrack = {
       ...upstream,
       entries: upstream.entries.map((entry) =>
@@ -276,6 +291,7 @@ const main = async () => {
     const diff = diffSnapshots(freshSchema, await schemaSnapshot(db.executor));
     results.S5_failureResume = {
       committedUpstreamBeforeResume: committedUpstream,
+      failAt,
       failedTag,
       oldImagePendingAtPartialState: oldImagePendingPartial,
       resumedApplied: resumed.applied.length,
@@ -427,10 +443,7 @@ const checkResults = (results: Record<string, any>, { aicoOwnCount }: { aicoOwnC
     expect(emptyDiff(results[variant].schemaDiff), `${variant}: schema differs from fresh`);
   }
   const s5 = results.S5_failureResume;
-  expect(
-    s5.failedTag === '0150_agent_interventions_and_live_activity',
-    `S5: failed at ${s5.failedTag}`,
-  );
+  expect(s5.failedTag === s5.failAt, `S5: failed at ${s5.failedTag}, injected at ${s5.failAt}`);
   expect(s5.oldImagePendingAtPartialState.length === 0, 'S5: old image would migrate mid-way');
   expect(emptyDiff(s5.schemaDiff), 'S5: resumed schema differs from fresh');
   expect(!results.S6_hashDrift.reExecuted, 'S6: drifted 0132 was re-executed');

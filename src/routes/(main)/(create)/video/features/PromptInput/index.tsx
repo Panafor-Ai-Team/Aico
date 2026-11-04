@@ -1,7 +1,7 @@
 'use client';
 
-import { ActionIcon, Flexbox, InputNumber, SliderWithInput, Text } from '@lobehub/ui';
-import { Switch, Tabs } from '@lobehub/ui/base-ui';
+import { ActionIcon, Flexbox, InputNumber, Text } from '@lobehub/ui';
+import { SliderWithInput, Switch, Tabs } from '@lobehub/ui/base-ui';
 import { Divider } from 'antd';
 import { Clock3, Dices } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
@@ -357,7 +357,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
     if (!canCreate) return;
 
     if (!isLogin) {
-      loginRequired.redirect({ timeout: 2000 });
+      loginRequired.redirect();
       return;
     }
 

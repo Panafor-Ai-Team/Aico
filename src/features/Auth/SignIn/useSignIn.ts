@@ -77,6 +77,7 @@ export const useSignIn = () => {
   const { t } = useTranslation('auth');
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const sessionExpired = searchParams.get('reason') === 'sessionExpired';
   const disableEmailPassword = useAuthServerConfigStore(
     (s) => s.serverConfig.disableEmailPassword || false,
   );
@@ -439,10 +440,13 @@ export const useSignIn = () => {
     if (sending) return false;
     setSending(true);
     try {
-      await requestPasswordReset({
+      // The better-auth client resolves with `{ data, error }` instead of
+      // throwing, so a failed send would otherwise land on the "email sent" screen.
+      const { error } = await requestPasswordReset({
         email: targetEmail,
         redirectTo: `/reset-password?email=${encodeURIComponent(targetEmail)}`,
       });
+      if (error) throw error;
       return true;
     } catch {
       toast.error(t('betterAuth.signin.forgotPasswordError'));
@@ -502,6 +506,7 @@ export const useSignIn = () => {
     phoneForm,
     resending,
     sending,
+    sessionExpired,
     sentInfo,
     serverConfigInit: enableBusinessFeatures ? true : serverConfigInit,
     socialLoading,

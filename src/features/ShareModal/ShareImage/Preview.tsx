@@ -1,5 +1,5 @@
 import { BRANDING_INBOX_NAME, BRANDING_SITE_URL } from '@lobechat/business-const';
-import { type ConversationContext, type UIChatMessage } from '@lobechat/types';
+import { agentDisplayName, type ConversationContext, type UIChatMessage } from '@lobechat/types';
 import { Avatar, Flexbox, Markdown, Text } from '@lobehub/ui';
 import { cx } from 'antd-style';
 import { memo } from 'react';
@@ -59,7 +59,7 @@ const Preview = memo<PreviewProps>(
         agentSelectors.displayableAgentPlugins(s),
         agentSelectors.currentAgentSystemRole(s),
         builtinAgentSelectors.isInboxAgent(s),
-        agentSelectors.currentAgentTitle(s),
+        agentSelectors.currentAgentDisplayName(s),
         agentSelectors.currentAgentAvatar(s),
         agentSelectors.currentAgentBackgroundColor(s),
         resolvedHeaderAgentId
@@ -78,7 +78,9 @@ const Preview = memo<PreviewProps>(
     });
 
     const displayTitle =
-      (isHeaderInbox ?? isInbox) ? BRANDING_INBOX_NAME : headerMeta?.title || title || currentTitle;
+      (isHeaderInbox ?? isInbox)
+        ? BRANDING_INBOX_NAME
+        : agentDisplayName(headerMeta) || title || currentTitle;
     const displayAvatar = headerMeta?.avatar || currentAvatar;
     const displayBackgroundColor = headerMeta?.backgroundColor || currentBackgroundColor;
     const displayModel = headerModel || currentModel;

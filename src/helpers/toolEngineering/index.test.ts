@@ -66,7 +66,7 @@ vi.mock('@/store/tool', () => ({
           api: [
             {
               description: 'Analyze visual media',
-              name: 'analyzeVisualMedia',
+              name: 'analyzeMedia',
               parameters: {
                 properties: {
                   question: { type: 'string' },
@@ -367,6 +367,7 @@ describe('toolEngineering', () => {
 
     it('should enable image generation in chat mode when media offer is on, even with native image output', () => {
       mockCurrentChatConfig = { enableAgentMode: false };
+      mockCurrentAgentPlugins = ['lobe-image-generation'];
       mockImageOutputSupport = true;
 
       const toolsEngine = createAgentToolsEngine(
@@ -380,7 +381,7 @@ describe('toolEngineering', () => {
       );
 
       const result = toolsEngine.generateToolsDetailed({
-        toolIds: [],
+        toolIds: ['lobe-image-generation'],
         model: 'gpt-image-chat',
         provider: 'openai',
       });
@@ -390,6 +391,7 @@ describe('toolEngineering', () => {
 
     it('should not enable image generation in chat mode when model cannot call tools', () => {
       mockCurrentChatConfig = { enableAgentMode: false };
+      mockCurrentAgentPlugins = ['lobe-image-generation'];
       mockIsCanUseFC = false;
 
       const toolsEngine = createAgentToolsEngine({
@@ -398,7 +400,7 @@ describe('toolEngineering', () => {
       });
 
       const result = toolsEngine.generateToolsDetailed({
-        toolIds: [],
+        toolIds: ['lobe-image-generation'],
         model: 'plain-text-model',
         provider: 'test',
       });
