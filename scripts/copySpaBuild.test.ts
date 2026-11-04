@@ -18,7 +18,15 @@ describe('copySpaBuild', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'copy-spa-build-'));
     testRoots.push(root);
 
-    for (const dir of ['assets', 'devtools', 'i18n', 'icons', 'model-bank', 'shiki', 'vendor']) {
+    for (const dir of [
+      'app-icons',
+      'assets',
+      'devtools',
+      'i18n',
+      'model-bank',
+      'shiki',
+      'vendor',
+    ]) {
       const sourceDir = path.join(root, 'dist/desktop', dir);
       mkdirSync(sourceDir, { recursive: true });
       writeFileSync(path.join(sourceDir, `${dir}.js`), `export default '${dir}';`);
@@ -26,7 +34,15 @@ describe('copySpaBuild', () => {
 
     copySpaBuild(root);
 
-    for (const dir of ['assets', 'devtools', 'i18n', 'icons', 'model-bank', 'shiki', 'vendor']) {
+    for (const dir of [
+      'app-icons',
+      'assets',
+      'devtools',
+      'i18n',
+      'model-bank',
+      'shiki',
+      'vendor',
+    ]) {
       expect(existsSync(path.join(root, 'public/_spa', dir, `${dir}.js`))).toBe(true);
     }
   });
@@ -35,13 +51,13 @@ describe('copySpaBuild', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'copy-spa-build-icons-'));
     testRoots.push(root);
 
-    const sourceDir = path.join(root, 'dist/desktop/icons');
+    const sourceDir = path.join(root, 'dist/desktop/app-icons');
     mkdirSync(sourceDir, { recursive: true });
     writeFileSync(path.join(sourceDir, 'icon-192x192.png'), 'png');
 
     copySpaBuild(root);
 
-    expect(existsSync(path.join(root, 'public/_spa/icons/icon-192x192.png'))).toBe(true);
+    expect(existsSync(path.join(root, 'public/_spa/app-icons/icon-192x192.png'))).toBe(true);
   });
 
   // `new Worker` only accepts a same-origin script, so these are requested from the

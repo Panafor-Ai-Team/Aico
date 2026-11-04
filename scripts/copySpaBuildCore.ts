@@ -1,8 +1,16 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-// Splash #loading-screen references /icons/...; Vite rewrites that to /_spa/icons/...
-const copyDirs = ['assets', 'devtools', 'i18n', 'icons', 'model-bank', 'shiki', 'vendor'] as const;
+// Splash #loading-screen references /app-icons/...; Vite rewrites that to /_spa/app-icons/...
+const copyDirs = [
+  'app-icons',
+  'assets',
+  'devtools',
+  'i18n',
+  'model-bank',
+  'shiki',
+  'vendor',
+] as const;
 
 // Workers are requested root-relative, not from under the entry prefix, because
 // `new Worker` needs a same-origin script and the file is byte-identical across

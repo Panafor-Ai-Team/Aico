@@ -432,7 +432,7 @@ wait_healthy() {
 verify_slot_spa() {
   local port="$1"
   local code
-  code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:${port}/_spa/icons/icon-192x192.png" || echo 000)
+  code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:${port}/_spa/app-icons/icon-192x192.png" || echo 000)
   if [[ "$code" != "200" ]]; then
     err "SPA icon check failed on :$port → HTTP $code"
     return 1

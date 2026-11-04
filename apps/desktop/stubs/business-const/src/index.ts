@@ -1,6 +1,6 @@
 export const BRANDING_CLOUD_NAME = 'Panachat Cloud';
 export const BRANDING_CLOUD_NAME_FA = 'ابر پاناچت';
-export const BRANDING_LOGO_URL = '/icons/icon-192x192.png';
+export const BRANDING_LOGO_URL = '/app-icons/icon-192x192.png';
 export const BRANDING_NAME = 'Panachat';
 export const BRANDING_NAME_FA = 'پاناچت';
 export const BRANDING_INBOX_NAME = `${BRANDING_NAME} AI`;

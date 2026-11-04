@@ -78,7 +78,7 @@ export const BRANDING_SITE_URL = brandingValue(
 /** Product logo URL used by ProductLogo / metadata. Defaults to the favicon_io PWA icon. */
 export const BRANDING_LOGO_URL = brandingValue(
   process.env.BRANDING_LOGO_URL ?? process.env.NEXT_PUBLIC_BRANDING_LOGO_URL,
-  '/icons/icon-192x192.png',
+  '/app-icons/icon-192x192.png',
 );
 
 /**

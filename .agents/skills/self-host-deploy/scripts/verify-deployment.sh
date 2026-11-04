@@ -57,7 +57,7 @@ fi
 # --- HTTP functional checks ---
 check_http "Root (may redirect)" "$BASE_URL/" "302" || check_http "Root" "$BASE_URL/" "200"
 check_http "Sign-in page" "$BASE_URL/signin" "200"
-check_http "SPA icons" "$BASE_URL/_spa/icons/icon-192x192.png" "200"
+check_http "SPA icons" "$BASE_URL/_spa/app-icons/icon-192x192.png" "200"
 check_http "SPA-auth favicon" "$BASE_URL/_spa-auth/favicon.ico" "200"
 
 # Extract chunks from sign-in HTML

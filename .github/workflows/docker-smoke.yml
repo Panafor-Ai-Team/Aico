@@ -102,7 +102,7 @@ jobs:
           # the #416 regression).
           docker exec -w /app app /bin/node -e "require('pg'); require('drizzle-orm/node-postgres/migrator')"
           # SPA assets are served.
-          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:3210/_spa/icons/icon-192x192.png)" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:3210/_spa/app-icons/icon-192x192.png)" = 200
           # Next can write its cache as the image user.
           docker exec app /bin/sh -c 'id; mkdir -p /app/.next/cache && touch /app/.next/cache/.smoke'
           # The image ships both journals beside the runner.
