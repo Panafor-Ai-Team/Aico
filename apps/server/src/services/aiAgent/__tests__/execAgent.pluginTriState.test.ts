@@ -28,6 +28,11 @@ const {
   mockPluginQuery: vi.fn().mockResolvedValue([]),
 }));
 
+// Aico capability gate: these upstream cases exercise goal behaviour, so goals are on.
+vi.mock('@/server/services/aico/capabilityGate', () => ({
+  isCapabilityEnabled: vi.fn(async () => true),
+}));
+
 vi.mock('@/libs/trusted-client', () => ({
   generateTrustedClientToken: vi.fn().mockReturnValue(undefined),
   getTrustedClientTokenForSession: vi.fn().mockResolvedValue(undefined),
@@ -82,6 +87,8 @@ vi.mock('@/database/models/connectorTool', () => ({
 
 vi.mock('@/database/models/topic', () => ({
   TopicModel: vi.fn().mockImplementation(() => ({
+    releaseTaskCallbackReservation: vi.fn().mockResolvedValue(undefined),
+    tryReserveTaskCallback: vi.fn().mockResolvedValue(true),
     create: vi.fn().mockResolvedValue({ id: 'topic-1' }),
     findById: vi.fn().mockResolvedValue(null),
   })),

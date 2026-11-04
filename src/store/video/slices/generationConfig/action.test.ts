@@ -58,7 +58,7 @@ const mockProviders = [
   {
     id: 'provider-a',
     name: 'Provider A',
-    children: [testVideoModels[0]],
+    children: [testVideoModels[0], testVideoModels[2]],
   },
   {
     id: 'provider-b',

@@ -46,7 +46,9 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   footer: css`
     display: flex;
     gap: 8px;
+    align-items: center;
     justify-content: flex-end;
+
     margin-block-start: 8px;
   `,
   number: css`

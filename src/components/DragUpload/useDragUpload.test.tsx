@@ -3,17 +3,17 @@ import { act, renderHook } from '@testing-library/react';
 import { type Mock } from 'vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type * as visualMediaUploadAbilityModule from '@/hooks/useVisualMediaUploadAbility';
-import { useVisualMediaUploadAbility } from '@/hooks/useVisualMediaUploadAbility';
+import type * as mediaUploadAbilityModule from '@/hooks/useMediaUploadAbility';
+import { useMediaUploadAbility } from '@/hooks/useMediaUploadAbility';
 import { useAgentStore } from '@/store/agent';
 import { agentSelectors } from '@/store/agent/selectors';
 
 import { getContainer, useDragUpload } from './useDragUpload';
 
 // Mock the hooks and components
-vi.mock('@/hooks/useVisualMediaUploadAbility', async (importOriginal) => ({
-  ...(await importOriginal<typeof visualMediaUploadAbilityModule>()),
-  useVisualMediaUploadAbility: vi.fn(),
+vi.mock('@/hooks/useMediaUploadAbility', async (importOriginal) => ({
+  ...(await importOriginal<typeof mediaUploadAbilityModule>()),
+  useMediaUploadAbility: vi.fn(),
 }));
 vi.mock('@/store/agent');
 vi.mock('@lobehub/ui/base-ui', () => {
@@ -29,7 +29,7 @@ describe('useDragUpload', () => {
     document.body.innerHTML = '';
 
     // Mock the hooks
-    (useVisualMediaUploadAbility as Mock).mockReturnValue({
+    (useMediaUploadAbility as Mock).mockReturnValue({
       canUploadAudio: false,
       canUploadDocument: true,
       canUploadImage: false,
@@ -199,7 +199,7 @@ describe('useDragUpload', () => {
   });
 
   it('should allow image files when vision is supported', async () => {
-    (useVisualMediaUploadAbility as Mock).mockReturnValue({
+    (useMediaUploadAbility as Mock).mockReturnValue({
       canUploadImage: true,
       canUploadVideo: false,
     });
@@ -233,7 +233,7 @@ describe('useDragUpload', () => {
   });
 
   it('should allow image files when visual understanding fallback is enabled', async () => {
-    (useVisualMediaUploadAbility as Mock).mockReturnValue({
+    (useMediaUploadAbility as Mock).mockReturnValue({
       canUploadImage: true,
       canUploadVideo: true,
     });
@@ -263,7 +263,7 @@ describe('useDragUpload', () => {
   });
 
   it('should warn and block dropping an audio file when the model does not support audio', async () => {
-    (useVisualMediaUploadAbility as Mock).mockReturnValue({
+    (useMediaUploadAbility as Mock).mockReturnValue({
       canUploadAudio: false,
       canUploadDocument: true,
       canUploadImage: false,
@@ -301,7 +301,7 @@ describe('useDragUpload', () => {
   });
 
   it('should warn and block pasting a document when the model has files: false', async () => {
-    (useVisualMediaUploadAbility as Mock).mockReturnValue({
+    (useMediaUploadAbility as Mock).mockReturnValue({
       canUploadAudio: false,
       canUploadDocument: false,
       canUploadImage: false,

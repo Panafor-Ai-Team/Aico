@@ -3,6 +3,7 @@
  */
 import { BrowserManifest } from '@lobechat/builtin-tool-browser';
 import { CloudSandboxManifest } from '@lobechat/builtin-tool-cloud-sandbox';
+import { GoalIdentifier } from '@lobechat/builtin-tool-goal';
 import { ImageGenerationManifest } from '@lobechat/builtin-tool-image-generation';
 import { KnowledgeBaseManifest } from '@lobechat/builtin-tool-knowledge-base';
 import { LocalSystemManifest } from '@lobechat/builtin-tool-local-system';
@@ -34,6 +35,7 @@ import { isToolAvailableInCurrentEnv } from '@/helpers/toolAvailability';
 import { patchManifestWithPermissions } from '@/libs/mcp/patchManifestPermissions';
 import { getAgentStoreState } from '@/store/agent';
 import { agentChatConfigSelectors, agentSelectors } from '@/store/agent/selectors';
+import { isClientCapabilityEnabled } from '@/store/serverConfig';
 import { getToolStoreState } from '@/store/tool';
 import {
   composioStoreSelectors,
@@ -203,10 +205,15 @@ export const createToolsEngine = (config: ToolsEngineConfig = {}): ToolsEngine =
   // enableChecker rules) — a plugin, skill, connector, or user-toggleable
   // builtin tool the agent has explicitly disabled must not be discoverable/
   // activatable at all, matching the server-side (aiAgent gateway) treatment.
+  // Aico capability gate: the Goal tool is never offered while `goals` is off.
+  const goalsEnabled = isClientCapabilityEnabled('goals');
+  const excludedIdentifiers = goalsEnabled
+    ? disabledPluginIds
+    : [...disabledPluginIds, GoalIdentifier];
   const allManifests =
-    disabledPluginIds.length === 0
+    excludedIdentifiers.length === 0
       ? combinedManifests
-      : combinedManifests.filter((m) => !disabledPluginIds.includes(m.identifier));
+      : combinedManifests.filter((m) => !excludedIdentifiers.includes(m.identifier));
 
   return new ToolsEngine({
     defaultToolIds,

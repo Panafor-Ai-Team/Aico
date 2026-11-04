@@ -22,7 +22,14 @@ const schemasDir = './packages/database/src/schemas';
 const AICO_SCHEMA_FILES = new Set(['aicoOrganization.ts', 'index.ts']);
 
 const mainSchemaFiles = readdirSync(schemasDir, { recursive: true, withFileTypes: true })
-  .filter((entry) => entry.isFile() && entry.name.endsWith('.ts'))
+  // Schema tests live next to the schemas (`__tests__/*.test.ts`); they are not schema.
+  .filter(
+    (entry) =>
+      entry.isFile() &&
+      entry.name.endsWith('.ts') &&
+      !entry.name.endsWith('.test.ts') &&
+      !entry.parentPath.split(path.sep).includes('__tests__'),
+  )
   .map((entry) => path.join(entry.parentPath, entry.name))
   .filter(
     (file) =>

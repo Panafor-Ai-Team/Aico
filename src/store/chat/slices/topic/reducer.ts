@@ -13,11 +13,28 @@ import { type ChatTopic, type CreateTopicParams } from '@/types/topic';
  */
 interface ChatTopicScope {
   agentId?: string;
+  /**
+   * Pre-resolved `topicDataMap` key, taking precedence over the fields above.
+   * For callers that hold a topic id but not its container coordinates — see
+   * `topicSelectors.getTopicContainerKeyById`.
+   */
+  containerKey?: string;
   groupId?: string;
   scope?: TopicMapScope;
 }
 
 type AddChatTopicAction = ChatTopicScope & {
+  /**
+   * Marks a client-only row inserted before the server has created it (the
+   * first-send placeholder). `internal_dispatchTopic` tracks these ids so a
+   * topic-list refetch landing mid-send re-prepends them instead of wiping the
+   * row — see `#reconcileFetchedTopics`.
+   *
+   * This must be stated by the caller rather than inferred from the id: the id
+   * is a normal `tpc_…` value the server will honour verbatim, so it is
+   * indistinguishable from a persisted one.
+   */
+  optimistic?: boolean;
   type: 'addTopic';
   value: CreateTopicParams & { id?: string };
 };

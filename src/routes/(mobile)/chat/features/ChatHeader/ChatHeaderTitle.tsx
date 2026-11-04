@@ -20,7 +20,7 @@ const ChatHeaderTitle = memo(() => {
     topicSelectors.currentActiveTopic(s),
   ]);
   const isInbox = useAgentStore(builtinAgentSelectors.isInboxAgent);
-  const title = useAgentStore(agentSelectors.currentAgentTitle);
+  const title = useAgentStore(agentSelectors.currentAgentDisplayName);
 
   const displayTitle = isInbox ? BRANDING_INBOX_NAME : title;
 

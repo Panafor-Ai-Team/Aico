@@ -55,6 +55,7 @@ describe('HomeEditorInput billing switcher', () => {
   it('exposes the billing source switcher before the first message', () => {
     render(
       <HomeEditorInput
+        contextSelectionKey="home:chat:agt_inbox"
         initialValue=""
         isAgentConfigLoading={false}
         loading={false}
@@ -72,6 +73,7 @@ describe('HomeEditorInput billing switcher', () => {
   it('mounts funds-blocked alerts above the composer (Conversation parity)', () => {
     render(
       <HomeEditorInput
+        contextSelectionKey="home:chat:agt_inbox"
         initialValue=""
         isAgentConfigLoading={false}
         loading={false}
@@ -96,6 +98,7 @@ describe('HomeEditorInput thinking level', () => {
     render(
       <HomeEditorInput
         agentId="agt_inbox"
+        contextSelectionKey="home:chat:agt_inbox"
         initialValue=""
         isAgentConfigLoading={false}
         loading={false}

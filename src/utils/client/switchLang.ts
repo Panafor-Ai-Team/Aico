@@ -7,8 +7,12 @@ import { type LocaleMode } from '@/types/locale';
 import { applyDocumentDirection } from '@/utils/client/applyDocumentDirection';
 import { getSystemLanguages } from '@/utils/client/systemLanguage';
 
+// Aico: `auto` resolves through the Persian-aware system-locale matcher.
+export const resolveLang = (locale: LocaleMode) =>
+  locale === 'auto' ? resolveSystemLocale(getSystemLanguages()) : locale;
+
 export const switchLang = (locale: LocaleMode) => {
-  const lang = locale === 'auto' ? resolveSystemLocale(getSystemLanguages()) : locale;
+  const lang = resolveLang(locale);
 
   changeLanguage(lang);
   document.documentElement.lang = lang;

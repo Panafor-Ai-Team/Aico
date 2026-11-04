@@ -1,27 +1,16 @@
 import { validateVideoFileSize } from '@lobechat/utils/client';
-import { type ItemType } from '@lobehub/ui';
 import { Icon, Tooltip } from '@lobehub/ui';
 import { toast } from '@lobehub/ui/base-ui';
 import { Upload } from 'antd';
 import { css, cx } from 'antd-style';
-import isEqual from 'fast-deep-equal';
-import { ArrowRight, FileUp, FolderUp, ImageUp, LibraryBig, Paperclip } from 'lucide-react';
+import { FileUp, FolderUp, ImageUp, Paperclip } from 'lucide-react';
 import { memo, Suspense, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import FileIcon from '@/components/FileIcon';
-import RepoIcon from '@/components/LibIcon';
 import TipGuide from '@/components/TipGuide';
-import { openAttachKnowledgeModal } from '@/features/LibraryModal';
+import { isUploadBlockedByAbility, useMediaUploadAbility } from '@/hooks/useMediaUploadAbility';
 import { usePermission } from '@/hooks/usePermission';
-import {
-  isUploadBlockedByAbility,
-  useVisualMediaUploadAbility,
-} from '@/hooks/useVisualMediaUploadAbility';
-import { useAgentStore } from '@/store/agent';
-import { agentByIdSelectors } from '@/store/agent/selectors';
-import { fileChatSelectors, useFileStore } from '@/store/file';
-import { resolvePersistedFileMime } from '@/store/file/slices/chat/persistedFile';
+import { useFileStore } from '@/store/file';
 import { featureFlagsSelectors, useServerConfigStore } from '@/store/serverConfig';
 import { useUserStore } from '@/store/user';
 import { preferenceSelectors } from '@/store/user/selectors';
@@ -31,7 +20,7 @@ import { useEffectiveModel } from '../../hooks/useEffectiveModel';
 import { useChatInputStore } from '../../store';
 import { type ActionDropdownMenuItems } from '../components/ActionDropdown';
 import { ChatInputAction } from '../components/ChatInputAction';
-import CheckboxItem from '../components/CheckboxWithLoading';
+import { MENU_ICON_SIZE, useKnowledgeMenuItems } from './useKnowledgeMenuItems';
 
 const hotArea = css`
   &::before {
@@ -41,11 +30,6 @@ const hotArea = css`
     background-color: transparent;
   }
 `;
-
-// Keep every row's leading icon the same width. The menu's icon slot sizes to its
-// content, so a larger file-type icon next to a smaller line icon would widen that
-// slot and push its label out of alignment with the upload / "view more" rows.
-const MENU_ICON_SIZE = 20;
 
 const FileUpload = memo(() => {
   const { t } = useTranslation('chat');
@@ -60,7 +44,7 @@ const FileUpload = memo(() => {
   const agentId = useAgentId();
   const { model, provider } = useEffectiveModel(agentId);
 
-  const mediaUploadAbility = useVisualMediaUploadAbility(model, provider, agentId);
+  const mediaUploadAbility = useMediaUploadAbility(model, provider, agentId);
   const { canUploadImage } = mediaUploadAbility;
 
   const [showTip, updateGuideState] = useUserStore((s) => [
@@ -70,21 +54,7 @@ const FileUpload = memo(() => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
 
-  const files = useAgentStore((s) => agentByIdSelectors.getAgentFilesById(agentId)(s), isEqual);
-  const knowledgeBases = useAgentStore(
-    (s) => agentByIdSelectors.getAgentKnowledgeBasesById(agentId)(s),
-    isEqual,
-  );
-
-  const toggleKnowledgeBase = useAgentStore((s) => s.toggleKnowledgeBase);
-
-  // Files are attached to the current draft (chip row + send path), not toggled as
-  // agent-wide knowledge — only libraries keep the agent-level toggle.
-  const attachedFileIds = useFileStore(fileChatSelectors.chatUploadFileIds, isEqual);
-  const [attachChatFile, detachChatFile] = useFileStore((s) => [
-    s.attachChatFile,
-    s.detachChatFile,
-  ]);
+  const knowledgeItems = useKnowledgeMenuItems({ onUpdatingChange: setUpdating });
 
   // Viewer doesn't have `file:upload` permission — backend would 403.
   // Render the disabled paperclip with a tooltip so the entry stays visible
@@ -211,86 +181,7 @@ const FileUpload = memo(() => {
     },
   ];
 
-  const knowledgeItems: ItemType[] = [];
-
-  // Only add knowledge base items if there are files or knowledge bases
-  if (files.length > 0 || knowledgeBases.length > 0) {
-    knowledgeItems.push({
-      children: [
-        // first the files
-        ...files.map((item) => ({
-          icon: (
-            <FileIcon
-              fileName={item.name}
-              fileType={resolvePersistedFileMime(item)}
-              size={MENU_ICON_SIZE}
-            />
-          ),
-          key: item.id,
-          label: (
-            <CheckboxItem
-              checked={attachedFileIds.includes(item.id)}
-              id={item.id}
-              label={item.name}
-              onUpdate={async (id, attached) => {
-                if (attached) attachChatFile(item);
-                else detachChatFile(id);
-              }}
-            />
-          ),
-        })),
-
-        // then the knowledge bases
-        ...knowledgeBases.map((item) => ({
-          icon: <RepoIcon size={MENU_ICON_SIZE} />,
-          key: item.id,
-          label: (
-            <CheckboxItem
-              checked={item.enabled}
-              id={item.id}
-              label={item.name}
-              onUpdate={async (id, enabled) => {
-                setUpdating(true);
-                await toggleKnowledgeBase(id, enabled);
-                setUpdating(false);
-              }}
-            />
-          ),
-        })),
-      ],
-      key: 'relativeFilesOrLibraries',
-      label: t('knowledgeBase.relativeFilesOrLibraries'),
-      type: 'group',
-    });
-  }
-
-  if (knowledgeItems.length > 0) {
-    knowledgeItems.push(
-      {
-        type: 'divider',
-      },
-      {
-        extra: <Icon icon={ArrowRight} />,
-        icon: <Icon icon={LibraryBig} size={MENU_ICON_SIZE} />,
-        key: 'knowledge-base-store',
-        label: t('knowledgeBase.viewMore'),
-        onClick: () => {
-          openAttachKnowledgeModal();
-        },
-      },
-    );
-  } else {
-    knowledgeItems.push({
-      disabled: true,
-      key: 'knowledge-empty',
-      label: t('knowledgeBase.related.empty'),
-    });
-  }
-
-  const items: ActionDropdownMenuItems = [
-    ...uploadItems,
-    ...(knowledgeItems.length > 0 ? knowledgeItems : []),
-  ];
+  const items: ActionDropdownMenuItems = [...uploadItems, ...knowledgeItems];
 
   const content = (
     <ChatInputAction

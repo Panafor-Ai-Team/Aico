@@ -42,6 +42,12 @@ export const FeatureFlagsSchema = z.object({
   storage_overage: FeatureFlagValue.optional(),
   workspace: FeatureFlagValue.optional(),
 
+  // Aico capability gate: upstream features that stay off until product sign-off.
+  // Enforced server-side (routers, tool engine, tool execution, background loops).
+  expertise: FeatureFlagValue.optional(),
+  goals: FeatureFlagValue.optional(),
+  projects: FeatureFlagValue.optional(),
+
   // the flags below can only be used with commercial license
   // if you want to use it in the commercial usage
   // please contact us for more information: hello@lobehub.com
@@ -97,6 +103,11 @@ export const DEFAULT_FEATURE_FLAGS: IFeatureFlags = {
   storage_overage: true,
   workspace: isDev,
 
+  // Aico capability gate — off everywhere (including dev) until enabled by an operator.
+  expertise: false,
+  goals: false,
+  projects: false,
+
   market: true,
   speech_to_text: true,
   changelog: true,
@@ -141,6 +152,10 @@ export const mapFeatureFlagsEnvToState = (
 
     showCloudPromotion: evaluateFeatureFlag(config.cloud_promotion, userId),
     enableWorkspace: evaluateFeatureFlag(config.workspace, userId),
+
+    enableExpertise: evaluateFeatureFlag(config.expertise, userId),
+    enableGoals: evaluateFeatureFlag(config.goals, userId),
+    enableProjects: evaluateFeatureFlag(config.projects, userId),
 
     showMarket: evaluateFeatureFlag(config.market, userId),
     enableSTT: evaluateFeatureFlag(config.speech_to_text, userId),

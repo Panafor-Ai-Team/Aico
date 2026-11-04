@@ -1,6 +1,7 @@
 import { BRANDING_INBOX_NAME } from '@lobechat/business-const';
 import { DEFAULT_AVATAR, DEFAULT_INBOX_AVATAR } from '@lobechat/const';
 import type { ScreenCaptureAgentOption } from '@lobechat/electron-client-ipc';
+import { agentDisplayName } from '@lobechat/types';
 
 const LOBE_AI_TITLE = BRANDING_INBOX_NAME;
 const UNTITLED_AGENT_TITLE = 'Untitled Agent';
@@ -10,6 +11,7 @@ interface OverlayAgentSource {
   backgroundColor?: string | null;
   heterogeneousType?: string | null;
   id: string;
+  name?: string | null;
   title?: string | null;
 }
 
@@ -36,13 +38,14 @@ const toOverlayAgentOption = ({
   backgroundColor,
   heterogeneousType,
   id,
+  name,
   title,
 }: OverlayAgentSource): ScreenCaptureAgentOption => ({
   avatar: typeof avatar === 'string' ? avatar : DEFAULT_AVATAR,
   backgroundColor: backgroundColor ?? undefined,
   heterogeneousType,
   id,
-  title: title?.trim() || UNTITLED_AGENT_TITLE,
+  title: agentDisplayName({ name, title }, UNTITLED_AGENT_TITLE),
 });
 
 const createInboxOverlayAgentOption = (
@@ -52,7 +55,7 @@ const createInboxOverlayAgentOption = (
   avatar: inboxMeta?.avatar || DEFAULT_INBOX_AVATAR,
   backgroundColor: inboxMeta?.backgroundColor ?? undefined,
   id: inboxAgentId,
-  title: inboxMeta?.title || LOBE_AI_TITLE,
+  title: agentDisplayName(inboxMeta, LOBE_AI_TITLE),
 });
 
 export const resolveOverlayAgentOptions = ({

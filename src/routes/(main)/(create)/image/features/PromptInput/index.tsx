@@ -197,7 +197,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
     if (!canCreate) return;
 
     if (!isLogin) {
-      loginRequired.redirect({ timeout: 2000 });
+      loginRequired.redirect();
       return;
     }
 

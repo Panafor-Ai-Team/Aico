@@ -1,0 +1,107 @@
+import { findChatModelInList, useEnabledChatModelsState } from '@/hooks/useEnabledChatModels';
+import { useModelSupportAudio } from '@/hooks/useModelSupportAudio';
+import { useModelSupportFiles } from '@/hooks/useModelSupportFiles';
+import { useModelSupportToolUse } from '@/hooks/useModelSupportToolUse';
+import { useModelSupportVideo } from '@/hooks/useModelSupportVideo';
+import { useModelSupportVision } from '@/hooks/useModelSupportVision';
+import { useAgentStore } from '@/store/agent';
+import { agentByIdSelectors } from '@/store/agent/selectors';
+import { aiModelSelectors, useAiInfraStore } from '@/store/aiInfra';
+import { serverConfigSelectors, useServerConfigStore } from '@/store/serverConfig';
+
+export interface VisualMediaUploadAbility {
+  canUploadAudio: boolean;
+  canUploadDocument: boolean;
+  canUploadImage: boolean;
+  canUploadVideo: boolean;
+}
+
+/**
+ * True when the current model (per `abilities`) cannot accept this file, so
+ * callers can reject it with a specific reason instead of silently dropping
+ * it. Anything that isn't image/video/audio is treated as a document — RAG
+ * extracts text from it, gated only by the `files` ability.
+ */
+export const isUploadBlockedByAbility = (
+  file: File,
+  abilities: VisualMediaUploadAbility,
+): boolean => {
+  if (file.type.startsWith('image/')) return !abilities.canUploadImage;
+  if (file.type.startsWith('video/')) return !abilities.canUploadVideo;
+  if (file.type.startsWith('audio/')) return !abilities.canUploadAudio;
+  return !abilities.canUploadDocument;
+};
+
+export const useMediaUploadAbility = (model: string, provider: string, agentId?: string) => {
+  const rawVision = useModelSupportVision(model, provider);
+  const rawVideo = useModelSupportVideo(model, provider);
+  const rawAudio = useModelSupportAudio(model, provider);
+  const rawFiles = useModelSupportFiles(model, provider);
+  const supportToolUse = useModelSupportToolUse(model, provider);
+  // Prefer the switcher-visible entry's abilities: they are the freshest
+  // served copy (the org catalog re-syncs on a poll while the raw
+  // runtime-state snapshot only refreshes on mount/focus). A just-enabled
+  // ability otherwise stays rejected until a page refresh. Explicit flags win;
+  // unknown falls back to the raw lookup so a transient list never blocks.
+  const { list: enabledChatModelList } = useEnabledChatModelsState();
+  const listedAbilities = findChatModelInList(enabledChatModelList, model, provider)?.abilities;
+  const supportVision = listedAbilities?.vision ?? rawVision;
+  const supportVideo = listedAbilities?.video ?? rawVideo;
+  const supportAudio = listedAbilities?.audio ?? rawAudio;
+  const supportFiles = listedAbilities?.files ?? rawFiles;
+  const enableMultimodalUnderstanding = useServerConfigStore(
+    serverConfigSelectors.enableMultimodalUnderstanding,
+  );
+  const multimodalUnderstanding = useServerConfigStore(
+    serverConfigSelectors.multimodalUnderstanding,
+  );
+  const fallbackModel = useAiInfraStore(
+    aiModelSelectors.getEnabledModelById(
+      multimodalUnderstanding?.model ?? '',
+      multimodalUnderstanding?.provider ?? '',
+    ),
+  );
+  const fallbackConfigured = !!(multimodalUnderstanding?.model && multimodalUnderstanding.provider);
+  const fallbackSupportAudio = fallbackConfigured && fallbackModel?.abilities?.audio !== false;
+  const fallbackSupportVision = fallbackConfigured && fallbackModel?.abilities?.vision !== false;
+  const fallbackSupportVideo = fallbackConfigured && fallbackModel?.abilities?.video !== false;
+  const canUseMultimodalUnderstanding = enableMultimodalUnderstanding && supportToolUse;
+
+  const heterogeneousAgentType = useAgentStore((s) =>
+    agentId
+      ? agentByIdSelectors.getAgencyConfigById(agentId)(s)?.heterogeneousProvider?.type
+      : undefined,
+  );
+
+  // In agent mode (tool calls) or heterogeneous agents (Claude Code / Codex, etc.) the agent
+  // can parse any file via scripts/terminal, so the upload should not be gated on the model's
+  // own multimodal ability. Mirror the store's `enforceFileTypeWhitelist` bypass in
+  // `uploadChatFiles` so the input UI doesn't silently drop audio/video/image the agent could
+  // still handle (e.g. .m4a on a non-audio model). See lobehub/lobehub#15770.
+  const bypassMediaGate = useAgentStore(
+    (s) =>
+      !!agentId &&
+      (agentByIdSelectors.getAgentEnableModeById(agentId)(s) ||
+        agentByIdSelectors.isAgentHeterogeneousById(agentId)(s)),
+  );
+
+  if (bypassMediaGate) {
+    return {
+      canUploadAudio: true,
+      canUploadDocument: true,
+      // Kimi's one-shot `--prompt` mode has no attachment argument, and ReadMediaFile is only
+      // registered for vision-capable local models, which LobeHub cannot determine beforehand.
+      canUploadImage: heterogeneousAgentType !== 'kimi-code',
+      canUploadVideo: true,
+    };
+  }
+
+  return {
+    canUploadAudio: supportAudio || (canUseMultimodalUnderstanding && fallbackSupportAudio),
+    // Default true — RAG handles document extraction for all models.
+    // Only block when model explicitly declares files: false.
+    canUploadDocument: supportFiles !== false,
+    canUploadImage: supportVision || (canUseMultimodalUnderstanding && fallbackSupportVision),
+    canUploadVideo: supportVideo || (canUseMultimodalUnderstanding && fallbackSupportVideo),
+  };
+};

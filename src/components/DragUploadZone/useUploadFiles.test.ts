@@ -2,19 +2,19 @@ import { act, renderHook } from '@testing-library/react';
 import { type Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type * as visualMediaUploadAbilityModule from '@/hooks/useVisualMediaUploadAbility';
-import { useVisualMediaUploadAbility } from '@/hooks/useVisualMediaUploadAbility';
+import type * as mediaUploadAbilityModule from '@/hooks/useMediaUploadAbility';
+import { useMediaUploadAbility } from '@/hooks/useMediaUploadAbility';
 import { useFileStore } from '@/store/file';
 
 import { useUploadFiles } from './useUploadFiles';
 
-vi.mock('@/hooks/useVisualMediaUploadAbility', async (importOriginal) => ({
-  ...(await importOriginal<typeof visualMediaUploadAbilityModule>()),
-  useVisualMediaUploadAbility: vi.fn(),
+vi.mock('@/hooks/useMediaUploadAbility', async (importOriginal) => ({
+  ...(await importOriginal<typeof mediaUploadAbilityModule>()),
+  useMediaUploadAbility: vi.fn(),
 }));
 vi.mock('@/store/file');
 
-const mockedUseVisualMediaUploadAbility = vi.mocked(useVisualMediaUploadAbility);
+const mockedUseVisualMediaUploadAbility = vi.mocked(useMediaUploadAbility);
 const mockedUseFileStore = vi.mocked(useFileStore);
 
 describe('useUploadFiles', () => {

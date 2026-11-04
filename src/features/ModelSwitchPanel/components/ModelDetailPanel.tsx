@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { PiTokenIcon } from '@/features/AicoBilling/PiTokenIcon';
 import type { EnabledProviderWithModels } from '@/types/aiProvider';
 import { getDocumentDirection } from '@/utils/client/applyDocumentDirection';
+import { getModelDescriptionI18nKey } from '@/utils/modelDescriptionI18n';
 
 import type { FormattedUnitPrice } from '../hooks/useModelDetailPanel';
 import { UNIT_ICON_MAP, useModelDetailPanel } from '../hooks/useModelDetailPanel';
@@ -195,11 +196,16 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
       approximatePriceLabel
     );
 
+    // Model ids can contain `:` (e.g. `gemini-3-pro-image-preview:image`). i18next
+    // defaults nsSeparator to `:`, so without disabling it the lookup splits into the
+    // wrong namespace and never hits `models.lobehub.<id>.description`.
     const description = model.description
       ? String(
-          t(`${model.id}.description` as any, {
+          t(getModelDescriptionI18nKey(model.id, provider) as any, {
             defaultValue: model.description,
+            keySeparator: false,
             ns: 'models',
+            nsSeparator: false,
           }),
         ).trim()
       : undefined;

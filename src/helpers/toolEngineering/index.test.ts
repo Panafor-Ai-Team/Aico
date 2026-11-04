@@ -9,6 +9,22 @@ vi.mock('@/store/tool', () => ({
     connectors: [],
     builtinTools: [
       {
+        identifier: 'lobe-goal',
+        manifest: {
+          api: [
+            {
+              description: 'Create a goal',
+              name: 'createGoal',
+              parameters: { properties: {}, type: 'object' },
+            },
+          ],
+          identifier: 'lobe-goal',
+          meta: { avatar: '🎯', title: 'Goal' },
+          type: 'builtin',
+        } as unknown as ToolManifest,
+        type: 'builtin' as const,
+      },
+      {
         identifier: 'search',
         manifest: {
           api: [
@@ -66,7 +82,7 @@ vi.mock('@/store/tool', () => ({
           api: [
             {
               description: 'Analyze visual media',
-              name: 'analyzeVisualMedia',
+              name: 'analyzeMedia',
               parameters: {
                 properties: {
                   question: { type: 'string' },
@@ -165,8 +181,11 @@ vi.mock('@/store/tool/selectors', () => ({
 
 let mockServerConfig: { toolNameMaxLength?: number } = {};
 
+let mockGoalsCapability = false;
+
 vi.mock('@/store/serverConfig', () => ({
   getServerConfigStoreState: () => ({ serverConfig: mockServerConfig }),
+  isClientCapabilityEnabled: (capability: string) => capability === 'goals' && mockGoalsCapability,
 }));
 
 let mockIsCanUseFC = true;
@@ -292,6 +311,33 @@ describe('toolEngineering', () => {
   });
 
   describe('createToolsEngine', () => {
+    describe('Aico goals capability gate', () => {
+      afterEach(() => {
+        mockGoalsCapability = false;
+      });
+
+      it('never offers the goal tool while the goals capability is off', () => {
+        const result = createToolsEngine().generateTools({
+          model: 'gpt-4',
+          provider: 'openai',
+          toolIds: ['lobe-goal'],
+        });
+
+        expect(result).toBeUndefined();
+      });
+
+      it('offers the goal tool once the operator enabled goals', () => {
+        mockGoalsCapability = true;
+        const result = createToolsEngine().generateTools({
+          model: 'gpt-4',
+          provider: 'openai',
+          toolIds: ['lobe-goal'],
+        });
+
+        expect(result?.map((tool) => tool.function.name)).toEqual(['lobe-goal____createGoal']);
+      });
+    });
+
     it('should generate tools array for enabled plugins', () => {
       const toolsEngine = createToolsEngine();
       const result = toolsEngine.generateTools({
@@ -367,6 +413,7 @@ describe('toolEngineering', () => {
 
     it('should enable image generation in chat mode when media offer is on, even with native image output', () => {
       mockCurrentChatConfig = { enableAgentMode: false };
+      mockCurrentAgentPlugins = ['lobe-image-generation'];
       mockImageOutputSupport = true;
 
       const toolsEngine = createAgentToolsEngine(
@@ -380,7 +427,7 @@ describe('toolEngineering', () => {
       );
 
       const result = toolsEngine.generateToolsDetailed({
-        toolIds: [],
+        toolIds: ['lobe-image-generation'],
         model: 'gpt-image-chat',
         provider: 'openai',
       });
@@ -390,6 +437,7 @@ describe('toolEngineering', () => {
 
     it('should not enable image generation in chat mode when model cannot call tools', () => {
       mockCurrentChatConfig = { enableAgentMode: false };
+      mockCurrentAgentPlugins = ['lobe-image-generation'];
       mockIsCanUseFC = false;
 
       const toolsEngine = createAgentToolsEngine({
@@ -398,7 +446,7 @@ describe('toolEngineering', () => {
       });
 
       const result = toolsEngine.generateToolsDetailed({
-        toolIds: [],
+        toolIds: ['lobe-image-generation'],
         model: 'plain-text-model',
         provider: 'test',
       });
