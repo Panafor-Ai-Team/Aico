@@ -2,6 +2,10 @@
 
 Guidelines for using AI coding agents in this opensource LobeHub repository.
 
+## Project Docs (always)
+
+Every session — before starting work and again before handing off — read and follow the **panachat-docs** skill (`.agents/skills/panachat-docs/SKILL.md`). It keeps `panachat-docs/` (`PRD.md`, `decisions.md`, `status.md`, `how_to_update_docs.md`) current: read the top of `status.md` first, record meaningful progress, accepted decisions, blockers, test results and the next step under stable `T-` / `D-` ids.
+
 ## Tech Stack
 
 - Next.js 16 + React 19 + TypeScript
