@@ -1,5 +1,5 @@
 import type * as LobechatConst from '@lobechat/const';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -137,7 +137,7 @@ const renderFooter = async ({
 
   const { default: Footer } = await import('./index');
 
-  render(
+  return render(
     <MemoryRouter initialEntries={['/']}>
       <Routes>
         <Route element={<Footer />} path="/" />
@@ -167,9 +167,9 @@ afterEach(() => {
 describe('Footer help menu tracking', () => {
   it('does not show Get App when downloads are hidden', async () => {
     const user = userEvent.setup();
-    await renderFooter({ hideGitHub: false });
+    const view = await renderFooter({ hideGitHub: false });
 
-    await user.click(screen.getByRole('button', { name: 'Help' }));
+    await user.click(within(view.container).getByRole('button', { name: 'Help' }));
 
     expect(screen.queryByRole('link', { name: 'Get App' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'GitHub' })).toBeInTheDocument();
@@ -177,18 +177,18 @@ describe('Footer help menu tracking', () => {
 
   it('does not show Get App in desktop builds', async () => {
     const user = userEvent.setup();
-    await renderFooter({ desktop: true, hideGitHub: false });
+    const view = await renderFooter({ desktop: true, hideGitHub: false });
 
-    await user.click(screen.getByRole('button', { name: 'Help' }));
+    await user.click(within(view.container).getByRole('button', { name: 'Help' }));
 
     expect(screen.queryByRole('link', { name: 'Get App' })).not.toBeInTheDocument();
   }, 20000);
 
   it('tracks menu open with the visible item keys', async () => {
     const user = userEvent.setup();
-    await renderFooter({ enableBusinessFeatures: true });
+    const view = await renderFooter({ enableBusinessFeatures: true });
 
-    await user.click(screen.getByRole('button', { name: 'Help' }));
+    await user.click(within(view.container).getByRole('button', { name: 'Help' }));
 
     const openedCall = analyticsTrack.mock.calls.find(
       ([event]) => event?.name === 'home_footer_menu_opened',
@@ -199,9 +199,9 @@ describe('Footer help menu tracking', () => {
 
   it('tracks a unified click event when the invite friend entry is clicked', async () => {
     const user = userEvent.setup();
-    await renderFooter({ enableBusinessFeatures: true });
+    const view = await renderFooter({ enableBusinessFeatures: true });
 
-    await user.click(screen.getByRole('button', { name: 'Help' }));
+    await user.click(within(view.container).getByRole('button', { name: 'Help' }));
     await user.click(await screen.findByText('Invite a friend'));
 
     expect(analyticsTrack).toHaveBeenCalledWith({
@@ -212,22 +212,22 @@ describe('Footer help menu tracking', () => {
 
   it('does not render the invite friend entry without business features', async () => {
     const user = userEvent.setup();
-    await renderFooter({ enableBusinessFeatures: false });
+    const view = await renderFooter({ enableBusinessFeatures: false });
 
-    await user.click(screen.getByRole('button', { name: 'Help' }));
+    await user.click(within(view.container).getByRole('button', { name: 'Help' }));
 
     expect(screen.queryByText('Invite a friend')).not.toBeInTheDocument();
   }, 20000);
 
   it('excludes billboard items from the opened keys to keep per-key CTR aligned', async () => {
     const user = userEvent.setup();
-    await renderFooter({
+    const view = await renderFooter({
       billboardItems: [{ key: 'billboard-promo', label: 'Promo', onClick: vi.fn() }],
       enableBusinessFeatures: true,
       homeSidebar: true,
     });
 
-    await user.click(screen.getByRole('button', { name: 'Help' }));
+    await user.click(within(view.container).getByRole('button', { name: 'Help' }));
 
     const openedCall = analyticsTrack.mock.calls.find(
       ([event]) => event?.name === 'home_footer_menu_opened',

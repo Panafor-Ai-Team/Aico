@@ -84,6 +84,15 @@ export const SignInEmailStep = ({
 
   return (
     <AuthCard title={t('betterAuth.signin.emailStep.title')}>
+      {sessionExpired && (
+        <Alert
+          showIcon
+          message={t('betterAuth.signin.sessionExpired')}
+          style={{ marginBlockEnd: 12 }}
+          type="warning"
+          variant="filled"
+        />
+      )}
       {showAuthMethods && (
         <AuthSocialButtons
           oAuthSSOProviders={oAuthSSOProviders}
