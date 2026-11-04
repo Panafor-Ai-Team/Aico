@@ -42,9 +42,15 @@ WORKDIR /src
 
 COPY packages ./packages
 
+## Packages whose install lifecycle hook runs a script (e.g. a native build that exits on
+## Linux) also need that `scripts/` directory before `pnpm i`.
 RUN set -e && \
     mkdir -p /out && \
-    find packages -name package.json -not -path '*/node_modules/*' -exec cp --parents {} /out/ \;
+    find packages -name package.json -not -path '*/node_modules/*' -exec cp --parents {} /out/ \; && \
+    for manifest in $(grep -lE '"(preinstall|install|postinstall)"[[:space:]]*:[[:space:]]*"[^"]*scripts/' $(find packages -name package.json -not -path '*/node_modules/*')); do \
+        dir=$(dirname "$manifest"); \
+        if [ -d "$dir/scripts" ]; then cp -r --parents "$dir/scripts" /out/; fi; \
+    done
 
 ## Builder image, install all the dependencies and build the app
 FROM base AS builder
