@@ -69,6 +69,8 @@ export const GenerationBatchItem = memo<GenerationBatchItemProps>(({ batch }) =>
   const activeWorkspaceId = useActiveWorkspaceId();
   const { shouldRenderBusinessBatchItem, businessBatchItem } = useRenderBusinessBatchItem(batch);
 
+  // Resolve the model's display name from the enabled model catalog, falling back
+  // to the raw model id when the model is not found (e.g. removed/renamed models).
   const creator = batch.creator;
   const showCreator = Boolean(activeWorkspaceId && creator?.id);
   const creatorName = creator?.fullName || creator?.username || '';

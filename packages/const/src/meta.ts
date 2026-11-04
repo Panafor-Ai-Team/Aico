@@ -10,4 +10,4 @@ export const DEFAULT_AGENT_META: MetaData = {};
 /** Title of the built-in inbox assistant — the product's default agent. */
 export const DEFAULT_INBOX_TITLE = BRANDING_NAME;
 export const DEFAULT_INBOX_AVATAR = BRANDING_LOGO_URL || '/avatars/agent-default.png';
-export const DEFAULT_USER_AVATAR_URL = BRANDING_LOGO_URL || '/icons/icon-192x192.png';
+export const DEFAULT_USER_AVATAR_URL = BRANDING_LOGO_URL || '/app-icons/icon-192x192.png';

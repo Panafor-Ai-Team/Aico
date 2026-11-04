@@ -26,15 +26,19 @@ export const UPSTREAM_0131 = '0131_agents_add_name_column';
 const readJournalFile = (folder: string): JournalFile =>
   JSON.parse(readFileSync(path.join(folder, 'meta/_journal.json'), 'utf8')) as JournalFile;
 
-/** Extracts `packages/database/migrations` at `ref` into a temp dir and returns its path. */
-export const extractMigrationsAtRef = (repoRoot: string, ref: string): string => {
+/** Extracts a migrations folder (default: the main one) at `ref` into a temp dir. */
+export const extractMigrationsAtRef = (
+  repoRoot: string,
+  ref: string,
+  migrationsPath: string = MIGRATIONS_PATH,
+): string => {
   const target = mkdtempSync(path.join(tmpdir(), 'aico-migrations-'));
-  const archive = execFileSync('git', ['archive', ref, MIGRATIONS_PATH], {
+  const archive = execFileSync('git', ['archive', ref, migrationsPath], {
     cwd: repoRoot,
     maxBuffer: 512 * 1024 * 1024,
   });
   execFileSync('tar', ['-x', '-C', target], { input: archive });
-  return path.join(target, MIGRATIONS_PATH);
+  return path.join(target, migrationsPath);
 };
 
 /** Numeric prefix of a migration tag (`0131_x` → 131, `20261101094543_x` → 20261101094543). */

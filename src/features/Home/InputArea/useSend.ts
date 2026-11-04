@@ -98,6 +98,7 @@ export const useSend = (mode: HomeMode = 'chat') => {
   const sendMessage = useChatStore((s) => s.sendMessage);
   const clearChatUploadFileList = useFileStore((s) => s.clearChatUploadFileList);
   const clearChatContextSelections = useFileStore((s) => s.clearChatContextSelections);
+  const restoreChatContextSelections = useFileStore((s) => s.restoreChatContextSelections);
 
   const homeInputLoading = useHomeStore((s) => s.homeInputLoading);
   const createTask = useTaskStore((s) => s.createTask);
@@ -109,6 +110,7 @@ export const useSend = (mode: HomeMode = 'chat') => {
   const inboxAgentId = useAgentStore(builtinAgentSelectors.inboxAgentId);
   const { agentId: selectedAgentId } = useResolvedHomeAgentId();
   const agentId = selectedAgentId;
+  const contextSelectionKey = `home:${mode}:${selectedAgentId ?? 'unresolved'}`;
   const { allowed: canCreateContent } = usePermission('create_content');
   const agentVisibility = useAgentStore((s) =>
     selectedAgentId ? s.agentMap[selectedAgentId]?.visibility : undefined,
@@ -132,7 +134,9 @@ export const useSend = (mode: HomeMode = 'chat') => {
       // cache catches up and the empty-message guard would bail incorrectly.
       const typed = (getMarkdownContent?.() ?? inputMessage ?? '').trim();
       const fileList = fileChatSelectors.chatUploadFileList(useFileStore.getState());
-      const contextList = fileChatSelectors.chatContextSelections(useFileStore.getState());
+      const contextList = fileChatSelectors.chatContextSelections(contextSelectionKey)(
+        useFileStore.getState(),
+      );
       const { sendAsAgent, sendAsGroup, sendAsWrite, sendAsResearch, inputActiveMode } =
         useHomeStore.getState();
 
@@ -280,6 +284,9 @@ export const useSend = (mode: HomeMode = 'chat') => {
               editorData,
               files: fileList,
               message,
+              onPreflightFailure: () => {
+                restoreChatContextSelections(contextSelectionKey, contextList);
+              },
               onTopicCreated: (topicId) => {
                 router.replace(AGENT_CHAT_TOPIC_URL(selectedAgentId, topicId, false));
                 // The route commits as a transition, after sendMessage has already dropped
@@ -308,7 +315,7 @@ export const useSend = (mode: HomeMode = 'chat') => {
         // editor, files and context are one unit from the user's perspective.
         if (submitted) {
           clearChatUploadFileList();
-          clearChatContextSelections();
+          clearChatContextSelections(contextSelectionKey);
           mainInputEditor?.clearContent();
         }
         setIsSubmitting(false);
@@ -319,7 +326,9 @@ export const useSend = (mode: HomeMode = 'chat') => {
       activeWorkspaceId,
       sendMessage,
       clearChatContextSelections,
+      restoreChatContextSelections,
       clearChatUploadFileList,
+      contextSelectionKey,
       router,
       currentPair,
       mode,
@@ -336,6 +345,7 @@ export const useSend = (mode: HomeMode = 'chat') => {
 
   return {
     agentId,
+    contextSelectionKey,
     loading: homeInputLoading || isSubmitting,
     send,
   };

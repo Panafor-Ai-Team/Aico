@@ -5,6 +5,7 @@ import fg from 'fast-glob';
 import { createLogger } from '../logger';
 import type { ToolDetector } from '../toolDetector';
 import type { GrepContentParams, GrepContentResult } from '../types';
+import { filterGitIgnored } from './gitIgnore';
 import { streamGrepFile } from './streamGrep';
 
 const logger = createLogger('contentSearch:base');
@@ -15,6 +16,25 @@ const logger = createLogger('contentSearch:base');
  * returning full content to the agent is a different cost than scanning it.
  */
 const STREAMING_THRESHOLD_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Directories excluded unconditionally, regardless of what the repo ignores.
+ *
+ * Deliberately limited to two names that are never checked in. It is tempting to
+ * add the usual build output here (`dist`, `build`, `out`, `.next`, …), but those
+ * names are only *usually* generated: this repo tracks
+ * `apps/desktop/build/entitlements.mac.plist`, and `rg`'s `--glob` overrides all
+ * ignore logic, so a hardcoded `!**\/build\/**` silently makes tracked files
+ * unfindable on every engine.
+ *
+ * What actually belongs out of the results is "whatever git ignores", and
+ * `filterGitIgnored` answers that exactly — including this repo's `.next`. Guess
+ * nothing here; ask git there.
+ *
+ * Entries are matched relative to the search root, so explicitly scoping a
+ * search *into* one of these directories still works.
+ */
+const EXCLUDED_DIRS = ['node_modules', '.git'] as const;
 
 /**
  * Content search tool type
@@ -54,11 +74,27 @@ export abstract class BaseContentSearch {
   }
 
   /**
-   * Build command-line arguments for grep tools
+   * Build command-line arguments for grep tools.
+   *
+   * `target` is what the tool is pointed at, resolved *relative to the cwd the
+   * caller will run it in* — `.` for a directory search, `./<file>` when `scope`
+   * names a single file. It must stay relative: an absolute target would be
+   * matched by the `EXCLUDED_DIRS` globs below, so deliberately searching inside
+   * e.g. `dist/` would return nothing.
    */
-  protected buildGrepArgs(tool: 'ag' | 'grep' | 'rg', params: GrepContentParams): string[] {
+  protected buildGrepArgs(
+    tool: 'ag' | 'grep' | 'rg',
+    params: GrepContentParams,
+    target = '.',
+  ): string[] {
     const { pattern, output_mode = 'files_with_matches' } = params;
     const args: string[] = [];
+
+    // Every one of these tools drops the filename prefix when handed a single
+    // file, which would emit bare `12:text` lines the caller cannot attribute to
+    // a path. Force it back on so a file-scoped search stays parseable — and
+    // stays consistent with the Node fallback, which always prefixes.
+    const singleFile = target !== '.';
 
     // When the caller's glob references a dot-prefixed segment (e.g.
     // `.github/workflows/*.yml`), rg and ag both default to skipping hidden
@@ -68,6 +104,7 @@ export abstract class BaseContentSearch {
 
     switch (tool) {
       case 'rg': {
+        if (singleFile) args.push('-H');
         if (params['-i']) args.push('-i');
         if (params['-n']) args.push('-n');
         if (params['-A']) args.push('-A', String(params['-A']));
@@ -89,11 +126,13 @@ export abstract class BaseContentSearch {
           }
         }
 
-        args.push('--glob', '!**/node_modules/**', '--glob', '!**/.git/**', pattern, '.');
+        for (const dir of EXCLUDED_DIRS) args.push('--glob', `!**/${dir}/**`);
+        args.push(pattern, target);
         break;
       }
 
       case 'ag': {
+        if (singleFile) args.push('--filename');
         if (params['-i']) args.push('-i');
         if (params['-A']) args.push('-A', String(params['-A']));
         if (params['-B']) args.push('-B', String(params['-B']));
@@ -112,12 +151,14 @@ export abstract class BaseContentSearch {
           }
         }
 
-        args.push('--ignore-dir', 'node_modules', '--ignore-dir', '.git', pattern, '.');
+        for (const dir of EXCLUDED_DIRS) args.push('--ignore-dir', dir);
+        args.push(pattern, target);
         break;
       }
 
       case 'grep': {
         args.push('-r');
+        if (singleFile) args.push('-H');
         if (params['-i']) args.push('-i');
         if (params['-n']) args.push('-n');
         if (params['-A']) args.push('-A', String(params['-A']));
@@ -137,7 +178,8 @@ export abstract class BaseContentSearch {
           }
         }
 
-        args.push('--exclude-dir', 'node_modules', '--exclude-dir', '.git', '-E', pattern, '.');
+        for (const dir of EXCLUDED_DIRS) args.push('--exclude-dir', dir);
+        args.push('-E', pattern, target);
         break;
       }
     }
@@ -178,6 +220,12 @@ export abstract class BaseContentSearch {
         const ext = `.${params.type}`;
         filesToSearch = filesToSearch.filter((file) => file.endsWith(ext));
       }
+
+      // `EXCLUDED_DIRS` above keeps traversal cheap; this drops whatever else the
+      // repo ignores (`*.log`, generated fixtures, …) so the Node fallback answers
+      // the same question `rg` would. Filtering the file list rather than the
+      // match list also avoids reading files we are about to discard.
+      filesToSearch = await filterGitIgnored(searchPath, filesToSearch);
     }
 
     logger.debug(`${logPrefix} Found ${filesToSearch.length} files to search`);
@@ -293,6 +341,6 @@ export abstract class BaseContentSearch {
    * Can be overridden by subclasses for platform-specific patterns
    */
   protected getDefaultIgnorePatterns(): string[] {
-    return ['**/node_modules/**', '**/.git/**'];
+    return EXCLUDED_DIRS.map((dir) => `**/${dir}/**`);
   }
 }

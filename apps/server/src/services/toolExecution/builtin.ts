@@ -1,3 +1,4 @@
+import { GoalIdentifier } from '@lobechat/builtin-tool-goal';
 import { builtinTools } from '@lobechat/builtin-tools';
 import { type LobeChatDatabase } from '@lobechat/database';
 import {
@@ -8,6 +9,8 @@ import {
 import { detectTruncatedJSON, safeParseJSON } from '@lobechat/utils';
 import debug from 'debug';
 
+import { UserModel } from '@/database/models/user';
+import { isCapabilityEnabled } from '@/server/services/aico/capabilityGate';
 import { ComposioService } from '@/server/services/composio';
 import { MarketService } from '@/server/services/market';
 
@@ -49,14 +52,32 @@ const collectRuntimeApiNames = (runtime: Record<string, any>): string[] => {
 };
 
 export class BuiltinToolsExecutor implements IToolExecutor {
-  private marketService: MarketService;
   private db: LobeChatDatabase;
   private userId: string;
+  private _marketService?: MarketService;
 
   constructor(db: LobeChatDatabase, userId: string) {
     this.db = db;
     this.userId = userId;
-    this.marketService = new MarketService({ userInfo: { userId } });
+  }
+
+  private async getMarketService(): Promise<MarketService> {
+    if (this._marketService) return this._marketService;
+
+    let accessToken: string | undefined;
+    try {
+      const userModel = new UserModel(this.db, this.userId);
+      const settings = await userModel.getUserSettings();
+      accessToken = (settings?.market as any)?.accessToken;
+    } catch {
+      // non-fatal — MarketService will fall back to trustedClientToken
+    }
+
+    this._marketService = new MarketService({
+      accessToken,
+      userInfo: { userId: this.userId },
+    });
+    return this._marketService;
   }
 
   async execute(
@@ -97,6 +118,17 @@ export class BuiltinToolsExecutor implements IToolExecutor {
 
     const args = parsed || {};
 
+    // Aico capability gate: covers replayed or client-sent calls that never went through
+    // a gated manifest set.
+    if (identifier === GoalIdentifier && !(await isCapabilityEnabled(context.userId, 'goals'))) {
+      const message = 'Goals are not enabled on this server, so the goal tool was not run.';
+      return {
+        content: message,
+        error: { code: 'CAPABILITY_DISABLED', message },
+        success: false,
+      };
+    }
+
     log(
       'Executing builtin tool: %s:%s (source: %s) with args: %O',
       identifier,
@@ -107,7 +139,8 @@ export class BuiltinToolsExecutor implements IToolExecutor {
 
     // Route LobeHub Skills to MarketService
     if (source === 'lobehubSkill') {
-      const result = await this.marketService.executeLobehubSkill({
+      const marketService = await this.getMarketService();
+      const result = await marketService.executeLobehubSkill({
         args,
         context: {
           topicId: context.topicId,

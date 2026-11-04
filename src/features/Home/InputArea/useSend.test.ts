@@ -17,6 +17,7 @@ const sendMessageMock = vi.hoisted(() => vi.fn());
 const clearContentMock = vi.hoisted(() => vi.fn());
 const clearChatUploadFileListMock = vi.hoisted(() => vi.fn());
 const clearChatContextSelectionsMock = vi.hoisted(() => vi.fn());
+const restoreChatContextSelectionsMock = vi.hoisted(() => vi.fn());
 const createTaskMock = vi.hoisted(() => vi.fn());
 const runTaskMock = vi.hoisted(() => vi.fn());
 const toggleTaskAgentPanelMock = vi.hoisted(() => vi.fn());
@@ -34,10 +35,11 @@ const chatState = vi.hoisted(() => ({
 }));
 
 const fileState = vi.hoisted(() => ({
-  chatContextSelections: [] as any[],
+  chatContextSelectionsByContext: {} as Record<string, any[]>,
   chatUploadFileList: [],
   clearChatContextSelections: clearChatContextSelectionsMock,
   clearChatUploadFileList: clearChatUploadFileListMock,
+  restoreChatContextSelections: restoreChatContextSelectionsMock,
 }));
 
 const homeState = vi.hoisted(() => ({
@@ -158,7 +160,8 @@ vi.mock('@/store/file', () => {
 
   return {
     fileChatSelectors: {
-      chatContextSelections: (state: typeof fileState) => state.chatContextSelections,
+      chatContextSelections: (contextKey: string) => (state: typeof fileState) =>
+        state.chatContextSelectionsByContext[contextKey] ?? [],
       chatUploadFileList: (state: typeof fileState) => state.chatUploadFileList,
     },
     useFileStore,
@@ -184,6 +187,7 @@ describe('Home InputArea useSend', () => {
     clearContentMock.mockReset();
     clearChatUploadFileListMock.mockReset();
     clearChatContextSelectionsMock.mockReset();
+    restoreChatContextSelectionsMock.mockReset();
     createTaskMock.mockReset();
     runTaskMock.mockReset();
     toggleTaskAgentPanelMock.mockReset();
@@ -193,7 +197,7 @@ describe('Home InputArea useSend', () => {
     chatState.inputMessage = 'hello';
     chatState.activeAgentId = undefined;
     chatState.activeTopicId = undefined;
-    fileState.chatContextSelections = [];
+    fileState.chatContextSelectionsByContext = {};
     fileState.chatUploadFileList = [];
     homeState.inputActiveMode = null;
     homeState.ungroupedAgents = [];
@@ -390,7 +394,7 @@ describe('Home InputArea useSend', () => {
   });
 
   it('does not discard context selections that Task mode cannot persist', async () => {
-    fileState.chatContextSelections = [{ id: 'ctx-1' }] as any;
+    fileState.chatContextSelectionsByContext = { 'home:task:agt_inbox': [{ id: 'ctx-1' }] };
     const { result } = renderHook(() => useSend('task'));
     const params: Parameters<SendButtonHandler>[0] = {
       clearContent: vi.fn(),
@@ -431,6 +435,9 @@ describe('Home InputArea useSend', () => {
     expect(routerMock.push).toHaveBeenCalledWith('/agent/agt_inbox');
 
     const sentPayload = sendMessageMock.mock.calls[0][0];
+
+    sentPayload.onPreflightFailure();
+    expect(restoreChatContextSelectionsMock).toHaveBeenCalledWith('home:chat:agt_inbox', []);
 
     await act(async () => {
       await sentPayload.onTopicCreated('tpc_created');
@@ -558,18 +565,20 @@ describe('Home InputArea useSend', () => {
   it('passes context selections through starter agent mode sends', async () => {
     homeState.inputActiveMode = 'agent';
     activeWorkspaceSlugMock.value = 'team';
-    fileState.chatContextSelections = [
-      {
-        content: 'const selected = true;',
-        filePath: 'src/example.ts',
-        id: 'code-selection',
-        lineRange: { endLine: 12, startLine: 10 },
-        preview: 'src/example.ts:10-12',
-        source: 'code',
-        title: 'src/example.ts:10-12',
-        workingDirectory: '/repo',
-      },
-    ];
+    fileState.chatContextSelectionsByContext = {
+      'home:chat:agt_inbox': [
+        {
+          content: 'const selected = true;',
+          filePath: 'src/example.ts',
+          id: 'code-selection',
+          lineRange: { endLine: 12, startLine: 10 },
+          preview: 'src/example.ts:10-12',
+          source: 'code',
+          title: 'src/example.ts:10-12',
+          workingDirectory: '/repo',
+        },
+      ],
+    };
 
     const { result } = renderHook(() => useSend());
     const params: Parameters<SendButtonHandler>[0] = {
@@ -597,6 +606,6 @@ describe('Home InputArea useSend', () => {
         workspaceSlug: 'team',
       }),
     );
-    expect(clearChatContextSelectionsMock).toHaveBeenCalledTimes(1);
+    expect(clearChatContextSelectionsMock).toHaveBeenCalledWith('home:chat:agt_inbox');
   });
 });

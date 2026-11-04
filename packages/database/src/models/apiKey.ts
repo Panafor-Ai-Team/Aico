@@ -21,20 +21,26 @@ export class ApiKeyModel {
     }
     const keyHash = hashApiKey(key);
 
-    return db.query.apiKeys.findFirst({
-      where: eq(apiKeys.keyHash, keyHash),
-    });
+    const [row] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, keyHash)).limit(1);
+    return row;
   };
 
   private userId: string;
   private db: LobeChatDatabase;
   private workspaceId?: string;
+  private canManageAll: boolean;
   private gateKeeperPromise: Promise<KeyVaultsGateKeeper> | null = null;
 
-  constructor(db: LobeChatDatabase, userId: string, workspaceId?: string) {
+  constructor(
+    db: LobeChatDatabase,
+    userId: string,
+    workspaceId?: string,
+    options?: { canManageAll?: boolean },
+  ) {
     this.userId = userId;
     this.db = db;
     this.workspaceId = workspaceId;
+    this.canManageAll = options?.canManageAll ?? true;
   }
 
   private ownership = () =>
@@ -47,6 +53,9 @@ export class ApiKeyModel {
    */
   private mine = () => and(this.ownership(), eq(apiKeys.userId, this.userId));
 
+  private manageable = () =>
+    this.workspaceId && !this.canManageAll ? this.mine() : this.ownership();
+
   private async getGateKeeper() {
     if (!this.gateKeeperPromise) {
       this.gateKeeperPromise = KeyVaultsGateKeeper.initWithEnvKey();
@@ -55,7 +64,9 @@ export class ApiKeyModel {
     return this.gateKeeperPromise;
   }
 
-  create = async (params: Omit<NewApiKeyItem, 'userId' | 'id' | 'key' | 'keyHash'>) => {
+  private createRecord = async (
+    params: Omit<NewApiKeyItem, 'userId' | 'id' | 'key' | 'keyHash'>,
+  ) => {
     const key = generateApiKey();
     const keyHash = hashApiKey(key);
     const gateKeeper = await this.getGateKeeper();
@@ -71,16 +82,32 @@ export class ApiKeyModel {
       )
       .returning();
 
-    // DATA-009: plaintext is returned only on create (show-once).
-    return { ...result, key };
+    return { key, record: result };
+  };
+
+  create = async (params: Omit<NewApiKeyItem, 'userId' | 'id' | 'key' | 'keyHash'>) =>
+    (await this.createRecord(params)).record;
+
+  /**
+   * Create a key and reveal its plaintext exactly once to a trusted transport.
+   * List/detail methods continue to return only the stored encrypted record.
+   */
+  createWithPlaintext = async (
+    params: Omit<NewApiKeyItem, 'userId' | 'id' | 'key' | 'keyHash'>,
+  ) => {
+    const { key, record } = await this.createRecord(params);
+    return { ...record, key };
   };
 
   delete = async (id: string) => {
-    return this.db.delete(apiKeys).where(and(eq(apiKeys.id, id), this.ownership()));
+    return this.db.delete(apiKeys).where(and(eq(apiKeys.id, id), this.manageable()));
   };
 
   deleteAll = async () => {
-    return this.db.delete(apiKeys).where(this.mine());
+    return this.db
+      .delete(apiKeys)
+      .where(this.mine())
+      .returning({ id: apiKeys.id, name: apiKeys.name, scopes: apiKeys.scopes });
   };
 
   /**
@@ -97,10 +124,10 @@ export class ApiKeyModel {
       })
       .from(apiKeys)
       .leftJoin(users, eq(users.id, apiKeys.userId))
-      .where(this.ownership())
+      .where(this.manageable())
       .orderBy(desc(apiKeys.updatedAt));
 
-    return rows.map(({ creatorEmail, creatorFullName, creatorUsername, ...apiKey }) => {
+    return rows.map(({ creatorEmail, creatorFullName, creatorUsername, keyHash: _, ...apiKey }) => {
       const isMine = apiKey.userId === this.userId;
 
       return {
@@ -113,8 +140,24 @@ export class ApiKeyModel {
     });
   };
 
+  /** Metadata-only list for public API transports that must never reveal keys. */
+  queryMetadata = async () => {
+    return this.db.query.apiKeys.findMany({
+      orderBy: desc(apiKeys.updatedAt),
+      where: this.ownership(),
+    });
+  };
+
   findByKey = async (key: string) => {
-    return ApiKeyModel.findByKey(this.db, key);
+    if (!validateApiKeyFormat(key)) return null;
+
+    const keyHash = hashApiKey(key);
+    const [row] = await this.db
+      .select()
+      .from(apiKeys)
+      .where(and(eq(apiKeys.keyHash, keyHash), this.manageable()))
+      .limit(1);
+    return row;
   };
 
   validateKey = async (key: string) => {
@@ -131,19 +174,22 @@ export class ApiKeyModel {
     return this.db
       .update(apiKeys)
       .set({ ...value, updatedAt: new Date() })
-      .where(and(eq(apiKeys.id, id), this.ownership()));
+      .where(and(eq(apiKeys.id, id), this.manageable()));
   };
 
   findById = async (id: string) => {
-    return this.db.query.apiKeys.findFirst({
-      where: and(eq(apiKeys.id, id), this.ownership()),
-    });
+    const [row] = await this.db
+      .select()
+      .from(apiKeys)
+      .where(and(eq(apiKeys.id, id), this.manageable()))
+      .limit(1);
+    return row;
   };
 
   updateLastUsed = async (id: string) => {
     return this.db
       .update(apiKeys)
       .set({ lastUsedAt: new Date() })
-      .where(and(eq(apiKeys.id, id), this.ownership()));
+      .where(and(eq(apiKeys.id, id), this.mine()));
   };
 }

@@ -6,6 +6,8 @@
  * - Pre-instantiated runtimes (e.g., WebBrowsing - no per-request context needed)
  * - Per-request runtimes (e.g., CloudSandbox - needs topicId, userId)
  */
+import { GoalIdentifier } from '@lobechat/builtin-tool-goal';
+
 import type { ToolExecutionContext } from '../types';
 import { activatorRuntime } from './activator';
 import { agentBuilderRuntime } from './agentBuilder';
@@ -20,6 +22,7 @@ import { browserRuntime } from './browser';
 import { calculatorRuntime } from './calculator';
 import { cloudSandboxRuntime } from './cloudSandbox';
 import { credsRuntime } from './creds';
+import { groupAgentBuilderRuntime } from './groupAgentBuilder';
 import { groupManagementRuntime } from './groupManagement';
 import { imageGenerationRuntime } from './imageGeneration';
 import { knowledgeBaseRuntime } from './knowledgeBase';
@@ -43,6 +46,14 @@ import { verifyResultRuntime } from './verifyResult';
 import { videoGenerationRuntime } from './videoGeneration';
 import { webBrowsingRuntime } from './webBrowsing';
 import { webOnboardingRuntime } from './webOnboarding';
+
+const goalRuntime: ServerRuntimeRegistration = {
+  factory: async (context) => {
+    const runtime = await taskRuntime.factory(context);
+    return { createGoal: runtime.createGoal };
+  },
+  identifier: GoalIdentifier,
+};
 
 /**
  * Registry of server runtime factories by identifier
@@ -81,7 +92,9 @@ registerRuntimes([
   topicReferenceRuntime,
   userInteractionRuntime,
   credsRuntime,
+  groupAgentBuilderRuntime,
   groupManagementRuntime,
+  goalRuntime,
   imageGenerationRuntime,
   videoGenerationRuntime,
   knowledgeBaseRuntime,

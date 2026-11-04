@@ -30,6 +30,7 @@ const ACTION_BAR_INSET = 8;
 
 export interface HomeEditorInputProps {
   agentId?: string;
+  contextSelectionKey: string;
   initialValue: string;
   isAgentConfigLoading: boolean;
   loading: boolean;
@@ -43,6 +44,7 @@ export interface HomeEditorInputProps {
 const HomeEditorInput = memo<HomeEditorInputProps>(
   ({
     agentId,
+    contextSelectionKey,
     initialValue,
     isAgentConfigLoading,
     loading,
@@ -83,6 +85,7 @@ const HomeEditorInput = memo<HomeEditorInputProps>(
       <ChatInputProvider
         agentId={agentId}
         allowExpand={false}
+        contextSelectionKey={contextSelectionKey}
         leftActions={leftActions}
         rightActions={rightActions}
         slashPlacement="bottom"

@@ -15,6 +15,11 @@ vi.mock('../serverRuntimes', () => ({
   getServerRuntime: vi.fn(async () => ({ createDocument: mocks.apiHandler })),
 }));
 
+const goalsCapability = vi.hoisted(() => ({ enabled: false }));
+vi.mock('@/server/services/aico/capabilityGate', () => ({
+  isCapabilityEnabled: vi.fn(async () => goalsCapability.enabled),
+}));
+
 vi.mock('@/server/services/composio', () => ({
   ComposioService: vi.fn().mockImplementation(() => ({})),
 }));
@@ -59,6 +64,45 @@ const context: ToolExecutionContext = {
   toolManifestMap: {},
   userId: 'user-1',
 };
+
+describe('BuiltinToolsExecutor Aico goals capability gate', () => {
+  const executor = new BuiltinToolsExecutor({} as any, 'user-1');
+  const goalPayload: ChatToolPayload = {
+    apiName: 'createGoal',
+    arguments: '{"name":"Ship it","instruction":"Ship","criteria":[]}',
+    id: 'g1',
+    identifier: 'lobe-goal',
+    type: 'default' as any,
+  };
+
+  beforeEach(() => {
+    mockApiHandler.mockReset();
+  });
+
+  it('refuses a goal call without reaching the runtime while goals are off', async () => {
+    const { getServerRuntime } = await import('../serverRuntimes');
+    vi.mocked(getServerRuntime).mockClear();
+
+    const result = await executor.execute(goalPayload, context);
+
+    expect(result).toMatchObject({ error: { code: 'CAPABILITY_DISABLED' }, success: false });
+    expect(getServerRuntime).not.toHaveBeenCalled();
+  });
+
+  it('lets the goal call through once the operator enabled goals', async () => {
+    goalsCapability.enabled = true;
+    try {
+      const { getServerRuntime } = await import('../serverRuntimes');
+      vi.mocked(getServerRuntime).mockClear();
+
+      await executor.execute(goalPayload, context);
+
+      expect(getServerRuntime).toHaveBeenCalledWith('lobe-goal', context);
+    } finally {
+      goalsCapability.enabled = false;
+    }
+  });
+});
 
 describe('BuiltinToolsExecutor truncated arguments', () => {
   const executor = new BuiltinToolsExecutor({} as any, 'user-1');
