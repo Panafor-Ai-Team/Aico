@@ -41,6 +41,11 @@ const {
   mockSkillFindByIds: vi.fn().mockResolvedValue([]),
 }));
 
+// Aico capability gate: these upstream cases exercise goal behaviour, so goals are on.
+vi.mock('@/server/services/aico/capabilityGate', () => ({
+  isCapabilityEnabled: vi.fn(async () => true),
+}));
+
 vi.mock('@/libs/trusted-client', () => ({
   generateTrustedClientToken: vi.fn().mockReturnValue(undefined),
   getTrustedClientTokenForSession: vi.fn().mockResolvedValue(undefined),

@@ -14,6 +14,7 @@ import type { LobeChatDatabase } from '@/database/type';
 import { assertAgentUsableBy } from '@/database/utils/agent-access';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
+import { assertCapability } from '@/server/services/aico/capabilityGate';
 import { EditLockService } from '@/server/services/editLock';
 import { publishResourceEvent } from '@/server/services/resourceEvents';
 import { TaskService } from '@/server/services/task';
@@ -143,6 +144,19 @@ const groupListSchema = z.object({
   projectId: z.string().optional(),
   visibility: z.enum(['private', 'public']).optional(),
 });
+
+/**
+ * Aico capability gate: a task may only join a project, or carry a goal marker
+ * (`config.goal`, which drives autonomous goal rounds), while the operator has
+ * enabled that capability. Clearing a goal (`goal: null`) is always allowed.
+ */
+async function assertTaskCapabilities(
+  userId: string,
+  input: { config?: Record<string, unknown> | null; projectId?: string | null },
+) {
+  if (input.projectId) await assertCapability(userId, 'projects');
+  if (input.config?.goal) await assertCapability(userId, 'goals');
+}
 
 // Helper: resolve id/identifier and throw if not found
 async function resolveOrThrow(model: TaskModel, id: string) {
@@ -415,6 +429,7 @@ export const taskRouter = router({
 
   create: taskProcedureWrite.input(createSchema).mutation(async ({ input, ctx }) => {
     try {
+      await assertTaskCapabilities(ctx.userId, input);
       const task = await ctx.taskService.createTask(input);
       return { data: task, message: 'Task created', success: true };
     } catch (error) {
@@ -1055,6 +1070,7 @@ export const taskRouter = router({
   update: taskProcedureWrite.input(idInput.merge(updateSchema)).mutation(async ({ input, ctx }) => {
     const { id, parentTaskId, ...data } = input;
     try {
+      await assertTaskCapabilities(ctx.userId, data);
       const model = ctx.taskModel;
       await assertAssigneeAgentBelongsToUser(
         ctx.serverDB,
@@ -1267,6 +1283,7 @@ export const taskRouter = router({
     .mutation(async ({ input, ctx }) => {
       const { id, config } = input;
       try {
+        await assertTaskCapabilities(ctx.userId, { config });
         const model = ctx.taskModel;
         const resolved = await resolveOrThrow(model, id);
         const task = await model.updateTaskConfig(resolved.id, config);

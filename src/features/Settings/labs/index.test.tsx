@@ -2,7 +2,11 @@ import { cleanup, render, screen, within } from '@testing-library/react';
 import { type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { initServerConfigStore, Provider } from '@/store/serverConfig/store';
+import {
+  initServerConfigStore,
+  Provider,
+  type ServerConfigStore,
+} from '@/store/serverConfig/store';
 import { useUserStore } from '@/store/user';
 
 import Page from './index';
@@ -80,9 +84,9 @@ vi.mock('@/features/Settings/features/SettingHeader', () => ({
   ),
 }));
 
-const createWrapper = () => {
+const createWrapper = (serverState: Partial<ServerConfigStore> = {}) => {
   const Wrapper = ({ children }: { children: ReactNode }) => (
-    <Provider createStore={() => initServerConfigStore({})}>{children}</Provider>
+    <Provider createStore={() => initServerConfigStore(serverState)}>{children}</Provider>
   );
 
   return Wrapper;
@@ -90,13 +94,13 @@ const createWrapper = () => {
 
 const initialUserStoreState = useUserStore.getState();
 
-const renderPage = () => {
+const renderPage = (serverState?: Partial<ServerConfigStore>) => {
   useUserStore.setState({
     isUserStateInit: true,
     updateLab: vi.fn(),
   });
 
-  return render(<Page />, { wrapper: createWrapper() });
+  return render(<Page />, { wrapper: createWrapper(serverState) });
 };
 
 afterEach(() => {
@@ -165,8 +169,17 @@ describe('Labs settings page', () => {
 
     const alphaTags = screen.getAllByText('stage.alpha.label');
     const betaTags = screen.getAllByText('stage.beta.label');
-    // Every toggle carries exactly one stage tag.
-    expect(alphaTags.length + betaTags.length).toBe(13);
+    // Every toggle carries exactly one stage tag (Projects is hidden: capability off).
+    expect(alphaTags.length + betaTags.length).toBe(12);
+  });
+
+  it('offers the Projects toggle only when the operator enabled the projects capability', () => {
+    renderPage();
+    expect(screen.queryByText('features.projects.title')).not.toBeInTheDocument();
+    cleanup();
+
+    renderPage({ featureFlags: { enableProjects: true } } as Partial<ServerConfigStore>);
+    expect(screen.getByText('features.projects.title')).toBeInTheDocument();
   });
 
   it('marks internal-testing experiments as alpha and usable ones as beta', () => {

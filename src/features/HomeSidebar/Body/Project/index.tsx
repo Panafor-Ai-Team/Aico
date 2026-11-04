@@ -9,10 +9,9 @@ import AsyncError from '@/components/AsyncError';
 import NeuralNetworkLoading from '@/components/NeuralNetworkLoading';
 import NavItem from '@/features/NavPanel/components/NavItem';
 import { openCreateProjectModal } from '@/features/Projects/CreateProjectModal';
+import { useProjectsEnabled } from '@/features/Projects/useProjectsEnabled';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { useCurrentProjectList, useProjectStore } from '@/store/project';
-import { useUserStore } from '@/store/user';
-import { labPreferSelectors } from '@/store/user/selectors';
 
 interface ProjectProps {
   itemKey: string;
@@ -20,7 +19,7 @@ interface ProjectProps {
 
 const Project = memo<ProjectProps>(({ itemKey }) => {
   const { t } = useTranslation('project');
-  const enabled = useUserStore(labPreferSelectors.enableProjects);
+  const enabled = useProjectsEnabled();
   const navigate = useWorkspaceAwareNavigate();
   const projects = useCurrentProjectList();
   const { error, isLoading, mutate } = useProjectStore((s) => s.useFetchProjectList)(enabled);

@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { useActiveWorkspaceId } from '@/business/client/hooks/useActiveWorkspaceId';
 import Recents from '@/features/Home/Recents';
 import NavItem from '@/features/NavPanel/components/NavItem';
+import { useProjectsEnabled } from '@/features/Projects/useProjectsEnabled';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import WorkspaceLink from '@/features/Workspace/WorkspaceLink';
 import { useActiveTabKey } from '@/hooks/useActiveTabKey';
@@ -20,7 +21,6 @@ import { useGlobalStore } from '@/store/global';
 import { systemStatusSelectors } from '@/store/global/selectors';
 import { SIDEBAR_SPACER_ID } from '@/store/global/selectors/systemStatus';
 import { useUserStore } from '@/store/user';
-import { labPreferSelectors } from '@/store/user/selectors';
 import { isModifierClick } from '@/utils/navigation';
 
 import Agent from './Agent';
@@ -86,7 +86,7 @@ const Body = memo(() => {
   // and the section layout syncs per-member — both live in the workspace
   // user preference, so load it alongside the sidebar.
   const useFetchWorkspaceUserPreference = useUserStore((s) => s.useFetchWorkspaceUserPreference);
-  const enableProjects = useUserStore(labPreferSelectors.enableProjects);
+  const enableProjects = useProjectsEnabled();
   useFetchWorkspaceUserPreference();
   useSyncWorkspaceSidebarPreference(activeWorkspaceId);
   const sidebarItems = useGlobalStore(systemStatusSelectors.sidebarItems(activeWorkspaceId));

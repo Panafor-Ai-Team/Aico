@@ -14,9 +14,8 @@ import { getProjectConversationStartPath } from '@/features/Projects/Layout/navi
 import ProjectDisabled from '@/features/Projects/ProjectDisabled';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { useCurrentProjectDetail, useProjectStore } from '@/store/project';
-import { useUserStore } from '@/store/user';
-import { labPreferSelectors } from '@/store/user/selectors';
 
+import { useProjectsEnabled } from '../useProjectsEnabled';
 import ProjectDashboard from './ProjectDashboard';
 
 const styles = createStaticStyles(({ css }) => ({
@@ -90,7 +89,7 @@ const ProjectWorkspace = memo(() => {
   const { t } = useTranslation('project');
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useWorkspaceAwareNavigate();
-  const enabled = useUserStore(labPreferSelectors.enableProjects);
+  const enabled = useProjectsEnabled();
   const detail = useCurrentProjectDetail(projectId);
   const [message, setMessage] = useState('');
   const { error, isLoading, mutate } = useProjectStore((s) => s.useFetchProjectDetail)(projectId);

@@ -5,13 +5,12 @@ import { memo } from 'react';
 import { Outlet } from 'react-router';
 
 import ProjectDisabled from '@/features/Projects/ProjectDisabled';
-import { useUserStore } from '@/store/user';
-import { labPreferSelectors } from '@/store/user/selectors';
 
+import { useProjectsEnabled } from '../useProjectsEnabled';
 import ProjectSidebar from './Sidebar';
 
 const ProjectLayout = memo(() => {
-  const enabled = useUserStore(labPreferSelectors.enableProjects);
+  const enabled = useProjectsEnabled();
 
   if (!enabled) return <ProjectDisabled />;
 

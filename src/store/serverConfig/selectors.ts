@@ -2,6 +2,16 @@ import { type ServerConfigStore } from './store';
 
 export const featureFlagsSelectors = (s: ServerConfigStore) => s.featureFlags;
 
+/**
+ * Aico capability gate (operator flags, default off). The server enforces these; the
+ * client only hides entry points so users never reach a refused feature.
+ */
+export const capabilitySelectors = {
+  expertise: (s: ServerConfigStore) => s.featureFlags.enableExpertise === true,
+  goals: (s: ServerConfigStore) => s.featureFlags.enableGoals === true,
+  projects: (s: ServerConfigStore) => s.featureFlags.enableProjects === true,
+};
+
 export const serverConfigSelectors = {
   disableEmailPassword: (s: ServerConfigStore) => s.serverConfig.disableEmailPassword || false,
   enableBusinessFeatures: (s: ServerConfigStore) => s.serverConfig.enableBusinessFeatures || false,

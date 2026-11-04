@@ -1,3 +1,4 @@
+import { GoalIdentifier } from '@lobechat/builtin-tool-goal';
 import { builtinTools } from '@lobechat/builtin-tools';
 import { type LobeChatDatabase } from '@lobechat/database';
 import {
@@ -9,6 +10,7 @@ import { detectTruncatedJSON, safeParseJSON } from '@lobechat/utils';
 import debug from 'debug';
 
 import { UserModel } from '@/database/models/user';
+import { isCapabilityEnabled } from '@/server/services/aico/capabilityGate';
 import { ComposioService } from '@/server/services/composio';
 import { MarketService } from '@/server/services/market';
 
@@ -115,6 +117,17 @@ export class BuiltinToolsExecutor implements IToolExecutor {
     }
 
     const args = parsed || {};
+
+    // Aico capability gate: covers replayed or client-sent calls that never went through
+    // a gated manifest set.
+    if (identifier === GoalIdentifier && !(await isCapabilityEnabled(context.userId, 'goals'))) {
+      const message = 'Goals are not enabled on this server, so the goal tool was not run.';
+      return {
+        content: message,
+        error: { code: 'CAPABILITY_DISABLED', message },
+        success: false,
+      };
+    }
 
     log(
       'Executing builtin tool: %s:%s (source: %s) with args: %O',

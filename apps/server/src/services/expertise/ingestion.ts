@@ -31,6 +31,7 @@ import { AgentSignalReviewContextModel } from '@/database/models/agentSignal/rev
 import { ExpertiseModel } from '@/database/models/expertise';
 import type { LobeChatDatabase } from '@/database/type';
 import type { CompletionCallbackParams } from '@/server/services/agentSignal/policies/completionPolicy';
+import { isCapabilityEnabled } from '@/server/services/aico/capabilityGate';
 import { AiGenerationService } from '@/server/services/aiGeneration';
 
 const MAX_CONTEXT_MESSAGES = 24;
@@ -227,6 +228,7 @@ export class ExpertiseIngestionService {
 
   /** Local-runtime fallback for the durable workflow used in queue deployments. */
   ingestHistory = async (agentId: string) => {
+    if (!(await isCapabilityEnabled(this.userId, 'expertise'))) return { ingested: 0, scanned: 0 };
     let ingested = 0;
     let scanned = 0;
     let cursor: { lastActivityAt: Date; topicId: string } | undefined;
@@ -245,6 +247,10 @@ export class ExpertiseIngestionService {
   };
 
   ingestCompletion = async (input: ExpertiseCompletionInput) => {
+    // Aico capability gate: every expertise LLM call funnels through here.
+    if (!(await isCapabilityEnabled(this.userId, 'expertise'))) {
+      return { ingested: 0, reason: 'capability-disabled' } as const;
+    }
     const expertiseModel = new ExpertiseModel(this.db, this.userId, this.workspaceId);
     const bound = await expertiseModel.listDomainsForAgent(input.agentId);
     if (bound.length === 0) return { ingested: 0, reason: 'no-domains' } as const;

@@ -21,8 +21,8 @@ import WideScreenContainer from '@/features/WideScreenContainer';
 import WorkspaceLink from '@/features/Workspace/WorkspaceLink';
 import { useCurrentProjectList, useProjectStore } from '@/store/project';
 import type { ProjectListItem } from '@/store/project/store';
-import { useUserStore } from '@/store/user';
-import { labPreferSelectors } from '@/store/user/selectors';
+
+import { useProjectsEnabled } from '../useProjectsEnabled';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   identifier: css`
@@ -108,7 +108,7 @@ ProjectRow.displayName = 'ProjectRow';
 const ProjectListPage = memo(() => {
   const { t } = useTranslation('project');
   const [keyword, setKeyword] = useState('');
-  const enabled = useUserStore(labPreferSelectors.enableProjects);
+  const enabled = useProjectsEnabled();
   const projects = useCurrentProjectList();
   const { error, isLoading, mutate } = useProjectStore((s) => s.useFetchProjectList)(enabled);
 

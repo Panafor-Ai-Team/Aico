@@ -4,12 +4,20 @@ import { agents, knowledgeBases } from '@lobechat/database/schemas';
 import { getTestDB } from '@lobechat/database/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { expertiseRouter } from '../../expertise';
 import { projectRouter } from '../../project';
 import { taskRouter } from '../../task';
 import { cleanupTestUser, createTestContext, createTestUser } from './setup';
 
 let testDB: LobeChatDatabase;
 vi.mock('@/database/core/db-adaptor', () => ({ getServerDB: vi.fn(() => testDB) }));
+
+// Aico capability gate: these upstream flows run with the operator flags on; the
+// refusal case below turns them off.
+const capabilityFlags = vi.hoisted(() => ({ enableExpertise: true, enableProjects: true }));
+vi.mock('@/server/featureFlags', () => ({
+  getServerFeatureFlagsStateFromRuntimeConfig: vi.fn(async () => capabilityFlags),
+}));
 
 describe('Project Router Integration', () => {
   let serverDB: LobeChatDatabase;
@@ -24,7 +32,32 @@ describe('Project Router Integration', () => {
   });
 
   afterEach(async () => {
+    capabilityFlags.enableExpertise = true;
+    capabilityFlags.enableProjects = true;
     await cleanupTestUser(serverDB, userId);
+  });
+
+  it('refuses projects, project tasks and expertise while their capabilities are off', async () => {
+    capabilityFlags.enableProjects = false;
+    capabilityFlags.enableExpertise = false;
+
+    await expect(caller.list({})).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller.create({ name: 'Blocked' } as never)).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+
+    const taskCaller = taskRouter.createCaller(createTestContext(userId));
+    await expect(
+      taskCaller.create({ instruction: 'Do it', projectId: 'prj_any' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      taskCaller.create({ config: { goal: { maxIterations: 3 } }, instruction: 'Loop' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
+    const expertiseCaller = expertiseRouter.createCaller(createTestContext(userId));
+    await expect(
+      expertiseCaller.listByAgent({ agentId: 'agt_any' } as never),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
   it('serves the complete project management and human review flow', async () => {

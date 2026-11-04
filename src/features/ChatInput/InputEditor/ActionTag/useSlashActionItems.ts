@@ -16,6 +16,7 @@ import { useFetchProjectSkills } from '@/hooks/useFetchProjectSkills';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
 import { useChatStore } from '@/store/chat';
+import { isClientCapabilityEnabled } from '@/store/serverConfig';
 import { useToolStore } from '@/store/tool';
 import { agentDocumentSkillsSelectors } from '@/store/tool/selectors';
 import type { AgentDocumentSkillItem } from '@/store/tool/slices/agentDocumentSkills/initialState';
@@ -233,19 +234,21 @@ export const useSlashActionItems = (): SlashOptions['items'] => {
 
       // Built-in commands — line-start only
       if (isAtLineStart) {
-        allItems.push({
-          icon: TargetIcon,
-          key: GOAL_COMMAND_TYPE,
-          label: t('slash.goal' as any),
-          metadata: {
-            category: 'command',
-            description: t('slash.goal.desc' as any, { defaultValue: '' }),
-            type: GOAL_COMMAND_TYPE,
-          },
-          // Unlike the other commands this one is not inserted at the caret —
-          // the chip has to lead the message. See `insertGoalTag`.
-          onSelect: (editor: IEditor) => insertGoalTag(editor, t('slash.goal' as any) as string),
-        } as SlashItem);
+        // Aico capability gate: the goal command is offered only while `goals` is on.
+        if (isClientCapabilityEnabled('goals'))
+          allItems.push({
+            icon: TargetIcon,
+            key: GOAL_COMMAND_TYPE,
+            label: t('slash.goal' as any),
+            metadata: {
+              category: 'command',
+              description: t('slash.goal.desc' as any, { defaultValue: '' }),
+              type: GOAL_COMMAND_TYPE,
+            },
+            // Unlike the other commands this one is not inserted at the caret —
+            // the chip has to lead the message. See `insertGoalTag`.
+            onSelect: (editor: IEditor) => insertGoalTag(editor, t('slash.goal' as any) as string),
+          } as SlashItem);
         for (const action of BUILTIN_COMMANDS) {
           if (action.type === 'newTopic' && !activeTopicId) continue;
           allItems.push(makeCommandItem(action) as SlashItem);

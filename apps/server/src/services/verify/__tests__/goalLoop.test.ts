@@ -13,6 +13,11 @@ const { runTaskMock, sumCostMock, findToolMessageIdMock, updateToolMessageMock }
   }),
 );
 
+const mockGoalsCapability = vi.hoisted(() => ({ enabled: true }));
+vi.mock('@/server/services/aico/capabilityGate', () => ({
+  isCapabilityEnabled: async () => mockGoalsCapability.enabled,
+}));
+
 vi.mock('@/server/services/taskRunner', () => ({
   TaskRunnerService: vi.fn(() => ({ runTask: runTaskMock })),
 }));
@@ -45,6 +50,19 @@ describe('resolveGoalRoundBudget', () => {
 describe('maybeContinueGoalLoop', () => {
   beforeEach(() => {
     [runTaskMock, sumCostMock].forEach((m) => m.mockReset());
+    mockGoalsCapability.enabled = true;
+  });
+
+  it('never spawns a round while the goals capability is off (Aico gate)', async () => {
+    mockGoalsCapability.enabled = false;
+    const outcome = await maybeContinueGoalLoop({
+      db,
+      goal: { maxIterations: 3 },
+      task: baseTask,
+      userId: 'u1',
+    });
+    expect(outcome).toBe('capability-disabled');
+    expect(runTaskMock).not.toHaveBeenCalled();
   });
 
   it('spawns the next round with the goal trigger while budgets last', async () => {

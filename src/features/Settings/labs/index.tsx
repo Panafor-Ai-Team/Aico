@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import AsyncError from '@/components/AsyncError';
 import { FORM_STYLE } from '@/const/layoutTokens';
 import SettingHeader from '@/features/Settings/features/SettingHeader';
+import { capabilitySelectors, useServerConfigStore } from '@/store/serverConfig';
 import { useUserStore } from '@/store/user';
 import { labPreferSelectors, preferenceSelectors } from '@/store/user/selectors';
 import { type UserLab } from '@/types/user';
@@ -54,6 +55,7 @@ interface LabToggle {
 const LabsForm = memo(() => {
   const { t: tLabs } = useTranslation('labs');
 
+  const projectsCapability = useServerConfigStore(capabilitySelectors.projects);
   const [
     isPreferenceInit,
     isUserStateInit,
@@ -157,13 +159,18 @@ const LabsForm = memo(() => {
       stage: 'alpha',
       title: tLabs('features.topicAcceptance.title'),
     },
-    {
-      checked: enableProjects,
-      desc: tLabs('features.projects.desc'),
-      flag: 'enableProjects',
-      stage: 'alpha',
-      title: tLabs('features.projects.title'),
-    },
+    // Aico capability gate: the Projects toggle exists only while the operator enabled it.
+    ...(projectsCapability
+      ? [
+          {
+            checked: enableProjects,
+            desc: tLabs('features.projects.desc'),
+            flag: 'enableProjects',
+            stage: 'alpha',
+            title: tLabs('features.projects.title'),
+          } satisfies LabToggle,
+        ]
+      : []),
     {
       checked: enableOAuthApps,
       desc: tLabs('features.oauthApps.desc'),

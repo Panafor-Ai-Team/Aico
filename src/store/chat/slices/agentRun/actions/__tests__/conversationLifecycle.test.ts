@@ -1,7 +1,7 @@
 import type * as LobechatConstModule from '@lobechat/const';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { TRPCClientError } from '@trpc/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { agentService } from '@/services/agent';
 import { aiAgentService } from '@/services/aiAgent';
@@ -32,6 +32,13 @@ import { resetTestEnvironment, setupMockSelectors, spyOnMessageService } from '.
 
 // Keep zustand mock as it's needed globally
 vi.mock('zustand/traditional');
+
+// Aico capability gate (operator flags): off by default, as in production.
+const clientCapabilities = vi.hoisted(() => ({ goals: false }));
+vi.mock('@/store/serverConfig/capability', () => ({
+  isClientCapabilityEnabled: (capability: string) =>
+    capability === 'goals' ? clientCapabilities.goals : false,
+}));
 
 const executeHeterogeneousAgentMock = vi.hoisted(() => vi.fn());
 const mockConstEnv = vi.hoisted(() => ({ isDesktop: false }));
@@ -2897,7 +2904,39 @@ describe('ConversationLifecycle actions', () => {
     });
 
     describe('page scope documentId injection', () => {
+      it('sends `/goal` as an ordinary turn while the goals capability is off', async () => {
+        const { result } = renderHook(() => useChatStore());
+        const executeGatewayAgentSpy = vi.fn().mockResolvedValue({
+          assistantMessageId: TEST_IDS.ASSISTANT_MESSAGE_ID,
+          operationId: 'op-goal',
+          userMessageId: TEST_IDS.USER_MESSAGE_ID,
+        });
+
+        act(() => {
+          useChatStore.setState({
+            executeGatewayAgent: executeGatewayAgentSpy,
+            isGatewayModeEnabled: () => true,
+          });
+        });
+
+        await act(async () => {
+          await result.current.sendMessage({
+            context: createTestContext(),
+            message: '/goal ship the homepage',
+          });
+        });
+
+        expect(executeGatewayAgentSpy).toHaveBeenCalledTimes(1);
+        expect(executeGatewayAgentSpy.mock.calls[0][0].selectedToolIds ?? []).not.toContain(
+          'lobe-goal',
+        );
+      });
+
       it('enables the task tool for a /goal gateway turn', async () => {
+        clientCapabilities.goals = true;
+        onTestFinished(() => {
+          clientCapabilities.goals = false;
+        });
         const { result } = renderHook(() => useChatStore());
         const executeGatewayAgentSpy = vi.fn().mockResolvedValue({
           assistantMessageId: TEST_IDS.ASSISTANT_MESSAGE_ID,

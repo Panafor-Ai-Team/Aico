@@ -37,6 +37,7 @@ import { useFileStore } from '@/store/file';
 import { useGlobalStore } from '@/store/global';
 import { systemStatusSelectors } from '@/store/global/selectors';
 import {
+  capabilitySelectors,
   featureFlagsSelectors,
   serverConfigSelectors,
   useServerConfigStore,
@@ -294,7 +295,10 @@ const usePlusMenuItems = ({ close }: { close: () => void }): ActionDropdownMenuI
   const { updateAgentChatConfig } = useUpdateAgentConfig();
 
   // Goal creation is lab-gated while the product surface is being rolled out.
-  const enableTopicAcceptance = useUserStore(labPreferSelectors.enableTopicAcceptance);
+  // Aico capability gate: the goal entry also needs the operator `goals` flag.
+  const goalsEnabled = useServerConfigStore(capabilitySelectors.goals);
+  const enableTopicAcceptance =
+    useUserStore(labPreferSelectors.enableTopicAcceptance) && goalsEnabled;
 
   const upload = useFileStore((s) => s.uploadChatFiles);
   const { enableKnowledgeBase } = useServerConfigStore(featureFlagsSelectors);

@@ -79,6 +79,7 @@ import { getElectronStoreState } from '@/store/electron';
 import { getFileStoreState } from '@/store/file/store';
 import { useGlobalStore } from '@/store/global';
 import { systemStatusSelectors } from '@/store/global/selectors';
+import { isClientCapabilityEnabled } from '@/store/serverConfig';
 import { pageAgentRuntime } from '@/store/tool/slices/builtin/executors/pageAgentRuntime';
 import { type StoreSetter } from '@/store/types';
 import { getUserStoreState } from '@/store/user';
@@ -308,6 +309,7 @@ export class ConversationLifecycleActionImpl {
     const selectedSkills = parseSelectedSkillsFromEditorData(editorData);
     const selectedTools = parseSelectedToolsFromEditorData(editorData);
     if (
+      isClientCapabilityEnabled('goals') &&
       isGoalPrompt(message) &&
       !selectedTools.some(({ identifier }) => identifier === GoalIdentifier)
     ) {

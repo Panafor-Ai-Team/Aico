@@ -21,12 +21,18 @@ export type IFeatureFlagsState = {
   enableAgentOnboarding: boolean | undefined;
   enableAgentSelfIteration: boolean | undefined;
   enableAuthCaptcha: boolean | undefined;
+  /** Aico capability gate (operator flag `expertise`). */
+  enableExpertise: boolean | undefined;
+  /** Aico capability gate (operator flag `goals`). */
+  enableGoals: boolean | undefined;
   enableCheckUpdates: boolean | undefined;
   enableDevDock: boolean | undefined;
   enableKnowledgeBase: boolean | undefined;
   enableOnboardingV2: boolean | undefined;
   enableRAGEval: boolean | undefined;
   enableSTT: boolean | undefined;
+  /** Aico capability gate (operator flag `projects`). */
+  enableProjects: boolean | undefined;
   enableStorageOverage: boolean | undefined;
   enableWorkspace: boolean | undefined;
   hideDocs: boolean | undefined;

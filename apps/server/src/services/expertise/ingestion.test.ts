@@ -6,6 +6,11 @@ import { expertiseHits, expertiseRuns } from '@/database/schemas';
 import type { SelfIterationCompletionPayload } from '../agentSignal/services/selfIteration/completion';
 import { ExpertiseIngestionService } from './ingestion';
 
+const mockExpertiseCapability = vi.hoisted(() => ({ enabled: true }));
+vi.mock('@/server/services/aico/capabilityGate', () => ({
+  isCapabilityEnabled: async () => mockExpertiseCapability.enabled,
+}));
+
 const completion = (selfIteration: SelfIterationCompletionPayload) => ({
   agentId: 'agent-signal-reflection',
   operationId: 'op_review_1',
@@ -72,6 +77,22 @@ describe('ExpertiseIngestionService historical ingestion', () => {
       ingestionKey: 'historical-v1:topic_1',
       topicId: 'topic_1',
     });
+  });
+
+  it('runs no historical ingestion while the expertise capability is off (Aico gate)', async () => {
+    mockExpertiseCapability.enabled = false;
+    try {
+      const service = new ExpertiseIngestionService({} as never, 'user_1');
+      const list = vi.spyOn(service, 'listHistoricalTopics');
+
+      await expect(service.ingestHistory('agent_1')).resolves.toEqual({ ingested: 0, scanned: 0 });
+      await expect(
+        service.ingestCompletion({ agentId: 'agent_1', topicId: 'topic_1' } as never),
+      ).resolves.toEqual({ ingested: 0, reason: 'capability-disabled' });
+      expect(list).not.toHaveBeenCalled();
+    } finally {
+      mockExpertiseCapability.enabled = true;
+    }
   });
 
   it('processes old topics sequentially to bound model concurrency', async () => {

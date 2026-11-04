@@ -167,6 +167,7 @@ import {
   resolveAgentSelfIterationCapability,
 } from '@/server/services/agentSignal/featureGate';
 import { shouldSuppressSignal } from '@/server/services/agentSignal/suppressSignal';
+import { isCapabilityEnabled } from '@/server/services/aico/capabilityGate';
 import { platformRegistry } from '@/server/services/bot/platforms';
 import { ComposioService } from '@/server/services/composio';
 import {
@@ -2945,7 +2946,10 @@ export class AiAgentService {
     // (deduped) alongside the agent's pinned plugins and any internal
     // `additionalPluginIds` so a mentioned-but-not-pinned tool (e.g. a custom MCP
     // connector) is both queried for manifests and enabled by the tools engine.
-    const isGoalTurn = isGoalPrompt(prompt);
+    // Aico capability gate: with `goals` off, `/goal` is an ordinary chat turn and the
+    // Goal tool is excluded from the manifest set (see `disabledPluginIds` below).
+    const goalsEnabled = await isCapabilityEnabled(this.userId, 'goals');
+    const isGoalTurn = goalsEnabled && isGoalPrompt(prompt);
     let agentPlugins: string[] = isGoalTurn
       ? [GoalIdentifier]
       : [
@@ -3574,7 +3578,9 @@ export class AiAgentService {
             }
           : undefined,
         disableLocalSystem,
-        disabledPluginIds,
+        disabledPluginIds: goalsEnabled
+          ? disabledPluginIds
+          : [...disabledPluginIds, GoalIdentifier],
         executionPlan,
         globalMemoryEnabled,
         hasEnabledKnowledgeBases,

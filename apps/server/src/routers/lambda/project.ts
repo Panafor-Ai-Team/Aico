@@ -7,9 +7,12 @@ import { wsCompatProcedure } from '@/business/server/trpc-middlewares/workspaceA
 import { ProjectModel } from '@/database/models/project';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
+import { assertCapability } from '@/server/services/aico/capabilityGate';
 
 const projectProcedure = wsCompatProcedure.use(serverDatabase).use(async (opts) => {
   const { ctx } = opts;
+  // Aico: Projects stay off until the operator enables the `projects` capability.
+  await assertCapability(ctx.userId, 'projects');
   return opts.next({
     ctx: {
       projectModel: new ProjectModel(ctx.serverDB, ctx.userId, ctx.workspaceId ?? undefined),

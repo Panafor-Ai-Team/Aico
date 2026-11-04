@@ -4,6 +4,7 @@ import debug from 'debug';
 import { AgentOperationModel } from '@/database/models/agentOperation';
 import { MessageModel } from '@/database/models/message';
 import type { LobeChatDatabase } from '@/database/type';
+import { isCapabilityEnabled } from '@/server/services/aico/capabilityGate';
 import { TaskRunnerService } from '@/server/services/taskRunner';
 
 import { resolveGoalRoundBudget } from './goalBudget';
@@ -12,7 +13,8 @@ const log = debug('lobe-server:verify-goal-loop');
 
 export { DEFAULT_GOAL_MAX_ROUNDS, resolveGoalRoundBudget } from './goalBudget';
 
-export type GoalLoopOutcome = 'continued' | 'exhausted-cost' | 'exhausted-rounds' | 'spawn-failed';
+export type GoalLoopOutcome =
+  'capability-disabled' | 'continued' | 'exhausted-cost' | 'exhausted-rounds' | 'spawn-failed';
 
 /**
  * The goal outer loop: after a goal task's verify run settles as failed, spawn
@@ -31,6 +33,13 @@ export const maybeContinueGoalLoop = async (params: {
   workspaceId?: string;
 }): Promise<GoalLoopOutcome> => {
   const { db, goal, task, userId, workspaceId } = params;
+
+  // Aico capability gate: no autonomous goal round while `goals` is off for the owner.
+  // Falls through to the caller's pause + brief path, like a failed spawn.
+  if (!(await isCapabilityEnabled(userId, 'goals'))) {
+    log('task %s goal round skipped: goals capability disabled', task.identifier);
+    return 'capability-disabled';
+  }
 
   const roundsRun = task.totalTopics || 0;
   const roundBudget = resolveGoalRoundBudget(goal);

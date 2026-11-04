@@ -9,6 +9,22 @@ vi.mock('@/store/tool', () => ({
     connectors: [],
     builtinTools: [
       {
+        identifier: 'lobe-goal',
+        manifest: {
+          api: [
+            {
+              description: 'Create a goal',
+              name: 'createGoal',
+              parameters: { properties: {}, type: 'object' },
+            },
+          ],
+          identifier: 'lobe-goal',
+          meta: { avatar: '🎯', title: 'Goal' },
+          type: 'builtin',
+        } as unknown as ToolManifest,
+        type: 'builtin' as const,
+      },
+      {
         identifier: 'search',
         manifest: {
           api: [
@@ -165,8 +181,11 @@ vi.mock('@/store/tool/selectors', () => ({
 
 let mockServerConfig: { toolNameMaxLength?: number } = {};
 
+let mockGoalsCapability = false;
+
 vi.mock('@/store/serverConfig', () => ({
   getServerConfigStoreState: () => ({ serverConfig: mockServerConfig }),
+  isClientCapabilityEnabled: (capability: string) => capability === 'goals' && mockGoalsCapability,
 }));
 
 let mockIsCanUseFC = true;
@@ -292,6 +311,33 @@ describe('toolEngineering', () => {
   });
 
   describe('createToolsEngine', () => {
+    describe('Aico goals capability gate', () => {
+      afterEach(() => {
+        mockGoalsCapability = false;
+      });
+
+      it('never offers the goal tool while the goals capability is off', () => {
+        const result = createToolsEngine().generateTools({
+          model: 'gpt-4',
+          provider: 'openai',
+          toolIds: ['lobe-goal'],
+        });
+
+        expect(result).toBeUndefined();
+      });
+
+      it('offers the goal tool once the operator enabled goals', () => {
+        mockGoalsCapability = true;
+        const result = createToolsEngine().generateTools({
+          model: 'gpt-4',
+          provider: 'openai',
+          toolIds: ['lobe-goal'],
+        });
+
+        expect(result?.map((tool) => tool.function.name)).toEqual(['lobe-goal____createGoal']);
+      });
+    });
+
     it('should generate tools array for enabled plugins', () => {
       const toolsEngine = createToolsEngine();
       const result = toolsEngine.generateTools({

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ExpertiseModel } from '@/database/models/expertise';
 import { authedProcedure, router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
+import { assertCapability } from '@/server/services/aico/capabilityGate';
 import { ExpertiseDomainService } from '@/server/services/expertise/domain';
 import { ExpertiseIngestionService } from '@/server/services/expertise/ingestion';
 import { ExpertiseHistoryWorkflow } from '@/server/workflows/expertiseHistory';
@@ -11,6 +12,8 @@ import { recentLessonDelta } from './expertiseHelpers';
 
 const expertiseProcedure = authedProcedure.use(serverDatabase).use(async (opts) => {
   const { ctx } = opts;
+  // Aico: Expertise stays off until the operator enables the `expertise` capability.
+  await assertCapability(ctx.userId, 'expertise');
   return opts.next({
     ctx: {
       expertiseModel: new ExpertiseModel(ctx.serverDB, ctx.userId, ctx.workspaceId ?? undefined),

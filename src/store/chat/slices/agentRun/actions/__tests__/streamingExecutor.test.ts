@@ -117,6 +117,7 @@ vi.mock('@/services/electron/desktopNotification', () => ({
   desktopNotificationService: desktopNotificationMock,
 }));
 vi.mock('@/store/serverConfig', () => ({
+  isClientCapabilityEnabled: () => false,
   getServerConfigStoreState: () => ({
     serverConfig: { enableMultimodalUnderstanding: serverConfigMock.enableMultimodalUnderstanding },
   }),

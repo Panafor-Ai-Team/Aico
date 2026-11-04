@@ -87,6 +87,10 @@ vi.mock('./CustomizeSidebarModal', () => ({
   openCustomizeSidebarModal: vi.fn(),
 }));
 
+vi.mock('@/features/Projects/useProjectsEnabled', () => ({
+  useProjectsEnabled: () => false,
+}));
+
 vi.mock('@/store/global', () => ({
   useGlobalStore: (selector: (state: MockGlobalState) => unknown) => selector(mocks.globalState),
 }));
