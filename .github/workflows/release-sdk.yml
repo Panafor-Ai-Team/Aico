@@ -4,12 +4,10 @@ permissions:
   contents: read
   id-token: write
 
+# Aico: upstream LobeHub's SDK release. It publishes `@lobehub/sdk` (LobeHub's npm scope,
+# repository lobehub/lobehub), which this fork must never do, so it runs only by hand.
+# `scripts/aico/workflowTriggers.test.ts` keeps publishing workflows dispatch-only.
 on:
-  push:
-    branches:
-      - canary
-    paths:
-      - packages/sdk/**
   workflow_dispatch: {}
 
 concurrency:
