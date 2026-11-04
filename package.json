@@ -594,6 +594,7 @@
       "@lobehub/tts": "5.1.2",
       "@lobehub/ui": "5.30.0",
       "@react-pdf/image": "3.0.4",
+      "@standard-community/standard-openapi": "0.2.10",
       "@types/react": "19.2.13",
       "@vitest/coverage-v8": "3.2.6",
       "antd": "6.3.5",
