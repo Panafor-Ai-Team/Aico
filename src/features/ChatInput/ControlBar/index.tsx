@@ -16,7 +16,10 @@ import { resolveControlBarView } from './resolveControlBarView';
 import WorkspaceControls from './WorkspaceControls';
 
 const styles = createStaticStyles(({ css }) => ({
+  // `flex: none` keeps the row at 28px inside the column-flex composer; without
+  // it the bar shrinks to the compact chips' min-content height.
   bar: css`
+    flex: none;
     height: 28px;
     padding-block: 0;
     padding-inline: 4px;

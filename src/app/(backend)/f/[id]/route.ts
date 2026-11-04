@@ -51,16 +51,12 @@ export const GET = async (req: Request, segmentData: { params: Params }) => {
     // Create file service with file owner's userId
     const fileService = new FileService(db, file.userId);
 
-    if (new URL(req.url).searchParams.has('download')) {
-      const downloadUrl = await fileService.createPreSignedUrlForDownload(file.url, file.name);
-      log('Web S3 presigned download URL generated');
-
-      return Response.redirect(downloadUrl, 302);
-    }
-
-    // Web: Generate a cached S3 presigned URL, normalizing legacy full S3 URLs.
-    const redirectUrl = await fileService.createCachedPreSignedUrlForPreview(file.url);
-    log('Web S3 presigned URL generated');
+    // Any `download` param (Aico links use a bare `?download`, upstream `?download=1`).
+    const isDownload = new URL(req.url).searchParams.has('download');
+    const redirectUrl = isDownload
+      ? await fileService.createDownloadUrl(file.url, file.name)
+      : await fileService.createCachedPreSignedUrlForPreview(file.url);
+    log('Web S3 presigned URL generated (%s)', isDownload ? 'download' : 'preview');
 
     // Return 302 redirect
     return Response.redirect(redirectUrl, 302);

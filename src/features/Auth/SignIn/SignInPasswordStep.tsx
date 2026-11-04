@@ -1,5 +1,5 @@
-import { InputPassword, Text } from '@lobehub/ui';
-import { Button } from '@lobehub/ui/base-ui';
+import { InputPassword } from '@lobehub/ui';
+import { Button, Text } from '@lobehub/ui/base-ui';
 import { type FormInstance, type InputRef } from 'antd';
 import { Form } from 'antd';
 import { createStaticStyles } from 'antd-style';

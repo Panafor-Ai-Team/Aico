@@ -8,12 +8,14 @@ import { ConfigProvider as AntdConfigProvider } from 'antd';
 import { createStaticStyles, cx } from 'antd-style';
 import * as m from 'motion/react-m';
 import { type ReactNode } from 'react';
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 
 import AntdStaticMethods from '@/components/AntdStaticMethods';
 import Link from '@/components/Link';
+import { genFontFamily, genFontFamilyCode } from '@/const/font';
 import { LOBE_THEME_NEUTRAL_COLOR, LOBE_THEME_PRIMARY_COLOR } from '@/const/theme';
 import { useIsDark } from '@/hooks/useIsDark';
+import { getLocaleFontConfig } from '@/utils/client/localeFont';
 import { useLocaleThemeFont } from '@/hooks/useLocaleThemeFont';
 import { getUILocaleAndResources } from '@/libs/getUILocaleAndResources';
 import type { UILocaleResources } from '@/libs/getUILocaleAndResources.utils';
@@ -22,7 +24,7 @@ import Image from '@/libs/next/Image';
 import { useGlobalStore } from '@/store/global';
 import { systemStatusSelectors } from '@/store/global/selectors';
 import { useUserStore } from '@/store/user';
-import { userGeneralSettingsSelectors } from '@/store/user/selectors';
+import { preferenceSelectors, userGeneralSettingsSelectors } from '@/store/user/selectors';
 import { GlobalStyle } from '@/styles';
 import {
   applyDocumentDirection,
@@ -107,11 +109,12 @@ const AppTheme = memo<AppThemeProps>(
   }) => {
     const language = useGlobalStore(systemStatusSelectors.language);
     const documentDir = getDocumentDirection(language);
-    const { fontFamily, fontURL } = useLocaleThemeFont({
-      customFontFamily,
-      customFontURL,
-      language,
-    });
+    // Aico: the locale's own font (Vazirmatn for fa-IR) and its stylesheet. Upstream's
+    // genFontFamily has no fa-IR family, so it is passed in as the default custom family.
+    const { fontURL } = useLocaleThemeFont({ customFontFamily, customFontURL, language });
+    const localeFontFamily = getLocaleFontConfig(
+      resolveUILocale(language).normalizedLocale,
+    )?.fontFamily;
     const isDark = useIsDark();
 
     const [primaryColor, neutralColor, animationMode] = useUserStore((s) => [
@@ -119,6 +122,27 @@ const AppTheme = memo<AppThemeProps>(
       userGeneralSettingsSelectors.neutralColor(s),
       userGeneralSettingsSelectors.animationMode(s),
     ]);
+    const [userFontFamily, userFontFamilyCode] = useUserStore((s) => [
+      preferenceSelectors.fontFamily(s),
+      preferenceSelectors.terminalFontFamily(s),
+    ]);
+    const fontFamily = useMemo(
+      () =>
+        genFontFamily({
+          customFontFamily: customFontFamily ?? localeFontFamily,
+          locale: resolveUILocale(language).normalizedLocale,
+          userFontFamily,
+        }),
+      [customFontFamily, language, localeFontFamily, userFontFamily],
+    );
+    const fontFamilyCode = useMemo(
+      () =>
+        genFontFamilyCode({
+          locale: resolveUILocale(language).normalizedLocale,
+          userFontFamily: userFontFamilyCode,
+        }),
+      [language, userFontFamilyCode],
+    );
     const [uiResources, setUIResources] = useState<UILocaleResources>();
     const [uiLocale, setUILocale] = useState(() => resolveUILocale(language).uiLocale);
 
@@ -168,6 +192,7 @@ const AppTheme = memo<AppThemeProps>(
           cssVar: { key: 'lobe-vars' },
           token: {
             fontFamily,
+            fontFamilyCode,
             motion: animationMode !== 'disabled',
             motionUnit: animationMode === 'agile' ? 0.05 : 0.1,
           },

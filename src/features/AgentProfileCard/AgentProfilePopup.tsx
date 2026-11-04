@@ -1,7 +1,8 @@
 'use client';
 
 import { agentDisplayName, type AgentItem } from '@lobechat/types';
-import { ActionIcon, Flexbox, Icon, Popover, Skeleton, Text } from '@lobehub/ui';
+import { Flexbox, Icon, Popover, Skeleton } from '@lobehub/ui';
+import { ActionIcon, Text } from '@lobehub/ui/base-ui';
 import { SkillsIcon } from '@lobehub/ui/icons';
 import { createStaticStyles } from 'antd-style';
 import { BookOpen, FileText, Settings } from 'lucide-react';

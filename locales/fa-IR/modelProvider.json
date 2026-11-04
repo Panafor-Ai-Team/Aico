@@ -361,5 +361,6 @@
   "vertexai.region.placeholder": "انتخاب منطقه",
   "vertexai.region.title": "منطقه Vertex AI",
   "zeroone.title": "01.AI Zero One Everything",
-  "zhipu.title": "Zhipu"
+  "zhipu.title": "Zhipu",
+  "providerModels.item.modelConfig.extendParams.options.deepseekV4GAReasoningEffort.hint": "برای حالت تفکر DeepSeek V4 GA؛ شدت استدلال را کنترل می‌کند. یک سطح `پایین` به سطوح اصلی V4 اضافه می‌شود. `بالا` به صورت پیش‌فرض است، `حداکثر` عمیق‌ترین استدلال مورد استفاده در جریان‌های کاری پیچیده عامل‌ها را باز می‌کند."
 }

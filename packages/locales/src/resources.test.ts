@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { locales, normalizeLocale, resolveSystemLocale } from './resources';
+import { locales, matchLocale, normalizeLocale, resolveSystemLocale } from './resources';
 
 describe('normalizeLocale', () => {
   it('should return "fa-IR" when locale is undefined', () => {
@@ -83,5 +83,19 @@ describe('resolveSystemLocale', () => {
     for (const locale of locales) {
       expect(resolveSystemLocale([locale])).toBe(locale);
     }
+  });
+});
+
+describe('matchLocale', () => {
+  it('should return undefined when nothing is supported', () => {
+    expect(matchLocale()).toBeUndefined();
+    expect(matchLocale('unknown')).toBeUndefined();
+    expect(matchLocale('en-GB')).toBeUndefined();
+  });
+
+  it('should return the matched locale', () => {
+    expect(matchLocale('en')).toBe('en-US');
+    expect(matchLocale('zh-Hant')).toBe('zh-TW');
+    expect(matchLocale('ar-EG')).toBe('ar');
   });
 });

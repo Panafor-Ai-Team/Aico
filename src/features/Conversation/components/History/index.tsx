@@ -1,4 +1,5 @@
-import { Center, Flexbox, Icon, Markdown, Text } from '@lobehub/ui';
+import { Center, Flexbox, Icon, Markdown } from '@lobehub/ui';
+import { Text } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { ScrollText } from 'lucide-react';
 import { memo } from 'react';

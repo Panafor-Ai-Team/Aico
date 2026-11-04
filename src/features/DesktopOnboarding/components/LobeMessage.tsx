@@ -1,6 +1,7 @@
 import { type FlexboxProps } from '@lobehub/ui';
-import { Flexbox, Text } from '@lobehub/ui';
+import { Flexbox } from '@lobehub/ui';
 import { type TypewriterEffectProps } from '@lobehub/ui/awesome';
+import { Text } from '@lobehub/ui/base-ui';
 import { memo } from 'react';
 
 import { ProductLogo } from '@/components/Branding';

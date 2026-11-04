@@ -2,8 +2,8 @@
 
 import { ExclamationCircleOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import { BRANDING_EMAIL } from '@lobechat/business-const';
-import { FluentEmoji, Text } from '@lobehub/ui';
-import { Button } from '@lobehub/ui/base-ui';
+import { FluentEmoji } from '@lobehub/ui';
+import { Button, Text } from '@lobehub/ui/base-ui';
 import { Result } from 'antd';
 import { memo } from 'react';
 import { Trans, useTranslation } from 'react-i18next';

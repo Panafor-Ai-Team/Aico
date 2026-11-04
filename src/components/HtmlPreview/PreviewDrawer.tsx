@@ -11,6 +11,8 @@ import { isDesktop } from '@/const/version';
 
 import { ensurePreviewableHtmlDocument } from './detectHtml';
 
+import { extractHtmlTitle } from './htmlTagScanner';
+
 const styles = createStaticStyles(({ css }) => ({
   container: css`
     height: 100%;
@@ -31,11 +33,6 @@ const HtmlPreviewDrawer = memo<HtmlPreviewDrawerProps>(({ content, open, onClose
 
   const htmlContent = ensurePreviewableHtmlDocument(content);
 
-  const extractTitle = useCallback(() => {
-    const m = htmlContent.match(/<title>([\S\s]*?)<\/title>/i);
-    return m ? m[1].trim() : undefined;
-  }, [htmlContent]);
-
   const sanitizeFileName = useCallback((name: string) => {
     return name
       .replaceAll(/["*/:<>?\\|]/g, '-')
@@ -45,10 +42,10 @@ const HtmlPreviewDrawer = memo<HtmlPreviewDrawerProps>(({ content, open, onClose
   }, []);
 
   const onDownload = useCallback(() => {
-    const title = extractTitle();
+    const title = extractHtmlTitle(content);
     const base = title ? sanitizeFileName(title) : `chat-html-preview-${Date.now()}`;
     exportFile(htmlContent, `${base}.html`);
-  }, [htmlContent, extractTitle, sanitizeFileName]);
+  }, [htmlContent, sanitizeFileName]);
 
   const extra = (
     <Flexbox horizontal align={'center'} gap={8}>

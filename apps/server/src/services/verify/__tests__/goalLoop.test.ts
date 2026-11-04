@@ -1,17 +1,22 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { DEFAULT_GOAL_MAX_ROUNDS, resolveGoalRoundBudget } from '../goalBudget';
+import { resolveGoalRoundBudget } from '../goalBudget';
 import { maybeContinueGoalLoop, syncGoalToolState } from '../goalLoop';
 
-const { runTaskMock, sumCostMock, findToolMessageIdMock, updateToolMessageMock } = vi.hoisted(
-  () => ({
-    findToolMessageIdMock: vi.fn(),
-    runTaskMock: vi.fn(),
-    sumCostMock: vi.fn(),
-    updateToolMessageMock: vi.fn(),
-  }),
-);
+const {
+  runTaskMock,
+  sumCostMock,
+  findToolMessageIdMock,
+  updateToolMessageMock,
+  updateGoalStatusMock,
+} = vi.hoisted(() => ({
+  findToolMessageIdMock: vi.fn(),
+  runTaskMock: vi.fn(),
+  sumCostMock: vi.fn(),
+  updateGoalStatusMock: vi.fn(),
+  updateToolMessageMock: vi.fn(),
+}));
 
 const mockGoalsCapability = vi.hoisted(() => ({ enabled: true }));
 vi.mock('@/server/services/aico/capabilityGate', () => ({
@@ -24,6 +29,9 @@ vi.mock('@/server/services/taskRunner', () => ({
 vi.mock('@/database/models/agentOperation', () => ({
   AgentOperationModel: vi.fn(() => ({ sumCostByTask: sumCostMock })),
 }));
+vi.mock('@/database/models/goal', () => ({
+  GoalModel: vi.fn(() => ({ updateStatus: updateGoalStatusMock })),
+}));
 vi.mock('@/database/models/message', () => ({
   MessageModel: vi.fn(() => ({
     findToolMessageIdByToolCallId: findToolMessageIdMock,
@@ -33,23 +41,22 @@ vi.mock('@/database/models/message', () => ({
 
 const db = {} as any;
 const baseTask = { id: 'task-1', identifier: 'T-1', totalTopics: 1 } as any;
+const goalItem = (partial: Record<string, unknown>) =>
+  ({ id: 'goal-1', maxRounds: null, maxTotalCost: null, ...partial }) as any;
 
 describe('resolveGoalRoundBudget', () => {
-  it('null → uncapped', () => {
-    expect(resolveGoalRoundBudget({ maxIterations: null })).toBe(Number.POSITIVE_INFINITY);
-  });
-  it('absent → default', () => {
-    expect(resolveGoalRoundBudget({})).toBe(DEFAULT_GOAL_MAX_ROUNDS);
+  it('null → uncapped (write time already resolved the default)', () => {
+    expect(resolveGoalRoundBudget({ maxRounds: null })).toBe(Number.POSITIVE_INFINITY);
   });
   it('numbers are floored at 2', () => {
-    expect(resolveGoalRoundBudget({ maxIterations: 1 })).toBe(2);
-    expect(resolveGoalRoundBudget({ maxIterations: 5 })).toBe(5);
+    expect(resolveGoalRoundBudget({ maxRounds: 1 })).toBe(2);
+    expect(resolveGoalRoundBudget({ maxRounds: 5 })).toBe(5);
   });
 });
 
 describe('maybeContinueGoalLoop', () => {
   beforeEach(() => {
-    [runTaskMock, sumCostMock].forEach((m) => m.mockReset());
+    [runTaskMock, sumCostMock, updateGoalStatusMock].forEach((m) => m.mockReset());
     mockGoalsCapability.enabled = true;
   });
 
@@ -57,7 +64,7 @@ describe('maybeContinueGoalLoop', () => {
     mockGoalsCapability.enabled = false;
     const outcome = await maybeContinueGoalLoop({
       db,
-      goal: { maxIterations: 3 },
+      goal: goalItem({ maxRounds: 3 }),
       task: baseTask,
       userId: 'u1',
     });
@@ -69,30 +76,32 @@ describe('maybeContinueGoalLoop', () => {
     runTaskMock.mockResolvedValue({});
     const outcome = await maybeContinueGoalLoop({
       db,
-      goal: { maxIterations: 3 },
+      goal: goalItem({ maxRounds: 3 }),
       task: baseTask,
       userId: 'u1',
     });
     expect(outcome).toBe('continued');
     expect(runTaskMock).toHaveBeenCalledWith({ taskId: 'task-1', trigger: 'goal' });
+    expect(updateGoalStatusMock).toHaveBeenCalledWith('goal-1', 'running');
   });
 
   it('stops at the round budget', async () => {
     const outcome = await maybeContinueGoalLoop({
       db,
-      goal: { maxIterations: 3 },
+      goal: goalItem({ maxRounds: 3 }),
       task: { ...baseTask, totalTopics: 3 },
       userId: 'u1',
     });
     expect(outcome).toBe('exhausted-rounds');
     expect(runTaskMock).not.toHaveBeenCalled();
+    expect(updateGoalStatusMock).not.toHaveBeenCalled();
   });
 
   it('uncapped rounds (null) keep looping', async () => {
     runTaskMock.mockResolvedValue({});
     const outcome = await maybeContinueGoalLoop({
       db,
-      goal: { maxIterations: null },
+      goal: goalItem({ maxRounds: null }),
       task: { ...baseTask, totalTopics: 42 },
       userId: 'u1',
     });
@@ -103,7 +112,7 @@ describe('maybeContinueGoalLoop', () => {
     sumCostMock.mockResolvedValue(21.5);
     const outcome = await maybeContinueGoalLoop({
       db,
-      goal: { maxIterations: 5, maxTotalCost: 20 },
+      goal: goalItem({ maxRounds: 5, maxTotalCost: 20 }),
       task: baseTask,
       userId: 'u1',
     });
@@ -115,7 +124,7 @@ describe('maybeContinueGoalLoop', () => {
     runTaskMock.mockResolvedValue({});
     const outcome = await maybeContinueGoalLoop({
       db,
-      goal: { maxIterations: 5, maxTotalCost: null },
+      goal: goalItem({ maxRounds: 5, maxTotalCost: null }),
       task: baseTask,
       userId: 'u1',
     });
@@ -127,11 +136,12 @@ describe('maybeContinueGoalLoop', () => {
     runTaskMock.mockRejectedValue(new Error('CONFLICT'));
     const outcome = await maybeContinueGoalLoop({
       db,
-      goal: { maxIterations: 3 },
+      goal: goalItem({ maxRounds: 3 }),
       task: baseTask,
       userId: 'u1',
     });
     expect(outcome).toBe('spawn-failed');
+    expect(updateGoalStatusMock).not.toHaveBeenCalled();
   });
 });
 

@@ -575,5 +575,8 @@
   "upgradeVersion.buildChannel": "{{channel}}",
   "upgradeVersion.builtAt": "ساخته‌شده {{time}}",
   "upgradeVersion.gitSha": "{{sha}}",
-  "upgradeVersion.shaCopied": "شناسه کامیت کپی شد"
+  "upgradeVersion.shaCopied": "شناسه کامیت کپی شد",
+  "navPanel.searchProject": "جستجوی پروژه‌ها...",
+  "navPanel.switcherAll": "همه",
+  "navPanel.switcherRecent": "اخیر"
 }

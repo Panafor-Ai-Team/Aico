@@ -148,6 +148,8 @@ export interface ChatTopicMetadata {
    * written without it can never be attributed afterwards.
    */
   editingGroupId?: string;
+  /** Restored-history tail used as the source message for eval attempt threads. */
+  evalHistoryTailMessageId?: string;
   /**
    * Scoped pointer to the currently active assistant message for a running
    * heterogeneous agent operation. Includes `operationId` so cold-start
@@ -156,6 +158,13 @@ export interface ChatTopicMetadata {
    * Updated on every step boundary.
    */
   heteroCurrentMsgId?: { msgId: string; operationId: string };
+  /**
+   * Secret-free identity of the provider/auth binding that created
+   * `heteroSessionId`. Resume is allowed only when this identity still matches.
+   */
+  heteroSessionBindingKey?: string;
+  /** Binding identities paired with `heteroSessionIdByWorkingDirectory`. */
+  heteroSessionBindingKeyByWorkingDirectory?: Record<string, string>;
   /**
    * Persistent session id for a heterogeneous agent.
    * Saved after each turn so the next message in the same topic can resume
@@ -192,6 +201,12 @@ export interface ChatTopicMetadata {
   /** origin marker for imported topics, e.g. `claude-code-local` / `codex-local` */
   importedFrom?: string;
   /**
+   * Root operation that most recently consumed `runningOperation`.
+   * Used to scope a post-terminal `unread` → `active` correction when the
+   * watching client receives the terminal event after the server cleared the marker.
+   */
+  lastSettledOperationId?: string;
+  /**
    * Measured dominant model by token volume, written by the usage roll-up
    * (`topicUsage.recompute`). This is an analytics projection of "what actually
    * ran", NOT the topic's configured model — the pinned/config model lives in
@@ -219,6 +234,18 @@ export interface ChatTopicMetadata {
    */
   runningOperation?: {
     assistantMessageId: string;
+    childOperations?: Array<{
+      assistantMessageId: string;
+      deviceId?: string;
+      deviceUserId?: string;
+      deviceWorkspaceId?: string;
+      heteroType?: string;
+      hooks?: SerializedAgentHook[];
+      operationId: string;
+      orchestrationRole?: 'supervisor' | 'member';
+      scope?: string;
+      threadId?: string | null;
+    }>;
     /** Device selected for a notify-based platform task. */
     deviceId?: string;
     /** Personal-device owner used to route dispatch and cancellation through the same principal. */
@@ -243,7 +270,18 @@ export interface ChatTopicMetadata {
      */
     hooks?: SerializedAgentHook[];
     operationId: string;
+    orchestrationRole?: 'supervisor' | 'member';
     scope?: string;
+    /**
+     * When this run claimed the topic, as an ISO string. This marker gates every
+     * background existing-topic start (`TopicModel.tryReserveTaskCallback`), so
+     * without a liveness stamp a run that dies before clearing it holds the
+     * topic hostage forever.
+     *
+     * Optional for back-compat: markers written before this field existed carry
+     * no stamp and cannot be proven live.
+     */
+    startedAt?: string;
     threadId?: string | null;
   } | null;
   /**
@@ -442,6 +480,8 @@ export const parseTopicScheduledRun = (raw: unknown): TopicScheduledRun | null =
 export const chatTopicMetadataUpdateSchema = z.object({
   autoApproveTools: z.boolean().optional(),
   boundDeviceId: z.string().optional(),
+  heteroSessionBindingKey: z.string().optional(),
+  heteroSessionBindingKeyByWorkingDirectory: z.record(z.string(), z.string()).optional(),
   heteroSessionId: z.string().optional(),
   heteroSessionIdByWorkingDirectory: z.record(z.string(), z.string()).optional(),
   model: z.string().optional(),
@@ -478,6 +518,7 @@ export const chatTopicMetadataUpdateSchema = z.object({
     })
     .optional(),
   provider: z.string().optional(),
+  lastSettledOperationId: z.string().optional(),
   repos: z.array(z.string()).optional(),
   // Runtime state, hooks and task-callback reservations are server-owned; clients may
   // only clear a stale marker (upstream accepts the full objects here).

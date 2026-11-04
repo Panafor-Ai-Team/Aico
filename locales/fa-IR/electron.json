@@ -162,5 +162,10 @@
   "window.pinToTop": "سنجاق به بالا",
   "window.restore": "بازیابی پنجره",
   "window.unpinFromTop": "برداشتن سنجاق از بالا",
-  "navigation.changelog": "تغییرات نسخه"
+  "navigation.changelog": "تغییرات نسخه",
+  "navigation.apps": "برنامه‌ها",
+  "navigation.projects": "پروژه‌ها",
+  "navigation.selfLearning": "خودآموزی",
+  "updater.refreshToApply": "اکنون تازه‌سازی کنید",
+  "updater.rendererUpdateReady": "نسخه جدید آماده است — برای اعمال تازه‌سازی کنید"
 }

@@ -14,6 +14,7 @@ const CHAT_ONLY_ACTIONS = new Set<ActionKey>([
   'promptTransform',
   'reasoningEffort',
   'typo',
+  'voiceDictation',
 ]);
 
 /**

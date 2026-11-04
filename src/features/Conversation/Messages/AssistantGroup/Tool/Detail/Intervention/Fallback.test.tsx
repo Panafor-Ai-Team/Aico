@@ -67,6 +67,9 @@ vi.mock('@/store/user/selectors', () => ({
 }));
 
 vi.mock('../../../../../store', () => ({
+  dataSelectors: {
+    getDbMessageById: () => () => undefined,
+  },
   useConversationStore: (
     selector: (state: { updatePluginArguments: ReturnType<typeof vi.fn> }) => unknown,
   ) => selector({ updatePluginArguments: vi.fn() }),

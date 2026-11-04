@@ -1,6 +1,7 @@
 import { BRANDING_INBOX_NAME, BRANDING_SITE_URL } from '@lobechat/business-const';
 import { agentDisplayName, type ConversationContext, type UIChatMessage } from '@lobechat/types';
-import { Avatar, Flexbox, Markdown, Text } from '@lobehub/ui';
+import { Flexbox, Markdown } from '@lobehub/ui';
+import { Avatar, Text } from '@lobehub/ui/base-ui';
 import { cx } from 'antd-style';
 import { memo } from 'react';
 

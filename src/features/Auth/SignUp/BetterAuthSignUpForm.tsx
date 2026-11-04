@@ -1,7 +1,7 @@
 'use client';
 
-import { Input, InputPassword, Text } from '@lobehub/ui';
-import { Button } from '@lobehub/ui/base-ui';
+import { Input, InputPassword } from '@lobehub/ui';
+import { Button, Text } from '@lobehub/ui/base-ui';
 import { Form, type InputRef } from 'antd';
 import { createStaticStyles } from 'antd-style';
 import { useEffect, useRef } from 'react';

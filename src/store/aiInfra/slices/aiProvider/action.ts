@@ -703,6 +703,7 @@ export class AiProviderActionImpl {
           hiddenBuiltinModels: defaultHiddenBuiltinModels,
           // without a server there is no routing layer, so no redirects exist
           modelRedirects: {},
+          providerBindingAgentTypes: {},
           runtimeConfig: {},
         };
       },
@@ -724,6 +725,7 @@ export class AiProviderActionImpl {
               hiddenBuiltinModels: data.hiddenBuiltinModels,
               isInitAiProviderRuntimeState: true,
               modelRedirects: data.modelRedirects,
+              providerBindingAgentTypes: data.providerBindingAgentTypes ?? {},
             },
             false,
             'useFetchAiProviderRuntimeState',

@@ -3,7 +3,8 @@
 import { BRANDING_INBOX_NAME } from '@lobechat/business-const';
 import { DEFAULT_INBOX_AVATAR } from '@lobechat/const';
 import { agentDisplayName } from '@lobechat/types';
-import { Avatar, Icon } from '@lobehub/ui';
+import { Icon } from '@lobehub/ui';
+import { Avatar } from '@lobehub/ui/base-ui';
 import { createStaticStyles } from 'antd-style';
 import { Loader2 } from 'lucide-react';
 import { type CSSProperties } from 'react';

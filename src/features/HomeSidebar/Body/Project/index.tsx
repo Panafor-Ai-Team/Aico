@@ -1,7 +1,8 @@
 'use client';
 
-import { AccordionItem, ActionIcon, Flexbox, Text } from '@lobehub/ui';
-import { ArrowRightIcon, PlusIcon, SquareKanbanIcon } from 'lucide-react';
+import { AccordionItem, Flexbox } from '@lobehub/ui';
+import { ActionIcon, Text } from '@lobehub/ui/base-ui';
+import { ArrowRightIcon, PlusIcon } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -12,6 +13,8 @@ import { openCreateProjectModal } from '@/features/Projects/CreateProjectModal';
 import { useProjectsEnabled } from '@/features/Projects/useProjectsEnabled';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { useCurrentProjectList, useProjectStore } from '@/store/project';
+
+import ProjectItem from './ProjectItem';
 
 interface ProjectProps {
   itemKey: string;
@@ -55,17 +58,10 @@ const Project = memo<ProjectProps>(({ itemKey }) => {
         <NavItem
           icon={PlusIcon}
           title={t('sidebar.emptyAction')}
-          onClick={openCreateProjectModal}
+          onClick={() => openCreateProjectModal()}
         />
       ) : (
-        projects.map((project) => (
-          <NavItem
-            icon={project.avatar || SquareKanbanIcon}
-            key={project.id}
-            title={project.name}
-            onClick={() => navigate(`/project/${project.id}`)}
-          />
-        ))
+        projects.map((project) => <ProjectItem key={project.id} project={project} />)
       )}
     </AccordionItem>
   );

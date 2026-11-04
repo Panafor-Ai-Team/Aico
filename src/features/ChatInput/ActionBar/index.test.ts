@@ -72,10 +72,19 @@ describe('filterChatOnlyActions', () => {
         'memory',
         'fileUpload',
         'tools',
+        'voiceDictation',
         '---',
         ['typo', 'params', 'clear'],
       ]),
-    ).toEqual(['agentMode', 'model', 'reasoningEffort', 'fileUpload', '---', ['typo', 'clear']]);
+    ).toEqual([
+      'agentMode',
+      'model',
+      'reasoningEffort',
+      'fileUpload',
+      'voiceDictation',
+      '---',
+      ['typo', 'clear'],
+    ]);
   });
 
   it('keeps the icon model trigger for chat-only members instead of degrading to the text label', () => {

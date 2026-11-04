@@ -76,10 +76,12 @@ export class S3StaticFileImpl implements FileServiceImpl {
     return this.s3.createPreSignedUrlForPreview(key, expiresIn);
   }
 
-  async createPreSignedUrlForDownload(url: string, filename: string): Promise<string> {
-    const key = await this.getStorageKeyFromUrl(url);
-
-    return this.s3.createPreSignedUrlForDownload(key, filename);
+  async createPreSignedUrlForDownload(
+    key: string,
+    fileName: string,
+    expiresIn?: number,
+  ): Promise<string> {
+    return this.s3.createPreSignedUrlForDownload(key, fileName, expiresIn);
   }
 
   private async getStorageKeyFromUrl(url: string): Promise<string> {
@@ -91,6 +93,12 @@ export class S3StaticFileImpl implements FileServiceImpl {
     }
 
     return extractedKey;
+  }
+
+  async createDownloadUrl(url: string, fileName: string, expiresIn?: number): Promise<string> {
+    const key = await this.getStorageKeyFromUrl(url);
+
+    return this.createPreSignedUrlForDownload(key, fileName, expiresIn);
   }
 
   private async getCachedPreSignedUrlForPreview(key: string, expiresIn?: number): Promise<string> {
