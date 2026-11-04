@@ -1,5 +1,5 @@
-import { Alert, Input, Text } from '@lobehub/ui';
-import { Button } from '@lobehub/ui/base-ui';
+import { Input } from '@lobehub/ui';
+import { Alert, Button, Text } from '@lobehub/ui/base-ui';
 import { type FormInstance, type InputRef } from 'antd';
 import { Form } from 'antd';
 import { createStaticStyles } from 'antd-style';

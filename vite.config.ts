@@ -7,6 +7,7 @@ import type { PluginOption, ViteDevServer } from 'vite';
 import { defineConfig, loadEnv } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+import { customBrandingLoadingScreen } from './plugins/vite/customBrandingLoadingScreen';
 import { viteEnvRestartKeys } from './plugins/vite/envRestartKeys';
 import {
   createSharedRolldownOutput,
@@ -23,15 +24,13 @@ import { createViteWatchOptions } from './plugins/vite/watchOptions';
 
 const isMobile = process.env.MOBILE === 'true';
 const isAuth = process.env.AUTH === 'true';
-const isWorkbench = process.env.SPA_TARGET === 'workbench';
 const isControlPlane = process.env.SPA_TARGET === 'control-plane';
 const mode = process.env.NODE_ENV === 'production' ? 'production' : 'development';
 
 Object.assign(process.env, loadEnv(mode, process.cwd(), ''));
 
 const isDev = process.env.NODE_ENV !== 'production';
-const isMobileRuntime = isMobile || isWorkbench;
-const platform = isAuth ? 'auth' : isMobileRuntime ? 'mobile' : 'web';
+const platform = isAuth ? 'auth' : isMobile ? 'mobile' : 'web';
 const enableViteDevTools = process.env.LOBE_VITE_DEVTOOLS === 'true';
 
 const resolveCommandExecutable = (cmd: string) => {
@@ -114,23 +113,19 @@ export default defineConfig({
     : process.env.VITE_CDN_BASE ||
       (isAuth
         ? '/_spa-auth/'
-        : isWorkbench
-          ? '/_spa-workbench/'
-          : isControlPlane
-            ? // Dedicated control-plane origin (moz / production) serves UI at `/`
-              '/'
-            : '/_spa/'),
+        : isControlPlane
+          ? // Dedicated control-plane origin (moz / production) serves UI at `/`
+            '/'
+          : '/_spa/'),
   build: {
     modulePreload: sharedModulePreload,
     outDir: isAuth
       ? 'dist/auth'
-      : isWorkbench
-        ? 'dist/workbench'
-        : isControlPlane
-          ? 'dist/control-plane'
-          : isMobile
-            ? 'dist/mobile'
-            : 'dist/desktop',
+      : isControlPlane
+        ? 'dist/control-plane'
+        : isMobile
+          ? 'dist/mobile'
+          : 'dist/desktop',
     reportCompressedSize: false,
     rolldownOptions: {
       ...(enableViteDevTools && { devtools: {} }),
@@ -138,20 +133,17 @@ export default defineConfig({
         __dirname,
         isAuth
           ? 'index.auth.html'
-          : isWorkbench
-            ? 'index.workbench.html'
-            : isControlPlane
-              ? 'index.controlPlane.html'
-              : isMobile
-                ? 'index.mobile.html'
-                : 'index.html',
+          : isControlPlane
+            ? 'index.controlPlane.html'
+            : isMobile
+              ? 'index.mobile.html'
+              : 'index.html',
       ),
       output: createSharedRolldownOutput({ strictExecutionOrder: true }),
     },
   },
   define: {
-    ...sharedRendererDefine({ isMobile: isMobileRuntime, isElectron: false }),
-    __WORKBENCH__: JSON.stringify(isWorkbench),
+    ...sharedRendererDefine({ isMobile, isElectron: false }),
     __CONTROL_PLANE__: JSON.stringify(isControlPlane),
   },
   experimental: {
@@ -163,7 +155,7 @@ export default defineConfig({
   },
   optimizeDeps: sharedOptimizeDeps,
   plugins: [
-    isMobileRuntime &&
+    isMobile &&
       isDev && {
         name: 'mobile-runtime-html-dev-entry',
         enforce: 'pre' as const,
@@ -175,7 +167,7 @@ export default defineConfig({
             const pathOnly = q === -1 ? raw : raw.slice(0, q);
             const search = q === -1 ? '' : raw.slice(q);
             if (pathOnly === '/' || pathOnly === '/index.html') {
-              req.url = `/${isWorkbench ? 'index.workbench.html' : 'index.mobile.html'}${search}`;
+              req.url = `/index.mobile.html${search}`;
             }
             next();
           });
@@ -200,6 +192,7 @@ export default defineConfig({
         },
       },
     vercelSkewProtection(),
+    customBrandingLoadingScreen(),
     viteEnvRestartKeys(['APP_URL']),
     enableViteDevTools &&
       DevTools({
@@ -330,7 +323,6 @@ export default defineConfig({
 
     // Control-plane admin UI must never PWA-cache /api/auth or /trpc (breaks login).
     !isAuth &&
-      !isWorkbench &&
       !isControlPlane &&
       VitePWA({
         injectRegister: null,
@@ -379,15 +371,13 @@ export default defineConfig({
   server: {
     cors: true,
     host: true,
-    port: isWorkbench
-      ? Number(process.env.WORKBENCH_SPA_PORT) || 3014
-      : isControlPlane
-        ? Number(process.env.CONTROL_PLANE_SPA_PORT) || 3021
-        : isMobile
-          ? Number(process.env.MOBILE_SPA_PORT) || 3012
-          : isAuth
-            ? Number(process.env.AUTH_SPA_PORT) || 3013
-            : Number(process.env.SPA_PORT) || 9876,
+    port: isControlPlane
+      ? Number(process.env.CONTROL_PLANE_SPA_PORT) || 3021
+      : isMobile
+        ? Number(process.env.MOBILE_SPA_PORT) || 3012
+        : isAuth
+          ? Number(process.env.AUTH_SPA_PORT) || 3013
+          : Number(process.env.SPA_PORT) || 9876,
     // The dev orchestrator (scripts/devStartupSequence.mts) pre-resolves a free
     // port and injects it via env; never silently drift to another port, since
     // downstream consumers locate this server through that env contract.

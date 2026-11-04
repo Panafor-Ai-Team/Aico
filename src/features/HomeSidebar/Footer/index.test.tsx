@@ -6,6 +6,27 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const analyticsTrack = vi.fn();
 
+vi.mock('@lobehub/ui/base-ui', () => ({
+  ActionIcon: ({
+    onClick,
+    title,
+    ...rest
+  }: {
+    onClick?: (e: any) => void;
+    title?: string;
+    [key: string]: unknown;
+  }) => (
+    <button
+      aria-label={(rest as any)['aria-label'] ?? title}
+      title={title}
+      type="button"
+      onClick={onClick}
+    >
+      {title}
+    </button>
+  ),
+}));
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     i18n: { language: 'en-US' },
@@ -26,6 +47,8 @@ vi.mock('react-i18next', () => ({
 interface RenderFooterOptions {
   billboardItems?: unknown[];
   desktop?: boolean;
+  /** Aico: the Get App entry also needs downloads enabled in the nav layout. */
+  showDownloads?: boolean;
   enableBusinessFeatures?: boolean;
   hideGitHub?: boolean;
   homeSidebar?: boolean;
@@ -40,6 +63,7 @@ const renderFooter = async ({
   enableBusinessFeatures = false,
   homeSidebar = false,
   hideGitHub = true,
+  showDownloads = false,
 }: RenderFooterOptions = {}) => {
   cleanup();
   vi.resetModules();
@@ -108,7 +132,7 @@ const renderFooter = async ({
         showEvalEntry: false,
         showSettingsEntry: true,
       },
-      showDownloads: false,
+      showDownloads,
       topNavItems: [],
       userPanel: {
         showDataImporter: false,
@@ -175,13 +199,13 @@ describe('Footer help menu tracking', () => {
     expect(screen.getByRole('link', { name: 'GitHub' })).toBeInTheDocument();
   }, 20000);
 
-  it('does not show Get App in desktop builds', async () => {
+  it('shows Get App in desktop builds too', async () => {
     const user = userEvent.setup();
-    const view = await renderFooter({ desktop: true, hideGitHub: false });
+    const view = await renderFooter({ desktop: true, hideGitHub: false, showDownloads: true });
 
     await user.click(within(view.container).getByRole('button', { name: 'Help' }));
 
-    expect(screen.queryByRole('link', { name: 'Get App' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Get App' })).toHaveAttribute('href', '/apps');
   }, 20000);
 
   it('tracks menu open with the visible item keys', async () => {

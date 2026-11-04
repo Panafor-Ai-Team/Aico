@@ -1,6 +1,8 @@
 import type * as ModelBankModule from 'model-bank';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type * as UserModelModule from '@/database/models/user';
+
 import { AiAgentService } from '../index';
 
 const {
@@ -115,12 +117,26 @@ vi.mock('@/server/services/file', () => ({
   })),
 }));
 
-const goalsCapability = vi.hoisted(() => ({ enabled: false }));
+const goalsCapability = vi.hoisted(() => ({ enabled: false, expertise: false }));
 vi.mock('@/server/services/aico/capabilityGate', () => ({
   isCapabilityEnabled: vi.fn(async (_userId: string, capability: string) =>
-    capability === 'goals' ? goalsCapability.enabled : false,
+    capability === 'goals'
+      ? goalsCapability.enabled
+      : capability === 'expertise'
+        ? goalsCapability.expertise
+        : false,
   ),
 }));
+
+const userLab = vi.hoisted(() => ({ enableSelfLearning: false }));
+vi.mock('@/database/models/user', async (importOriginal) => {
+  const actual = await importOriginal<typeof UserModelModule>();
+  class UserModel extends actual.UserModel {
+    getUserPreference = async () => ({ lab: { ...userLab } }) as never;
+    getUserSettings = async () => ({}) as never;
+  }
+  return { ...actual, UserModel };
+});
 
 vi.mock('@/server/modules/Mecha', () => ({
   createServerAgentToolsEngine: mockCreateServerAgentToolsEngine,
@@ -160,6 +176,8 @@ describe('AiAgentService.execAgent - Aico goals capability gate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     goalsCapability.enabled = false;
+    goalsCapability.expertise = false;
+    userLab.enableSelfLearning = false;
     mockMessageCreate.mockResolvedValue({ id: 'msg-1' });
     mockCreateOperation.mockResolvedValue({
       autoStarted: true,
@@ -198,5 +216,16 @@ describe('AiAgentService.execAgent - Aico goals capability gate', () => {
     expect(input.agentConfig.plugins).toEqual(['lobe-goal']);
     expect(input.agentConfig.chatConfig?.toolMode).toBe('custom');
     expect(input.disabledPluginIds).not.toContain('lobe-goal');
+  });
+
+  it('ignores the self-learning Labs toggle until the operator enabled expertise', async () => {
+    userLab.enableSelfLearning = true;
+
+    await service.execAgent({ agentId: 'agent-1', prompt: 'hello' });
+    expect(mockCreateOperation.mock.calls[0][0].enableExpertise).toBe(false);
+
+    goalsCapability.expertise = true;
+    await service.execAgent({ agentId: 'agent-1', prompt: 'hello' });
+    expect(mockCreateOperation.mock.calls[1][0].enableExpertise).toBe(true);
   });
 });

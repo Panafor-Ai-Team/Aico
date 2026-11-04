@@ -2,8 +2,8 @@
 
 import { getLocalizedBrandingInboxName, getLocalizedBrandingName } from '@lobechat/business-const';
 import { type IconProps } from '@lobehub/ui';
-import { Block, Flexbox, Icon, Text } from '@lobehub/ui';
-import { Button, Switch } from '@lobehub/ui/base-ui';
+import { Block, Flexbox, Icon } from '@lobehub/ui';
+import { Button, Switch, Text } from '@lobehub/ui/base-ui';
 import { Steps } from 'antd';
 import { cssVar } from 'antd-style';
 import { BrainIcon, HeartHandshakeIcon, PencilRulerIcon, ShieldCheck } from 'lucide-react';

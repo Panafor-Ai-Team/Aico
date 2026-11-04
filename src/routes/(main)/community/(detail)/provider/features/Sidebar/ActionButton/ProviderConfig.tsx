@@ -53,7 +53,7 @@ const ProviderConfig = memo(() => {
 
   if (!items || items?.length === 0)
     return (
-      <Button block size={'large'} style={{ flex: 1 }} type={'primary'}>
+      <Button block size={'large'} style={{ flex: 1 }} type={'primary'} onClick={openSettings}>
         {t('providers.config')}
       </Button>
     );

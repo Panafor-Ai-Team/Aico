@@ -4,18 +4,8 @@ import { BRANDING_NAME, BRANDING_PROVIDER } from '@lobechat/business-const';
 import { AES_GCM_URL, BASE_PROVIDER_DOC_URL, FORM_STYLE } from '@lobechat/const';
 import { ProviderCombine, ProviderIcon } from '@lobehub/icons';
 import { type FormGroupItemType, type FormItemProps } from '@lobehub/ui';
-import {
-  Avatar,
-  Center,
-  Flexbox,
-  Form,
-  Icon,
-  Skeleton,
-  stopPropagation,
-  Text,
-  Tooltip,
-} from '@lobehub/ui';
-import { Switch } from '@lobehub/ui/base-ui';
+import { Center, Flexbox, Form, Icon, Skeleton, stopPropagation, Tooltip } from '@lobehub/ui';
+import { Avatar, Switch, Text } from '@lobehub/ui/base-ui';
 import { useDebounceFn } from 'ahooks';
 import { Form as AntdForm } from 'antd';
 import { createStaticStyles, cssVar, cx, responsive } from 'antd-style';

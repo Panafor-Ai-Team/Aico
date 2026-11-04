@@ -1,7 +1,7 @@
 'use client';
 
-import { Flexbox, Input, InputPassword, Text, TextArea } from '@lobehub/ui';
-import { Button, Select, toast, useModalContext } from '@lobehub/ui/base-ui';
+import { Flexbox, Input, InputPassword, TextArea } from '@lobehub/ui';
+import { Button, Select, Text, toast, useModalContext } from '@lobehub/ui/base-ui';
 import { Form } from 'antd';
 import { AiProviderBaseURLSchema } from 'model-bank/aiProvider';
 import { memo, useState } from 'react';

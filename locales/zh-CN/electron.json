@@ -163,5 +163,9 @@
   "window.minimize": "最小化窗口",
   "window.pinToTop": "窗口置顶",
   "window.restore": "恢复窗口",
-  "window.unpinFromTop": "取消置顶"
+  "window.unpinFromTop": "取消置顶",
+  "navigation.apps": "应用",
+  "navigation.selfLearning": "自进化",
+  "updater.refreshToApply": "立即刷新",
+  "updater.rendererUpdateReady": "新版本已就绪,刷新即可使用"
 }

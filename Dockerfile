@@ -42,9 +42,15 @@ WORKDIR /src
 
 COPY packages ./packages
 
+## Packages whose install lifecycle hook runs a script (e.g. a native build that exits on
+## Linux) also need that `scripts/` directory before `pnpm i`.
 RUN set -e && \
     mkdir -p /out && \
-    find packages -name package.json -not -path '*/node_modules/*' -exec cp --parents {} /out/ \;
+    find packages -name package.json -not -path '*/node_modules/*' -exec cp --parents {} /out/ \; && \
+    for manifest in $(grep -lE '"(preinstall|install|postinstall)"[[:space:]]*:[[:space:]]*"[^"]*scripts/' $(find packages -name package.json -not -path '*/node_modules/*')); do \
+        dir=$(dirname "$manifest"); \
+        if [ -d "$dir/scripts" ]; then cp -r --parents "$dir/scripts" /out/; fi; \
+    done
 
 ## Builder image, install all the dependencies and build the app
 FROM base AS builder
@@ -85,8 +91,10 @@ COPY package.json pnpm-workspace.yaml ./
 COPY .npmrc ./
 COPY --from=manifests /out/packages ./packages
 COPY patches ./patches
-# bring in desktop workspace manifest so pnpm can resolve it
+# workspace manifests must exist before pnpm i so --filter can resolve them
 COPY apps/desktop/src/main/package.json ./apps/desktop/src/main/package.json
+COPY apps/share/package.json ./apps/share/package.json
+COPY apps/workbench/package.json ./apps/workbench/package.json
 
 RUN set -e && \
     if [ "${USE_CN_MIRROR:-false}" = "true" ]; then \
@@ -139,7 +147,7 @@ RUN set -eux; \
     mkdir -p /out; \
     mv .next/standalone/node_modules /out/node_modules; \
     mv .next/standalone/dist /out/dist; \
-    rm -rf .next/standalone/public/_spa .next/standalone/public/_spa-auth .next/standalone/public/_spa-workbench; \
+    rm -rf .next/standalone/public/_spa .next/standalone/public/_spa-auth .next/standalone/public/_spa-share .next/standalone/public/_spa-workbench; \
     mkdir -p /out/node_modules/.pnpm; \
     cp -a /deps/node_modules/.pnpm/. /out/node_modules/.pnpm/; \
     for pkg in pg drizzle-orm; do \
@@ -170,6 +178,7 @@ COPY --link --chown=1001:1001 --from=builder /app/.next/static /app/.next/static
 # Copy SPA assets (Vite build output)
 COPY --link --chown=1001:1001 --from=builder /app/public/_spa /app/public/_spa
 COPY --link --chown=1001:1001 --from=builder /app/public/_spa-auth /app/public/_spa-auth
+COPY --link --chown=1001:1001 --from=builder /app/public/_spa-share /app/public/_spa-share
 COPY --link --chown=1001:1001 --from=builder /app/public/_spa-workbench /app/public/_spa-workbench
 # Copy database migrations
 COPY --link --chown=1001:1001 --from=builder /app/packages/database/migrations /app/migrations

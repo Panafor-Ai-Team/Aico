@@ -20,9 +20,15 @@ WORKDIR /src
 
 COPY . .
 
+# Packages whose install lifecycle hook runs a script (e.g. a native build that exits on
+# Linux) also need that `scripts/` directory before `pnpm i`.
 RUN set -e; \
     mkdir -p /out; \
     find . -name package.json -not -path '*/node_modules/*' -exec cp --parents {} /out/ \;; \
+    for manifest in $(grep -lE '"(preinstall|install|postinstall)"[[:space:]]*:[[:space:]]*"[^"]*scripts/' $(find . -name package.json -not -path '*/node_modules/*')); do \
+        dir=$(dirname "$manifest"); \
+        if [ -d "$dir/scripts" ]; then cp -r --parents "$dir/scripts" /out/; fi; \
+    done; \
     cp -a pnpm-workspace.yaml .npmrc patches /out/
 
 FROM node:${NODEJS_VERSION}-bookworm-slim AS deps

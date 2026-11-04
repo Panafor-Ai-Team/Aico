@@ -11,7 +11,8 @@ import type { EnabledProviderWithModels } from '@/types/aiProvider';
 import { useModelDetailSectionsStore } from '../hooks/useModelDetailSections';
 import ModelDetailPanel from './ModelDetailPanel';
 
-vi.mock('antd-style', () => ({
+vi.mock('antd-style', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   createStaticStyles: () => ({
     actionText: 'actionText',
     container: 'container',

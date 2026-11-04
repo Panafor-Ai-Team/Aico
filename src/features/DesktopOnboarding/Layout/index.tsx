@@ -2,7 +2,8 @@
 
 import { ORG_NAME } from '@lobechat/business-const';
 import { TITLE_BAR_HEIGHT } from '@lobechat/desktop-bridge';
-import { Center, Flexbox, Text } from '@lobehub/ui';
+import { Center, Flexbox } from '@lobehub/ui';
+import { Text } from '@lobehub/ui/base-ui';
 import { Divider } from 'antd';
 import { css, cx } from 'antd-style';
 import { type FC, type PropsWithChildren } from 'react';

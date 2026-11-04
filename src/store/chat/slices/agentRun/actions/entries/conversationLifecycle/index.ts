@@ -17,6 +17,7 @@ import type {
   UIChatMessage,
 } from '@lobechat/types';
 import {
+  applyTopicModelToHeterogeneousProvider,
   getWorkingDirEffectivePath,
   getWorkingDirSourcePath,
   resolveAgentAgencyConfig,
@@ -29,8 +30,13 @@ import { type ChatInputEditor } from '@/features/ChatInput';
 import {
   resolveAgentWorkingDirectory,
   resolveAgentWorkingDirectoryConfig,
+  resolveTargetDeviceId,
 } from '@/helpers/agentWorkingDirectory';
-import { resolveExecutionTarget, resolveWorkspaceScoped } from '@/helpers/executionTarget';
+import {
+  resolveExecutionTarget,
+  resolveToolMode,
+  resolveWorkspaceScoped,
+} from '@/helpers/executionTarget';
 import { globalAgentContextManager } from '@/helpers/GlobalAgentContextManager';
 import { agentService } from '@/services/agent';
 import { aiAgentService } from '@/services/aiAgent';
@@ -56,7 +62,10 @@ import { selectRuntimeType } from '@/store/chat/slices/agentRun/actions/dispatch
 import { executeDirectMention } from '@/store/chat/slices/agentRun/actions/dispatch/directMentionExecutor';
 import { buildRunLifecycle } from '@/store/chat/slices/agentRun/actions/lifecycle/buildRunLifecycle';
 import type { RunScope } from '@/store/chat/slices/agentRun/actions/lifecycle/types';
-import { resolveHeteroResume } from '@/store/chat/slices/agentRun/actions/transports/hetero/heteroResume';
+import {
+  getNativeHeteroSessionBindingKey,
+  resolveHeteroResume,
+} from '@/store/chat/slices/agentRun/actions/transports/hetero/heteroResume';
 import type { QueuedFile } from '@/store/chat/slices/operation/types';
 import {
   isQueueBlockingOperation,
@@ -75,6 +84,7 @@ import { isLocalOnlyMessage } from '@/store/chat/utils/localMessages';
 import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 import { snapshotAgentModel } from '@/store/chat/utils/snapshotAgentModel';
 import { topicMapKey } from '@/store/chat/utils/topicMapKey';
+import { deviceSelectors, getDeviceStoreState } from '@/store/device';
 import { getElectronStoreState } from '@/store/electron';
 import { getFileStoreState } from '@/store/file/store';
 import { useGlobalStore } from '@/store/global';
@@ -389,11 +399,12 @@ export class ConversationLifecycleActionImpl {
       executionTarget: agencyConfig?.executionTarget,
       heterogeneousProvider,
       isGatewayMode,
-      isWorkspaceAgent: workspaceScoped,
+      isWorkspaceAgent: !!agent?.workspaceId,
       // Callers that need to pin the runtime (e.g. task topics that were
       // started server-side via runTask) pass `forceRuntime` to override
       // the agent's local/cloud preference.
       parentRuntime: forceRuntime,
+      workspaceScoped,
     });
 
     // ── Command Bus: extract and process built-in commands from editorData ──
@@ -795,6 +806,42 @@ export class ConversationLifecycleActionImpl {
       const ids = options?.preserveOptimisticUser ? [tempAssistantId] : [tempId, tempAssistantId];
       this.#get().internal_dispatchMessage({ ids, type: 'deleteMessages' }, { operationId });
     };
+    /**
+     * Put the typed message back in the composer when a send fails before the
+     * user message was persisted. The composer is cleared the instant Enter is
+     * pressed, so without this the text is gone for good — the run never
+     * happened, and there is no persisted row to recover it from.
+     *
+     * Shared by all three runtime branches. Gateway and hetero previously only
+     * logged and deleted the optimistic pair, so a server-side start refusal
+     * (e.g. the topic-start reservation reporting the topic busy) was
+     * indistinguishable from the message being silently swallowed.
+     */
+    const restoreComposerAfterFailedSend = (error: unknown) => {
+      if (preserveComposer || hasNotifiedMessageAccepted) return;
+
+      // Cancellation is a deliberate user action with its own restore path
+      // (`inputEditorTempState` is replayed by the cancel flow); re-filling the
+      // composer here would fight it. Aico (#762): judge that by the real cancel
+      // signal, not the error text — a network abort whose message merely
+      // contains "aborted" is a failed send and must restore the text and show
+      // the error, or the follow-up looks sent and then vanishes.
+      const isUserCancel =
+        abortController.signal.aborted ||
+        this.#get().operations[operationId]?.status === 'cancelled';
+      if (isUserCancel) return;
+
+      this.#get().updateOperationMetadata(operationId, {
+        inputSendErrorMsg: error instanceof Error ? describeSendFailure(error) : String(error),
+      });
+
+      const op = this.#get().operations[operationId];
+      if (op?.metadata.inputEditorTempState) {
+        targetInputEditor?.setJSONState(op.metadata.inputEditorTempState);
+      } else {
+        targetInputEditor?.setDocument('markdown', message);
+      }
+    };
     const restoreUnacceptedVoiceMessageContext = () => {
       if (!optimisticUserMessageId || hasNotifiedMessageAccepted) return;
 
@@ -996,45 +1043,65 @@ export class ConversationLifecycleActionImpl {
       topicId: willCreateNewTopic ? undefined : operationContext.topicId,
     });
     const currentDeviceId = getElectronStoreState().gatewayDeviceInfo?.deviceId;
-    // Resolve the cwd for every hetero-provider run that lands on a MACHINE
-    // (in-process `hetero` runtime, or a gateway dispatch whose effective
-    // target routes to a device) — the server can only honour a cwd the client
-    // resolved (per-user legacy slot included) if it rides along as the new
-    // topic's initial metadata. Sandbox/none targets must NOT resolve one: the
-    // desktop/home fallback is a local machine path that doesn't exist in an
-    // ephemeral cloud sandbox and would pollute the topic's metadata.
-    const heteroEffectiveTarget = heterogeneousProvider
-      ? resolveExecutionTarget(agencyConfig, {
-          clientExecutionAvailable: isDesktop,
-          isHetero: true,
-          workspaceScoped,
-        })
+    // Resolve the cwd for every run that lands on a MACHINE — a hetero CLI
+    // (in-process `hetero` runtime) and a NATIVE agent alike, as long as the
+    // effective target routes to a device. The server can only honour a cwd the
+    // client resolved (per-user legacy slot included) if it rides along as the
+    // new topic's initial metadata, and a topic that is born unbound renders
+    // under "No directory" while every later turn re-resolves the agent-level
+    // default. Sandbox/none targets must NOT resolve one: the desktop/home
+    // fallback is a local machine path that doesn't exist in an ephemeral cloud
+    // sandbox and would pollute the topic's metadata. Plain-chat agents have no
+    // execution environment at all, so they stay unbound too.
+    const isHeteroRun = !!heterogeneousProvider;
+    const runEffectiveTarget =
+      isHeteroRun || resolveToolMode(agentConfig?.chatConfig) !== 'chat'
+        ? resolveExecutionTarget(agencyConfig, {
+            clientExecutionAvailable: isDesktop,
+            // A web client can't run tools in-process, but its backend may still
+            // route a bound `local` target to the user's machine — where the cwd
+            // does apply.
+            deviceRoutingAvailable: isGatewayMode,
+            isHetero: isHeteroRun,
+            workspaceScoped,
+          })
+        : undefined;
+    const resolvesRunCwd =
+      runEffectiveTarget === 'local' ||
+      runEffectiveTarget === 'device' ||
+      runEffectiveTarget === 'auto';
+    // Same precedence as `useEffectiveWorkingDirectory` (and the server's
+    // `resolveDeviceWorkingDirectoryConfig`), but over the MERGED config — the
+    // agent selector reads the raw shared row internally, which could fall back
+    // to a cwd registered for another member's device.
+    const runCwdDeviceId = resolvesRunCwd
+      ? resolveTargetDeviceId(agencyConfig, currentDeviceId, { workspaceScoped })
       : undefined;
-    const resolvesHeteroCwd =
-      !!heterogeneousProvider &&
-      (heteroEffectiveTarget === 'local' ||
-        heteroEffectiveTarget === 'device' ||
-        heteroEffectiveTarget === 'auto');
-    // Same precedence as `getAgentWorkingDirectoryById`, but over the MERGED
-    // config — the selector reads the raw shared row internally, which could
-    // fall back to a cwd registered for another member's device. Desktop/home
-    // is the only neutral last resort.
+    // Desktop/home is the last resort for hetero CLIs ONLY: they always spawn in
+    // some directory, so an unconfigured agent still needs one. A native agent
+    // with nothing configured stays unbound instead — pinning it to `~/Desktop`
+    // would file every desktop conversation under a project the user never
+    // picked.
     const heteroCwdContext =
-      resolvesHeteroCwd && isDesktop ? globalAgentContextManager.getContext() : undefined;
-    const heteroCwdParams = resolvesHeteroCwd
+      resolvesRunCwd && isHeteroRun && isDesktop
+        ? globalAgentContextManager.getContext()
+        : undefined;
+    const runCwdParams = resolvesRunCwd
       ? {
           agencyConfig,
           currentDeviceId,
+          deviceDefaultCwd:
+            deviceSelectors.getDeviceDefaultCwd(runCwdDeviceId)(getDeviceStoreState()),
           fallback: heteroCwdContext?.desktopPath ?? heteroCwdContext?.homePath,
           legacyAgentWorkingDirectory: agentState.localAgentWorkingDirectoryMap[agentId],
           workspaceScoped,
         }
       : undefined;
-    const agentWorkingDirectory = heteroCwdParams
-      ? resolveAgentWorkingDirectory(heteroCwdParams)
+    const agentWorkingDirectory = runCwdParams
+      ? resolveAgentWorkingDirectory(runCwdParams)
       : undefined;
-    const agentWorkingDirectoryConfig = heteroCwdParams
-      ? resolveAgentWorkingDirectoryConfig(heteroCwdParams)
+    const agentWorkingDirectoryConfig = runCwdParams
+      ? resolveAgentWorkingDirectoryConfig(runCwdParams)
       : undefined;
     // Heterogeneous CLI agents (Claude Code, Codex, …) store sessions per-cwd
     // (`~/.claude/projects/<encoded-cwd>/`). Anchor their session cwd to the
@@ -1308,6 +1375,7 @@ export class ConversationLifecycleActionImpl {
             message: e instanceof Error ? e.message : 'Unknown error',
             type: 'HeterogeneousAgentError',
           });
+          restoreComposerAfterFailedSend(e);
         }
         cleanupTempMessages({ preserveOptimisticUser: Boolean(optimisticUserMessageId) });
         detachUnacceptedCallerAbort();
@@ -1491,7 +1559,8 @@ export class ConversationLifecycleActionImpl {
         // Read heterogeneous-agent session id from topic metadata for multi-turn
         // resume. `resolveHeteroResume` drops the sessionId when the saved cwd
         // doesn't match the current one, so CC doesn't emit
-        // "No conversation found with session ID".
+        // "No conversation found with session ID". Pre-binding native rows
+        // retain the old cwd-only behavior, independent of the Labs flag.
         // Store lookup first (freshest optimistic edits), but fall back to the
         // server row resolved above — the paginated store misses deep-linked
         // older topics, and a miss here silently dropped `--resume` even when
@@ -1500,23 +1569,37 @@ export class ConversationLifecycleActionImpl {
           (heteroContext.topicId
             ? topicSelectors.getTopicById(heteroContext.topicId)(this.#get())
             : undefined) ?? existingTopic;
-        const { cwdChanged, resumeSessionId } = resolveHeteroResume(
+        const providerBinding = heterogeneousProvider.authMode === 'api';
+        const { cwdChanged, reason, resumeBindingKey, resumeSessionId } = resolveHeteroResume(
           topic?.metadata,
           workingDirectory,
+          {
+            currentBindingKey: providerBinding
+              ? undefined
+              : getNativeHeteroSessionBindingKey(heterogeneousProvider.type),
+            providerBinding,
+          },
         );
         if (cwdChanged) {
           toast.info(t('heteroAgent.resumeReset.cwdChanged', { ns: 'chat' }));
+        } else if (reason === 'binding_changed') {
+          toast.info(t('heteroAgent.resumeReset.bindingChanged', { ns: 'chat' }));
         }
+        const effectiveHeterogeneousProvider = applyTopicModelToHeterogeneousProvider(
+          heterogeneousProvider,
+          topic?.model ? { model: topic.model, provider: topic.provider || '' } : undefined,
+        );
 
         await executeHeterogeneousAgent(() => this.#get(), {
           assistantMessageId: heteroExecutionAssistantId,
           context: heteroExecutionContext,
           contextSelections: effectiveContextSelections,
-          heterogeneousProvider,
+          heterogeneousProvider: effectiveHeterogeneousProvider,
           imageList: persistedImageList?.length ? persistedImageList : undefined,
           message,
           operationId: heteroOpId,
           pageSelections: effectivePageSelections,
+          resumeBindingKey,
           resumeSessionId,
           workingDirectory,
           workingDirectoryConfig,
@@ -1675,6 +1758,7 @@ export class ConversationLifecycleActionImpl {
           message: e instanceof Error ? e.message : 'Unknown error',
           type: 'GatewayError',
         });
+        restoreComposerAfterFailedSend(e);
         cleanupTempMessages({
           preserveOptimisticUser: Boolean(optimisticUserMessageId && !hasNotifiedMessageAccepted),
         });
@@ -1757,6 +1841,11 @@ export class ConversationLifecycleActionImpl {
                 ...newTopicModelSnapshot,
                 // Same id the optimistic sidebar row already uses.
                 id: optimisticTopic?.id,
+                // Born bound to the directory this run resolved — the client
+                // runtime creates the topic here, so nothing downstream would
+                // ever write the cwd back (the server-side binding only exists
+                // on the gateway path).
+                metadata: optimisticTopicMetadata,
                 topicMessageIds: forceNewTopicFromExisting ? [] : messages.map((m) => m.id),
                 title: newTopicTitle,
               }
@@ -1898,16 +1987,6 @@ export class ConversationLifecycleActionImpl {
       }
     } catch (e) {
       console.error(e);
-      // Only a real user cancel may drop the message silently — the Stop flow
-      // restores the editor itself. Anything else (a non-tRPC error, or a
-      // network abort whose text merely contains "aborted") used to delete the
-      // optimistic bubble with no error and no restored text, so the follow-up
-      // looked sent and then vanished. Read this before failOperation rewrites
-      // the status.
-      const isUserCancel =
-        abortController.signal.aborted ||
-        this.#get().operations[operationId]?.status === 'cancelled';
-
       rollbackOptimisticTopic('sendMessage/rollbackOptimisticTopic');
       // Fail operation on error
       if (this.#get().operations[operationId]?.status !== 'cancelled') {
@@ -1917,18 +1996,7 @@ export class ConversationLifecycleActionImpl {
         });
       }
 
-      // Upstream: a send that keeps the composer (queued follow-up) never restores it.
-      if (!preserveComposer && !isUserCancel) {
-        this.#get().updateOperationMetadata(operationId, {
-          inputSendErrorMsg: e instanceof Error ? describeSendFailure(e) : String(e),
-        });
-        const op = this.#get().operations[operationId];
-        if (op?.metadata.inputEditorTempState) {
-          targetInputEditor?.setJSONState(op.metadata.inputEditorTempState);
-        } else {
-          targetInputEditor?.setDocument('markdown', message);
-        }
-      }
+      restoreComposerAfterFailedSend(e);
     } finally {
       // Roll the optimistic pair back only when the send did not land (cancel or
       // failure). On success there is nothing to clean up: the rows were created

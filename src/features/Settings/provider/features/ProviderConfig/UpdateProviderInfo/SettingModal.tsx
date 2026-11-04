@@ -1,6 +1,6 @@
 'use client';
 
-import { Flexbox, Icon, Input, Text, TextArea } from '@lobehub/ui';
+import { Flexbox, Icon, Input, TextArea } from '@lobehub/ui';
 import {
   Button,
   confirmModal,
@@ -8,9 +8,10 @@ import {
   ModalFooter,
   type ModalInstance,
   Select,
+  Text,
+  toast,
   useModalContext,
 } from '@lobehub/ui/base-ui';
-import { toast } from '@lobehub/ui/base-ui';
 import { Form } from 'antd';
 import { cssVar } from 'antd-style';
 import { t as i18nT } from 'i18next';

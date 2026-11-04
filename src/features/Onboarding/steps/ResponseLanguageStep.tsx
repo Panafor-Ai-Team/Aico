@@ -1,8 +1,8 @@
 'use client';
 
 import { SendButton } from '@lobehub/editor/react';
-import { Flexbox, Text } from '@lobehub/ui';
-import { Select } from '@lobehub/ui/base-ui';
+import { Flexbox } from '@lobehub/ui';
+import { Select, Text } from '@lobehub/ui/base-ui';
 import { cssVar } from 'antd-style';
 import { memo, useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';

@@ -33,8 +33,12 @@ permissions:
   contents: read
 
 env:
-  # Aico canary right before the M1 upstream merge: the ledger shape production had.
-  AICO_TODAY_SHA: 0044f80ffbab88df57ffbbcc4c6aa683298fed16
+  # The canary commit production runs: today's two journals. Bump it after each upstream
+  # merge is deployed.
+  AICO_TODAY_SHA: 1f5dd5dc68ec8dc5118acbbe52d92caca51d2703
+  # Canary right before the first upstream merge (M1), whose main journal still holds Aico's
+  # 0134: production's ledger was built from its single journal, then today's two.
+  AICO_LEGACY_SHA: 0044f80ffbab88df57ffbbcc4c6aa683298fed16
 
 jobs:
   scenarios:
@@ -54,10 +58,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Fetch the pre-merge canary journals
+      - name: Fetch production's and the pre-merge canary journals
         run: |
           git fetch --no-tags --depth=1 origin "$AICO_TODAY_SHA"
           git update-ref refs/aico/today FETCH_HEAD
+          git fetch --no-tags --depth=1 origin "$AICO_LEGACY_SHA"
+          git update-ref refs/aico/legacy FETCH_HEAD
 
       - name: Setup environment
         uses: ./.github/actions/setup-env
@@ -88,5 +94,6 @@ jobs:
           bunx tsx scripts/migrateServerDB/dualJournal/spike.ts
           --upstream-ref=HEAD
           --today-ref=refs/aico/today
+          --legacy-ref=refs/aico/legacy
           --pg-url=postgres://postgres:postgres@localhost:5432/postgres
           --assert

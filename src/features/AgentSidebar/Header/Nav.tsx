@@ -3,6 +3,7 @@
 import { Flexbox } from '@lobehub/ui';
 import { BotPromptIcon } from '@lobehub/ui/icons';
 import {
+  DnaIcon,
   ListTodoIcon,
   MessageSquarePlusIcon,
   MessagesSquareIcon,
@@ -24,13 +25,18 @@ import { topicActionKeys } from '@/libs/swr/keys';
 import { useChatStore } from '@/store/chat';
 import { topicSelectors } from '@/store/chat/selectors';
 import { useGlobalStore } from '@/store/global';
-import { featureFlagsSelectors, useServerConfigStore } from '@/store/serverConfig';
+import {
+  capabilitySelectors,
+  featureFlagsSelectors,
+  useServerConfigStore,
+} from '@/store/serverConfig';
 import { useUserStore } from '@/store/user';
 import { labPreferSelectors } from '@/store/user/selectors';
 
 const Nav = memo(() => {
   const { t } = useTranslation('chat');
   const { t: tTopic } = useTranslation('topic');
+  const { t: tSelfLearning } = useTranslation('selfLearning');
   const params = useActiveRouteParams();
   const agentId = params.aid;
   const { pathname } = useActiveLocation();
@@ -42,6 +48,8 @@ const Nav = memo(() => {
     pathname.includes('/channel') ||
     pathname.endsWith('/statistics');
   const isGoalsActive = pathname.endsWith('/goals');
+  // 下钻页 /self-evolving/:domainId 也算在这个入口下，否则点进去侧边栏就失焦了
+  const isSelfLearningActive = pathname.includes('/self-evolving');
   const isTasksActive = pathname.endsWith('/tasks') || pathname.includes('/task/');
   // Topic IDs are prefixed `topics_`, so /agent/:aid/topics_abc would also match
   // pathname.includes('/topics') — anchor to end to avoid that false positive.
@@ -57,6 +65,10 @@ const Nav = memo(() => {
   const [openNewTopicOrSaveTopic] = useChatStore((s) => [s.openNewTopicOrSaveTopic]);
   const isNewTopicSendInFlight = useChatStore(topicSelectors.isNewTopicSendInFlight);
   const enableTopicAcceptance = useUserStore(labPreferSelectors.enableTopicAcceptance);
+  // Aico: the self-learning page is the Expertise feature, off until the operator enables it.
+  const expertiseCapability = useServerConfigStore(capabilitySelectors.expertise);
+  const enableSelfLearning =
+    useUserStore(labPreferSelectors.enableSelfLearning) && expertiseCapability;
 
   const { mutate } = useActionSWR(topicActionKeys.openNewOrSave(), openNewTopicOrSaveTopic);
   const handleNewTopic = () => {
@@ -102,6 +114,17 @@ const Nav = memo(() => {
           onClick={() => {
             switchTopic(null, { skipRefreshMessage: true });
             router.push(urlJoin('/agent', agentId!, 'profile'));
+          }}
+        />
+      )}
+      {enableSelfLearning && (
+        <NavItem
+          active={isSelfLearningActive}
+          icon={DnaIcon}
+          title={tSelfLearning('title')}
+          onClick={() => {
+            switchTopic(null, { skipRefreshMessage: true });
+            router.push(urlJoin('/agent', agentId!, 'self-evolving'));
           }}
         />
       )}

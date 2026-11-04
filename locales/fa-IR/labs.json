@@ -42,5 +42,9 @@
   "stage.beta.label": "بتا",
   "title": "آزمایشگاه‌ها",
   "features.platformAgent.desc": "نمایش گزینه \"اتصال ایجنت\" در منوی ایجاد. ایجنت‌ها متصل (مانند OpenClaw، Hermes) بر روی دستگاه‌های شما اجرا می‌شوند و از طریق lh connect ارتباط برقرار می‌کنند.",
-  "features.platformAgent.title": "اتصال ایجنت"
+  "features.platformAgent.title": "اتصال ایجنت",
+  "features.agentProviderBinding.desc": "اجازه دهید عوامل محلی پشتیبانی‌شده از یک ارائه‌دهنده API و مدل پیکربندی‌شده به جای اشتراک خود استفاده کنند. در ابتدا برای Claude Code و Codex در اجرای محلی دسکتاپ در دسترس است.",
+  "features.agentProviderBinding.title": "اتصال ارائه‌دهنده عامل",
+  "features.selfLearning.desc": "نمایش آنچه هر عامل از تمرین واقعی آموخته است — پایگاه قوانین آن، قوانینی که واقعاً استفاده می‌شوند و لایه‌هایی که هنوز خالی هستند.",
+  "features.selfLearning.title": "خود-تکامل"
 }

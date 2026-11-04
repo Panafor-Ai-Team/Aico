@@ -45,6 +45,7 @@ const alias = {
   // though the control plane's own tsconfig declares it. Mirror the mapping here
   // so control-plane tests can import server services the way the app does.
   '@/server': resolve(__dirname, './apps/server/src'),
+  '~base-ui-stubs': resolve(__dirname, './tests/mocks/baseUiStubs.tsx'),
   '~test-utils': resolve(__dirname, './tests/utils.tsx'),
   'lru_map': resolve(__dirname, './tests/mocks/lru_map'),
 };
@@ -78,6 +79,24 @@ export default defineConfig({
      * In app bundlers this can be tolerated/rewritten, but Vite/Vitest resolves it strictly and
      * fails the whole test run. Redirect it to the real file.
      */
+    /**
+     * base-ui components resolve their motion implementation through
+     * `@lobehub/ui`'s internal MotionProvider module via relative imports, and
+     * its hook throws without the app-level ConfigProvider. Redirect that one
+     * module to a static stub so real base-ui components render in tests
+     * without per-file mocks. The module has no package subpath export, so an
+     * alias/vi.mock on a specifier cannot intercept it — only resolveId can.
+     */
+    {
+      enforce: 'pre',
+      name: 'stub-lobehub-ui-motion-provider',
+      resolveId(id, importer) {
+        if (!importer || !importer.includes('/@lobehub/ui/')) return null;
+        if (id.endsWith('/MotionProvider/index.mjs') || id.endsWith('/MotionProvider/index.js'))
+          return resolve(__dirname, './tests/mocks/lobehubUiMotionProvider.tsx');
+        return null;
+      },
+    },
     {
       enforce: 'pre',
       name: 'fix-lobehub-fluent-emoji-style-import',

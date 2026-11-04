@@ -26,15 +26,23 @@ vi.mock('@lobehub/icons', async (importOriginal) => {
 });
 
 vi.mock('@lobehub/ui', () => ({
-  ActionIcon: () => <button type="button" />,
-  Avatar: ({ avatar, title }: { avatar?: string | null; title?: string }) => (
-    <span aria-label={title} data-testid="active-user-avatar">
-      {avatar}
-    </span>
-  ),
   Flexbox: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   Modal: () => null,
 }));
+
+vi.mock('@lobehub/ui/base-ui', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+
+  return {
+    ...actual,
+    ActionIcon: () => <button type="button" />,
+    Avatar: ({ avatar, title }: { avatar?: string | null; title?: string }) => (
+      <span aria-label={title} data-testid="active-user-avatar">
+        {avatar}
+      </span>
+    ),
+  };
+});
 
 vi.mock('@/components/StatisticCard', () => ({
   default: ({ statistic }: { statistic: { description?: ReactNode; value?: ReactNode } }) => (

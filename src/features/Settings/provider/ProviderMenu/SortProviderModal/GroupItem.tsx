@@ -1,4 +1,5 @@
-import { Avatar, Flexbox, SortableList } from '@lobehub/ui';
+import { Flexbox, SortableList } from '@lobehub/ui';
+import { Avatar } from '@lobehub/ui/base-ui';
 import { memo } from 'react';
 
 import { BrandedProviderIcon } from '@/components/Branding/BrandedProviderIcon';

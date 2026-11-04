@@ -40,6 +40,7 @@ import portal from './portal';
 import project from './project';
 import providers from './providers';
 import ragEval from './ragEval';
+import selfLearning from './selfLearning';
 import setting from './setting';
 import spend from './spend';
 import subscription from './subscription';
@@ -95,6 +96,7 @@ const resources = {
   providers,
   project,
   ragEval,
+  selfLearning,
   setting,
   spend,
   subscription,

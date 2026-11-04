@@ -1,7 +1,16 @@
+import { toast } from '@lobehub/ui/base-ui';
+import { useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+
 import { useAgentId } from '@/features/ChatInput/hooks/useAgentId';
 import { useAgentModelSelection } from '@/features/ChatInput/hooks/useAgentModelSelection';
 import { useChatInputResourceAccess } from '@/features/ChatInput/hooks/useChatInputResourceAccess';
+import {
+  resolveEnableTargetProviderId,
+  resolveStaleModelState,
+} from '@/features/ModelSelect/resolveStaleModelState';
 import { useEnabledChatModelsState } from '@/hooks/useEnabledChatModels';
+import { usePermission } from '@/hooks/usePermission';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
 import { aiProviderSelectors, useAiInfraStore } from '@/store/aiInfra';
@@ -17,6 +26,7 @@ interface ResolveChatInputNoticeParams {
   isGroupContext?: boolean;
   isHeterogeneousAgent: boolean;
   isModelConfigReady: boolean;
+  isModelDisabled?: boolean;
   isResourceViewOnly?: boolean;
 }
 
@@ -33,6 +43,7 @@ export const resolveChatInputNotice = ({
   isAgentModelPending,
   isGroupContext,
   isHeterogeneousAgent,
+  isModelDisabled,
   isModelConfigReady,
   isResourceViewOnly,
 }: ResolveChatInputNoticeParams) => {
@@ -59,8 +70,16 @@ export const resolveChatInputNotice = ({
     !isAgentModelPending && // Example: an agent still references `gpt-4-32k`, or a model reclassified to
     // image/video; once absent from the chat selector, it should read as unavailable.
     !currentChatModel
-  )
+  ) {
+    if (isModelDisabled)
+      return {
+        action: 'enableModel' as const,
+        key: 'input.modelDisabled',
+        type: 'warning',
+      } as const;
+
     return { action: undefined, key: 'input.modelUnavailable', type: 'warning' } as const;
+  }
 
   // Use-level General access (can chat, can't edit the shared config) is
   // deliberately NOT a notice: a standing "you can only use this agent" banner
@@ -70,10 +89,19 @@ export const resolveChatInputNotice = ({
 };
 
 /** Union of every notice shape `resolveChatInputNotice` can return. */
-export type ChatInputNotice = NonNullable<ReturnType<typeof resolveChatInputNotice>>;
+export type ChatInputNotice = NonNullable<ReturnType<typeof resolveChatInputNotice>> & {
+  actionDisabled?: boolean;
+  actionDisabledReason?: string;
+  actionLoading?: boolean;
+  onAction?: () => Promise<void>;
+};
 
 export const useChatInputNotice = (): ChatInputNotice | undefined => {
+  const { t } = useTranslation('chat');
+  const { allowed: canManageAiInfra, reason: aiInfraPermissionReason } =
+    usePermission('manage_provider_key');
   const agentId = useAgentId();
+  const [actionLoading, setActionLoading] = useState(false);
 
   const [isAgentConfigLoading, isHeterogeneousAgent] = useAgentStore((s) => [
     agentByIdSelectors.isAgentConfigLoadingById(agentId)(s),
@@ -85,9 +113,11 @@ export const useChatInputNotice = (): ChatInputNotice | undefined => {
   // overrides included) — a revoked pin warns even when the agent default
   // is still healthy.
   const {
+    canSelectModel,
     isPreferenceLoading,
     model: agentModel,
     provider: agentProvider,
+    selectModel,
     selectionPolicy,
   } = useAgentModelSelection(agentId);
   const topicPin = useChatStore(topicSelectors.activeTopicModel);
@@ -104,18 +134,107 @@ export const useChatInputNotice = (): ChatInputNotice | undefined => {
   // allow-list and catalog load (and before billing context resolves it can be
   // the personal list), so the model looks missing on a cold load.
   const { isPending: isModelListPending, list: enabledChatModelList } = useEnabledChatModelsState();
+  const builtinAiModelList = useAiInfraStore((s) => s.builtinAiModelList);
+  const enabledAiProviders = useAiInfraStore((s) => s.enabledAiProviders);
+  const modelRedirects = useAiInfraStore((s) => s.modelRedirects);
+  const toggleProviderEnabled = useAiInfraStore((s) => s.toggleProviderEnabled);
+  const toggleProviderModelEnabled = useAiInfraStore((s) => s.toggleProviderModelEnabled);
   const isModelConfigReady = useAiInfraStore((s) =>
     aiProviderSelectors.isInitAiProviderRuntimeState(s),
   );
   const currentChatModel = findEnabledChatModel(enabledChatModelList, model, provider);
+  const staleModelState = useMemo(
+    () =>
+      isModelConfigReady
+        ? resolveStaleModelState(
+            { model, provider },
+            {
+              builtinAiModelList,
+              enabledList: enabledChatModelList,
+              modelRedirects,
+              modelType: 'chat',
+            },
+          )
+        : undefined,
+    [builtinAiModelList, enabledChatModelList, isModelConfigReady, model, modelRedirects, provider],
+  );
+  const enableTargetProviderId =
+    staleModelState?.status === 'notEnabled'
+      ? resolveEnableTargetProviderId(
+          { model, provider },
+          {
+            enabledAiProviders,
+            enabledList: enabledChatModelList,
+            metaProviderId: staleModelState.meta?.providerId,
+          },
+        )
+      : undefined;
+  /**
+   * A locked Agent selection can only be repaired in place. Enabling an id-only fallback
+   * provider would mutate global model settings while leaving the persisted selection stale.
+   */
+  const isModelDisabled = Boolean(
+    enableTargetProviderId && (enableTargetProviderId === provider || canSelectModel),
+  );
   const { canUseResource, isGroupContext } = useChatInputResourceAccess();
 
-  return resolveChatInputNotice({
+  const notice = resolveChatInputNotice({
     currentChatModel,
     isAgentModelPending: isAgentConfigLoading || isMemberOverridePending || isModelListPending,
     isGroupContext,
     isHeterogeneousAgent,
+    isModelDisabled,
     isModelConfigReady,
     isResourceViewOnly: !canUseResource,
   });
+
+  const handleEnableModel = useCallback(async () => {
+    const providerId = enableTargetProviderId;
+    if (!providerId) return;
+
+    setActionLoading(true);
+    try {
+      if (!enabledChatModelList.some((item) => item.id === providerId)) {
+        await toggleProviderEnabled(providerId, true);
+      }
+      await toggleProviderModelEnabled({
+        enabled: true,
+        id: model,
+        providerId,
+        type: 'chat',
+      });
+      if (providerId !== provider) {
+        try {
+          await selectModel({ model, provider: providerId });
+        } catch (error) {
+          console.error('Failed to select the enabled chat model provider:', error);
+          toast.error(t('input.modelDisabled.selectionFailed'));
+        }
+      }
+    } catch (error) {
+      console.error('Failed to enable the selected chat model:', error);
+      toast.error(t('input.modelDisabled.actionFailed'));
+    } finally {
+      setActionLoading(false);
+    }
+  }, [
+    enableTargetProviderId,
+    enabledChatModelList,
+    model,
+    provider,
+    selectModel,
+    t,
+    toggleProviderEnabled,
+    toggleProviderModelEnabled,
+  ]);
+
+  if (notice?.action !== 'enableModel') return notice;
+
+  return {
+    ...notice,
+    actionDisabled: !canManageAiInfra,
+    actionDisabledReason: canManageAiInfra ? undefined : aiInfraPermissionReason,
+    actionLoading,
+    onAction: canManageAiInfra ? handleEnableModel : undefined,
+  };
 };

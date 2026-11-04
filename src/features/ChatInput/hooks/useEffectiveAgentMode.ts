@@ -1,7 +1,7 @@
 import { resolveAgentModelConfig } from '@lobechat/types';
 
-import { useAgentManagementAccess } from '@/features/ResourcePermission/useAgentManagementAccess';
 import { findChatModelInList, useEnabledChatModelsState } from '@/hooks/useEnabledChatModels';
+import { useAgentManagementAccess } from '@/features/ResourcePermission/useAgentManagementAccess';
 import { useModelSupportToolUse } from '@/hooks/useModelSupportToolUse';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
@@ -9,6 +9,8 @@ import { aiProviderSelectors, useAiInfraStore } from '@/store/aiInfra';
 import { useChatStore } from '@/store/chat';
 import { topicSelectors } from '@/store/chat/slices/topic/selectors';
 import { useUserStore } from '@/store/user';
+
+import { useEffectiveAgentModePreference } from './effectiveAgentModePreference';
 
 export type ChatInputMode = 'agent' | 'chat';
 
@@ -50,26 +52,17 @@ export const resolveEffectiveAgentMode = ({
 };
 
 export const useEffectiveAgentMode = (agentId: string) => {
-  const [sharedEnableAgentMode, sharedModel, sharedProvider, sharedAgencyConfig, agent] =
-    useAgentStore((s) => [
-      agentByIdSelectors.getAgentEnableModeById(agentId)(s),
-      agentByIdSelectors.getAgentModelById(agentId)(s),
-      agentByIdSelectors.getAgentModelProviderById(agentId)(s),
-      agentByIdSelectors.getAgencyConfigById(agentId)(s),
-      agentByIdSelectors.getAgentById(agentId)(s),
-    ]);
-  const { canManageAgent, isAccessLoading } = useAgentManagementAccess(agentId);
-  const usesWorkspaceMemberMode =
-    !!agent?.workspaceId && agent.visibility !== 'private' && !canManageAgent;
-  const storePreference = useUserStore((s) => s.workspaceUserPreference);
-  const { data: fetchedPreference, isLoading } = useUserStore(
-    (s) => s.useFetchWorkspaceUserPreference,
-  )();
-  const preference = fetchedPreference === undefined ? storePreference : (fetchedPreference ?? {});
-  const memberModeOverride = usesWorkspaceMemberMode
-    ? preference.agentModeOverrides?.[agentId]
-    : undefined;
-  const enableAgentMode = memberModeOverride ?? sharedEnableAgentMode;
+  const [sharedModel, sharedProvider, sharedAgencyConfig, agent] = useAgentStore((s) => [
+    agentByIdSelectors.getAgentModelById(agentId)(s),
+    agentByIdSelectors.getAgentModelProviderById(agentId)(s),
+    agentByIdSelectors.getAgencyConfigById(agentId)(s),
+    agentByIdSelectors.getAgentById(agentId)(s),
+  ]);
+  const { enableAgentMode, isPreferenceLoading, usesWorkspaceMemberMode } =
+    useEffectiveAgentModePreference(agentId);
+  const { canManageAgent } = useAgentManagementAccess(agentId);
+  // Hydrated by `useEffectiveAgentModePreference` (same workspace preference fetch).
+  const preference = useUserStore((s) => s.workspaceUserPreference);
   // Gate tool support on the EFFECTIVE model — the same source the model
   // trigger renders and generation runs (member override, then the active
   // topic pin). Gating on the shared default strands callers whose effective
@@ -109,7 +102,7 @@ export const useEffectiveAgentMode = (agentId: string) => {
 
   return {
     ...resolveEffectiveAgentMode({ enableAgentMode, isModelListReady, supportToolUse }),
-    isPreferenceLoading: isAccessLoading || (usesWorkspaceMemberMode && isLoading),
+    isPreferenceLoading,
     usesWorkspaceMemberMode,
   };
 };

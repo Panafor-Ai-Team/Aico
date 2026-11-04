@@ -1,6 +1,6 @@
+import type { AiFullModelCard } from 'model-bank';
 import type { PartialDeep } from 'type-fest';
 
-import type { ChatModelCard } from './llm';
 import type {
   GlobalLLMProviderKey,
   UserDefaultAgent,
@@ -34,6 +34,7 @@ export type IFeatureFlagsState = {
   /** Aico capability gate (operator flag `projects`). */
   enableProjects: boolean | undefined;
   enableStorageOverage: boolean | undefined;
+  enableVoiceDictation: boolean | undefined;
   enableWorkspace: boolean | undefined;
   hideDocs: boolean | undefined;
   hideGitHub: boolean | undefined;
@@ -85,7 +86,7 @@ export interface ServerModelProviderConfig {
   /**
    * the model lists defined in server
    */
-  serverModelLists?: ChatModelCard[];
+  serverModelLists?: AiFullModelCard[];
 }
 
 export type ServerLanguageModel = Partial<Record<GlobalLLMProviderKey, ServerModelProviderConfig>>;

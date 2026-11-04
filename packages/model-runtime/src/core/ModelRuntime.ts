@@ -571,6 +571,7 @@ export class ModelRuntime {
           apiKey?: string;
           baseURL?: string;
           userId?: string;
+          workspaceId?: string;
         }
     >,
     hooks?: ModelRuntimeHooks,

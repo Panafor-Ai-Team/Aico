@@ -163,5 +163,9 @@
   "window.minimize": "Minimize window",
   "window.pinToTop": "Pin on top",
   "window.restore": "Restore window",
-  "window.unpinFromTop": "Unpin from top"
+  "window.unpinFromTop": "Unpin from top",
+  "navigation.apps": "Apps",
+  "navigation.selfLearning": "Self-evolving",
+  "updater.refreshToApply": "Refresh now",
+  "updater.rendererUpdateReady": "A new version is ready — refresh to apply"
 }
