@@ -248,3 +248,46 @@ describe('generateObject tool-calling fallback', () => {
     expect(getCreateMock(instance)).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('generateObject fenced JSON output', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const createInstance = () => new TestRuntime({ apiKey: 'test' });
+
+  const mockContent = (instance: any, content: string) =>
+    vi.spyOn(instance.client.chat.completions, 'create').mockResolvedValue({
+      choices: [{ message: { content } }],
+    } as any);
+
+  it('should parse json_schema output wrapped in a ```json fence', async () => {
+    const instance = createInstance();
+    // Some gateways ignore response_format and reply with markdown-fenced JSON
+    mockContent(instance, '```json\n{"summary":"Task completed","title":"Done"}\n```');
+
+    const result = await instance.generateObject(generateObjectPayload);
+
+    expect(result).toEqual({ summary: 'Task completed', title: 'Done' });
+  });
+
+  it('should parse output wrapped in a bare ``` fence with surrounding whitespace', async () => {
+    const instance = createInstance();
+    mockContent(instance, '\n```\n{"summary":"Task completed","title":"Done"}\n```\n');
+
+    const result = await instance.generateObject(generateObjectPayload);
+
+    expect(result).toEqual({ summary: 'Task completed', title: 'Done' });
+  });
+
+  it('should still return undefined when the output is not JSON', async () => {
+    const instance = createInstance();
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockContent(instance, '```json\nnot json at all\n```');
+
+    const result = await instance.generateObject(generateObjectPayload);
+
+    expect(result).toBeUndefined();
+    consoleSpy.mockRestore();
+  });
+});

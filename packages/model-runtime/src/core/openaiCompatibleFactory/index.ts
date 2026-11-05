@@ -108,6 +108,25 @@ export const isResponseFormatUnsupportedError = (error: unknown): boolean => {
   return /(?:response_format|json_schema)[^]*?(?:unavailable|not +support)/i.test(message);
 };
 
+/**
+ * Parse structured-output text, tolerating a surrounding markdown code fence.
+ * Some gateways ignore `response_format` and reply with ```json ... ``` instead of raw JSON.
+ * Throws like `JSON.parse` when the text is not JSON even after removing the fence.
+ */
+export const parseStructuredOutputText = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    const trimmed = text.trim();
+    const firstLineEnd = trimmed.indexOf('\n');
+    const isFenced = trimmed.startsWith('```') && trimmed.endsWith('```') && firstLineEnd > 0;
+    if (!isFenced) throw error;
+
+    // Drop the opening fence line (with its optional language tag) and the closing fence
+    return JSON.parse(trimmed.slice(firstLineEnd + 1, -3));
+  }
+};
+
 // the model contains the following keywords is not a chat model, so we should filter them out
 export const CHAT_MODELS_BLOCK_LIST = [
   'embedding',
@@ -1224,7 +1243,7 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
           const text = res.output_text;
           log('received structured output from Responses API, length: %d', text?.length || 0);
           try {
-            const result = JSON.parse(text);
+            const result = parseStructuredOutputText(text);
             log('successfully parsed JSON output');
             return result;
           } catch (error) {
@@ -1270,7 +1289,7 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
         log('received structured output from Chat Completions API, length: %d', text?.length || 0);
 
         try {
-          const result = JSON.parse(text);
+          const result = parseStructuredOutputText(text);
           log('successfully parsed JSON output');
           return result;
         } catch (error) {
