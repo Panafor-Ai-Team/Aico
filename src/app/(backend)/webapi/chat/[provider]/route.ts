@@ -53,15 +53,20 @@ interface ChatTiming {
   provider: string;
 }
 
+// The catch below sends `error` as the response body, and JSON drops an Error's
+// own message. The client caps start-timeout retries by matching this message,
+// so it also travels as a plain `error` object.
+const createTimeoutError = (message: string) =>
+  Object.assign(new Error(message), {
+    error: { message },
+    errorType: ChatErrorType.InternalServerError,
+  });
+
 const withSetupTimeout = <T>(promise: Promise<T>, label: string): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      reject(
-        Object.assign(new Error(`Chat setup timed out: ${label}`), {
-          errorType: ChatErrorType.InternalServerError,
-        }),
-      );
+      reject(createTimeoutError(`Chat setup timed out: ${label}`));
     }, SETUP_TIMEOUT_MS);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
@@ -297,11 +302,7 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
     const startTimeout = new Promise<never>((_, reject) => {
       startTimer = setTimeout(() => {
         startController.abort(new Error('Chat start timed out: upstream-headers'));
-        reject(
-          Object.assign(new Error('Chat start timed out: upstream-headers'), {
-            errorType: ChatErrorType.InternalServerError,
-          }),
-        );
+        reject(createTimeoutError('Chat start timed out: upstream-headers'));
       }, CHAT_START_TIMEOUT_MS);
     });
     const chatSignal = req.signal

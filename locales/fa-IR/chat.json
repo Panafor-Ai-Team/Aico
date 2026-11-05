@@ -980,6 +980,8 @@
   "operation.heterogeneousAgentFallback": "ایجنت خارجی",
   "operation.sendMessage": "در حال ارسال پیام",
   "operation.streamRetry": "{{name}} بالادستی مشغول است ({{status}})، تلاش مجدد",
+  "operation.streamRetry.chat": "درخواست به مدل ناموفق بود، تلاش مجدد",
+  "operation.streamRetry.chat.withAttempt": "درخواست به مدل ناموفق بود، تلاش مجدد {{attempt}}/{{maxAttempts}}",
   "operation.streamRetry.unknownStatus": "وضعیت نامشخص",
   "operation.streamRetry.withAttempt": "{{name}} بالادستی مشغول است ({{status}})، تلاش مجدد {{attempt}}/{{maxAttempts}}",
   "owner": "مالک گروه",

@@ -164,7 +164,9 @@ const executePreparedCall = async (
             delayMs,
             errorType: classified.code,
             kind: classified.kind,
-            maxAttempts,
+            // The budget can be lower than the provider's attempt count (e.g. a
+            // start timeout retries once), and the UI shows this as "n/max".
+            maxAttempts: Math.min(maxAttempts, retryBudget + 1),
           },
           type: 'stream_retry',
         };

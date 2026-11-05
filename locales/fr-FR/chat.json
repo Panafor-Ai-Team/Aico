@@ -980,6 +980,8 @@
   "operation.heterogeneousAgentFallback": "Agent externe",
   "operation.sendMessage": "Envoi du message",
   "operation.streamRetry": "{{name}} en amont est occupé ({{status}}), nouvelle tentative en cours",
+  "operation.streamRetry.chat": "La requête au modèle a échoué, nouvelle tentative en cours",
+  "operation.streamRetry.chat.withAttempt": "La requête au modèle a échoué, nouvelle tentative {{attempt}}/{{maxAttempts}}",
   "operation.streamRetry.unknownStatus": "statut inconnu",
   "operation.streamRetry.withAttempt": "{{name}} en amont est occupé ({{status}}), nouvelle tentative {{attempt}}/{{maxAttempts}}",
   "owner": "Propriétaire du groupe",

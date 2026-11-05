@@ -280,7 +280,15 @@ const bestEffortMessage = (error: unknown): string => {
  */
 export const isChatStartTimeoutError = (error: unknown): boolean => {
   try {
-    return normalizeSignal(error).message.includes('chat start timed out');
+    if (normalizeSignal(error).message.includes('chat start timed out')) return true;
+
+    // Over HTTP the client's message is translated UI text; the route's own
+    // message only survives in the response body as `body.error.message`.
+    const body = (error as { body?: { error?: { message?: unknown } } } | undefined)?.body;
+    const bodyMessage = body?.error?.message;
+    return (
+      typeof bodyMessage === 'string' && bodyMessage.toLowerCase().includes('chat start timed out')
+    );
   } catch {
     return false;
   }
