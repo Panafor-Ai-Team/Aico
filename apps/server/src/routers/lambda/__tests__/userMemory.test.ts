@@ -227,6 +227,37 @@ describe('userMemoryRouter.requestMemoryFromChatTopic', () => {
     });
   });
 
+  it('falls back to the in-server run when the Upstash trigger fails', async () => {
+    mockFindActiveByType.mockResolvedValue(undefined);
+    mockCreate.mockResolvedValue('fallback-task');
+    mockCountTopicsForMemoryExtractor.mockResolvedValue(2);
+    mockTriggerProcessUsers.mockRejectedValue(new Error('unable to authenticate: invalid token'));
+
+    const caller = createCaller();
+    const result = await caller.requestMemoryFromChatTopic({
+      fromDate: new Date('2024-01-01'),
+      toDate: new Date('2024-02-01'),
+    });
+
+    expect(mockTriggerProcessUsers).toHaveBeenCalledTimes(1);
+    expect(mockScheduleLocalRun).toHaveBeenCalledWith({
+      asyncTaskId: 'fallback-task',
+      from: new Date('2024-01-01'),
+      to: new Date('2024-02-01'),
+      userId: 'user-1',
+      workspaceId: undefined,
+    });
+    expect(mockUpdate).not.toHaveBeenCalledWith(
+      'fallback-task',
+      expect.objectContaining({ status: AsyncTaskStatus.Error }),
+    );
+    expect(result).toMatchObject({
+      deduped: false,
+      id: 'fallback-task',
+      status: AsyncTaskStatus.Pending,
+    });
+  });
+
   it('returns success immediately when no topics', async () => {
     mockFindActiveByType.mockResolvedValue(undefined);
     mockCountTopicsForMemoryExtractor.mockResolvedValue(0);

@@ -346,7 +346,7 @@ export const userMemoryRouter = router({
       const { runner, webhook, upstashWorkflowExtraHeaders } = parseMemoryExtractionConfig();
 
       // Aico: without a usable Upstash, run the extraction inside the app server.
-      if (runner === 'local') {
+      const scheduleLocalRun = () => {
         MemoryExtractionLocalRunner.schedule({
           asyncTaskId: taskId,
           from: input.fromDate,
@@ -361,7 +361,9 @@ export const userMemoryRouter = router({
           metadata: metadata as UserMemoryExtractionMetadata,
           status: AsyncTaskStatus.Pending,
         };
-      }
+      };
+
+      if (runner === 'local') return scheduleLocalRun();
 
       const baseUrl = webhook.baseUrl || appEnv.INTERNAL_APP_URL || appEnv.APP_URL;
 
@@ -395,18 +397,12 @@ export const userMemoryRouter = router({
           } as UserMemoryExtractionMetadata,
         });
       } catch (error) {
-        await ctx.asyncTaskModel.update(taskId, {
-          error: new AsyncTaskError(
-            AsyncTaskErrorType.TaskTriggerError,
-            'Failed to schedule memory extraction workflow',
-          ),
-          status: AsyncTaskStatus.Error,
-        });
-        throw new TRPCError({
-          cause: error,
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to trigger user memory extraction',
-        });
+        // Aico: QStash can be configured but unusable (e.g. a rejected token); run in-server instead.
+        console.error(
+          '[userMemory] Upstash workflow trigger failed, running extraction in-server',
+          error,
+        );
+        return scheduleLocalRun();
       }
 
       return {
