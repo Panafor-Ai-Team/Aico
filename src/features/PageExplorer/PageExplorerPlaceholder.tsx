@@ -217,11 +217,15 @@ const PageExplorerPlaceholder = memo<PageExplorerPlaceholderProps>(
               id: parsedDocument.id,
               metadata: parsedDocument.metadata || {},
               source: parsedDocument.source || 'document',
-              sourceType: parsedDocument.sourceType || 'file',
+              sourceType: parsedDocument.sourceType || 'api',
               title: parsedDocument.title || fileName,
               totalCharCount: parsedDocument.totalCharCount || 0,
               totalLineCount: parsedDocument.totalLineCount || 0,
               updatedAt: parsedDocument.updatedAt ? new Date(parsedDocument.updatedAt) : new Date(),
+              // Keep the row in the sidebar bucket (Private / Workspace) the server chose.
+              userId: parsedDocument.userId,
+              visibility: parsedDocument.visibility ?? null,
+              workspaceId: parsedDocument.workspaceId ?? null,
             };
 
             // Replace optimistic with real document in the store

@@ -793,7 +793,10 @@ export class DocumentService {
         metadata: fileDocument.metadata,
         parentId: file.parentId,
         source: file.url,
-        sourceType: 'file',
+        // A Pages upload is a user-authored page, not a parse cache. `'file'` is
+        // the marker `parseFile` uses for parse caches, which the Pages sidebar
+        // hides, so the uploaded page vanished on the next list fetch.
+        sourceType: 'api',
         title,
         totalCharCount: cleanContent.length,
         totalLineCount: cleanContent.split('\n').length,
