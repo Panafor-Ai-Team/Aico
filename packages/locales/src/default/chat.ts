@@ -1084,6 +1084,9 @@ export default {
   'operation.execHeterogeneousAgent': '{{name}} is running',
   'operation.heterogeneousAgentFallback': 'External agent',
   'operation.streamRetry': '{{name}} upstream is busy ({{status}}), retrying',
+  'operation.streamRetry.chat': 'Model request failed, retrying',
+  'operation.streamRetry.chat.withAttempt':
+    'Model request failed, retrying {{attempt}}/{{maxAttempts}}',
   'operation.streamRetry.unknownStatus': 'unknown status',
   'operation.streamRetry.withAttempt':
     '{{name}} upstream is busy ({{status}}), retrying {{attempt}}/{{maxAttempts}}',

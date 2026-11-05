@@ -543,6 +543,38 @@ describe('callLlm executor', () => {
     expect(transport.trace.close).toHaveBeenCalledWith(undefined);
   });
 
+  it('reports the error-specific retry budget as maxAttempts in stream_retry', async () => {
+    const state = createState();
+    const error = new Error('Chat start timed out: upstream-headers');
+    const runAttempt = vi
+      .fn()
+      .mockResolvedValueOnce({ error, ok: false, output: createAttemptOutput('') })
+      .mockResolvedValueOnce({ ok: true, output: createAttemptOutput('complete') });
+    const policy = createRetryPolicy({
+      classifyError: vi.fn().mockReturnValue({ kind: 'retry', message: error.message }),
+      maxAttempts: vi.fn().mockReturnValue(6),
+      resolveRetryBudget: vi.fn().mockReturnValue(1),
+    });
+    const transport = createCallTransport({ policy, runAttempt });
+    const stream = createStreamSink();
+    const host = createHost(
+      transport.llm,
+      createMessageTransport(),
+      stream,
+      createContextBuilder(),
+      { clearRunningMark: vi.fn(), loadState: vi.fn().mockResolvedValue(null) },
+    );
+
+    await callLlm(host)(instruction, state);
+
+    expect(stream.publishEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ attempt: 2, maxAttempts: 2 }),
+        type: 'stream_retry',
+      }),
+    );
+  });
+
   it('stops retrying and persists the partial attempt when the operation is interrupted', async () => {
     const state = createState();
     const error = new Error('stream aborted');

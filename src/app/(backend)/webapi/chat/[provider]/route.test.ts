@@ -321,7 +321,10 @@ describe('POST handler', () => {
         expect(response.status).toBe(500);
         // Managed gateway ids never leak to the client: errors say `aico`.
         expect(await response.json()).toMatchObject({
-          body: expect.objectContaining({ provider: 'aico' }),
+          body: expect.objectContaining({
+            error: { message: 'Chat setup timed out: init-runtime' },
+            provider: 'aico',
+          }),
         });
       } finally {
         vi.useRealTimers();
@@ -343,6 +346,11 @@ describe('POST handler', () => {
         await vi.advanceTimersByTimeAsync(60_000);
         const response = await pending;
         expect(response.status).toBe(500);
+        // The client caps retries for this failure by its message, so the
+        // message must survive JSON serialization.
+        expect(await response.json()).toMatchObject({
+          body: { error: { message: 'Chat start timed out: upstream-headers' } },
+        });
       } finally {
         vi.useRealTimers();
       }

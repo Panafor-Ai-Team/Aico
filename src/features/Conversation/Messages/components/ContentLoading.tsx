@@ -89,15 +89,27 @@ const ContentLoading = memo<ContentLoadingProps>(({ id, startTime: startTimeOver
     const retry = runningOp?.metadata?.streamRetry;
     if (!retry) return undefined;
 
-    const name = getHeterogeneousAgentName();
-    const status = getRetryStatusText(retry);
-
-    if (
+    const hasAttemptCount =
       typeof retry.attempt === 'number' &&
       Number.isFinite(retry.attempt) &&
       typeof retry.maxAttempts === 'number' &&
-      Number.isFinite(retry.maxAttempts)
-    ) {
+      Number.isFinite(retry.maxAttempts);
+
+    // Normal chat has no external agent, and a retried request is not
+    // necessarily "busy" (timeouts, 5xx, dropped streams all land here).
+    if (!runningOp?.metadata?.heterogeneousType) {
+      return hasAttemptCount
+        ? t('operation.streamRetry.chat.withAttempt', {
+            attempt: retry.attempt,
+            maxAttempts: retry.maxAttempts,
+          })
+        : t('operation.streamRetry.chat');
+    }
+
+    const name = getHeterogeneousAgentName();
+    const status = getRetryStatusText(retry);
+
+    if (hasAttemptCount) {
       return t('operation.streamRetry.withAttempt', {
         attempt: retry.attempt,
         maxAttempts: retry.maxAttempts,

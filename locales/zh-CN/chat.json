@@ -989,6 +989,8 @@
   "operation.heterogeneousAgentFallback": "外部助理",
   "operation.sendMessage": "消息发送中",
   "operation.streamRetry": "{{name}} 上游繁忙（{{status}}），正在重试",
+  "operation.streamRetry.chat": "模型请求失败，正在重试",
+  "operation.streamRetry.chat.withAttempt": "模型请求失败，正在重试 {{attempt}}/{{maxAttempts}}",
   "operation.streamRetry.unknownStatus": "未知状态",
   "operation.streamRetry.withAttempt": "{{name}} 上游繁忙（{{status}}），正在重试 {{attempt}}/{{maxAttempts}}",
   "owner": "群主",
