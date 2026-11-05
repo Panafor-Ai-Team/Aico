@@ -164,6 +164,63 @@ describe('POST handler', () => {
       });
     });
 
+    it('accepts a gzip-encoded body', async () => {
+      const mockParams = Promise.resolve({ provider: 'openrouter' });
+      const mockChatPayload = { message: 'سلام '.repeat(10_000), model: 'test-model' };
+      const json = JSON.stringify({ aicoBilling: billing, ...mockChatPayload });
+      const gzipped = await new Response(
+        new Blob([json]).stream().pipeThrough(new CompressionStream('gzip')),
+      ).arrayBuffer();
+      request = new Request(new URL('https://test.com'), {
+        body: gzipped,
+        headers: { 'Content-Encoding': 'gzip', 'Content-Type': 'application/json' },
+        method: 'POST',
+      });
+
+      const mockRuntime: LobeRuntimeAI = {
+        baseURL: 'abc',
+        chat: vi.fn().mockResolvedValue({ success: true }),
+      };
+      vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+      await POST(request, { params: mockParams });
+
+      expect(mockRuntime.chat).toHaveBeenCalledWith(mockChatPayload, expect.anything());
+    });
+
+    it('rejects a gzip body that decodes past the size cap', async () => {
+      // 26 MB of zeros compresses to a few KB: a small upload must not be
+      // allowed to expand into an unbounded buffer.
+      const gzipped = await new Response(
+        new Blob([new Uint8Array(26 * 1024 * 1024)])
+          .stream()
+          .pipeThrough(new CompressionStream('gzip')),
+      ).arrayBuffer();
+      request = new Request(new URL('https://test.com'), {
+        body: gzipped,
+        headers: { 'Content-Encoding': 'gzip' },
+        method: 'POST',
+      });
+
+      const response = await POST(request, { params: Promise.resolve({ provider: 'openrouter' }) });
+
+      expect(response.status).toBe(400);
+      expect(initModelRuntimeFromDB).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unsupported Content-Encoding', async () => {
+      request = new Request(new URL('https://test.com'), {
+        body: 'not-brotli',
+        headers: { 'Content-Encoding': 'br' },
+        method: 'POST',
+      });
+
+      const response = await POST(request, { params: Promise.resolve({ provider: 'openrouter' }) });
+
+      expect(response.status).toBe(400);
+      expect(initModelRuntimeFromDB).not.toHaveBeenCalled();
+    });
+
     it('should return an error response when chat completion fails', async () => {
       const mockParams = Promise.resolve({ provider: 'openrouter' });
       const mockChatPayload = { message: 'Hello, world!' };

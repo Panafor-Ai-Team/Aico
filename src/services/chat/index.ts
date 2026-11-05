@@ -55,7 +55,12 @@ import { createTraceHeader } from '@/utils/trace';
 
 import { createHeaderWithAuth } from '../_auth';
 import { API_ENDPOINTS } from '../_url';
-import { findDeploymentName, isEnableFetchOnClient, resolveRuntimeProvider } from './helper';
+import {
+  encodeJsonRequestBody,
+  findDeploymentName,
+  isEnableFetchOnClient,
+  resolveRuntimeProvider,
+} from './helper';
 import { type ResolvedAgentConfig } from './mecha';
 import {
   contextEngineering,
@@ -161,6 +166,16 @@ class ChatService {
     // which handles isSubAgent filtering, disableTools, and tools generation
 
     const targetAgentId = getTargetAgentId(agentId);
+
+    // Make sure the user's saved model-instance reasoning config is loaded
+    // before extend params are resolved below — after a reload the
+    // ReasoningConfigLoader SWR fetch may still be in flight when the user
+    // sends the first message. Started now so the round trip overlaps context
+    // engineering; no-op once cached; failures fall back to level defaults.
+    const reasoningConfigReady = getAiInfraStoreState().ensureModelReasoningConfig(
+      payload.model,
+      payload.provider!,
+    );
 
     // Tools are pre-generated in internal_createAgentState and passed via resolvedAgentConfig
     // This avoids duplicate toolsEngine creation and ensures disableTools is properly handled
@@ -332,12 +347,7 @@ class ChatService {
 
     // ============  3. process extend params   ============ //
 
-    // Make sure the user's saved model-instance reasoning config is loaded
-    // before the synchronous resolution below — after a reload the
-    // ReasoningConfigLoader SWR fetch may still be in flight when the user
-    // sends the first message. No-op once cached; failures fall back to
-    // level defaults.
-    await getAiInfraStoreState().ensureModelReasoningConfig(payload.model, payload.provider!);
+    await reasoningConfigReady;
 
     const extendParams = resolveModelExtendParams({
       chatConfig,
@@ -541,6 +551,14 @@ class ChatService {
     });
     const requestBody = aicoBilling ? { ...payload, aicoBilling } : payload;
 
+    // The body repeats the whole history and tool set on every step (often
+    // 0.3–1.4 MB), so upload time adds up on slow links. The client-side
+    // fetcher builds its own request from `payload` and never sends this body.
+    const encodedBody = enableFetchOnClient
+      ? { body: JSON.stringify(requestBody), gzip: false }
+      : await encodeJsonRequestBody(JSON.stringify(requestBody));
+    if (encodedBody.gzip) (headers as Record<string, string>)['Content-Encoding'] = 'gzip';
+
     const onFinish: FetchSSEOptions['onFinish'] | undefined = aicoBilling
       ? async (content, context) => {
           const costUsd = context.usage?.cost;
@@ -562,7 +580,7 @@ class ChatService {
       : options?.onFinish;
 
     return fetchSSE(API_ENDPOINTS.chat(provider), {
-      body: JSON.stringify(requestBody),
+      body: encodedBody.body,
       fetcher,
       headers,
       method: 'POST',

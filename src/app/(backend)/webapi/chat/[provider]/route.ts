@@ -24,6 +24,7 @@ import { type ChatStreamPayload } from '@/types/openai/chat';
 import { createErrorResponse } from '@/utils/errorResponse';
 import { getTracePayload } from '@/utils/trace';
 
+import { readJsonRequestBody } from '../../_utils/requestBody';
 import { resolveValidWorkspaceIdFromRequest } from '../../_utils/workspace';
 
 // If user don't use fluid compute, will build  failed
@@ -242,7 +243,7 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
     }
 
     const workspaceId = await resolveValidWorkspaceIdFromRequest({ req, serverDB, userId });
-    const body = (await req.json()) as ChatStreamPayload & { aicoBilling?: unknown };
+    const body = await readJsonRequestBody<ChatStreamPayload & { aicoBilling?: unknown }>(req);
     // `aicoBilling` only tells this route who pays; it must never reach the
     // upstream API — strict endpoints (Responses) reject unknown parameters.
     const { aicoBilling: _aicoBilling, ...data } = body;
