@@ -1662,17 +1662,14 @@ describe('ChatService', () => {
         expect(agentDocumentService.getContextDocuments).toHaveBeenCalledWith({
           agentId: 'agent-1',
         });
-        expect(contextEngineeringSpy).toHaveBeenCalledWith(
+        // Handed over still loading so contextEngineering can overlap its lookups.
+        expect(await contextEngineeringSpy.mock.calls[0][0].agentDocuments).toEqual([
           expect.objectContaining({
-            agentDocuments: [
-              expect.objectContaining({
-                content: 'Project setup steps',
-                filename: 'setup.md',
-                id: 'doc-1',
-              }),
-            ],
+            content: 'Project setup steps',
+            filename: 'setup.md',
+            id: 'doc-1',
           }),
-        );
+        ]);
       });
 
       it('should resolve agent builder documents from the edited agent', async () => {
@@ -1707,15 +1704,11 @@ describe('ChatService', () => {
         expect(agentDocumentService.getContextDocuments).toHaveBeenCalledWith({
           agentId: 'edited-agent',
         });
-        expect(contextEngineeringSpy).toHaveBeenCalledWith(
+        expect(await contextEngineeringSpy.mock.calls[0][0].agentDocuments).toEqual([
           expect.objectContaining({
-            agentDocuments: [
-              expect.objectContaining({
-                content: 'Edited agent setup',
-              }),
-            ],
+            content: 'Edited agent setup',
           }),
-        );
+        ]);
       });
     });
   });
@@ -1805,6 +1798,30 @@ describe('ChatService', () => {
       });
       expect(JSON.parse(mockFetchSSE.mock.calls[0][1].body)).toMatchObject({
         aicoBilling: billingContext,
+      });
+    });
+
+    it('does not hold a cost-less finish on the wallet refetch', async () => {
+      const billingContext = { source: 'personal' as const };
+      mockAssertAicoBillingAllowsChat.mockResolvedValueOnce(billingContext);
+      // The refetch never settles; awaiting it would hang the finish forever.
+      mockRefreshAicoBillingBalance.mockReturnValueOnce(new Promise(() => {}));
+      let finished = false;
+      mockFetchSSE.mockImplementationOnce(async (_url: string, fetchOptions: FetchSSEOptions) => {
+        await fetchOptions.onFinish?.('', { type: 'error' });
+        finished = true;
+        return new Response('mock response');
+      });
+
+      await chatService.getChatCompletion(
+        { messages: [], model: 'managed-model', provider: 'aico' },
+        {},
+      );
+
+      expect(finished).toBe(true);
+      expect(mockRefreshAicoBillingBalance).toHaveBeenCalledWith({
+        billingContext,
+        costUsd: undefined,
       });
     });
 

@@ -62,3 +62,41 @@ describe('lambdaClient transfer-job status transport', () => {
     expect(body.json.topicIds).toHaveLength(1000);
   });
 });
+
+describe('lambdaClient billing sources transport', () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('location', new URL('http://localhost/chat'));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    fetchMock.mockReset();
+  });
+
+  // Regression: a live billing read batched with getContextDocuments made the
+  // chat prompt wait for the key gateway (1.3 s instead of one round trip).
+  it('never shares a batch with the queries issued alongside it', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) =>
+      String(input).includes('batch=1')
+        ? new Response(JSON.stringify([{ result: { data: superjson.serialize([]) } }]), {
+            headers: { 'content-type': 'application/json' },
+            status: 200,
+          })
+        : okTrpcResponse(null),
+    );
+
+    await Promise.all([
+      lambdaClient.aicoBilling.getMyBillingSources.query({ syncLive: true }),
+      lambdaClient.agentDocument.getContextDocuments.query({ agentId: 'agt_test' }),
+    ]);
+
+    const urls = fetchMock.mock.calls.map(([input]) => String(input));
+    expect(urls).toHaveLength(2);
+    const billingUrl = urls.find((url) => url.includes('aicoBilling.getMyBillingSources'));
+    expect(billingUrl).toBeDefined();
+    expect(billingUrl).not.toContain('agentDocument');
+  });
+});

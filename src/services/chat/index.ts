@@ -6,7 +6,7 @@ import {
   REQUEST_TOPIC_ID_HEADER,
   REQUEST_TRIGGER_HEADER,
 } from '@lobechat/const';
-import { type OfficialToolItem } from '@lobechat/context-engine';
+import { type AgentContextDocument, type OfficialToolItem } from '@lobechat/context-engine';
 import { type FetchSSEOptions } from '@lobechat/fetch-sse';
 import { fetchSSE, standardizeAnimationStyle } from '@lobechat/fetch-sse';
 import type { ChatCompletionErrorPayload } from '@lobechat/model-runtime';
@@ -196,17 +196,22 @@ class ChatService {
     const isAgentBuilderEnabled = enabledToolIds.includes(AgentBuilderIdentifier);
     const documentsAgentId = this.resolveAgentDocumentsTargetId(targetAgentId, enabledToolIds);
     let agentBuilderContext;
-    let agentDocuments = documentsAgentId
-      ? agentSelectors.getAgentDocumentsById(documentsAgentId)(getAgentStoreState())
-      : undefined;
+    let agentDocuments:
+      AgentContextDocument[] | Promise<AgentContextDocument[] | undefined> | undefined =
+      documentsAgentId
+        ? agentSelectors.getAgentDocumentsById(documentsAgentId)(getAgentStoreState())
+        : undefined;
 
     if (documentsAgentId && agentDocuments === undefined) {
-      try {
-        agentDocuments = await getAgentStoreState().ensureAgentDocuments(documentsAgentId);
-      } catch (error) {
-        // Agent documents are optional on the client; keep generation working if hydration fails.
-        console.error('[ChatService] Failed to ensure agent documents:', error);
-      }
+      // Not awaited here: contextEngineering awaits it last, so the hydration
+      // round trip overlaps its own lookups (e.g. the topic plan).
+      agentDocuments = getAgentStoreState()
+        .ensureAgentDocuments(documentsAgentId)
+        .catch((error) => {
+          // Agent documents are optional on the client; keep generation working if hydration fails.
+          console.error('[ChatService] Failed to ensure agent documents:', error);
+          return undefined;
+        });
     }
 
     if (isAgentBuilderEnabled) {
@@ -538,14 +543,20 @@ class ChatService {
 
     const onFinish: FetchSSEOptions['onFinish'] | undefined = aicoBilling
       ? async (content, context) => {
+          const costUsd = context.usage?.cost;
           const refreshPromise = refreshAicoBillingBalance({
             billingContext: aicoBilling,
-            costUsd: context.usage?.cost,
+            costUsd,
           });
           try {
             return await options?.onFinish?.(content, context);
           } finally {
-            await refreshPromise;
+            // A finish without cost (e.g. an upstream error event) only refetches
+            // balances from the server. The send gate is already invalidated
+            // synchronously, so awaiting that round trip would only delay the
+            // runtime's retry of the failed attempt.
+            if (costUsd) await refreshPromise;
+            else void refreshPromise.catch(console.error);
           }
         }
       : options?.onFinish;

@@ -195,7 +195,10 @@ const linkOptions = {
 
 // Procedures that should skip batching for faster initial load
 const initialLoadProcedures = new Set(['user.getUserState', 'config.getGlobalConfig']);
-const slowProcedures = new Set(['market.getAssistantList']);
+// `aicoBilling.getMyBillingSources` with `syncLive` waits on the key gateway.
+// Batched, it held back whatever shared its request — on the send path that is
+// the agent's context documents, so the prompt waited on a balance read.
+const slowProcedures = new Set(['market.getAssistantList', 'aicoBilling.getMyBillingSources']);
 const SKIP_BATCH_PROCEDURES = new Set([...initialLoadProcedures, ...slowProcedures]);
 
 // Queries whose input can exceed the GET URL budget (`maxURLLength` 2083):
