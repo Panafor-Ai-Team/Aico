@@ -90,7 +90,11 @@ interface ContextEngineeringContext {
   additionalContexts?: readonly RuntimeAdditionalContextFragment[];
   /** Agent Builder context for injecting current agent info */
   agentBuilderContext?: AgentBuilderContext;
-  agentDocuments?: AgentContextDocument[];
+  /**
+   * May be passed while still loading: it is only awaited when the engine is
+   * built, so the other context lookups below run alongside it.
+   */
+  agentDocuments?: AgentContextDocument[] | Promise<AgentContextDocument[] | undefined>;
   /** The agent ID that will respond (for group context injection) */
   agentId?: string;
   /**
@@ -725,7 +729,7 @@ export const contextEngineering = async ({
       fileContents,
       knowledgeBases,
     },
-    agentDocuments,
+    agentDocuments: await agentDocuments,
 
     // Messages
     messages,

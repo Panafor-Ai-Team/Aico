@@ -132,6 +132,16 @@ describe('refreshAicoBillingBalance', () => {
     expect(invalidateBillingSourcesAllowGateCache).toHaveBeenCalledTimes(1);
   });
 
+  it('invalidates the allow-gate before the refetch is awaited', () => {
+    // Chat no longer awaits a cost-less refresh, so the next send's gate must
+    // already be invalidated when the call returns its promise.
+    vi.mocked(mutate).mockReturnValue(new Promise(() => {}) as ReturnType<typeof mutate>);
+
+    void refreshAicoBillingBalance();
+
+    expect(invalidateBillingSourcesAllowGateCache).toHaveBeenCalledTimes(1);
+  });
+
   it('revalidates both balance caches when no optimistic cost is available', async () => {
     await refreshAicoBillingBalance();
 
