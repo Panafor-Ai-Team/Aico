@@ -38,3 +38,39 @@ describe('parseMemoryExtractionConfig', () => {
     expect(parseMemoryExtractionConfig().workflow?.processUserTopicsParallelism).toBe(25);
   });
 });
+
+describe('parseMemoryExtractionConfig runner', () => {
+  const originalRunner = process.env.MEMORY_USER_MEMORY_EXTRACTION_RUNNER;
+  const originalQstashToken = process.env.QSTASH_TOKEN;
+
+  const restore = (key: string, value: string | undefined) => {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  };
+
+  afterEach(() => {
+    restore('MEMORY_USER_MEMORY_EXTRACTION_RUNNER', originalRunner);
+    restore('QSTASH_TOKEN', originalQstashToken);
+  });
+
+  it('runs locally when QStash is not configured', () => {
+    delete process.env.MEMORY_USER_MEMORY_EXTRACTION_RUNNER;
+    delete process.env.QSTASH_TOKEN;
+
+    expect(parseMemoryExtractionConfig().runner).toBe('local');
+  });
+
+  it('uses the workflow when a QStash token is set', () => {
+    delete process.env.MEMORY_USER_MEMORY_EXTRACTION_RUNNER;
+    process.env.QSTASH_TOKEN = 'token';
+
+    expect(parseMemoryExtractionConfig().runner).toBe('workflow');
+  });
+
+  it('lets the env force local even with a QStash token set', () => {
+    process.env.MEMORY_USER_MEMORY_EXTRACTION_RUNNER = 'local';
+    process.env.QSTASH_TOKEN = 'rejected-token';
+
+    expect(parseMemoryExtractionConfig().runner).toBe('local');
+  });
+});

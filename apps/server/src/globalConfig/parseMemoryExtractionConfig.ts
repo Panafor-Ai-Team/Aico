@@ -63,6 +63,16 @@ export type MemoryLayerExtractorConfig = MemoryLayerExtractorPublicConfig &
     layers: Record<GlobalMemoryLayer, string>;
   };
 
+export type MemoryExtractionRunner = 'local' | 'workflow';
+
+// Aico: QStash may be configured but unusable (e.g. a rejected token), so the env wins over detection.
+const parseExtractionRunner = (): MemoryExtractionRunner => {
+  const value = process.env.MEMORY_USER_MEMORY_EXTRACTION_RUNNER?.trim().toLowerCase();
+  if (value === 'local' || value === 'workflow') return value;
+
+  return process.env.QSTASH_TOKEN ? 'workflow' : 'local';
+};
+
 export interface MemoryExtractionPrivateConfig {
   agentBenchmarkLoCoMo: MemoryAgentConfig;
   agentGateKeeper: MemoryAgentConfig;
@@ -89,6 +99,12 @@ export interface MemoryExtractionPrivateConfig {
     region?: string;
     secretAccessKey?: string;
   };
+  /**
+   * Where user-initiated chat-topic extraction runs:
+   * - `workflow`: Upstash Workflow (needs a working QStash token and a public callback URL)
+   * - `local`: inside the app server process
+   */
+  runner: MemoryExtractionRunner;
   upstashWorkflowExtraHeaders?: Record<string, string>;
   webhook: {
     baseUrl?: string;
@@ -348,6 +364,7 @@ export const parseMemoryExtractionConfig = (): MemoryExtractionPrivateConfig => 
     embeddingPreferredProviders,
     featureFlags,
     observabilityS3: extractorObservabilityS3,
+    runner: parseExtractionRunner(),
     upstashWorkflowExtraHeaders,
     webhook: {
       baseUrl: process.env.MEMORY_USER_MEMORY_WEBHOOK_BASE_URL,

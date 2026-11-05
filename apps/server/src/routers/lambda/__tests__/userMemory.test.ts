@@ -19,9 +19,12 @@ const mockDeleteAll = vi.fn();
 const mockDeletePersona = vi.fn();
 const mockListPersonaVersions = vi.fn();
 const mockRestorePersonaVersion = vi.fn();
-const { mockTriggerProcessUsers } = vi.hoisted(() => ({
-  mockTriggerProcessUsers: vi.fn(),
-}));
+const { mockParseMemoryExtractionConfig, mockScheduleLocalRun, mockTriggerProcessUsers } =
+  vi.hoisted(() => ({
+    mockParseMemoryExtractionConfig: vi.fn(),
+    mockScheduleLocalRun: vi.fn(),
+    mockTriggerProcessUsers: vi.fn(),
+  }));
 const mockActivityUpdate = vi.fn();
 const mockContextUpdate = vi.fn();
 const mockExperienceUpdate = vi.fn();
@@ -83,10 +86,11 @@ vi.mock('@/envs/app', () => ({
 }));
 
 vi.mock('@/server/globalConfig/parseMemoryExtractionConfig', () => ({
-  parseMemoryExtractionConfig: vi.fn(() => ({
-    webhook: { baseUrl: 'https://internal.example.com' },
-    upstashWorkflowExtraHeaders: { 'x-test': 'ok' },
-  })),
+  parseMemoryExtractionConfig: mockParseMemoryExtractionConfig,
+}));
+
+vi.mock('@/server/services/memory/userMemory/extractLocalRunner', () => ({
+  MemoryExtractionLocalRunner: { schedule: mockScheduleLocalRun },
 }));
 
 vi.mock('@/server/services/memory/userMemory/extract', () => ({
@@ -110,6 +114,11 @@ const createCaller = (ctxOverrides: Partial<any> = {}) => {
 describe('userMemoryRouter.requestMemoryFromChatTopic', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockParseMemoryExtractionConfig.mockReturnValue({
+      runner: 'workflow',
+      upstashWorkflowExtraHeaders: { 'x-test': 'ok' },
+      webhook: { baseUrl: 'https://internal.example.com' },
+    });
     mockTriggerProcessUsers.mockResolvedValue({ workflowRunId: 'workflow-run-1' });
   });
 
@@ -168,6 +177,7 @@ describe('userMemoryRouter.requestMemoryFromChatTopic', () => {
       }),
       { extraHeaders: { 'x-test': 'ok' } },
     );
+    expect(mockScheduleLocalRun).not.toHaveBeenCalled();
     expect(mockUpdate).toHaveBeenCalledWith('new-task', {
       metadata: expect.objectContaining({
         control: {
@@ -180,6 +190,39 @@ describe('userMemoryRouter.requestMemoryFromChatTopic', () => {
     expect(result).toMatchObject({
       deduped: false,
       id: 'new-task',
+      status: AsyncTaskStatus.Pending,
+    });
+  });
+
+  it('runs the extraction in-process when the runner is local, without Upstash', async () => {
+    mockParseMemoryExtractionConfig.mockReturnValue({
+      runner: 'local',
+      upstashWorkflowExtraHeaders: {},
+      webhook: {},
+    });
+    mockFindActiveByType.mockResolvedValue(undefined);
+    mockCreate.mockResolvedValue('local-task');
+    mockCountTopicsForMemoryExtractor.mockResolvedValue(3);
+    mockTriggerProcessUsers.mockRejectedValue(new Error('QStash rejected the token'));
+
+    const caller = createCaller();
+    const result = await caller.requestMemoryFromChatTopic({
+      fromDate: new Date('2024-01-01'),
+      toDate: new Date('2024-02-01'),
+    });
+
+    expect(mockTriggerProcessUsers).not.toHaveBeenCalled();
+    expect(mockScheduleLocalRun).toHaveBeenCalledWith({
+      asyncTaskId: 'local-task',
+      from: new Date('2024-01-01'),
+      to: new Date('2024-02-01'),
+      userId: 'user-1',
+      workspaceId: undefined,
+    });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      deduped: false,
+      id: 'local-task',
       status: AsyncTaskStatus.Pending,
     });
   });

@@ -53,6 +53,7 @@ const createExecutor = (provider: string) => {
     embedding: { model: 'embed-1', provider },
     featureFlags: { enableBenchmarkLoCoMo: false },
     observabilityS3: { enabled: false },
+    runner: 'workflow',
     webhook: {},
   };
 

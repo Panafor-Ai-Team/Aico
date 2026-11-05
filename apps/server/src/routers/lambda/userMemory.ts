@@ -42,6 +42,7 @@ import {
   MemoryExtractionWorkflowService,
   normalizeMemoryExtractionPayload,
 } from '@/server/services/memory/userMemory/extract';
+import { MemoryExtractionLocalRunner } from '@/server/services/memory/userMemory/extractLocalRunner';
 
 const userMemoryProcedure = wsCompatProcedure.use(serverDatabase).use(async (opts) => {
   const { ctx } = opts;
@@ -342,7 +343,26 @@ export const userMemoryRouter = router({
         };
       }
 
-      const { webhook, upstashWorkflowExtraHeaders } = parseMemoryExtractionConfig();
+      const { runner, webhook, upstashWorkflowExtraHeaders } = parseMemoryExtractionConfig();
+
+      // Aico: without a usable Upstash, run the extraction inside the app server.
+      if (runner === 'local') {
+        MemoryExtractionLocalRunner.schedule({
+          asyncTaskId: taskId,
+          from: input.fromDate,
+          to: input.toDate,
+          userId: ctx.userId,
+          workspaceId: ctx.workspaceId ?? undefined,
+        });
+
+        return {
+          deduped: false,
+          id: taskId,
+          metadata: metadata as UserMemoryExtractionMetadata,
+          status: AsyncTaskStatus.Pending,
+        };
+      }
+
       const baseUrl = webhook.baseUrl || appEnv.INTERNAL_APP_URL || appEnv.APP_URL;
 
       try {
