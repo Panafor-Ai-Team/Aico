@@ -2,6 +2,9 @@ import { produce } from 'immer';
 
 import { type LobeDocument } from '@/types/document';
 
+/** Id prefix of optimistic pages that have not been saved on the server yet. */
+export const TEMP_PAGE_ID_PREFIX = 'temp-page-';
+
 // ============ Action Types ============
 
 type AddDocumentAction = {
@@ -84,6 +87,16 @@ export const documentsReducer = (
         const index = draft.findIndex((doc) => doc.id === payload.oldId);
         if (index !== -1) {
           draft[index] = payload.document;
+          return;
+        }
+
+        // The optimistic entry can be gone already (a list refetch replaced the
+        // array mid-upload). Upsert so the real document is not lost.
+        const existingIndex = draft.findIndex((doc) => doc.id === payload.document.id);
+        if (existingIndex !== -1) {
+          draft[existingIndex] = payload.document;
+        } else {
+          draft.unshift(payload.document);
         }
       });
     }

@@ -11,6 +11,7 @@ import { standardizeIdentifier } from '@/utils/identifier';
 import { setNamespace } from '@/utils/storeDebug';
 
 import { type PageStore } from '../../store';
+import { TEMP_PAGE_ID_PREFIX } from '../internal/reducer';
 
 const n = setNamespace('page/crud');
 
@@ -104,7 +105,7 @@ export class CrudActionImpl {
     visibility?: 'private' | 'public',
   ): string => {
     // Generate temporary ID with prefix to identify optimistic pages
-    const tempId = `temp-page-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const tempId = `${TEMP_PAGE_ID_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const now = new Date();
 
     const newPage: LobeDocument = {
