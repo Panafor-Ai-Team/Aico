@@ -1,6 +1,7 @@
 import { CUSTOM_DOCUMENT_FILE_TYPE } from '@lobechat/const';
 import { Notion } from '@lobehub/icons';
 import { Center, FileTypeIcon, Flexbox, Icon, Text } from '@lobehub/ui';
+import { toast } from '@lobehub/ui/base-ui';
 import { Upload } from 'antd';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { ArrowUpIcon, PlusIcon } from 'lucide-react';
@@ -13,7 +14,6 @@ import { usePermission } from '@/hooks/usePermission';
 import { useFileStore } from '@/store/file';
 import { usePageStore } from '@/store/page';
 import { DocumentSourceType } from '@/types/document';
-import { standardizeIdentifier } from '@/utils/identifier';
 
 const ICON_SIZE = 80;
 
@@ -227,13 +227,10 @@ const PageExplorerPlaceholder = memo<PageExplorerPlaceholderProps>(
             // Replace optimistic with real document in the store
             replaceTempPageWithReal(tempPageId, realPage);
 
-            // Update selected page ID in store (with full ID including prefix)
-            setSelectedPageId(parsedDocument.id, false);
-
-            // Update URL with stripped ID (without prefix)
-            const cleanId = standardizeIdentifier(parsedDocument.id);
-            const newPath = cleanId ? `/page/${cleanId}` : '/page';
-            window.history.replaceState({}, '', newPath);
+            // Select and open the new page through the router. A bare
+            // history.replaceState is invisible to React Router, so the
+            // placeholder kept rendering and the editor never opened.
+            setSelectedPageId(parsedDocument.id);
           } catch (error) {
             console.error('Failed to upload and parse file:', error);
             // Remove temp document on error
@@ -243,6 +240,7 @@ const PageExplorerPlaceholder = memo<PageExplorerPlaceholderProps>(
         }
       } catch (error) {
         console.error('Failed to upload file:', error);
+        toast.error(t('pageEditor.empty.uploadFailed', { name: file.name }));
       } finally {
         setIsUploading(false);
       }
@@ -295,7 +293,9 @@ const PageExplorerPlaceholder = memo<PageExplorerPlaceholderProps>(
                 }}
               >
                 <span className={styles.actionTitle}>
-                  {isUploading ? 'Uploading...' : t('pageEditor.empty.uploadFiles')}
+                  {isUploading
+                    ? t('pageEditor.empty.uploading')
+                    : t('pageEditor.empty.uploadFiles')}
                 </span>
                 <div className={styles.glow} style={{ background: cssVar.gold }} />
                 <FileTypeIcon
