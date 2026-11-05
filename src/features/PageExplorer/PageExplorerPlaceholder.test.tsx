@@ -4,7 +4,7 @@
 import { fireEvent, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { usePageStore } from '@/store/page';
+import { pageSelectors, usePageStore } from '@/store/page';
 
 import PageExplorerPlaceholder from './PageExplorerPlaceholder';
 
@@ -66,8 +66,9 @@ describe('PageExplorerPlaceholder .docx upload', () => {
       content: 'Hello',
       fileType: 'custom/document',
       id: 'docs_parsed',
-      sourceType: 'file',
+      sourceType: 'api',
       title: 'report',
+      visibility: 'private',
     });
 
     const { container } = render(<PageExplorerPlaceholder />);
@@ -78,6 +79,11 @@ describe('PageExplorerPlaceholder .docx upload', () => {
     const state = usePageStore.getState();
     expect(state.selectedPageId).toBe('docs_parsed');
     expect(state.documents?.map((d) => d.id)).toEqual(['docs_parsed']);
+    // The sidebar must show it too, not just hold it in the store.
+    expect(pageSelectors.getFilteredDocuments(state).map((d) => d.id)).toEqual(['docs_parsed']);
+    expect(pageSelectors.getPrivateFilteredDocuments(state).map((d) => d.id)).toEqual([
+      'docs_parsed',
+    ]);
     expect(mocks.toastError).not.toHaveBeenCalled();
   });
 

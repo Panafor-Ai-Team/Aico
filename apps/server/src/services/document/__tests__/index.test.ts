@@ -1631,7 +1631,8 @@ describe('DocumentService', () => {
           totalLineCount: 1,
           parentId: 'parent-id',
           source: 's3://bucket/test.pdf',
-          sourceType: 'file',
+          // Not 'file': the Pages sidebar hides 'file' parse caches.
+          sourceType: 'api',
         }),
       );
       expect(mockCleanup).toHaveBeenCalled();
