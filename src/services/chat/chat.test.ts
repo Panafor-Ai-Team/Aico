@@ -21,6 +21,7 @@ import { useChatStore } from '@/store/chat';
 import { useToolStore } from '@/store/tool';
 import { settingsSelectors } from '@/store/user/selectors';
 
+import { GZIP_REQUEST_BODY_MIN_BYTES } from './helper';
 import { chatService } from './index';
 import * as mechaModule from './mecha';
 import { type ResolvedAgentConfig } from './mecha';
@@ -242,6 +243,31 @@ describe('ChatService', () => {
           enableAgentMode: false,
         }),
       );
+    });
+
+    it('starts the reasoning-config fetch before context engineering finishes', async () => {
+      const original = useAiInfraStore.getState().ensureModelReasoningConfig;
+      const ensureModelReasoningConfig = vi.fn().mockResolvedValue(undefined);
+      useAiInfraStore.setState({ ensureModelReasoningConfig });
+      let fetchStartedBeforeContext = false;
+      vi.spyOn(mechaModule, 'contextEngineering').mockImplementation(async () => {
+        fetchStartedBeforeContext = ensureModelReasoningConfig.mock.calls.length > 0;
+        return [];
+      });
+
+      try {
+        await chatService.createAssistantMessage({
+          messages: [{ content: 'Hello', role: 'user' }] as UIChatMessage[],
+          model: 'test-model',
+          provider: 'openai',
+          resolvedAgentConfig: createMockResolvedConfig(),
+        });
+      } finally {
+        useAiInfraStore.setState({ ensureModelReasoningConfig: original });
+      }
+
+      expect(ensureModelReasoningConfig).toHaveBeenCalledWith('test-model', 'openai');
+      expect(fetchStartedBeforeContext).toBe(true);
     });
 
     describe('historyCount functionality', () => {
@@ -1799,6 +1825,35 @@ describe('ChatService', () => {
       expect(JSON.parse(mockFetchSSE.mock.calls[0][1].body)).toMatchObject({
         aicoBilling: billingContext,
       });
+    });
+
+    it('gzips a large request body and marks it with Content-Encoding', async () => {
+      const longText = 'سلام، history '.repeat(GZIP_REQUEST_BODY_MIN_BYTES / 4);
+
+      await chatService.getChatCompletion(
+        { messages: [{ content: longText, role: 'user' }], model: 'test-model' },
+        {},
+      );
+
+      const [, fetchOptions] = mockFetchSSE.mock.calls[0];
+      expect(fetchOptions.headers['Content-Encoding']).toBe('gzip');
+      expect(fetchOptions.body).toBeInstanceOf(ArrayBuffer);
+      const decoded = await new Response(
+        new Blob([fetchOptions.body]).stream().pipeThrough(new DecompressionStream('gzip')),
+      ).json();
+      expect(decoded.messages[0].content).toBe(longText);
+      expect(fetchOptions.body.byteLength).toBeLessThan(new TextEncoder().encode(longText).length);
+    });
+
+    it('keeps a small request body as plain JSON', async () => {
+      await chatService.getChatCompletion(
+        { messages: [{ content: 'hi', role: 'user' }], model: 'test-model' },
+        {},
+      );
+
+      const [, fetchOptions] = mockFetchSSE.mock.calls[0];
+      expect(typeof fetchOptions.body).toBe('string');
+      expect(fetchOptions.headers['Content-Encoding']).toBeUndefined();
     });
 
     it('does not hold a cost-less finish on the wallet refetch', async () => {

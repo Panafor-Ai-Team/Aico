@@ -72,3 +72,29 @@ export const resolveRuntimeProvider = (provider: string) => {
 
   return providerConfig?.settings.sdkType || 'openai';
 };
+
+// Below this the gzip round trip saves less than it costs; chat bodies that
+// carry history and tools are hundreds of KB and shrink ~3–4×.
+export const GZIP_REQUEST_BODY_MIN_BYTES = 32 * 1024;
+
+/**
+ * Gzip a JSON request body before upload when it is large and the browser can
+ * compress. Returns an ArrayBuffer (reusable if the request is retried) and
+ * whether it is gzipped, so the caller sets `Content-Encoding`. Any failure
+ * falls back to the plain string.
+ */
+export const encodeJsonRequestBody = async (
+  json: string,
+): Promise<{ body: ArrayBuffer | string; gzip: boolean }> => {
+  if (typeof CompressionStream === 'undefined') return { body: json, gzip: false };
+
+  const bytes = new TextEncoder().encode(json);
+  if (bytes.byteLength < GZIP_REQUEST_BODY_MIN_BYTES) return { body: json, gzip: false };
+
+  try {
+    const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'));
+    return { body: await new Response(stream).arrayBuffer(), gzip: true };
+  } catch {
+    return { body: json, gzip: false };
+  }
+};
