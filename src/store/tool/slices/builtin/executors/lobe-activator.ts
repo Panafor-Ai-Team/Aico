@@ -3,7 +3,7 @@
  *
  * Creates and exports the ActivatorExecutor instance for registration.
  * Resolves tool manifests from the tool store (installedPlugins + builtinTools +
- * lobehubSkillServers + composio servers).
+ * lobehubSkillServers + composio servers + custom MCP connectors).
  *
  * State tracking (getActivatedToolIds / markActivated) is intentionally a no-op
  * because the activated state is persisted in message pluginState and accumulated
@@ -19,11 +19,13 @@ import { ActivatorExecutor } from '@lobechat/builtin-tool-activator/executor';
 import { SkillsExecutionRuntime } from '@lobechat/builtin-tool-skills/executionRuntime';
 
 import { filterBuiltinSkills } from '@/helpers/skillFilters';
+import { buildClientConnectorManifests } from '@/helpers/toolEngineering/buildClientConnectorManifests';
 import { agentSkillService } from '@/services/skill';
 import { getServerConfigStoreState, serverConfigSelectors } from '@/store/serverConfig';
 import { getToolStoreState } from '@/store/tool';
 import { composioStoreSelectors } from '@/store/tool/selectors';
 import { toolSelectors } from '@/store/tool/selectors/tool';
+import { connectorSelectors } from '@/store/tool/slices/connector/selectors';
 import { LobehubSkillStatus } from '@/store/tool/slices/lobehubSkillStore';
 
 const skillsRuntime = new SkillsExecutionRuntime({
@@ -91,6 +93,23 @@ const service: ActivatorRuntimeService = {
           avatar: composio.manifest.meta?.avatar,
           identifier: composio.identifier,
           name: composio.manifest.meta?.title ?? composio.identifier,
+        });
+        continue;
+      }
+
+      // Search custom MCP connectors (tools execute server-side via connector.callTool)
+      const connector = buildClientConnectorManifests(connectorSelectors.customConnectors(s)).find(
+        (m) => m.identifier === id,
+      );
+      if (connector) {
+        results.push({
+          apiDescriptions: connector.api.map((a) => ({
+            description: a.description,
+            name: a.name,
+          })),
+          avatar: connector.meta?.avatar,
+          identifier: connector.identifier,
+          name: connector.meta?.title ?? connector.identifier,
         });
         continue;
       }

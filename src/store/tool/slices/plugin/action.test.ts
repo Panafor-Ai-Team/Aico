@@ -143,10 +143,24 @@ describe('useToolStore:plugin', () => {
 describe('ensureRuntimeToolsReady', () => {
   beforeEach(() => {
     useToolStore.setState({
+      fetchConnectors: vi.fn().mockResolvedValue(undefined),
       installedPlugins: [],
       isComposioServersInit: false,
+      isConnectorsInit: false,
       loadingInstallPlugins: true,
     });
+  });
+
+  // Regression: a custom MCP connector is only discoverable once the connector
+  // list is loaded, so a run must not depend on a settings page having loaded it.
+  it('loads custom connectors that are not loaded yet', async () => {
+    vi.mocked(pluginService.getInstalledPlugins).mockResolvedValue([]);
+    const fetchConnectors = vi.fn().mockResolvedValue(undefined);
+    useToolStore.setState({ fetchConnectors });
+
+    await useToolStore.getState().ensureRuntimeToolsReady();
+
+    expect(fetchConnectors).toHaveBeenCalledTimes(1);
   });
 
   it('loads installed plugins and Composio connections that are not loaded yet', async () => {
@@ -166,8 +180,11 @@ describe('ensureRuntimeToolsReady', () => {
 
   it('does nothing when the tool state is already loaded', async () => {
     const refreshComposioConnections = vi.fn();
+    const fetchConnectors = vi.fn();
     useToolStore.setState({
+      fetchConnectors,
       isComposioServersInit: true,
+      isConnectorsInit: true,
       loadingInstallPlugins: false,
       refreshComposioConnections,
     });
@@ -176,6 +193,7 @@ describe('ensureRuntimeToolsReady', () => {
 
     expect(pluginService.getInstalledPlugins).not.toHaveBeenCalled();
     expect(refreshComposioConnections).not.toHaveBeenCalled();
+    expect(fetchConnectors).not.toHaveBeenCalled();
   });
 
   it('skips Composio when it is not enabled', async () => {

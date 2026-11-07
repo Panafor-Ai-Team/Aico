@@ -41,6 +41,7 @@ const storeState = (overrides: Record<string, unknown> = {}) =>
     builtinSkills: [],
     builtinTools: [],
     composioServers: [driveServer],
+    connectors: [],
     ensureRuntimeToolsReady: vi.fn().mockResolvedValue(undefined),
     // The plugin list is fetched once at page load, so it has no entry for an
     // app connected afterwards.
@@ -128,5 +129,56 @@ describe('activator (browser) tool lookup', () => {
     expect(ensureRuntimeToolsReady).toHaveBeenCalledWith({ composio: true });
     expect((result.state as any).notFound).toEqual([]);
     expect(result.content).toContain('GITHUB_LIST');
+  });
+
+  // Regression: a custom MCP connector (e.g. Vercel added via OAuth) was never
+  // listed in <available_tools> nor resolvable by `activateTools`, so unless the
+  // user pinned it on the agent the model had no way to reach its tools and
+  // answered "I don't have access to your account".
+  describe('custom MCP connectors', () => {
+    const vercelConnector = (overrides: Record<string, unknown> = {}) => ({
+      id: 'conn-1',
+      identifier: 'vercel',
+      isEnabled: true,
+      name: 'Vercel',
+      sourceType: 'custom',
+      status: 'connected',
+      tools: [
+        {
+          description: 'List the projects of a team',
+          inputSchema: { type: 'object' },
+          permission: 'auto',
+          toolName: 'list_projects',
+        },
+      ],
+      ...overrides,
+    });
+
+    it('lists a connected custom connector and activates its tools', async () => {
+      const state = storeState({ connectors: [vercelConnector()] });
+      vi.mocked(getToolStoreState).mockReturnValue(state);
+
+      const listed = toolSelectors.availableToolsForDiscovery(state);
+      expect(listed.map((t) => t.identifier)).toContain('vercel');
+
+      const result = await activatorExecutor.activateTools(
+        { identifiers: ['vercel'], reason: 'list projects' } as any,
+        ctx,
+      );
+
+      expect((result.state as any).notFound).toEqual([]);
+      expect(result.content).toContain('list_projects');
+    });
+
+    it.each([
+      ['disabled', { isEnabled: false }],
+      ['not connected', { status: 'error' }],
+      ['without synced tools', { tools: [] }],
+      ['not custom', { sourceType: 'composio' }],
+    ])('does not list a connector that is %s', (_label, overrides) => {
+      const state = storeState({ connectors: [vercelConnector(overrides)] });
+      const listed = toolSelectors.availableToolsForDiscovery(state).map((t) => t.identifier);
+      expect(listed).not.toContain('vercel');
+    });
   });
 });

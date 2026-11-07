@@ -44,7 +44,8 @@ export class PluginActionImpl {
   };
 
   /**
-   * Load the tool state an agent run reads — installed plugins (MCP / custom) and,
+   * Load the tool state an agent run reads — installed plugins (MCP / custom),
+   * custom MCP connectors and,
    * when enabled, the user's Composio connections — if it isn't loaded yet.
    *
    * The run must not depend on some component having fetched it: the chat page's
@@ -62,6 +63,7 @@ export class PluginActionImpl {
 
     if (state.loadingInstallPlugins) pending.push(state.refreshPlugins());
     if (composio && !state.isComposioServersInit) pending.push(state.refreshComposioConnections());
+    if (!state.isConnectorsInit) pending.push(state.fetchConnectors());
     if (pending.length === 0) return;
 
     let timer: ReturnType<typeof setTimeout> | undefined;
