@@ -37,6 +37,9 @@ vi.mock('@/server/services/sms', () => ({
 
 const {
   disableAllOrgMemberKeysMock,
+  disableAllUserMemberKeysMock,
+  ensureAllOrgMemberKeysMock,
+  ensureAllUserMemberKeysMock,
   disableUserKeyMock,
   ensureMemberKeyMock,
   ensureUserKeyMock,
@@ -46,6 +49,9 @@ const {
   syncMemberCycleUsageMock,
 } = vi.hoisted(() => ({
   disableAllOrgMemberKeysMock: vi.fn().mockResolvedValue([]),
+  disableAllUserMemberKeysMock: vi.fn().mockResolvedValue({ queued: 0 }),
+  ensureAllOrgMemberKeysMock: vi.fn().mockResolvedValue({ queued: 0, synced: 0 }),
+  ensureAllUserMemberKeysMock: vi.fn().mockResolvedValue({ queued: 0, synced: 0 }),
   disableUserKeyMock: vi.fn().mockResolvedValue(null),
   ensureMemberKeyMock: vi.fn().mockResolvedValue({ created: false, keyId: null }),
   ensureUserKeyMock: vi.fn().mockResolvedValue({ created: false, keyId: null }),
@@ -64,6 +70,9 @@ vi.mock('@/server/services/openrouter/keyService', () => ({
     disableUserKey = disableUserKeyMock;
     disableMemberKey = vi.fn().mockResolvedValue(null);
     disableAllOrgMemberKeys = disableAllOrgMemberKeysMock;
+    ensureAllOrgMemberKeys = ensureAllOrgMemberKeysMock;
+    disableAllUserMemberKeys = disableAllUserMemberKeysMock;
+    ensureAllUserMemberKeys = ensureAllUserMemberKeysMock;
     getUserRemaining = getUserRemainingMock;
     reclaimMemberKey = reclaimMemberKeyMock;
     shrinkUserKey = shrinkUserKeyMock;
@@ -122,6 +131,9 @@ const cleanup = async () => {
 
 beforeEach(async () => {
   disableAllOrgMemberKeysMock.mockClear();
+  ensureAllOrgMemberKeysMock.mockClear();
+  disableAllUserMemberKeysMock.mockClear();
+  ensureAllUserMemberKeysMock.mockClear();
   disableUserKeyMock.mockClear();
   ensureUserKeyMock.mockClear();
   reclaimMemberKeyMock.mockClear();
@@ -597,6 +609,14 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
     expect(ensureUserKeyMock).toHaveBeenCalledWith(strangerId);
   });
 
+  it("deactivateUser freezes the user's org keys and reactivateUser restores them", async () => {
+    const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+    await platformCaller.deactivateUser({ reason: 'abuse', userId: strangerId });
+    expect(disableAllUserMemberKeysMock).toHaveBeenCalledWith(strangerId);
+    await platformCaller.reactivateUser({ userId: strangerId });
+    expect(ensureAllUserMemberKeysMock).toHaveBeenCalledWith(strangerId);
+  });
+
   it('D3: reactivateUser reports success and queues a retry when the key push throws', async () => {
     const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
     await platformCaller.deactivateUser({ reason: 'abuse', userId: strangerId });
@@ -626,6 +646,16 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
     expect(row.status).toBe('suspended');
     // Suspend must disable every member's OpenRouter key immediately (fail closed).
     expect(disableAllOrgMemberKeysMock).toHaveBeenCalledWith(created.id);
+  });
+
+  it('platform admin activating a suspended org re-syncs its member keys', async () => {
+    const ownerCaller = organizationRouter.createCaller(createTestContext(ownerId));
+    const created = await ownerCaller.create({ name: 'Reactivate RBAC' });
+    const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+    await platformCaller.suspendOrganization({ orgId: created.id });
+    const row = await platformCaller.activateOrganization({ orgId: created.id });
+    expect(row.status).toBe('active');
+    expect(ensureAllOrgMemberKeysMock).toHaveBeenCalledWith(created.id);
   });
 
   it('platform admin updateTrialConfig round-trips trialBudgetUsd as decimal string', async () => {

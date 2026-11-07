@@ -1,6 +1,19 @@
 import { createHash } from 'node:crypto';
 
-import { and, asc, eq, inArray, isNotNull, lt, lte, ne, notInArray, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  ne,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
 import {
@@ -15,6 +28,7 @@ import {
   memberBudgets,
   organizationMembers,
   organizations,
+  users,
   walletTransactions,
 } from '@/database/schemas';
 import type { LobeChatDatabase } from '@/database/type';
@@ -51,6 +65,8 @@ const FAILED_RETRY_MS = 15 * 60 * 1000;
  * committed money and is safe to take over.
  */
 const STALE_PENDING_MS = 30 * 60 * 1000;
+/** A renewal batch failing this long (for a non-balance reason) raises a critical alert. */
+const STUCK_BATCH_ALERT_MS = 60 * 60 * 1000;
 /** Delay before the backstop key sync that follows a funded renewal (R10). */
 const KEY_SYNC_BACKSTOP_MS = 5 * 60 * 1000;
 
@@ -119,8 +135,13 @@ export const processDueRenewals = async (
     .from(memberBudgets)
     .innerJoin(organizationMembers, eq(organizationMembers.id, memberBudgets.orgMemberId))
     .innerJoin(organizations, eq(organizations.id, organizationMembers.orgId))
+    .innerJoin(users, eq(users.id, organizationMembers.userId))
     .where(
       and(
+        // A deactivated (banned) user is not renewed: the cap would be refunded and
+        // re-debited every cycle for someone who cannot use it. The budget stays
+        // due and renews once the user is reactivated.
+        or(isNull(users.banned), eq(users.banned, false)),
         // N5: a suspended or deleted org moves no money and has no key unfrozen.
         // Its budgets stay due and renew once it is active again.
         aicoEnv.AICO_FIX_S2_RENEWAL_BATCH ? eq(organizations.status, 'active') : undefined,
@@ -166,7 +187,28 @@ export const processDueRenewals = async (
 
   const results: OrgRenewalResult[] = [];
   for (const [orgId, budgets] of byOrg) {
-    results.push(await renewOrg({ budgets, db, keyService, now, orgId }));
+    try {
+      results.push(await renewOrg({ budgets, db, keyService, now, orgId }));
+    } catch (error) {
+      // Isolate the org: one org's error must not starve the rest of this run.
+      console.error('[aico] renewal crashed for org', orgId, error);
+      await sendSecurityAlert(db, {
+        dedupeKey: `renewal.org_error:${orgId}`,
+        details: { error: error instanceof Error ? error.message : String(error), orgId },
+        severity: 'warning',
+        summary: `Renewal for org ${orgId} threw before it could finish`,
+        type: 'renewal.org_error',
+      }).catch(() => undefined);
+      results.push({
+        batchKey: '',
+        grossRequiredMicroUsd: 0,
+        memberCount: budgets.length,
+        orgId,
+        refundedMicroUsd: 0,
+        shortfallMicroUsd: 0,
+        status: 'failed',
+      });
+    }
   }
   return results;
 };
@@ -188,8 +230,19 @@ export const retryRenewalKeySync = async (
   const stuck = await db
     .select({ id: memberBudgets.id, orgMemberId: memberBudgets.orgMemberId })
     .from(memberBudgets)
+    .innerJoin(organizationMembers, eq(organizationMembers.id, memberBudgets.orgMemberId))
+    .innerJoin(organizations, eq(organizations.id, organizationMembers.orgId))
+    .innerJoin(users, eq(users.id, organizationMembers.userId))
     .where(
-      and(eq(memberBudgets.isActive, true), eq(memberBudgets.renewalStatus, 'renewal_failed')),
+      and(
+        eq(memberBudgets.isActive, true),
+        eq(memberBudgets.renewalStatus, 'renewal_failed'),
+        // A suspended org, a leaving member or a banned user keeps its key frozen,
+        // so re-opening the budget here would only hide the failure.
+        eq(organizations.status, 'active'),
+        eq(organizationMembers.status, 'active'),
+        or(isNull(users.banned), eq(users.banned, false)),
+      ),
     );
 
   let failed = 0;
@@ -445,13 +498,23 @@ const renewOrg = async (params: {
     status: 'failed' as const,
   });
 
-  const failBatch = async (error: string, shortfallMicroUsd = 0) => {
+  const failBatch = async (
+    error: string,
+    shortfallMicroUsd = 0,
+    options: { retryNow?: boolean } = {},
+  ) => {
     if (aicoEnv.AICO_FIX_S2_RENEWAL_BATCH) {
       // Fail the batch first, and only while this worker still holds its lease:
       // when another worker has taken the batch over, this run owns nothing.
       const [owned] = await db
         .update(aicoRenewalBatches)
-        .set({ error, shortfallMicroUsd, status: 'failed', updatedAt: lease })
+        .set({
+          error,
+          shortfallMicroUsd,
+          status: 'failed',
+          // A retry-now failure is back-dated so the next run may re-claim it.
+          updatedAt: options.retryNow ? new Date(lease.getTime() - FAILED_RETRY_MS) : lease,
+        })
         .where(
           and(
             eq(aicoRenewalBatches.id, batch.id),
@@ -461,6 +524,23 @@ const renewOrg = async (params: {
         )
         .returning({ id: aicoRenewalBatches.id });
       if (!owned) return skippedResult();
+
+      // A batch that keeps failing for a reason money cannot fix (an unreadable
+      // key, a crash) blocks every member of the org. Say so once it has been
+      // failing long enough to be more than a blip.
+      if (
+        error !== 'INSUFFICIENT_ORG_BALANCE' &&
+        now.getTime() - batch.createdAt.getTime() >= STUCK_BATCH_ALERT_MS
+      ) {
+        await sendSecurityAlert(db, {
+          cooldownMs: 6 * 60 * 60 * 1000,
+          dedupeKey: `renewal.batch_stuck:${batch.id}`,
+          details: { batchKey, error, orgId },
+          severity: 'critical',
+          summary: `Renewal for org ${orgId} has been failing for over an hour (${error.slice(0, 120)})`,
+          type: 'renewal.batch_stuck',
+        }).catch(() => undefined);
+      }
 
       const failed = await db
         .update(memberBudgets)
@@ -833,10 +913,20 @@ const renewOrg = async (params: {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message === 'BATCH_CLAIM_LOST') return skippedResult();
+    // A concurrent allocate/reclaim is not a failure of the renewal: the next
+    // run re-reads the budgets, so do not hold it back with the failure backoff.
+    if (message === 'BUDGETS_CHANGED_DURING_RENEWAL') {
+      return failBatch(`RENEWAL_FAILED:${message}`, 0, { retryNow: true });
+    }
     if (message === 'INSUFFICIENT_ORG_BALANCE') {
       const org = await db.query.organizations.findFirst({ where: eq(organizations.id, orgId) });
       const balance = Number(org?.walletBalanceMicroUsd ?? 0);
-      return failBatch('INSUFFICIENT_ORG_BALANCE', Math.max(0, grossRequiredMicroUsd - balance));
+      // The rolled-back transaction would have credited the refund first, so the
+      // gap is what is still missing after it.
+      return failBatch(
+        'INSUFFICIENT_ORG_BALANCE',
+        Math.max(0, grossRequiredMicroUsd - balance - refundedMicroUsd),
+      );
     }
     return failBatch(`RENEWAL_FAILED:${message}`);
   }

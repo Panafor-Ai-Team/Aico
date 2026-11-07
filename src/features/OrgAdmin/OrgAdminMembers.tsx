@@ -91,6 +91,21 @@ const periodLabelKey = (period: string | null | undefined) => {
   return 'org.period.total' as const;
 };
 
+export const renewalStatusLabelKey = (status: string | null | undefined) => {
+  switch (status) {
+    case 'active':
+    case 'renewal_pending':
+    case 'renewal_failed':
+    case 'disabled':
+    case 'settled': {
+      return `org.renewalStatus.${status}` as const;
+    }
+    default: {
+      return null;
+    }
+  }
+};
+
 /** Default inclusive UTC window: last 30 calendar days including today. */
 const defaultRange = (): [string, string] => {
   const to = dayjs().format('YYYY-MM-DD');
@@ -604,7 +619,10 @@ export const OrgAdminMembers = () => {
                     {
                       dataIndex: 'renewalStatus',
                       title: t('org.columns.renewalStatus'),
-                      render: (v: string | null) => v || '—',
+                      render: (v: string | null) => {
+                        const key = renewalStatusLabelKey(v);
+                        return key ? t(key) : v || '—';
+                      },
                     },
                   ]}
                 />

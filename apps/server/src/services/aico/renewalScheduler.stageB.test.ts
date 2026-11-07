@@ -9,7 +9,7 @@ import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { OrganizationModel } from '@/database/models/organization';
-import { users } from '@/database/schemas';
+import { aicoSecurityAlertState, users } from '@/database/schemas';
 import {
   aicoKeyOutbox,
   aicoRenewalBatches,
@@ -21,7 +21,11 @@ import {
   walletTransactions,
 } from '@/database/schemas/aicoOrganization';
 import { aicoEnv } from '@/envs/aico';
-import { processDueRenewals, processKeyOutbox } from '@/server/services/aico/renewalScheduler';
+import {
+  processDueRenewals,
+  processKeyOutbox,
+  retryRenewalKeySync,
+} from '@/server/services/aico/renewalScheduler';
 import type { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 
 const usd = (n: number) => Math.round(n * 1_000_000);
@@ -133,6 +137,123 @@ describe('renewal scheduler — stage B', () => {
         eq(aicoKeyOutbox.action, 'disable_member_key'),
       ),
     });
+
+  describe('a budget changed mid-renewal is retried on the next run', () => {
+    it('does not hold the org back with the failure backoff', async () => {
+      const { member, org } = await setup();
+      await topUp(org.id);
+      const t0 = new Date();
+      let first = true;
+      const ks = keyService({
+        settleMemberPeriod: vi.fn(async () => {
+          if (first) {
+            first = false;
+            // A same-cap re-set flips the status back to `active` mid-renewal.
+            await orgModel.allocateMemberCredit({
+              createdByUserId: ownerId,
+              orgId: org.id,
+              orgMemberId: member.id,
+              period: 'daily',
+              periodAmountMicroUsd: usd(5),
+            });
+          }
+          return { remainingMicroUsd: 0, usageMicroUsd: usd(5) };
+        }),
+      });
+
+      const firstRun = await processDueRenewals(db, { keyService: ks, now: t0 });
+      expect(firstRun[0].status).toBe('failed');
+
+      const second = await processDueRenewals(db, {
+        keyService: keyService(),
+        now: new Date(t0.getTime() + MIN),
+      });
+      expect(second[0].status).toBe('funded');
+      const budget = await orgModel.getMemberBudget(member.id);
+      expect(budget?.renewalStatus).toBe('active');
+      expect(budget?.isActive).toBe(true);
+      expect(budget!.nextRenewalAt!.getTime()).toBeGreaterThan(t0.getTime());
+    });
+  });
+
+  describe('shortfall nets out the refund the transaction would have credited', () => {
+    it('reports gross minus balance minus refund', async () => {
+      const { org } = await setup();
+      const ks = keyService({
+        settleMemberPeriod: vi.fn(async () => ({
+          remainingMicroUsd: usd(2),
+          usageMicroUsd: usd(3),
+        })),
+      });
+
+      const [result] = await processDueRenewals(db, { keyService: ks, now: new Date() });
+
+      expect(result.status).toBe('failed');
+      // Needs $5, wallet is empty, but $2 comes back first: $3 is still missing.
+      expect(result.shortfallMicroUsd).toBe(usd(3));
+      expect((await batchesOf(org.id))[0].shortfallMicroUsd).toBe(usd(3));
+    });
+  });
+
+  describe('a batch stuck for a non-balance reason raises a critical alert', () => {
+    it('alerts once it has failed for over an hour, not before', async () => {
+      const { org } = await setup();
+      await topUp(org.id);
+      const broken = keyService({
+        settleMemberPeriod: vi.fn(async () => {
+          throw new Error('key gone');
+        }),
+      });
+      const t0 = new Date();
+      const alertFor = async () => {
+        const [batch] = await batchesOf(org.id);
+        return db.query.aicoSecurityAlertState.findFirst({
+          where: eq(aicoSecurityAlertState.id, `renewal.batch_stuck:${batch.id}`),
+        });
+      };
+
+      await processDueRenewals(db, { keyService: broken, now: t0 });
+      expect(await alertFor()).toBeUndefined();
+
+      await processDueRenewals(db, {
+        keyService: broken,
+        now: new Date(t0.getTime() + 61 * MIN),
+      });
+      expect(await alertFor()).toBeDefined();
+    });
+  });
+
+  describe('a deactivated user is not renewed', () => {
+    it('skips a banned member and renews once the ban is lifted', async () => {
+      const { org } = await setup();
+      await topUp(org.id);
+      await db.update(users).set({ banned: true }).where(eq(users.id, memberUserId));
+
+      expect(await processDueRenewals(db, { keyService: keyService() })).toHaveLength(0);
+
+      await db.update(users).set({ banned: false }).where(eq(users.id, memberUserId));
+      const [result] = await processDueRenewals(db, { keyService: keyService() });
+      expect(result.status).toBe('funded');
+    });
+  });
+
+  describe('retryRenewalKeySync leaves inactive subjects alone', () => {
+    it('does not re-open a failed budget of a suspended org', async () => {
+      const { member, org } = await setup();
+      await db
+        .update(memberBudgets)
+        .set({ isActive: true, renewalStatus: 'renewal_failed' })
+        .where(eq(memberBudgets.orgMemberId, member.id));
+      await orgModel.setOrganizationStatus(org.id, 'suspended');
+      const ks = keyService();
+
+      const result = await retryRenewalKeySync(db, ks);
+
+      expect(result).toEqual({ failed: 0, synced: 0 });
+      expect(ks.ensureMemberKey).not.toHaveBeenCalled();
+      expect((await orgModel.getMemberBudget(member.id))?.renewalStatus).toBe('renewal_failed');
+    });
+  });
 
   describe('R2: org deletion', () => {
     it('is not blocked by a finished (funded) batch', async () => {
