@@ -8,6 +8,7 @@ import { useToolStore } from '@/store/tool';
 import { connectorSelectors } from '@/store/tool/slices/connector';
 
 import { executeLegacyMigrationSave } from './legacyPluginMigration';
+import { createConnectorViaOAuth, type OAuthPopupResult, popupResultError } from './oauthCreate';
 
 interface CustomConnectorModalProps {
   connectorId?: string;
@@ -25,12 +26,6 @@ interface CustomConnectorModalProps {
   onClose: () => void;
   onEditSuccess?: () => void;
   open: boolean;
-}
-
-interface OAuthPopupResult {
-  error?: string;
-  status: 'success' | 'error' | 'dismissed';
-  synced?: boolean;
 }
 
 /**
@@ -316,9 +311,7 @@ const CustomConnectorModal = memo<CustomConnectorModalProps>(
             popup.location.href = authorizationUrl;
             const result = await waitForOAuthPopup(popup, connectorId);
             await fetchConnectors();
-            if (result.status !== 'success') {
-              throw new Error(result.error || 'Authorization was not completed');
-            }
+            if (result.status !== 'success') throw popupResultError(result);
           } catch (e) {
             if (!popup.closed) popup.close();
             throw e;
@@ -353,23 +346,23 @@ const CustomConnectorModal = memo<CustomConnectorModalProps>(
 
         const clientId = mcp.auth?.clientId?.trim();
         try {
-          const { id: newConnectorId } = await createConnector({
-            ...base,
-            oidcConfig: {
-              clientId: clientId || undefined,
-              clientSecret: mcp.auth?.clientSecret?.trim() || undefined,
-              // client_id present → pre-registration; absent → dynamic registration.
-              scheme: clientId ? 'pre_registration' : 'dcr',
-            },
+          await createConnectorViaOAuth({
+            create: () =>
+              createConnector({
+                ...base,
+                oidcConfig: {
+                  clientId: clientId || undefined,
+                  clientSecret: mcp.auth?.clientSecret?.trim() || undefined,
+                  // client_id present → pre-registration; absent → CIMD / dynamic registration.
+                  scheme: clientId ? 'pre_registration' : 'dcr',
+                },
+              }),
+            deleteConnector,
+            fetchConnectors,
+            popup,
+            startOAuth: startConnectorOAuth,
+            waitForPopup: waitForOAuthPopup,
           });
-
-          const authorizationUrl = await startConnectorOAuth(newConnectorId);
-          popup.location.href = authorizationUrl;
-          const result = await waitForOAuthPopup(popup, newConnectorId);
-          await fetchConnectors();
-          if (result.status !== 'success') {
-            throw new Error(result.error || 'Authorization was not completed');
-          }
         } catch (e) {
           // Close the blank/in-flight popup we opened so it isn't left dangling.
           // On success the OAuth callback page closes it itself.

@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   getDefaultEnvironment,
@@ -256,8 +257,13 @@ export class MCPClient {
 
       if (this.params.type === 'http') {
         const error = e as Error;
-        if (error.message.includes('401'))
-          throw createMCPError('AUTHORIZATION_ERROR', error.message);
+        // SDK errors carry the HTTP status on `.code`, not in the message.
+        if (
+          (e as { code?: unknown })?.code === 401 ||
+          e instanceof UnauthorizedError ||
+          error.message.includes('401')
+        )
+          throw createMCPError('AUTHORIZATION_ERROR', 'MCP server requires authorization');
 
         throw e;
       }

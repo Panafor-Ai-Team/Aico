@@ -95,6 +95,19 @@ describe('MCPService transport boundary', () => {
     environment.isDesktop = false;
   });
 
+  it('reports an upstream 401 as MCP_AUTH_REQUIRED (never UNAUTHORIZED, which logs the user out)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(MCPClient.prototype.initialize).mockRejectedValueOnce(
+      Object.assign(new Error('MCP server requires authorization'), {
+        data: { type: 'AUTHORIZATION_ERROR' },
+      }),
+    );
+
+    await expect(
+      new MCPService().listTools({ name: 'v', type: 'http', url: 'https://mcp.example.com' }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: 'MCP_AUTH_REQUIRED' });
+  });
+
   it('rejects connector tool sync on the web before initializing a stdio client', async () => {
     await expect(new MCPService().listRawTools(stdioParams)).rejects.toMatchObject({
       code: 'BAD_REQUEST',

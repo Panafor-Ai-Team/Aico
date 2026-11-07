@@ -4,6 +4,7 @@ import debug from 'debug';
 
 import type { ConnectorModel, DecryptedConnector } from '@/database/models/connector';
 import type { ConnectorCredentials } from '@/database/schemas';
+import { getMcpServerFetch } from '@/libs/mcp/serverFetch';
 
 import { refreshConnectorToken } from './oauth';
 
@@ -46,11 +47,15 @@ export const ensureFreshConnectorToken = async (
   const oidc = connector.oidcConfig;
 
   if (!creds || creds.type !== 'oauth2' || !creds.refreshToken) return connector;
-  if (creds.expiresAt && creds.expiresAt - EXPIRY_SKEW_MS > Date.now()) return connector;
+  // No known expiry → treat as valid; a later 401 signals re-authorization.
+  if (!creds.expiresAt) return connector;
+  if (creds.expiresAt - EXPIRY_SKEW_MS > Date.now()) return connector;
   if (!oidc?.issuer || !oidc.clientId) return connector;
 
   try {
-    const metadata = await discoverAuthorizationServerMetadata(oidc.issuer);
+    const metadata = await discoverAuthorizationServerMetadata(oidc.issuer, {
+      fetchFn: getMcpServerFetch(),
+    });
     if (!metadata) return connector;
 
     const tokens = await refreshConnectorToken({

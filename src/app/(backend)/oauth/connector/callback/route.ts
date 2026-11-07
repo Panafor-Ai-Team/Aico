@@ -6,6 +6,7 @@ import { ConnectorModel } from '@/database/models/connector';
 import { ConnectorToolModel } from '@/database/models/connectorTool';
 import { serverDB } from '@/database/server';
 import { appEnv } from '@/envs/app';
+import { getMcpServerFetch } from '@/libs/mcp/serverFetch';
 import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
 import { exchangeConnectorCode } from '@/server/services/connector/oauth';
 import { consumeConnectorOAuthState } from '@/server/services/connector/stateStore';
@@ -101,7 +102,9 @@ export const GET = async (req: NextRequest) => {
       return renderResultPage({ error: 'connector_missing_client', success: false });
     }
 
-    const metadata = await discoverAuthorizationServerMetadata(payload.authorizationServerUrl);
+    const metadata = await discoverAuthorizationServerMetadata(payload.authorizationServerUrl, {
+      fetchFn: getMcpServerFetch(),
+    });
     if (!metadata) {
       return renderResultPage({ error: 'metadata_discovery_failed', success: false });
     }
@@ -113,7 +116,7 @@ export const GET = async (req: NextRequest) => {
       codeVerifier: payload.codeVerifier,
       metadata,
       redirectUri: oidc.redirectUri!,
-      resource: connector.mcpServerUrl ?? undefined,
+      resource: payload.resource ?? connector.mcpServerUrl ?? undefined,
     });
 
     const { credentials, tokenExpiresAt } = tokensToCredentials(tokens, {

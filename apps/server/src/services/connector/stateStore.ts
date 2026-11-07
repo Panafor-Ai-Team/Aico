@@ -21,6 +21,8 @@ export interface ConnectorOAuthStatePayload {
   connectorId: string;
   /** LobeHub user who initiated the connect. */
   lobeUserId: string;
+  /** RFC 8707 resource indicator sent at authorize; reused at token exchange. */
+  resource?: string;
   /** Where to send the user after the callback finishes (relative path). */
   returnTo?: string;
   /** Issuance timestamp (ms epoch) for diagnostics. */

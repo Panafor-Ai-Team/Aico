@@ -68,6 +68,17 @@ vi.mock('@/database/models/connector', () => ({
   })),
 }));
 
+const mockEnsureFresh = vi.hoisted(() => vi.fn());
+const mockBuildManifests = vi.hoisted(() => vi.fn());
+vi.mock('@/libs/mcp/buildConnectorManifests', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, any>>();
+  mockBuildManifests.mockImplementation(actual.buildConnectorManifests);
+  return { ...actual, buildConnectorManifests: mockBuildManifests };
+});
+vi.mock('@/server/services/connector/tokens', () => ({
+  ensureFreshConnectorToken: mockEnsureFresh,
+}));
+
 vi.mock('@/database/models/connectorTool', () => ({
   ConnectorToolModel: vi.fn().mockImplementation(() => ({
     queryAllByConnectorIds: mockConnectorToolQueryAll,
@@ -180,6 +191,7 @@ describe('AiAgentService.execAgent - connector/plugin overlap', () => {
       systemRole: 'You are a helper',
     });
     mockPluginQuery.mockResolvedValue([pluginA]);
+    mockEnsureFresh.mockImplementation(async (c: unknown) => c);
     service = new AiAgentService({} as any, 'test-user-id');
   });
 
@@ -212,5 +224,30 @@ describe('AiAgentService.execAgent - connector/plugin overlap', () => {
     await service.execAgent({ agentId: 'agent-1', prompt: 'Hello' } as any);
 
     expect(installedPluginsArg().some((p) => p.identifier === 'plugin-a')).toBe(false);
+  });
+
+  it('refreshes an expired OAuth token before building the tool manifest', async () => {
+    const stale = connectorOf({
+      credentials: {
+        accessToken: 'tok-stale-9f3',
+        expiresAt: 1,
+        refreshToken: 'r',
+        type: 'oauth2',
+      },
+    });
+    mockConnectorQueryByIdentifiers.mockResolvedValue([stale]);
+    mockEnsureFresh.mockImplementation(async (c: any) => ({
+      ...c,
+      credentials: { ...c.credentials, accessToken: 'tok-fresh-9f3' },
+    }));
+    mockConnectorToolQueryAll.mockResolvedValue([
+      { permission: 'auto', toolName: 'x', userConnectorId: 'c1' },
+    ]);
+
+    await service.execAgent({ agentId: 'agent-1', prompt: 'Hello' } as any);
+
+    expect(mockEnsureFresh).toHaveBeenCalledWith(stale, expect.anything());
+    const builtFrom = mockBuildManifests.mock.calls[0][0] as any[];
+    expect(builtFrom[0].credentials.accessToken).toBe('tok-fresh-9f3');
   });
 });

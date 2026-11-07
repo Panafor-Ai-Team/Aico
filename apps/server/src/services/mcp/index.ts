@@ -109,7 +109,16 @@ export class MCPService {
       async (bail, attemptNumber) => {
         // Skip cache on retry attempts
         const skipCache = attemptNumber > 1;
-        const client = await this.getClient(params, skipCache);
+        let client: MCPClient;
+        try {
+          client = await this.getClient(params, skipCache);
+        } catch (error) {
+          if ((error as Error).message === 'MCP_AUTH_REQUIRED') {
+            bail(error as Error);
+            return [];
+          }
+          throw error;
+        }
         log('Listing MCP tools: %O', { attempt: attemptNumber, connection });
 
         try {
@@ -339,6 +348,16 @@ export class MCPService {
     } catch (error) {
       const errorLog = getMCPErrorLogMetadata(error);
       console.error('Failed to initialize MCP client:', { connection, error: errorLog });
+
+      // Upstream 401: surface a typed, non-logout error (never UNAUTHORIZED —
+      // the web client signs the user out on HTTP 401).
+      if ((error as { data?: { type?: string } })?.data?.type === 'AUTHORIZATION_ERROR') {
+        throw new TRPCError({
+          cause: error,
+          code: 'PRECONDITION_FAILED',
+          message: 'MCP_AUTH_REQUIRED',
+        });
+      }
 
       if (typeof error === 'object' && !!error && 'data' in error) {
         throw new TRPCError({
