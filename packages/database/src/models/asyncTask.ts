@@ -10,7 +10,7 @@ import {
   AsyncTaskStatus,
   AsyncTaskType,
 } from '@lobechat/types';
-import { and, eq, inArray, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 
 import type { AsyncTaskSelectItem, NewAsyncTaskItem } from '../schemas';
 import { asyncTasks } from '../schemas';
@@ -77,6 +77,13 @@ export class AsyncTaskModel {
         eq(asyncTasks.type, type),
         inArray(asyncTasks.status, [AsyncTaskStatus.Pending, AsyncTaskStatus.Processing]),
       ),
+    });
+  };
+
+  findLatestByType = async (type: AsyncTaskType) => {
+    return this.db.query.asyncTasks.findFirst({
+      orderBy: desc(asyncTasks.createdAt),
+      where: and(this.ownership(), eq(asyncTasks.type, type)),
     });
   };
 
