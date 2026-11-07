@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 
 import { type MemoryExtractionTask } from '@/services/userMemory/extraction';
 
+import { getMemoryAnalysisErrorText } from './errorText';
 import { useMemoryAnalysisAsyncTask } from './useTask';
 
 interface StatusProps {
@@ -39,13 +40,7 @@ export const MemoryAnalysisStatus = memo<StatusProps>(({ task }) => {
       })
     : t('analysis.status.progressUnknown', { completed: progress.completedTopics });
 
-  const body = data.error?.body;
-  const errorText =
-    typeof body === 'string'
-      ? body
-      : body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string'
-        ? body.detail
-        : (data.error?.name ?? t('analysis.status.errorTitle'));
+  const errorText = getMemoryAnalysisErrorText(data.error) ?? t('analysis.status.errorTitle');
 
   return (
     <Alert
@@ -62,8 +57,12 @@ export const MemoryAnalysisStatus = memo<StatusProps>(({ task }) => {
               status={isError ? 'exception' : 'active'}
               style={{ flex: 1, minWidth: 220 }}
             />
-            <Text fontSize={13} type={isError ? 'danger' : 'secondary'}>
-              {isError ? (errorText ?? t('analysis.status.errorTitle')) : progressText}
+            <Text
+              fontSize={13}
+              style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}
+              type={isError ? 'danger' : 'secondary'}
+            >
+              {isError ? errorText : progressText}
             </Text>
           </Flexbox>
         </Flexbox>
