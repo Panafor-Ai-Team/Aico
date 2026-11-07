@@ -9,6 +9,7 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import MCPManifestForm from './MCPManifestForm';
+import { shouldRunMcpOAuthFlow } from './MCPManifestForm/utils';
 import PluginPreview from './PluginPreview';
 import { getSaveErrorMessage } from './saveError';
 
@@ -46,6 +47,7 @@ const DevModal = memo<DevModalProps>(
     const { mobile } = useResponsive();
     const [form] = Form.useForm();
     const authType = Form.useWatch(['customParams', 'mcp', 'auth', 'type'], form);
+    const mcpType = Form.useWatch(['customParams', 'mcp', 'type'], form);
 
     // Seed the form once per modal open, waiting for `value` to arrive (it may
     // be undefined initially while edit-mode credentials are being fetched).
@@ -95,7 +97,7 @@ const DevModal = memo<DevModalProps>(
     };
 
     const handlePrimaryClick = () => {
-      if (enableOAuth && authType === 'oauth2') return runOAuthFlow();
+      if (shouldRunMcpOAuthFlow({ authType, enableOAuth, mcpType })) return runOAuthFlow();
       form.submit();
     };
 

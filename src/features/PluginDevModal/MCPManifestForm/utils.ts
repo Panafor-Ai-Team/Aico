@@ -143,3 +143,23 @@ export const parseMcpInput = (value: string): ParseResult => {
   // Input is not a valid JSON object or failed safeParseJSON
   return { status: 'noop' }; // Or potentially InvalidJsonStructure if safeParse failed but wasn't null/undefined?
 };
+
+export type McpAuthType = 'oauth2' | 'bearer' | 'none';
+
+/**
+ * Auth options in display order. OAuth comes first when available (most remote
+ * MCP servers require it) and "No Authentication" is always last.
+ */
+export const getMcpAuthTypeOptions = (enableOAuth?: boolean): McpAuthType[] =>
+  enableOAuth ? ['oauth2', 'bearer', 'none'] : ['bearer', 'none'];
+
+/** Default auth type for a new server: OAuth when available, else none. */
+export const getDefaultMcpAuthType = (enableOAuth?: boolean): McpAuthType =>
+  enableOAuth ? 'oauth2' : 'none';
+
+/** The OAuth popup flow applies only to HTTP servers with OAuth selected. */
+export const shouldRunMcpOAuthFlow = (params: {
+  authType?: string;
+  enableOAuth?: boolean;
+  mcpType?: string;
+}): boolean => !!params.enableOAuth && params.mcpType !== 'stdio' && params.authType === 'oauth2';
