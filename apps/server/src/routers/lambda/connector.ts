@@ -35,6 +35,7 @@ import {
   getConnectorClientMetadataUrl,
   getConnectorRedirectUri,
   registerDynamicClient,
+  withOfflineAccessScope,
 } from '@/server/services/connector/oauth';
 import {
   generateConnectorOAuthState,
@@ -559,14 +560,18 @@ export const connectorRouter = router({
 
         // Scopes: user-specified → WWW-Authenticate challenge → protected
         // resource metadata → none. Never the authorization server's full list.
-        const scopes =
+        // `offline_access` is added on top when the authorization server
+        // supports it, so the connection can refresh instead of expiring.
+        const scopes = withOfflineAccessScope(
           existing.scopes && existing.scopes.length > 0
             ? existing.scopes
             : wwwAuthenticateScope
               ? wwwAuthenticateScope.split(' ').filter(Boolean)
               : resourceMetadata?.scopes_supported && resourceMetadata.scopes_supported.length > 0
                 ? resourceMetadata.scopes_supported
-                : undefined;
+                : undefined,
+          metadata,
+        );
         const resource = resourceMetadata?.resource
           ? String(resourceMetadata.resource)
           : connector.mcpServerUrl;

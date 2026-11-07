@@ -27,7 +27,8 @@ vi.mock('@/database/models/connector', () => ({
 vi.mock('@/database/models/connectorTool', () => ({ ConnectorToolModel: vi.fn() }));
 vi.mock('@/database/models/plugin', () => ({ PluginModel: vi.fn() }));
 vi.mock('@/database/models/agent', () => ({ AgentModel: vi.fn() }));
-vi.mock('@/server/services/connector/oauth', () => ({
+vi.mock('@/server/services/connector/oauth', async (importOriginal) => ({
+  withOfflineAccessScope: (await importOriginal<Record<string, any>>()).withOfflineAccessScope,
   buildAuthorizationUrl: mocks.buildAuthorizationUrl,
   discoverConnectorOAuth: mocks.discoverConnectorOAuth,
   getConnectorClientMetadataUrl: mocks.getClientMetadataUrl,
@@ -126,6 +127,41 @@ describe('connector.startOAuth', () => {
     expect(args.scopes).toEqual(['openid']);
     expect(args.resource).toBe('https://mcp.example.com/');
     expect(mocks.saveState.mock.calls[0][1].resource).toBe('https://mcp.example.com/');
+  });
+
+  // Regression: Vercel lists `offline_access` only in its authorization-server
+  // metadata. Without it no refresh token was issued, so tool calls hit a 401 as
+  // soon as the access token expired.
+  it('adds offline_access when the authorization server supports it', async () => {
+    mocks.discoverConnectorOAuth.mockResolvedValue(
+      discovered({ scopes_supported: ['openid', 'email', 'offline_access'] }),
+    );
+
+    await caller().startOAuth({ id: ID });
+
+    expect(mocks.buildAuthorizationUrl.mock.calls[0][0].scopes).toEqual([
+      'openid',
+      'offline_access',
+    ]);
+  });
+
+  it('adds offline_access on re-authorization over previously stored scopes', async () => {
+    mocks.connectorFindById.mockResolvedValue({
+      id: ID,
+      mcpServerUrl: 'https://mcp.example.com',
+      oidcConfig: { scheme: 'client_id_metadata_document', scopes: ['openid'] },
+      userId: 'user-1',
+    });
+    mocks.discoverConnectorOAuth.mockResolvedValue(
+      discovered({ scopes_supported: ['openid', 'offline_access'] }),
+    );
+
+    await caller().startOAuth({ id: ID });
+
+    expect(mocks.buildAuthorizationUrl.mock.calls[0][0].scopes).toEqual([
+      'openid',
+      'offline_access',
+    ]);
   });
 
   it('omits scope when neither the challenge nor the resource metadata names any', async () => {

@@ -30,6 +30,22 @@ function calculateObjectSizeBytes(obj: any): number {
   }
 }
 
+/** Failed connector tool call → tool result that carries the reason. */
+export const connectorCallErrorResult = (error: unknown): MCPToolCallResult => {
+  const message =
+    (error instanceof Error && error.message) ||
+    (typeof error === 'object' && error && typeof (error as any).message === 'string'
+      ? (error as any).message
+      : '') ||
+    'Tool execution failed';
+  return {
+    content: `Tool call failed: ${message}`,
+    error: { message, type: 'ConnectorToolCallError' },
+    state: { content: [{ text: message, type: 'text' }], isError: true },
+    success: false,
+  };
+};
+
 class MCPService {
   async invokeMcpToolCall(
     payload: ChatToolPayload,
@@ -57,10 +73,18 @@ class MCPService {
       (connector.mcpServerUrl || connector.mcpConnectionType === 'stdio')
     ) {
       const { lambdaClient } = await import('@/libs/trpc/client');
-      return (await lambdaClient.connector.callTool.mutate(
-        { args, identifier, toolName: apiName },
-        { signal },
-      )) as MCPToolCallResult;
+      try {
+        return (await lambdaClient.connector.callTool.mutate(
+          { args, identifier, toolName: apiName },
+          { signal },
+        )) as MCPToolCallResult;
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        // Return the server's reason as the tool result so the model can tell
+        // the user what to do (e.g. reconnect an expired sign-in) instead of
+        // only seeing "no result returned".
+        return connectorCallErrorResult(error);
+      }
     }
 
     const installPlugin = pluginSelectors.getInstalledPluginById(identifier)(s);

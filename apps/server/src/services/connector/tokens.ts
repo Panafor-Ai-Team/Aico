@@ -42,14 +42,23 @@ export const tokensToCredentials = (
 export const ensureFreshConnectorToken = async (
   connector: DecryptedConnector,
   connectorModel: ConnectorModel,
+  options: {
+    /**
+     * Refresh even when the stored expiry says the token is still valid — used
+     * after the MCP server rejected the token with a 401.
+     */
+    force?: boolean;
+  } = {},
 ): Promise<DecryptedConnector> => {
   const creds = connector.credentials;
   const oidc = connector.oidcConfig;
 
   if (!creds || creds.type !== 'oauth2' || !creds.refreshToken) return connector;
-  // No known expiry → treat as valid; a later 401 signals re-authorization.
-  if (!creds.expiresAt) return connector;
-  if (creds.expiresAt - EXPIRY_SKEW_MS > Date.now()) return connector;
+  if (!options.force) {
+    // No known expiry → treat as valid; a later 401 forces a refresh.
+    if (!creds.expiresAt) return connector;
+    if (creds.expiresAt - EXPIRY_SKEW_MS > Date.now()) return connector;
+  }
   if (!oidc?.issuer || !oidc.clientId) return connector;
 
   try {
@@ -77,7 +86,14 @@ export const ensureFreshConnectorToken = async (
     });
 
     return { ...connector, credentials };
-  } catch {
+  } catch (error) {
+    // Logged (without any token) so a failing refresh is visible in production
+    // logs instead of only surfacing later as an unexplained 401.
+    console.warn(
+      '[connector] token refresh failed for connector=%s: %s',
+      connector.id,
+      error instanceof Error ? error.message : String(error),
+    );
     log('token refresh failed for connector=%s', connector.id);
     return connector;
   }

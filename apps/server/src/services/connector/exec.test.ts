@@ -38,7 +38,10 @@ const tool = (over: Record<string, unknown> = {}) => ({
 
 const makeCtx = (connectors: any[], tools: any[]) =>
   ({
-    connectorModel: { queryByIdentifiers: vi.fn().mockResolvedValue(connectors) },
+    connectorModel: {
+      queryByIdentifiers: vi.fn().mockResolvedValue(connectors),
+      updateStatus: vi.fn(),
+    },
     connectorToolModel: { queryByConnector: vi.fn().mockResolvedValue(tools) },
   }) as any;
 
@@ -208,5 +211,67 @@ describe('callConnectorToolById', () => {
 
     expect(res).toEqual({ success: true });
     expect(mcpService.callTool).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Regression: Vercel answered 401 once the access token expired, and the call
+// failed as an opaque 500 the chat showed as "no result returned".
+describe('callConnectorToolById — upstream 401', () => {
+  const authRequired = () =>
+    Object.assign(new Error('MCP_AUTH_REQUIRED'), { code: 'PRECONDITION_FAILED' });
+  const oauthConnector = {
+    ...connector,
+    credentials: { accessToken: 'old', refreshToken: 'r', type: 'oauth2' },
+  };
+
+  it('forces a token refresh and retries once', async () => {
+    const refreshed = {
+      ...oauthConnector,
+      credentials: { ...oauthConnector.credentials, accessToken: 'new' },
+    };
+    vi.mocked(ensureFreshConnectorToken).mockImplementation(async (c: any, _m: any, opts?: any) =>
+      opts?.force ? refreshed : c,
+    );
+    vi.mocked(mcpService.callTool)
+      .mockRejectedValueOnce(authRequired())
+      .mockResolvedValueOnce({ content: 'ok', success: true } as any);
+    const ctx = makeCtx([oauthConnector], [tool()]);
+
+    const result = await callConnectorToolById(
+      { identifier: 'my-conn', toolName: 'do_thing' },
+      ctx,
+    );
+
+    expect(result).toEqual({ content: 'ok', success: true });
+    expect(vi.mocked(ensureFreshConnectorToken).mock.calls[1][2]).toEqual({ force: true });
+    expect(vi.mocked(mcpService.callTool).mock.calls[1][0].clientParams).toMatchObject({
+      auth: { accessToken: 'new' },
+    });
+    expect(ctx.connectorModel.updateStatus).not.toHaveBeenCalled();
+  });
+
+  it('marks the connector as errored and asks to reconnect when refresh cannot help', async () => {
+    vi.mocked(mcpService.callTool).mockRejectedValue(authRequired());
+    const ctx = makeCtx([oauthConnector], [tool()]);
+
+    const error: any = await callConnectorToolById(
+      { identifier: 'my-conn', toolName: 'do_thing' },
+      ctx,
+    ).catch((e: unknown) => e);
+
+    expect(error).toHaveProperty('code', 'PRECONDITION_FAILED');
+    expect(error.message).toContain('reconnect');
+    expect(ctx.connectorModel.updateStatus).toHaveBeenCalledWith('c1', 'error');
+    expect(mcpService.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('rethrows other errors unchanged', async () => {
+    vi.mocked(mcpService.callTool).mockRejectedValue(new Error('boom'));
+    const ctx = makeCtx([oauthConnector], [tool()]);
+
+    await expect(
+      callConnectorToolById({ identifier: 'my-conn', toolName: 'do_thing' }, ctx),
+    ).rejects.toThrow('boom');
+    expect(ctx.connectorModel.updateStatus).not.toHaveBeenCalled();
   });
 });
