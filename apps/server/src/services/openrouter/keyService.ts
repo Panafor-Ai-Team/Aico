@@ -1,6 +1,9 @@
+import { and, eq } from 'drizzle-orm';
+
 import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { OrganizationModel, type ReclaimBudgetSnapshot } from '@/database/models/organization';
-import { aicoKeyOutbox } from '@/database/schemas/aicoOrganization';
+import { users } from '@/database/schemas';
+import { aicoKeyOutbox, organizationMembers } from '@/database/schemas/aicoOrganization';
 import type { LobeChatDatabase } from '@/database/type';
 import {
   applyMultiplierMicroUsd,
@@ -1380,6 +1383,25 @@ export class AicoOpenRouterKeyService {
       const budget = await this.orgModel.getMemberBudget(orgMemberId);
       if (!budget) throw new Error('BUDGET_NOT_FOUND');
 
+      const [subjectOrg, subjectMember] = await Promise.all([
+        this.orgModel.getById(budget.orgId),
+        this.orgModel.getMemberInOrg({ orgId: budget.orgId, orgMemberId }),
+      ]);
+      // A suspended/deleted org or a member who is leaving keeps the key frozen,
+      // whichever path asked (renewal retry, outbox backstop, reactivation).
+      // A banned user's key stays frozen too (deactivateUser froze it).
+      const [subjectUser] = subjectMember
+        ? await this.db
+            .select({ banned: users.banned })
+            .from(users)
+            .where(eq(users.id, subjectMember.userId))
+            .limit(1)
+        : [];
+      const subjectInactive =
+        subjectOrg?.status !== 'active' ||
+        subjectMember?.status !== 'active' ||
+        Boolean(subjectUser?.banned);
+
       const period = (budget.period || 'total') as BudgetPeriod;
       const limitReset: OpenRouterKeyLimitReset = periodToOpenRouterLimitReset(period);
       // FIN-001: never use reservedMicroUsd here — it may include pending next-period funds.
@@ -1394,6 +1416,7 @@ export class AicoOpenRouterKeyService {
       });
       const limitUsd = microToOpenRouterLimitUsd(limitMicro);
       const shouldDisable =
+        subjectInactive ||
         !budget.isActive ||
         cycleCapMicro <= 0 ||
         budget.renewalStatus === 'renewal_pending' ||
@@ -1735,6 +1758,98 @@ export class AicoOpenRouterKeyService {
   disableAllOrgMemberKeys = async (orgId: string) => {
     const members = await this.orgModel.listMembers(orgId);
     return Promise.allSettled(members.map((m) => this.disableMemberKey(m.id)));
+  };
+
+  /**
+   * Undo `disableAllOrgMemberKeys` when an org is re-activated. Each active
+   * member with a live budget is put back in the state its budget implies;
+   * a member whose key could not be synced gets a `sync_member_key` retry row.
+   */
+  ensureAllOrgMemberKeys = async (orgId: string): Promise<{ queued: number; synced: number }> => {
+    const members = await this.orgModel.listMembers(orgId);
+    const tally = { queued: 0, synced: 0 };
+    for (const m of members) {
+      if (m.status !== 'active') continue;
+      await this.syncMemberKeyOrQueue({
+        orgId,
+        orgMemberId: m.id,
+        reason: 'ORG_REACTIVATED',
+        tally,
+      });
+    }
+    return tally;
+  };
+
+  /** Puts a member's key back in the state its budget implies, or queues a retry row. */
+  private syncMemberKeyOrQueue = async (params: {
+    orgId: string;
+    orgMemberId: string;
+    reason: string;
+    tally: { queued: number; synced: number };
+  }): Promise<void> => {
+    const budget = await this.orgModel.getMemberBudget(params.orgMemberId);
+    if (!budget || budget.renewalStatus === 'settled') return;
+    try {
+      const ensured = await this.ensureMemberKey(params.orgMemberId);
+      if (ensured?.unverified) throw new Error('KEY_SYNC_UNVERIFIED');
+      params.tally.synced += 1;
+    } catch (error) {
+      console.warn('[aico] member key sync failed; queued', params.orgMemberId, error);
+      await this.db.insert(aicoKeyOutbox).values({
+        action: 'sync_member_key',
+        nextAttemptAt: new Date(),
+        orgId: params.orgId,
+        orgMemberId: params.orgMemberId,
+        payload: { reason: params.reason },
+        status: 'pending',
+      });
+      params.tally.queued += 1;
+    }
+  };
+
+  private activeMembershipsOfUser = (userId: string) =>
+    this.db
+      .select({ id: organizationMembers.id, orgId: organizationMembers.orgId })
+      .from(organizationMembers)
+      .where(and(eq(organizationMembers.userId, userId), eq(organizationMembers.status, 'active')));
+
+  /**
+   * Freeze every org-funded key of a user who was deactivated. A freeze that
+   * fails is queued (a `disable_member_key` row without a batch key always runs).
+   */
+  disableAllUserMemberKeys = async (userId: string): Promise<{ queued: number }> => {
+    let queued = 0;
+    for (const m of await this.activeMembershipsOfUser(userId)) {
+      try {
+        await this.disableMemberKey(m.id);
+      } catch (error) {
+        console.warn('[aico] member key freeze on deactivation failed; queued', m.id, error);
+        await this.db.insert(aicoKeyOutbox).values({
+          action: 'disable_member_key',
+          nextAttemptAt: new Date(),
+          orgId: m.orgId,
+          orgMemberId: m.id,
+          payload: { reason: 'USER_DEACTIVATED' },
+          status: 'pending',
+        });
+        queued += 1;
+      }
+    }
+    return { queued };
+  };
+
+  /** Undo {@link disableAllUserMemberKeys} when the user is reactivated. */
+  ensureAllUserMemberKeys = async (userId: string): Promise<{ queued: number; synced: number }> => {
+    const tally = { queued: 0, synced: 0 };
+    for (const m of await this.activeMembershipsOfUser(userId)) {
+      await this.syncMemberKeyOrQueue({
+        orgId: m.orgId,
+        orgMemberId: m.id,
+        reason: 'USER_REACTIVATED',
+        tally,
+      });
+    }
+    return tally;
   };
 
   /**

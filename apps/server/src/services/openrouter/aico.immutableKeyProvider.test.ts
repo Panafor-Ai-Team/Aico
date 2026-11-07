@@ -671,6 +671,71 @@ describe('immutable-limit provider — member budgets', () => {
     expect(provider.frozen.has(created.keyId!)).toBe(false);
   });
 
+  it('re-activating a suspended org unfreezes its funded member keys', async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    const { member, org, orgModel } = await setupMember();
+    const created = await keys.ensureMemberKey(member.id);
+
+    await orgModel.setOrganizationStatus(org.id, 'suspended');
+    await keys.disableAllOrgMemberKeys(org.id);
+    expect(provider.frozen.has(created.keyId!)).toBe(true);
+
+    await orgModel.setOrganizationStatus(org.id, 'active');
+    const result = await keys.ensureAllOrgMemberKeys(org.id);
+
+    expect(result).toEqual({ queued: 0, synced: 1 });
+    expect(provider.frozen.has(created.keyId!)).toBe(false);
+  });
+
+  it('does not unfreeze a member key while the org is suspended', async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    const { member, org, orgModel } = await setupMember();
+    const created = await keys.ensureMemberKey(member.id);
+
+    await orgModel.setOrganizationStatus(org.id, 'suspended');
+    await keys.disableAllOrgMemberKeys(org.id);
+    await keys.ensureMemberKey(member.id);
+
+    expect(provider.frozen.has(created.keyId!)).toBe(true);
+  });
+
+  it("freezes a deactivated user's org key and unfreezes it on reactivation", async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    const { member } = await setupMember();
+    const created = await keys.ensureMemberKey(member.id);
+
+    await db.update(users).set({ banned: true }).where(eq(users.id, memberUserId));
+    expect(await keys.disableAllUserMemberKeys(memberUserId)).toEqual({ queued: 0 });
+    expect(provider.frozen.has(created.keyId!)).toBe(true);
+
+    // A banned user's key stays frozen whichever path asks.
+    await keys.ensureMemberKey(member.id);
+    expect(provider.frozen.has(created.keyId!)).toBe(true);
+
+    await db.update(users).set({ banned: false }).where(eq(users.id, memberUserId));
+    expect(await keys.ensureAllUserMemberKeys(memberUserId)).toEqual({ queued: 0, synced: 1 });
+    expect(provider.frozen.has(created.keyId!)).toBe(false);
+  });
+
+  it('does not unfreeze the key of a member being removed', async () => {
+    const provider = new RevocableImmutableProvider();
+    const keys = new AicoOpenRouterKeyService(db, provider);
+    const { member } = await setupMember();
+    const created = await keys.ensureMemberKey(member.id);
+
+    await keys.disableMemberKey(member.id);
+    await db
+      .update(organizationMembers)
+      .set({ status: 'revocation_pending' })
+      .where(eq(organizationMembers.id, member.id));
+    await keys.ensureMemberKey(member.id);
+
+    expect(provider.frozen.has(created.keyId!)).toBe(true);
+  });
+
   it('settles a member key that renewal froze, although a frozen key cannot read its balance', async () => {
     const provider = new RevocableImmutableProvider();
     const keys = new AicoOpenRouterKeyService(db, provider);

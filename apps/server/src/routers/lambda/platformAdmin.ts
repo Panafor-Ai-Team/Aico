@@ -440,6 +440,11 @@ export const platformAdminRouter = router({
       try {
         const row = await ctx.organizationModel.setOrganizationStatus(input.orgId, 'active');
         if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Organization not found' });
+
+        // Suspension froze every member key; put them back to what each budget implies.
+        const keyService = new AicoOpenRouterKeyService(ctx.serverDB);
+        await keyService.ensureAllOrgMemberKeys(input.orgId);
+
         await recordAicoSecurityEvent(ctx.serverDB, {
           action: 'platform.org.activate',
           actorAdminId: ctx.adminId,
@@ -971,6 +976,9 @@ export const platformAdminRouter = router({
 
       const keyService = new AicoOpenRouterKeyService(ctx.serverDB);
       await keyService.disableUserKey(input.userId);
+      // Org-funded keys too: renewal skips a banned member, and an unfrozen key
+      // would keep spending the cap until the cycle ends.
+      await keyService.disableAllUserMemberKeys(input.userId);
 
       return { ok: true as const };
     }),
@@ -1017,6 +1025,8 @@ export const platformAdminRouter = router({
         console.error('[aico] user reactivated but OpenRouter key push failed', error);
         keyNeedsRetry = true;
       }
+      // Org-funded keys frozen by deactivateUser; failures queue their own retry rows.
+      await new AicoOpenRouterKeyService(ctx.serverDB).ensureAllUserMemberKeys(input.userId);
       if (keyNeedsRetry) {
         await ctx.serverDB
           .insert(aicoKeyOutbox)
