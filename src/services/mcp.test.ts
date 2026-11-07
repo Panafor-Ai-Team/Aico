@@ -33,6 +33,13 @@ vi.mock('@lobechat/utils', () => ({
 }));
 
 vi.mock('@/libs/trpc/client', () => ({
+  lambdaClient: {
+    connector: {
+      callTool: {
+        mutate: vi.fn(),
+      },
+    },
+  },
   toolsClient: {
     market: {
       callCloudMcpEndpoint: {
@@ -84,6 +91,56 @@ describe('MCPService', () => {
   });
 
   describe('invokeMcpToolCall', () => {
+    // Regression: a failed connector call (e.g. an expired Vercel sign-in) threw,
+    // so the chat only saw "no result returned" and could not tell the user why.
+    describe('custom connector', () => {
+      const payload = {
+        apiName: 'list_projects',
+        arguments: '{}',
+        id: 'call-1',
+        identifier: 'vercel',
+        type: 'mcp',
+      } as ChatToolPayload;
+
+      beforeEach(() => {
+        mockGetToolStoreState.mockReturnValue({
+          connectors: [
+            {
+              identifier: 'vercel',
+              isEnabled: true,
+              mcpConnectionType: 'http',
+              mcpServerUrl: 'https://mcp.example.com',
+            },
+          ],
+        });
+      });
+
+      it('returns the server reason as a failed tool result', async () => {
+        const { lambdaClient } = await import('@/libs/trpc/client');
+        vi.mocked(lambdaClient.connector.callTool.mutate).mockRejectedValue(
+          new Error('Ask the user to reconnect it in Settings > Connectors'),
+        );
+
+        const result = await mcpService.invokeMcpToolCall(payload, {});
+
+        expect(result).toMatchObject({
+          content: expect.stringContaining('reconnect'),
+          success: false,
+        });
+      });
+
+      it('still throws when the call was aborted', async () => {
+        const { lambdaClient } = await import('@/libs/trpc/client');
+        const controller = new AbortController();
+        controller.abort();
+        vi.mocked(lambdaClient.connector.callTool.mutate).mockRejectedValue(new Error('aborted'));
+
+        await expect(
+          mcpService.invokeMcpToolCall(payload, { signal: controller.signal }),
+        ).rejects.toThrow('aborted');
+      });
+    });
+
     it('should invoke tool call with installed plugin', async () => {
       const { toolsClient } = await import('@/libs/trpc/client');
       const { discoverService } = await import('./discover');

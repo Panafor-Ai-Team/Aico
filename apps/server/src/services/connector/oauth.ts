@@ -72,6 +72,24 @@ export const buildConnectorClientMetadata = () => {
   };
 };
 
+/** OIDC scope that asks the authorization server for a refresh token. */
+export const OFFLINE_ACCESS_SCOPE = 'offline_access';
+
+/**
+ * Add `offline_access` when the authorization server advertises it, so the user
+ * gets a refresh token instead of having to reconnect once the access token
+ * expires. Protected resources must not list it themselves (MCP authorization
+ * spec, "Refresh tokens"), so the resource's own scopes never include it.
+ */
+export const withOfflineAccessScope = (
+  scopes: string[] | undefined,
+  metadata: Pick<AuthorizationServerMetadata, 'scopes_supported'>,
+): string[] | undefined => {
+  if (!metadata.scopes_supported?.includes(OFFLINE_ACCESS_SCOPE)) return scopes;
+  if (scopes?.includes(OFFLINE_ACCESS_SCOPE)) return scopes;
+  return [...(scopes ?? []), OFFLINE_ACCESS_SCOPE];
+};
+
 export interface DiscoveredOAuth {
   authorizationServerUrl: string;
   metadata: AuthorizationServerMetadata;

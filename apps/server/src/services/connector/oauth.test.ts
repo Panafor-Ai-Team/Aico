@@ -60,3 +60,26 @@ describe('discoverConnectorOAuth', () => {
     expect(requests).toContain('GET /mcp');
   });
 });
+
+describe('withOfflineAccessScope', () => {
+  it('adds offline_access when the authorization server supports it', async () => {
+    const { withOfflineAccessScope } = await import('./oauth');
+    expect(
+      withOfflineAccessScope(['openid'], { scopes_supported: ['openid', 'offline_access'] }),
+    ).toEqual(['openid', 'offline_access']);
+    expect(withOfflineAccessScope(undefined, { scopes_supported: ['offline_access'] })).toEqual([
+      'offline_access',
+    ]);
+  });
+
+  it('leaves scopes alone when unsupported or already present', async () => {
+    const { withOfflineAccessScope } = await import('./oauth');
+    expect(withOfflineAccessScope(['openid'], { scopes_supported: ['openid'] })).toEqual([
+      'openid',
+    ]);
+    expect(withOfflineAccessScope(undefined, {})).toBeUndefined();
+    expect(
+      withOfflineAccessScope(['offline_access'], { scopes_supported: ['offline_access'] }),
+    ).toEqual(['offline_access']);
+  });
+});

@@ -47,4 +47,30 @@ describe('ensureFreshConnectorToken', () => {
     expect(mocks.refresh).toHaveBeenCalledOnce();
     expect((fresh.credentials as any).accessToken).toBe('new');
   });
+
+  it('refreshes a token the stored expiry still calls valid when forced', async () => {
+    const fresh = await ensureFreshConnectorToken(connector(Date.now() + 3_600_000), model, {
+      force: true,
+    });
+
+    expect(mocks.refresh).toHaveBeenCalledOnce();
+    expect((fresh.credentials as any).accessToken).toBe('new');
+  });
+
+  it('refreshes a token with no known expiry when forced', async () => {
+    await ensureFreshConnectorToken(connector(undefined), model, { force: true });
+
+    expect(mocks.refresh).toHaveBeenCalledOnce();
+  });
+
+  it('logs a failed refresh and keeps the old token', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mocks.refresh.mockRejectedValue(new Error('invalid_grant'));
+
+    const result = await ensureFreshConnectorToken(connector(Date.now() - 1000), model);
+
+    expect((result.credentials as any).accessToken).toBe('old');
+    expect(warn).toHaveBeenCalledWith(expect.any(String), 'c1', 'invalid_grant');
+    warn.mockRestore();
+  });
 });
