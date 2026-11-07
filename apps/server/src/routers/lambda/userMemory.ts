@@ -132,6 +132,8 @@ const embedEditedFields = async <K extends string>(
   }
 };
 
+const USER_MEMORY_EXTRACTION_ERROR_VISIBLE_MS = 24 * 60 * 60 * 1000;
+
 const getUserMemoryExtractionTimeoutMs = (metadata: UserMemoryExtractionMetadata) => {
   const totalTopics = metadata.progress.totalTopics;
 
@@ -218,11 +220,27 @@ export const userMemoryRouter = router({
   getMemoryExtractionTask: userMemoryProcedure
     .input(userMemoryExtractionTaskInputSchema)
     .query(async ({ ctx, input }) => {
-      const task = input?.taskId
+      let task = input?.taskId
         ? await ctx.asyncTaskModel.findById(input.taskId)
         : await ctx.asyncTaskModel.findActiveByType(
             AsyncTaskType.UserMemoryExtractionWithChatTopic,
           );
+
+      // Aico: a failed run is no longer "active", so without this the status banner vanished
+      // and the user never saw why nothing was produced. Keep a recent failure visible.
+      if (!task && !input?.taskId) {
+        const latest = await ctx.asyncTaskModel.findLatestByType(
+          AsyncTaskType.UserMemoryExtractionWithChatTopic,
+        );
+        const failedAt = latest?.updatedAt ? new Date(latest.updatedAt).getTime() : Number.NaN;
+        if (
+          latest?.status === AsyncTaskStatus.Error &&
+          Number.isFinite(failedAt) &&
+          Date.now() - failedAt <= USER_MEMORY_EXTRACTION_ERROR_VISIBLE_MS
+        ) {
+          task = latest;
+        }
+      }
 
       if (!task || task.userId !== ctx.userId) return null;
 

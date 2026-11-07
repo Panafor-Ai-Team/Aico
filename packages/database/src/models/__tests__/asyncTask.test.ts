@@ -199,6 +199,41 @@ describe('AsyncTaskModel', () => {
     });
   });
 
+  describe('findLatestByType', () => {
+    it('returns the newest task of the type regardless of status', async () => {
+      await serverDB.insert(asyncTasks).values([
+        {
+          createdAt: new Date('2024-01-01T00:00:00.000Z'),
+          status: AsyncTaskStatus.Success,
+          type: AsyncTaskType.Chunking,
+          userId,
+        },
+        {
+          createdAt: new Date('2024-01-02T00:00:00.000Z'),
+          status: AsyncTaskStatus.Error,
+          type: AsyncTaskType.Chunking,
+          userId,
+        },
+      ]);
+
+      const task = await asyncTaskModel.findLatestByType(AsyncTaskType.Chunking);
+      expect(task?.status).toBe(AsyncTaskStatus.Error);
+    });
+
+    it('ignores other users and other types', async () => {
+      const otherUserId = 'other-user-for-latest-test';
+      await serverDB.insert(users).values([{ id: otherUserId }]);
+      await serverDB.insert(asyncTasks).values([
+        { status: AsyncTaskStatus.Error, type: AsyncTaskType.Chunking, userId: otherUserId },
+        { status: AsyncTaskStatus.Error, type: AsyncTaskType.Embedding, userId },
+      ]);
+
+      expect(await asyncTaskModel.findLatestByType(AsyncTaskType.Chunking)).toBeUndefined();
+
+      await serverDB.delete(users).where(eq(users.id, otherUserId));
+    });
+  });
+
   describe('findActiveByType', () => {
     it('should find active tasks with Pending status', async () => {
       await serverDB.insert(asyncTasks).values({

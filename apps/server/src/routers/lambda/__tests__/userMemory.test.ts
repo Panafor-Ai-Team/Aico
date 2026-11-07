@@ -10,6 +10,7 @@ import { AsyncTaskErrorType, AsyncTaskStatus, AsyncTaskType } from '@/types/asyn
 import { MemorySourceType } from '@/types/userMemory';
 
 const mockFindActiveByType = vi.fn();
+const mockFindLatestByType = vi.fn();
 const mockCreate = vi.fn();
 const mockUpdate = vi.fn();
 const mockFindById = vi.fn();
@@ -40,6 +41,7 @@ vi.mock('@/database/models/asyncTask', () => ({
     create: mockCreate,
     findById: mockFindById,
     findActiveByType: mockFindActiveByType,
+    findLatestByType: mockFindLatestByType,
     update: mockUpdate,
   })),
   initUserMemoryExtractionMetadata: vi.fn((metadata) => metadata),
@@ -329,6 +331,65 @@ describe('userMemoryRouter.getMemoryExtractionTask', () => {
       },
       status: AsyncTaskStatus.Processing,
     });
+  });
+
+  it('keeps a recent failed run visible when no task is active', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-03-01T01:00:00.000Z'));
+    mockFindActiveByType.mockResolvedValue(undefined);
+    mockFindLatestByType.mockResolvedValue({
+      error: { body: { detail: 'provider rejected the request' }, name: 'ServerError' },
+      id: 'task-failed',
+      metadata: {
+        progress: { completedTopics: 0, totalTopics: 3 },
+        source: 'chat_topic',
+      },
+      status: AsyncTaskStatus.Error,
+      updatedAt: new Date('2024-03-01T00:30:00.000Z'),
+      userId: 'user-1',
+    });
+
+    const result = await createCaller().getMemoryExtractionTask();
+
+    expect(result).toEqual({
+      error: { body: { detail: 'provider rejected the request' }, name: 'ServerError' },
+      id: 'task-failed',
+      metadata: {
+        progress: { completedTopics: 0, totalTopics: 3 },
+        range: undefined,
+        source: 'chat_topic',
+      },
+      status: AsyncTaskStatus.Error,
+    });
+  });
+
+  it('hides a failed run older than 24 hours', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-03-03T00:00:00.000Z'));
+    mockFindActiveByType.mockResolvedValue(undefined);
+    mockFindLatestByType.mockResolvedValue({
+      error: { body: { detail: 'old failure' }, name: 'ServerError' },
+      id: 'task-old',
+      metadata: { progress: { completedTopics: 0, totalTopics: 3 }, source: 'chat_topic' },
+      status: AsyncTaskStatus.Error,
+      updatedAt: new Date('2024-03-01T00:00:00.000Z'),
+      userId: 'user-1',
+    });
+
+    expect(await createCaller().getMemoryExtractionTask()).toBeNull();
+  });
+
+  it('hides a finished run when no task is active', async () => {
+    mockFindActiveByType.mockResolvedValue(undefined);
+    mockFindLatestByType.mockResolvedValue({
+      id: 'task-done',
+      metadata: { progress: { completedTopics: 3, totalTopics: 3 }, source: 'chat_topic' },
+      status: AsyncTaskStatus.Success,
+      updatedAt: new Date(),
+      userId: 'user-1',
+    });
+
+    expect(await createCaller().getMemoryExtractionTask()).toBeNull();
   });
 
   it('fetches by task id when provided', async () => {
