@@ -193,7 +193,31 @@ const availableToolsForDiscovery = (s: ToolStoreState): AvailableToolForDiscover
       };
     });
 
-  return [...builtinItems, ...pluginItems, ...composioItems, ...lobehubSkillItems];
+  // 5. Custom MCP connectors (enabled, connected, with synced tools). Their
+  //    tools run server-side with the stored credentials, so a connected one is
+  //    as usable as a connected Composio app and must be activatable on demand.
+  const takenIds = new Set(
+    [...builtinItems, ...pluginItems, ...composioItems, ...lobehubSkillItems].map(
+      (item) => item.identifier,
+    ),
+  );
+  const connectorItems = (s.connectors ?? [])
+    .filter((c) => c.sourceType === 'custom')
+    .filter((c) => c.isEnabled && c.status === 'connected' && (c.tools?.length ?? 0) > 0)
+    .filter((c) => !takenIds.has(c.identifier))
+    .map((c) => ({
+      description: describeConnectedComposioApp(c.name),
+      identifier: c.identifier,
+      name: c.name,
+    }));
+
+  return [
+    ...builtinItems,
+    ...pluginItems,
+    ...composioItems,
+    ...lobehubSkillItems,
+    ...connectorItems,
+  ];
 };
 
 export const toolSelectors = {
