@@ -975,10 +975,12 @@ export const platformAdminRouter = router({
         .where(eq(userWallets.userId, input.userId));
 
       const keyService = new AicoOpenRouterKeyService(ctx.serverDB);
-      await keyService.disableUserKey(input.userId);
-      // Org-funded keys too: renewal skips a banned member, and an unfrozen key
-      // would keep spending the cap until the cycle ends.
+      // Org-funded keys first: renewal skips a banned member, and an unfrozen key
+      // would keep spending the cap until the cycle ends. This never throws (a
+      // failed freeze is queued), so a failing personal-key disable below cannot
+      // leave them live.
       await keyService.disableAllUserMemberKeys(input.userId);
+      await keyService.disableUserKey(input.userId);
 
       return { ok: true as const };
     }),

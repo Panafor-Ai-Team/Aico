@@ -504,6 +504,11 @@ const renewOrg = async (params: {
     options: { retryNow?: boolean } = {},
   ) => {
     if (aicoEnv.AICO_FIX_S2_RENEWAL_BATCH) {
+      // An immediate retry is for a one-off race, so it only applies in the batch's
+      // first backoff window; a budget that keeps reading as changed falls back to
+      // the normal wait instead of being retried on every cron tick.
+      const retryNow =
+        Boolean(options.retryNow) && now.getTime() - batch.createdAt.getTime() < FAILED_RETRY_MS;
       // Fail the batch first, and only while this worker still holds its lease:
       // when another worker has taken the batch over, this run owns nothing.
       const [owned] = await db
@@ -513,7 +518,7 @@ const renewOrg = async (params: {
           shortfallMicroUsd,
           status: 'failed',
           // A retry-now failure is back-dated so the next run may re-claim it.
-          updatedAt: options.retryNow ? new Date(lease.getTime() - FAILED_RETRY_MS) : lease,
+          updatedAt: retryNow ? new Date(lease.getTime() - FAILED_RETRY_MS) : lease,
         })
         .where(
           and(

@@ -617,6 +617,15 @@ describe('Aico RBAC / IDOR matrix (Phase 2)', () => {
     expect(ensureAllUserMemberKeysMock).toHaveBeenCalledWith(strangerId);
   });
 
+  it('deactivateUser still freezes the org keys when the personal key disable throws', async () => {
+    const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
+    disableUserKeyMock.mockRejectedValueOnce(new Error('upstream down'));
+    await expect(
+      platformCaller.deactivateUser({ reason: 'abuse', userId: strangerId }),
+    ).rejects.toBeDefined();
+    expect(disableAllUserMemberKeysMock).toHaveBeenCalledWith(strangerId);
+  });
+
   it('D3: reactivateUser reports success and queues a retry when the key push throws', async () => {
     const platformCaller = platformAdminRouter.createCaller(createAdminContext(operatorId));
     await platformCaller.deactivateUser({ reason: 'abuse', userId: strangerId });

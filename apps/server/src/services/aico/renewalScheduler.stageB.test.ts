@@ -176,6 +176,40 @@ describe('renewal scheduler — stage B', () => {
     });
   });
 
+  describe('the immediate retry is bounded', () => {
+    it('falls back to the normal backoff once the batch is older than the retry window', async () => {
+      const { member, org } = await setup();
+      await topUp(org.id);
+      // The batch row is created now (real time); running 20 minutes later makes it
+      // older than the 15-minute retry window when the race happens.
+      const t0 = new Date(Date.now() + 20 * MIN);
+      let first = true;
+      const ks = keyService({
+        settleMemberPeriod: vi.fn(async () => {
+          if (first) {
+            first = false;
+            await orgModel.allocateMemberCredit({
+              createdByUserId: ownerId,
+              orgId: org.id,
+              orgMemberId: member.id,
+              period: 'daily',
+              periodAmountMicroUsd: usd(5),
+            });
+          }
+          return { remainingMicroUsd: 0, usageMicroUsd: usd(5) };
+        }),
+      });
+
+      expect((await processDueRenewals(db, { keyService: ks, now: t0 }))[0].status).toBe('failed');
+
+      const early = await processDueRenewals(db, {
+        keyService: keyService(),
+        now: new Date(t0.getTime() + MIN),
+      });
+      expect(early[0].status).toBe('skipped');
+    });
+  });
+
   describe('shortfall nets out the refund the transaction would have credited', () => {
     it('reports gross minus balance minus refund', async () => {
       const { org } = await setup();
