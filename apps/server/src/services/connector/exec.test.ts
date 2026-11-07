@@ -254,10 +254,10 @@ describe('callConnectorToolById — upstream 401', () => {
     vi.mocked(mcpService.callTool).mockRejectedValue(authRequired());
     const ctx = makeCtx([oauthConnector], [tool()]);
 
-    const error = await callConnectorToolById(
+    const error: any = await callConnectorToolById(
       { identifier: 'my-conn', toolName: 'do_thing' },
       ctx,
-    ).catch((e: any) => e);
+    ).catch((e: unknown) => e);
 
     expect(error).toHaveProperty('code', 'PRECONDITION_FAILED');
     expect(error.message).toContain('reconnect');
