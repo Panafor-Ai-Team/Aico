@@ -1,3 +1,4 @@
+import { CONTEXT_OBJECT_TYPES, CONTEXT_SUBJECT_TYPES } from '@lobechat/types';
 import { describe, expect, it } from 'vitest';
 
 import { activityPrompt } from './activity';
@@ -54,5 +55,21 @@ describe('memory layer prompt output contracts', () => {
       hasLegacyWrapper: false,
       hasUnexpectedActionsWrapper: false,
     });
+  });
+
+  /**
+   * @example
+   * The model returned `type: "event"` and scores like 7 because the prompt only said `type (string)`.
+   */
+  it('tells the context extractor the allowed association types and the 0-1 score scale', () => {
+    expect({
+      listsObjectTypes: contextPrompt.includes(
+        `associatedObjects type: ${CONTEXT_OBJECT_TYPES.join(', ')}`,
+      ),
+      listsSubjectTypes: contextPrompt.includes(
+        `associatedSubjects type: ${CONTEXT_SUBJECT_TYPES.join(', ')}`,
+      ),
+      statesScoreScale: /scoreImpact and scoreUrgency are decimals from 0 to 1/.test(contextPrompt),
+    }).toEqual({ listsObjectTypes: true, listsSubjectTypes: true, statesScoreScale: true });
   });
 });
