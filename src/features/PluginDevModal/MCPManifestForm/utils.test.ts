@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { McpParseErrorCode, parseMcpInput } from './utils';
+import {
+  getDefaultMcpAuthType,
+  getMcpAuthTypeOptions,
+  McpParseErrorCode,
+  parseMcpInput,
+  shouldRunMcpOAuthFlow,
+} from './utils';
 
 describe('parseMcpInput', () => {
   // Test Suite 1: Valid Nested mcpServers Structure
@@ -258,5 +264,32 @@ describe('parseMcpInput', () => {
       const expected = { status: 'noop' };
       expect(parseMcpInput(input)).toEqual(expected);
     });
+  });
+});
+
+describe('MCP auth type options', () => {
+  it('puts OAuth first and No Authentication last when OAuth is available', () => {
+    expect(getMcpAuthTypeOptions(true)).toEqual(['oauth2', 'bearer', 'none']);
+    expect(getDefaultMcpAuthType(true)).toBe('oauth2');
+  });
+
+  it('keeps No Authentication last and default when OAuth is unavailable', () => {
+    expect(getMcpAuthTypeOptions(false)).toEqual(['bearer', 'none']);
+    expect(getDefaultMcpAuthType(false)).toBe('none');
+  });
+
+  it('runs the OAuth popup flow only for HTTP servers with OAuth selected', () => {
+    expect(shouldRunMcpOAuthFlow({ authType: 'oauth2', enableOAuth: true, mcpType: 'http' })).toBe(
+      true,
+    );
+    expect(shouldRunMcpOAuthFlow({ authType: 'oauth2', enableOAuth: true, mcpType: 'stdio' })).toBe(
+      false,
+    );
+    expect(shouldRunMcpOAuthFlow({ authType: 'oauth2', enableOAuth: false, mcpType: 'http' })).toBe(
+      false,
+    );
+    expect(shouldRunMcpOAuthFlow({ authType: 'none', enableOAuth: true, mcpType: 'http' })).toBe(
+      false,
+    );
   });
 });

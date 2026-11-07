@@ -18,6 +18,7 @@ import ArgsInput from './ArgsInput';
 import CollapsibleSection from './CollapsibleSection';
 import MCPTypeSelect from './MCPTypeSelect';
 import QuickImportSection from './QuickImportSection';
+import { getDefaultMcpAuthType, getMcpAuthTypeOptions, type McpAuthType } from './utils';
 
 interface MCPManifestFormProps {
   /**
@@ -44,6 +45,11 @@ const MCP_TYPE = ['customParams', 'mcp', 'type'];
 const DESC_TYPE = ['customParams', 'description'];
 // Authentication-related constants
 const AUTH_TYPE = ['customParams', 'mcp', 'auth', 'type'];
+const AUTH_TYPE_LABEL_KEYS = {
+  bearer: 'dev.mcp.auth.bear',
+  none: 'dev.mcp.auth.none',
+  oauth2: 'dev.mcp.auth.oauth',
+} as const satisfies Record<McpAuthType, string>;
 const AUTH_TOKEN = ['customParams', 'mcp', 'auth', 'token'];
 const AUTH_CLIENT_ID = ['customParams', 'mcp', 'auth', 'clientId'];
 const AUTH_CLIENT_SECRET = ['customParams', 'mcp', 'auth', 'clientSecret'];
@@ -250,30 +256,16 @@ const MCPManifestForm = ({
               </FormItem>
               <FormItem
                 desc={t('dev.mcp.auth.desc')}
-                initialValue={'none'}
+                initialValue={getDefaultMcpAuthType(enableOAuth)}
                 label={t('dev.mcp.auth.label')}
                 name={AUTH_TYPE}
               >
                 <RadioGroup
                   style={{ width: '100%' }}
-                  options={[
-                    {
-                      label: t('dev.mcp.auth.none'),
-                      value: 'none',
-                    },
-                    {
-                      label: t('dev.mcp.auth.bear'),
-                      value: 'bearer',
-                    },
-                    ...(enableOAuth
-                      ? [
-                          {
-                            label: t('dev.mcp.auth.oauth'),
-                            value: 'oauth2',
-                          },
-                        ]
-                      : []),
-                  ]}
+                  options={getMcpAuthTypeOptions(enableOAuth).map((value) => ({
+                    label: t(AUTH_TYPE_LABEL_KEYS[value]),
+                    value,
+                  }))}
                 />
               </FormItem>
               {authType === 'bearer' && (
