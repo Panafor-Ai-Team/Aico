@@ -233,6 +233,8 @@ export function defineConfig() {
     // Custom connector OAuth callback — hit via a cross-site redirect from the
     // provider, carries its own code+state, so it must not be session-gated.
     '/oauth/connector/callback',
+    // CIMD document fetched server-to-server by the authorization server.
+    '/oauth/connector/client-metadata',
     '/oidc/handoff',
     '/oidc/device/auth',
     '/oidc/token',

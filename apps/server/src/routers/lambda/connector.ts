@@ -1,4 +1,5 @@
 import { upsertPluginMode } from '@lobechat/types';
+import { OAuthError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
@@ -31,6 +32,7 @@ import { callConnectorToolById, ConnectorToolCallError } from '@/server/services
 import {
   buildAuthorizationUrl,
   discoverConnectorOAuth,
+  getConnectorClientMetadataUrl,
   getConnectorRedirectUri,
   registerDynamicClient,
 } from '@/server/services/connector/oauth';
@@ -550,76 +552,117 @@ export const connectorRouter = router({
       const existing: OIDCConfig = connector.oidcConfig ?? { scheme: 'dcr' };
       const redirectUri = getConnectorRedirectUri();
 
-      // 1. Discover the authorization server backing the MCP resource.
-      const { authorizationServerUrl, metadata } = await discoverConnectorOAuth(
-        connector.mcpServerUrl,
-      );
+      try {
+        // 1. Discover the authorization server backing the MCP resource.
+        const { authorizationServerUrl, metadata, resourceMetadata, wwwAuthenticateScope } =
+          await discoverConnectorOAuth(connector.mcpServerUrl);
 
-      // Default to the scopes advertised by the server when the user did not
-      // specify any — many MCP authorization servers reject (or issue a useless
-      // token for) a scope-less request.
-      const scopes =
-        existing.scopes && existing.scopes.length > 0 ? existing.scopes : metadata.scopes_supported;
+        // Scopes: user-specified → WWW-Authenticate challenge → protected
+        // resource metadata → none. Never the authorization server's full list.
+        const scopes =
+          existing.scopes && existing.scopes.length > 0
+            ? existing.scopes
+            : wwwAuthenticateScope
+              ? wwwAuthenticateScope.split(' ').filter(Boolean)
+              : resourceMetadata?.scopes_supported && resourceMetadata.scopes_supported.length > 0
+                ? resourceMetadata.scopes_supported
+                : undefined;
+        const resource = resourceMetadata?.resource
+          ? String(resourceMetadata.resource)
+          : connector.mcpServerUrl;
 
-      // 2. Resolve the OAuth client: pre-registration vs. DCR.
-      let clientId = existing.clientId;
-      let clientSecret = existing.clientSecret;
-      const scheme: OIDCConfig['scheme'] = clientId ? 'pre_registration' : 'dcr';
+        // 2. Resolve the OAuth client: pre-registration → CIMD → stored DCR → DCR.
+        let clientId: string | undefined;
+        let clientSecret: string | undefined;
+        let scheme: OIDCConfig['scheme'];
+        const clientMetadataUrl = getConnectorClientMetadataUrl();
 
-      if (!clientId) {
-        if (!metadata.registration_endpoint) {
+        if (existing.scheme === 'pre_registration' && existing.clientId) {
+          clientId = existing.clientId;
+          clientSecret = existing.clientSecret;
+          scheme = 'pre_registration';
+        } else if (metadata.client_id_metadata_document_supported === true && clientMetadataUrl) {
+          clientId = clientMetadataUrl;
+          clientSecret = undefined;
+          scheme = 'client_id_metadata_document';
+        } else if (
+          existing.scheme === 'dcr' &&
+          existing.clientId &&
+          existing.issuer === authorizationServerUrl &&
+          existing.redirectUri === redirectUri
+        ) {
+          clientId = existing.clientId;
+          clientSecret = existing.clientSecret;
+          scheme = 'dcr';
+        } else if (metadata.registration_endpoint) {
+          const reg = await registerDynamicClient({
+            authorizationServerUrl,
+            metadata,
+            redirectUri,
+            scopes,
+          });
+          clientId = reg.client_id;
+          clientSecret = reg.client_secret ?? undefined;
+          scheme = 'dcr';
+        } else {
           throw new TRPCError({
             code: 'BAD_REQUEST',
             message:
               'This server does not support dynamic registration. Provide an OAuth Client ID in Advanced settings.',
           });
         }
-        const reg = await registerDynamicClient({
+
+        // 3. Persist the resolved config so the callback + refresh can reuse it.
+        const resolvedOidc: OIDCConfig = {
+          ...existing,
+          authorizationEndpoint: metadata.authorization_endpoint,
+          clientId,
+          clientSecret,
+          issuer: authorizationServerUrl,
+          redirectUri,
+          registrationEndpoint: metadata.registration_endpoint,
+          scheme,
+          scopes,
+          tokenEndpoint: metadata.token_endpoint,
+        };
+        await ctx.connectorModel.update(input.id, { oidcConfig: resolvedOidc });
+
+        // 4. Build the authorize URL (with PKCE) and stash the verifier under `state`.
+        const state = generateConnectorOAuthState();
+        const { authorizationUrl, codeVerifier } = await buildAuthorizationUrl({
           authorizationServerUrl,
+          clientInformation: { client_id: clientId, client_secret: clientSecret },
           metadata,
           redirectUri,
+          resource,
           scopes,
+          state,
         });
-        clientId = reg.client_id;
-        clientSecret = reg.client_secret ?? undefined;
+
+        await saveConnectorOAuthState(state, {
+          authorizationServerUrl,
+          codeVerifier,
+          connectorId: input.id,
+          lobeUserId: ctx.userId,
+          resource,
+          returnTo: input.returnTo,
+        });
+
+        return { authorizationUrl };
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        if (
+          err instanceof OAuthError ||
+          (err instanceof Error && /OAuth metadata/.test(err.message))
+        ) {
+          throw new TRPCError({
+            cause: err,
+            code: 'BAD_REQUEST',
+            message: `OAuth setup failed: ${err.message.slice(0, 300)}`,
+          });
+        }
+        throw err;
       }
-
-      // 3. Persist the resolved config so the callback + refresh can reuse it.
-      const resolvedOidc: OIDCConfig = {
-        ...existing,
-        authorizationEndpoint: metadata.authorization_endpoint,
-        clientId,
-        clientSecret,
-        issuer: authorizationServerUrl,
-        redirectUri,
-        registrationEndpoint: metadata.registration_endpoint,
-        scheme,
-        scopes,
-        tokenEndpoint: metadata.token_endpoint,
-      };
-      await ctx.connectorModel.update(input.id, { oidcConfig: resolvedOidc });
-
-      // 4. Build the authorize URL (with PKCE) and stash the verifier under `state`.
-      const state = generateConnectorOAuthState();
-      const { authorizationUrl, codeVerifier } = await buildAuthorizationUrl({
-        authorizationServerUrl,
-        clientInformation: { client_id: clientId, client_secret: clientSecret },
-        metadata,
-        redirectUri,
-        resource: connector.mcpServerUrl,
-        scopes,
-        state,
-      });
-
-      await saveConnectorOAuthState(state, {
-        authorizationServerUrl,
-        codeVerifier,
-        connectorId: input.id,
-        lobeUserId: ctx.userId,
-        returnTo: input.returnTo,
-      });
-
-      return { authorizationUrl };
     }),
 
   update: connectorWriteProcedure
@@ -725,6 +768,7 @@ export const connectorRouter = router({
       try {
         return await syncConnectorToolsById(input.id, ctx);
       } catch (err: any) {
+        if (err instanceof TRPCError && err.code === 'PRECONDITION_FAILED') throw err;
         throw new TRPCError({
           cause: err,
           code: 'INTERNAL_SERVER_ERROR',

@@ -145,9 +145,10 @@ const MCPManifestForm = ({
         setErrorMetadata(null);
       } else if (result.error) {
         // Store has already handled the error state; optionally show additional user-friendly messages here
-        const errorMessage = t('error.testConnectionFailed', {
-          error: result.error,
-        });
+        const errorMessage =
+          result.error === 'MCP_AUTH_REQUIRED' || result.error.includes('MCP_AUTH_REQUIRED')
+            ? t('error.mcpAuthRequired')
+            : t('error.testConnectionFailed', { error: result.error });
         setConnectionError(errorMessage);
 
         // Build error metadata for detailed display
@@ -169,9 +170,9 @@ const MCPManifestForm = ({
     } catch (error) {
       // Handle unexpected errors
       const err = error as Error;
-      const errorMessage = t('error.testConnectionFailed', {
-        error: err.message || t('unknownError'),
-      });
+      const errorMessage = err.message?.includes('MCP_AUTH_REQUIRED')
+        ? t('error.mcpAuthRequired')
+        : t('error.testConnectionFailed', { error: err.message || t('unknownError') });
       setConnectionError(errorMessage);
     } finally {
       setIsTesting(false);

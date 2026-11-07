@@ -759,6 +759,7 @@ export default {
   'dev.preview.title': 'Skill name preview',
   'dev.save': 'Install',
   'dev.saveError': 'Install failed, please try again',
+  'dev.saveErrorWithReason': 'Install failed: {{reason}}',
   'dev.saveSuccess': 'Settings saved',
   'dev.tabs.manifest': 'Manifest',
   'dev.tabs.meta': 'Meta info',
@@ -782,6 +783,8 @@ export default {
   'error.openAPIInvalid': 'OpenAPI parse failed: \n\n {{error}}',
   'error.reinstallError': 'Failed to refresh {{name}}',
   'error.renderError': 'Render error',
+  'error.mcpAuthRequired':
+    'This server requires sign-in. Set Authentication to "OAuth" and authorize.',
   'error.testConnectionFailed': 'Failed to fetch manifest: {{error}}',
   'error.unknownError': 'Unknown error',
   'error.urlError': 'URL did not return JSON, verify link',

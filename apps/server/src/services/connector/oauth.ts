@@ -1,8 +1,10 @@
+import { BRANDING_NAME } from '@lobechat/business-const';
 import {
   discoverAuthorizationServerMetadata,
   discoverOAuthProtectedResourceMetadata,
   exchangeAuthorization,
-  extractResourceMetadataUrl,
+  extractWWWAuthenticateParams,
+  isHttpsUrl,
   refreshAuthorization,
   registerClient,
   startAuthorization,
@@ -11,6 +13,7 @@ import type {
   AuthorizationServerMetadata,
   OAuthClientInformationFull,
   OAuthClientInformationMixed,
+  OAuthProtectedResourceMetadata,
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
 import debug from 'debug';
@@ -35,9 +38,47 @@ export const getConnectorRedirectUri = (): string => {
   return new URL(CONNECTOR_OAUTH_CALLBACK_PATH, base).toString();
 };
 
+export const CONNECTOR_CLIENT_METADATA_PATH = '/oauth/connector/client-metadata';
+
+/**
+ * URL of our OAuth Client ID Metadata Document (CIMD). Only usable when it is a
+ * public HTTPS URL with a non-root path, so local http dev returns undefined.
+ */
+export const getConnectorClientMetadataUrl = (): string | undefined => {
+  const base = appEnv.APP_URL;
+  if (!base) return undefined;
+  try {
+    const url = new URL(CONNECTOR_CLIENT_METADATA_PATH, base).toString();
+    return isHttpsUrl(url) ? url : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** The CIMD document served at {@link getConnectorClientMetadataUrl}. */
+export const buildConnectorClientMetadata = () => {
+  const clientId = getConnectorClientMetadataUrl();
+  if (!clientId) return undefined;
+  const base = appEnv.APP_URL!;
+  return {
+    client_id: clientId,
+    client_name: BRANDING_NAME,
+    client_uri: new URL(base).origin,
+    grant_types: ['authorization_code', 'refresh_token'],
+    logo_uri: new URL('/apple-touch-icon.png', base).toString(),
+    redirect_uris: [getConnectorRedirectUri()],
+    response_types: ['code'],
+    token_endpoint_auth_method: 'none',
+  };
+};
+
 export interface DiscoveredOAuth {
   authorizationServerUrl: string;
   metadata: AuthorizationServerMetadata;
+  /** RFC 9728 protected-resource metadata, when the server advertises it. */
+  resourceMetadata?: OAuthProtectedResourceMetadata;
+  /** `scope` from the WWW-Authenticate challenge, if any. */
+  wwwAuthenticateScope?: string;
 }
 
 /**
@@ -55,12 +96,17 @@ export interface DiscoveredOAuth {
 export const discoverConnectorOAuth = async (mcpServerUrl: string): Promise<DiscoveredOAuth> => {
   const fetchFn = getMcpServerFetch();
   let resourceMetadataUrl: URL | undefined;
+  let wwwAuthenticateScope: string | undefined;
   try {
     const res = await (fetchFn ?? fetch)(mcpServerUrl, {
       headers: { accept: 'application/json, text/event-stream' },
       method: 'GET',
     });
-    if (res.status === 401) resourceMetadataUrl = extractResourceMetadataUrl(res);
+    if (res.status === 401) {
+      const params = extractWWWAuthenticateParams(res);
+      resourceMetadataUrl = params.resourceMetadataUrl;
+      wwwAuthenticateScope = params.scope;
+    }
     // Only the status and headers matter; the body may be a never-ending SSE stream.
     await res.body?.cancel().catch(() => {});
   } catch (err) {
@@ -68,12 +114,14 @@ export const discoverConnectorOAuth = async (mcpServerUrl: string): Promise<Disc
   }
 
   let authorizationServerUrl: string | undefined;
+  let resourceMetadata: OAuthProtectedResourceMetadata | undefined;
   try {
     const prm = await discoverOAuthProtectedResourceMetadata(
       mcpServerUrl,
       { resourceMetadataUrl },
       fetchFn,
     );
+    resourceMetadata = prm ?? undefined;
     authorizationServerUrl = prm?.authorization_servers?.[0]?.toString();
   } catch (err) {
     log('protected-resource-metadata discovery failed: %O', err);
@@ -87,7 +135,7 @@ export const discoverConnectorOAuth = async (mcpServerUrl: string): Promise<Disc
     throw new Error(`Failed to discover OAuth metadata for ${authorizationServerUrl}`);
   }
 
-  return { authorizationServerUrl, metadata };
+  return { authorizationServerUrl, metadata, resourceMetadata, wwwAuthenticateScope };
 };
 
 /**
@@ -136,7 +184,7 @@ export const buildAuthorizationUrl = async (params: {
       clientInformation: params.clientInformation,
       metadata: params.metadata,
       redirectUrl: params.redirectUri,
-      resource: params.resource ? new URL(params.resource) : undefined,
+      resource: params.resource,
       scope: params.scopes?.join(' '),
       state: params.state,
     },
@@ -161,7 +209,7 @@ export const exchangeConnectorCode = async (params: {
     fetchFn: getMcpServerFetch(),
     metadata: params.metadata,
     redirectUri: params.redirectUri,
-    resource: params.resource ? new URL(params.resource) : undefined,
+    resource: params.resource,
   });
 };
 
@@ -178,6 +226,6 @@ export const refreshConnectorToken = async (params: {
     fetchFn: getMcpServerFetch(),
     metadata: params.metadata,
     refreshToken: params.refreshToken,
-    resource: params.resource ? new URL(params.resource) : undefined,
+    resource: params.resource,
   });
 };

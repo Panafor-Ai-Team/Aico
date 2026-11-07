@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 
 import MCPManifestForm from './MCPManifestForm';
 import PluginPreview from './PluginPreview';
+import { getSaveErrorMessage } from './saveError';
 
 interface DevModalProps {
   /** Enable the connector-backed OAuth auth type in the MCP form (see MCPManifestForm). */
@@ -73,15 +74,7 @@ const DevModal = memo<DevModalProps>(
         onOpenChange(false);
       } catch (error) {
         console.error('[DevModal] Install failed:', error);
-        const httpStatus = (error as { data?: { httpStatus?: number } })?.data?.httpStatus;
-        toast.error(
-          httpStatus === 403
-            ? t(
-                'dev.permissionDenied',
-                'You are not allowed to modify this connector — only the creator or a workspace owner can',
-              )
-            : t('dev.saveError'),
-        );
+        toast.error(getSaveErrorMessage(error, t as never));
       } finally {
         setSubmitting(false);
       }

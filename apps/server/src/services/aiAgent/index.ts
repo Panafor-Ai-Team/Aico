@@ -174,6 +174,7 @@ import {
   buildLastSyncedAtMap,
   scheduleStaleConnectorToolsRefresh,
 } from '@/server/services/connector/refresh';
+import { ensureFreshConnectorToken } from '@/server/services/connector/tokens';
 import { deviceGateway } from '@/server/services/deviceGateway';
 import { getScopedOnlineDevices } from '@/server/services/deviceGateway/scopedDevices';
 import { DocumentService } from '@/server/services/document';
@@ -3135,8 +3136,19 @@ export class AiAgentService {
       // manifest. Connectors WITHOUT an endpoint (e.g. Lobehub/Composio OAuth skills synced via
       // syncToolsFromClient) must continue using their original plugin executor path — otherwise
       // after humanIntervention approval the runtime tries to call mcpServerUrl='' and returns empty.
-      const connectorsMcp = connectors.filter(
+      const connectorsMcpRaw = connectors.filter(
         (c) => c.mcpServerUrl || c.mcpConnectionType === 'stdio',
+      );
+
+      // Refresh expired OAuth access tokens before baking them into the manifests
+      // (the classic chat path already does this in connector/exec.ts). The model
+      // needs the gatekeeper so the rotated credentials can be re-encrypted;
+      // ensureFreshConnectorToken swallows errors and returns the original row.
+      const tokenRefreshModel = connectorGateKeeper
+        ? new ConnectorModel(this.db, this.userId, this.workspaceId, connectorGateKeeper)
+        : this.connectorModel;
+      const connectorsMcp = await Promise.all(
+        connectorsMcpRaw.map((c) => ensureFreshConnectorToken(c, tokenRefreshModel)),
       );
 
       // Fetch ALL tools for all real-MCP connectors (including disabled tools) so that
