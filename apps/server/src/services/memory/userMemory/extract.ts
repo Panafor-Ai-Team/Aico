@@ -469,12 +469,18 @@ const normalizeActivityAssociationList = (value: unknown) => {
 };
 
 const normalizeActivityMemoryCandidate = (item: unknown) => {
-  if (!item || typeof item !== 'object' || !('withActivity' in item)) return item;
-  const withActivity = item.withActivity as WithActivity | undefined;
-  if (!withActivity || typeof withActivity !== 'object') return item;
+  if (!item || typeof item !== 'object') return item;
+  const record = item as Record<string, unknown>;
+  // The schema asks for '' when there is no extra detail, but the gateway does not
+  // enforce the JSON schema and some models send null. One such memory failed the
+  // topic, and with it the whole analysis run.
+  const details = record.details === null || record.details === undefined ? '' : record.details;
+  const withActivity = record.withActivity as WithActivity | undefined;
+  if (!withActivity || typeof withActivity !== 'object') return { ...record, details };
 
   return {
-    ...item,
+    ...record,
+    details,
     withActivity: {
       ...withActivity,
       associatedLocations: normalizeActivityAssociationList(withActivity.associatedLocations),
