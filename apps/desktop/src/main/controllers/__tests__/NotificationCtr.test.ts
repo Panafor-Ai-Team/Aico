@@ -115,7 +115,7 @@ describe('NotificationCtr', () => {
 
       controller.afterAppReady();
 
-      expect(app.setAppUserModelId).toHaveBeenCalledWith('com.lobehub.chat');
+      expect(app.setAppUserModelId).toHaveBeenCalledWith('com.panafor.panachat');
 
       vi.mocked(windows).mockReturnValue(false);
     });

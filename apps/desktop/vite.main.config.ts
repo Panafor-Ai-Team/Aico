@@ -14,6 +14,13 @@ import {
   processEnvDefine,
 } from './vite.shared';
 
+const buildTimeEnvDefine = (keys: string[]) =>
+  Object.fromEntries(
+    keys
+      .filter((key) => process.env[key])
+      .map((key) => [`process.env.${key}`, JSON.stringify(process.env[key])]),
+  );
+
 export default defineConfig(async (env) => {
   const { mode } = env;
   loadDesktopEnv(mode);
@@ -111,6 +118,9 @@ export default defineConfig(async (env) => {
       'process.env.DESKTOP_EXTERNAL_NAVIGATION_HOSTS': JSON.stringify(externalNavigationHosts),
       'process.env.UPDATE_CHANNEL': JSON.stringify(process.env.UPDATE_CHANNEL),
       'process.env.UPDATE_SERVER_URL': JSON.stringify(process.env.UPDATE_SERVER_URL),
+      // Bake the default server and optional device gateway into packaged builds; without
+      // them the main process falls back to http://localhost:3210 / no gateway at runtime.
+      ...buildTimeEnvDefine(['OFFICIAL_CLOUD_SERVER', 'DEVICE_GATEWAY_URL']),
     },
     publicDir: false,
     resolve: {

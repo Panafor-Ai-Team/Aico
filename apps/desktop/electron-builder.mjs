@@ -61,13 +61,14 @@ const getPublishConfig = () => {
     ];
   }
 
-  // 本地开发无 S3 时回退到 GitHub
-  console.info(`📦 ${channelPath} channel: No UPDATE_SERVER_URL, falling back to GitHub provider`);
+  // Without UPDATE_SERVER_URL, releases are published to GitHub Releases on the Panachat repo.
+  // Keep in sync with GITHUB_UPDATE_REPO in src/main/modules/updater/configs.ts.
+  console.info(`📦 ${channelPath} channel: No UPDATE_SERVER_URL, using GitHub provider`);
   return [
     {
-      owner: 'lobehub',
+      owner: 'Panafor-Ai-Team',
       provider: 'github',
-      repo: 'lobehub',
+      repo: 'Aico',
     },
   ];
 };
@@ -81,9 +82,9 @@ if (!hasAppleCertificate) {
 
 // 根据版本类型确定协议 scheme
 const getProtocolScheme = () => {
-  if (isCanary) return 'lobehub-canary';
-  if (isNightly) return 'lobehub-nightly';
-  return 'lobehub';
+  if (isCanary) return 'panachat-canary';
+  if (isNightly) return 'panachat-nightly';
+  return 'panachat';
 };
 
 const protocolScheme = getProtocolScheme();
@@ -167,7 +168,7 @@ const config = {
     }
   },
   afterSign: verifyFontListSignature,
-  appId: 'com.lobehub.lobehub-desktop',
+  appId: 'com.panafor.panachat',
   appImage: {
     artifactName: '${productName}-${version}.${ext}',
   },
@@ -225,7 +226,7 @@ const config = {
   linux: {
     category: 'Utility',
     icon: 'build/icon.png',
-    maintainer: 'electronjs.org',
+    maintainer: 'Panafor AI Team',
     target: ['AppImage', 'snap', 'deb', 'rpm', 'tar.gz'],
   },
   mac: {
@@ -236,7 +237,7 @@ const config = {
       CFBundleIconName: 'AppIcon',
       CFBundleURLTypes: [
         {
-          CFBundleURLName: 'LobeHub Protocol',
+          CFBundleURLName: 'Panachat Protocol',
           CFBundleURLSchemes: [protocolScheme],
         },
       ],
@@ -274,7 +275,7 @@ const config = {
   },
   protocols: [
     {
-      name: 'LobeHub Protocol',
+      name: 'Panachat Protocol',
       schemes: [protocolScheme],
     },
   ],
@@ -316,7 +317,7 @@ const config = {
   ],
 
   win: {
-    executableName: 'LobeHub',
+    executableName: 'Panachat',
   },
 };
 

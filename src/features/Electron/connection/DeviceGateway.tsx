@@ -144,9 +144,12 @@ const DeviceGateway = memo(() => {
 
 const DeviceGatewayWithAuth = memo(() => {
   const isSyncActive = useElectronStore(electronSyncSelectors.isSyncActive);
+  const useFetchGatewayConfigured = useElectronStore((s) => s.useFetchGatewayConfigured);
   const activeWorkspaceSlug = useActiveWorkspaceSlug();
+  // No device gateway URL in this build: hide the toggle instead of offering a switch that can't connect.
+  const { data: isGatewayConfigured } = useFetchGatewayConfigured();
 
-  if (!isSyncActive || activeWorkspaceSlug) return null;
+  if (!isSyncActive || activeWorkspaceSlug || !isGatewayConfigured) return null;
 
   return <DeviceGateway />;
 });
