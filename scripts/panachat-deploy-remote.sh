@@ -226,9 +226,9 @@ set_image_env() {
   persist_infra_kv "PANACHAT_VOLUME_PREFIX" "$PANACHAT_VOLUME_PREFIX"
   persist_infra_kv "PANACHAT_APP_ENV_FILE" "$APP_ENV_FILE"
   persist_infra_kv "PANACHAT_INFRA_ENV_FILE" "$INFRA_ENV_FILE"
-  if [[ -n "${PANACHAT_CONTROL_PLANE_IMAGE:-}" ]]; then
-    persist_infra_kv "PANACHAT_CONTROL_PLANE_IMAGE" "$PANACHAT_CONTROL_PLANE_IMAGE"
-  fi
+  # PANACHAT_CONTROL_PLANE_IMAGE is persisted by deploy_control_plane only once
+  # that image runs healthy, so the infra .env never names an image that is not
+  # on disk (compose would try the registry for it on the next `up`).
 }
 
 persist_infra_kv() {
@@ -337,19 +337,34 @@ pull_with_retry() {
   return 1
 }
 
+# The ref pull_control_plane_image already fetched in this run.
+CONTROL_PLANE_PULLED=""
+
+# cmd_deploy calls this before it touches any slot. A registry that fails here
+# aborts the deploy with chat and admin panel both still on the previous
+# release; pulling only after the nginx flip (as before 2026-11-08) left chat
+# on the new commit and the control plane on the old one.
+pull_control_plane_image() {
+  [[ -n "${PANACHAT_CONTROL_PLANE_IMAGE:-}" ]] || return 0
+  [[ "$CONTROL_PLANE_PULLED" == "$PANACHAT_CONTROL_PLANE_IMAGE" ]] && return 0
+  pull_with_retry "$PANACHAT_CONTROL_PLANE_IMAGE"
+  CONTROL_PLANE_PULLED="$PANACHAT_CONTROL_PLANE_IMAGE"
+}
+
 deploy_control_plane() {
   if [[ -z "${PANACHAT_CONTROL_PLANE_IMAGE:-}" ]]; then
     log "Skipping control-plane (PANACHAT_CONTROL_PLANE_IMAGE unset)"
     return 0
   fi
-  persist_infra_kv "PANACHAT_CONTROL_PLANE_IMAGE" "$PANACHAT_CONTROL_PLANE_IMAGE"
   persist_infra_kv "PANACHAT_CONTROL_PLANE_PORT" "$CONTROL_PLANE_PORT"
-  pull_with_retry "$PANACHAT_CONTROL_PLANE_IMAGE"
+  pull_control_plane_image
   log "Starting ${PANACHAT_STACK}-control-plane"
   # Just pulled: --pull never skips the service's pull_policy: always, which
-  # would make a second, unbounded registry round trip.
+  # would make a second, unbounded registry round trip. The exported
+  # PANACHAT_CONTROL_PLANE_IMAGE wins over the infra .env for interpolation.
   compose_with_profile control-plane up -d --no-deps --force-recreate --pull never panachat-control-plane
   wait_control_plane
+  persist_infra_kv "PANACHAT_CONTROL_PLANE_IMAGE" "$PANACHAT_CONTROL_PLANE_IMAGE"
   prune_repo_images "$PANACHAT_CONTROL_PLANE_IMAGE" "$CONTROL_PLANE_IMAGE_KEEP"
 }
 
@@ -673,10 +688,14 @@ cmd_deploy() {
 
   assert_db_fingerprint_matches
   run_backup
+
+  # Both images first: a registry failure must abort before the infra .env or
+  # any slot changes, so chat and the control plane stay on one release.
+  pull_with_retry "$image"
+  pull_control_plane_image
+
   set_image_env "$image"
   sync_app_url_to_slot "$inactive"
-
-  pull_with_retry "$image"
 
   log "Starting inactive slot $inactive_svc"
   compose_with_profile "$inactive_profile" up -d --no-deps --force-recreate --pull never "$inactive_compose"
