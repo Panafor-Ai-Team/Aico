@@ -347,7 +347,7 @@
   "platform.multiplierActive": "使用中",
   "platform.multiplierCard": "充值收益率",
   "platform.multiplierFailed": "更新充值收益率失败",
-  "platform.multiplierHint": "仅在充值时生效：每 1 美元兑换更少的 π（利润）。模型价格与用量按原始 CVC 汇率以 π 显示——每个上游提供商一个值。",
+  "platform.multiplierHint": "仅在充值时生效：每 1 美元兑换更少的 π（利润）。模型价格与用量按原始上游汇率以 π 显示——每个上游提供商一个值。",
   "platform.multiplierLabel": "倍率",
   "platform.multiplierPreview": "1 美元充值 {{pi}} π。",
   "platform.multiplierSave": "保存收益率",

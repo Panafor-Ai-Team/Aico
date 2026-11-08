@@ -31,7 +31,7 @@ describe('generate-openapi', () => {
     const spec = parse(readFileSync(path.join(PKG_ROOT, 'openapi.yml'), 'utf8'));
 
     expect(spec.openapi).toBe('3.1.0');
-    expect(spec.info.title).toBe('LobeHub API');
+    expect(spec.info.title).toBe('REST API');
     expect(spec.components.securitySchemes.bearerAuth.scheme).toBe('bearer');
     expect(spec.components.schemas.Agent.additionalProperties).toBe(false);
     expect(spec.components.schemas.Agent.properties).not.toHaveProperty('clientId');

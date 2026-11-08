@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
+import { BRANDING_NAME } from '@lobechat/business-const';
 import { type LobeChatDatabase } from '@lobechat/database';
 import { ssrfSafeFetch } from '@lobechat/ssrf-safe-fetch';
 import {
@@ -43,7 +44,7 @@ export class SkillImporter {
     this.parser = new SkillParser();
     this.resourceService = new SkillResourceService(db, userId, workspaceId);
     this.fileService = new FileService(db, userId, workspaceId);
-    this.github = new GitHub({ userAgent: 'LobeHub-Skill-Importer' });
+    this.github = new GitHub({ userAgent: `${BRANDING_NAME}-Skill-Importer` });
     this.userId = userId;
     this.workspaceId = workspaceId;
     this.workspaceRole = options?.workspaceRole;

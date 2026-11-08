@@ -366,7 +366,7 @@ export default {
   'platform.multiplierTitle': 'Top-up yield',
   'platform.multiplierLabel': 'Multiplier',
   'platform.multiplierHint':
-    'Applied only when credits are added: $1 buys fewer π (margin). Model prices and usage are shown in π at raw CVC rates — one value per upstream provider.',
+    'Applied only when credits are added: $1 buys fewer π (margin). Model prices and usage are shown in π at raw upstream rates — one value per upstream provider.',
   'platform.multiplierSave': 'Save yield',
   'platform.multiplierSaved': 'Top-up yield updated',
   'platform.multiplierFailed': 'Failed to update top-up yield',

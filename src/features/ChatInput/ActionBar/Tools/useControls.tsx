@@ -57,6 +57,7 @@ import { useAgentId } from '../../hooks/useAgentId';
 import { useUpdateAgentConfig } from '../../hooks/useUpdateAgentConfig';
 import ComposioServerItem from './ComposioServerItem';
 import ComposioSkillIcon from './ComposioSkillIcon';
+import { formatSkillAuthor } from './formatSkillAuthor';
 import LobehubSkillIcon from './LobehubSkillIcon';
 import LobehubSkillServerItem from './LobehubSkillServerItem';
 import MarketAgentSkillPopoverContent from './MarketAgentSkillPopoverContent';
@@ -72,13 +73,6 @@ const officialTag = (
     <Tag color={'success'} icon={<Icon icon={BadgeCheck} />} size={'small'} />
   </Tooltip>
 );
-
-const formatSkillAuthor = (author?: string) => {
-  if (!author) return author;
-  if (author === 'LobeHub') return BRANDING_NAME;
-  if (author === 'LobeHub Market') return `${BRANDING_NAME} Market`;
-  return author;
-};
 
 const isOfficialSkillAuthor = (author?: string) => author === 'LobeHub' || author === BRANDING_NAME;
 

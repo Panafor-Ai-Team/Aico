@@ -38,7 +38,7 @@ lh acceptance run ingest "$REPORT_DIR" \
 # Re-verification — append a new immutable round to the same acceptance
 lh acceptance run ingest "$REPORT_DIR" --acceptance "$ACCEPTANCE_ID" --json
 
-# Existing LobeHub subject — group by a Task, Topic, or Document
+# Existing platform subject — group by a Task, Topic, or Document
 lh acceptance run ingest "$REPORT_DIR" --subject topic:tpc_xxx --json
 
 # B. atomic fallback — create the round first, then submit into it with --run
@@ -56,7 +56,7 @@ re-submit into the previous round to make it look green — publish the
 re-verification as the next round. The acceptance
 (`/acceptance/<acceptanceId>`) aggregates the rounds in order, so the repair
 history is the point, not something to hide. Reuse the same `--subject` across
-rounds for a LobeHub object, or pass `--acceptance <acceptanceId>` after an
+rounds for a platform object, or pass `--acceptance <acceptanceId>` after an
 external project's first standalone round.
 
 Before composing a repair round, read the aggregate:
@@ -118,7 +118,7 @@ supersedes? }`.
    Describe the durable goal of the whole acceptance, not this round's narrower
    implementation scope.
 
-   Inside a LobeHub topic, the command groups the round under the current topic.
+   Inside a platform topic, the command groups the round under the current topic.
    Outside one, it creates a standalone acceptance automatically; no Task ID is
    required. To publish a repair into that same history, add
    `--acceptance <acceptanceId>` using the ID printed by the first ingest. The

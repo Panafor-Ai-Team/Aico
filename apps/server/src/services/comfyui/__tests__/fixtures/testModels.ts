@@ -26,7 +26,7 @@ export const TEST_SDXL_MODELS = {
 } as const;
 
 // Custom SD model
-export const TEST_CUSTOM_SD = 'custom_sd_lobe.safetensors';
+export const TEST_CUSTOM_SD = 'custom_sd.safetensors';
 
 // Real component names from system components
 export const TEST_COMPONENTS = {

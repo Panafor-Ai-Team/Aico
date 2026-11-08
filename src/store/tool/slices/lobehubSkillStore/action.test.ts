@@ -1,3 +1,4 @@
+import { BRANDING_NAME } from '@lobechat/business-const';
 import type * as LobechatConstModule from '@lobechat/const';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
@@ -216,7 +217,7 @@ describe('lobehubSkillStore actions', () => {
 
       expect(callResult).toEqual({
         data: null,
-        error: 'LobeHub Skill call failed',
+        error: `${BRANDING_NAME} Skill call failed`,
         errorCode: undefined,
         success: false,
       });

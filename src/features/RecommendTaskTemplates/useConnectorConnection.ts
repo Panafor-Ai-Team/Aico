@@ -1,3 +1,4 @@
+import { BRANDING_NAME } from '@lobechat/business-const';
 import type { TaskTemplateConnectorReference } from '@lobechat/const';
 import { COMPOSIO_APP_TYPES } from '@lobechat/const';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -38,7 +39,7 @@ export class ConnectorConnectionPopupBlockedError extends Error {
 /** Thrown when connecting a LobeHub connector first needs Market auth. */
 export class ConnectorConnectionMarketAuthRequiredError extends Error {
   constructor() {
-    super('Market auth required before connecting LobeHub connector');
+    super(`Market auth required before connecting ${BRANDING_NAME} connector`);
     this.name = 'ConnectorConnectionMarketAuthRequiredError';
   }
 }

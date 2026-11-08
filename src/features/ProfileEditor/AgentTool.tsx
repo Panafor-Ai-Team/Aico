@@ -17,6 +17,7 @@ import ComposioServerItem from '@/features/ChatInput/ActionBar/Tools/ComposioSer
 import ComposioSkillIcon, {
   SKILL_ICON_SIZE,
 } from '@/features/ChatInput/ActionBar/Tools/ComposioSkillIcon';
+import { formatSkillAuthor } from '@/features/ChatInput/ActionBar/Tools/formatSkillAuthor';
 import LobehubSkillIcon from '@/features/ChatInput/ActionBar/Tools/LobehubSkillIcon';
 import LobehubSkillServerItem from '@/features/ChatInput/ActionBar/Tools/LobehubSkillServerItem';
 import MarketAgentSkillPopoverContent from '@/features/ChatInput/ActionBar/Tools/MarketAgentSkillPopoverContent';
@@ -311,7 +312,7 @@ const AgentTool = memo<AgentToolProps>(
                 <ToolItemDetailPopover
                   icon={<ComposioSkillIcon icon={type.icon} label={type.label} size={36} />}
                   identifier={type.identifier}
-                  sourceLabel={type.author}
+                  sourceLabel={formatSkillAuthor(type.author)}
                   title={type.label}
                   description={t(`tools.composio.servers.${type.identifier}.description` as any, {
                     defaultValue: type.description,
@@ -347,7 +348,7 @@ const AgentTool = memo<AgentToolProps>(
                 <ToolItemDetailPopover
                   icon={<LobehubSkillIcon icon={provider.icon} label={provider.label} size={36} />}
                   identifier={provider.id}
-                  sourceLabel={provider.author}
+                  sourceLabel={formatSkillAuthor(provider.author)}
                   title={provider.label}
                   description={t(`tools.lobehubSkill.providers.${provider.id}.description` as any, {
                     defaultValue: provider.description,

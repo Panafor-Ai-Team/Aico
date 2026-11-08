@@ -78,7 +78,7 @@ const reconcile = async (db: LobeChatDatabase): Promise<ReconcileResult> => {
       cooldownMs: ALERT_COOLDOWN_MS,
       dedupeKey: 'ledger:reconcile',
       severity: alert,
-      summary: `Shared CVC account spent ${upstream} raw µUSD in ${Math.round(windowMs / 60_000)} min; the usage ledger charged ${ledgerSpend}`,
+      summary: `Shared gateway account spent ${upstream} raw µUSD in ${Math.round(windowMs / 60_000)} min; the usage ledger charged ${ledgerSpend}`,
       type: 'billing_ledger',
     }).catch(() => null);
   }

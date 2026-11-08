@@ -45,7 +45,7 @@ import {
 import type { OpenRouterKeyLimitReset, OpenRouterManagementClient } from './management';
 
 const MISSING_PERIOD_COUNTER =
-  'OpenRouter reported no period usage counter for this budget; usage held at the last settled value';
+  'The gateway reported no period usage counter for this budget; usage held at the last settled value';
 
 /**
  * Thrown into `getUserRemaining`'s degraded path when a provider that reports
@@ -57,7 +57,7 @@ const MANAGED_KEY_LIMIT_UNKNOWN =
   'Managed key has no recorded mint-time limit; spend cannot be derived from the remaining allowance';
 
 const STALE_MANAGED_KEY =
-  'Wallet carries a placeholder OpenRouter key id; usage cannot be read and is held at the last settled value';
+  'Wallet carries a placeholder gateway key id; usage cannot be read and is held at the last settled value';
 
 const FROZEN_READ_NO_REMAINING =
   'managed key freeze returned no remaining; cannot settle the period';

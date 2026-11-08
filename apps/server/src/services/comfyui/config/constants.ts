@@ -94,8 +94,8 @@ export const SUPPORTED_MODEL_FORMATS = [
  * Fixed model and VAE filenames for custom SD models
  */
 export const CUSTOM_SD_CONFIG = {
-  MODEL_FILENAME: 'custom_sd_lobe.safetensors', // Both custom models use same file
-  VAE_FILENAME: 'custom_sd_vae_lobe.safetensors', // Optional VAE file
+  MODEL_FILENAME: 'custom_sd.safetensors', // Both custom models use same file
+  VAE_FILENAME: 'custom_sd_vae.safetensors', // Optional VAE file
 } as const;
 
 /**

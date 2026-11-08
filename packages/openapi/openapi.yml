@@ -952,15 +952,15 @@ components:
       scheme: bearer
       type: http
 info:
-  title: LobeHub API
-  description: LobeHub platform REST API. Generated from `packages/openapi` routes
-    — do not edit openapi.yml by hand; run `bun generate:openapi` instead.
+  title: REST API
+  description: Platform REST API. Generated from `packages/openapi` routes — do
+    not edit openapi.yml by hand; run `bun generate:openapi` instead.
   version: 1.0.0
 security:
   - bearerAuth: []
 servers:
-  - description: LobeHub Cloud
-    url: https://app.lobehub.com
+  - description: This deployment
+    url: /
 paths:
   /api/v1/health:
     get:

@@ -1,3 +1,4 @@
+import { BRANDING_NAME } from '@lobechat/business-const';
 import { and, eq, getTableColumns, type SQL } from 'drizzle-orm';
 
 import type { MessengerAccountLinkItem, NewMessengerAccountLink } from '../schemas';
@@ -73,7 +74,7 @@ export class MessengerAccountLinkConflictError extends Error {
   readonly existingUserId: string;
 
   constructor(existingUserId: string, message?: string) {
-    super(message ?? 'IM identity is already linked to another LobeHub user');
+    super(message ?? `IM identity is already linked to another ${BRANDING_NAME} user`);
     this.name = 'MessengerAccountLinkConflictError';
     this.existingUserId = existingUserId;
   }
@@ -136,7 +137,7 @@ export class MessengerAccountLinkModel {
     if (claimed && claimed.userId !== this.userId) {
       throw new MessengerAccountLinkConflictError(
         claimed.userId,
-        'Credential application is already linked to another LobeHub user',
+        `Credential application is already linked to another ${BRANDING_NAME} user`,
       );
     }
     throw new MessengerAccountLinkRelinkRequiredError();

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { BRANDING_NAME } from '@lobechat/business-const';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TelegramApi } from '@/server/services/bot/platforms/telegram/api';
@@ -125,7 +126,7 @@ describe('MessengerTelegramBinder.handleUnlinkedMessage', () => {
     expect(sendMessageWithUrlButton).toHaveBeenCalledTimes(1);
     const [chatId, text, button] = sendMessageWithUrlButton.mock.calls[0];
     expect(chatId).toBe('C_DM');
-    expect(text).toContain('Welcome to LobeHub');
+    expect(text).toContain(`Welcome to ${BRANDING_NAME}`);
     expect(button.text).toContain('Link Account');
     expect(button.url).toContain('https://app.example.com/verify-im');
     expect(button.url).toContain('im_type=telegram');

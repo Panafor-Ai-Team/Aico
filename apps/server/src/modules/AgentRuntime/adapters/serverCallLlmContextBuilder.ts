@@ -9,6 +9,7 @@ import {
   resolveAvailableComposioServices,
 } from '@lobechat/builtin-tool-creds';
 import { builtinTools } from '@lobechat/builtin-tools';
+import { BRANDING_NAME } from '@lobechat/business-const';
 import { AGENT_PLAN_FILE_TYPE, COMPOSIO_APP_TYPES } from '@lobechat/const';
 import type {
   AgentBuilderContext,
@@ -529,7 +530,7 @@ const buildServerCallLlmContextInner = async ({
             );
             for (const tool of COMPOSIO_APP_TYPES) {
               officialTools.push({
-                description: `LobeHub Mcp Server: ${tool.label}`,
+                description: `${BRANDING_NAME} Mcp Server: ${tool.label}`,
                 enabled: enabledPlugins.includes(tool.identifier),
                 identifier: tool.identifier,
                 installed: connectedComposioIds.has(tool.identifier),
@@ -631,7 +632,7 @@ const buildServerCallLlmContextInner = async ({
             );
             for (const tool of COMPOSIO_APP_TYPES) {
               groupOfficialTools.push({
-                description: `LobeHub Mcp Server: ${tool.label}`,
+                description: `${BRANDING_NAME} Mcp Server: ${tool.label}`,
                 enabled: enabledPlugins.includes(tool.identifier),
                 identifier: tool.identifier,
                 installed: connectedComposioIds.has(tool.identifier),

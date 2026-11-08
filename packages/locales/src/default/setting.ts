@@ -714,11 +714,11 @@ export default {
   'notification.email.desc': 'Receive email notifications when important events occur',
   'notification.im.banner.platformUnlinked': '{{platform}} is not linked yet',
   'notification.im.desc':
-    'Deliver notifications to your linked messenger (Telegram, Discord, Slack, or WeChat) via the LobeHub bot',
+    'Deliver notifications to your linked messenger (Telegram, Discord, Slack, or WeChat) via the {{appName}} bot',
   'notification.im.linkAccount': 'Link account',
   'notification.im.title': 'Messenger Notifications',
   'notification.im.platform.desc':
-    'Deliver notifications to your {{platform}} DM via the LobeHub bot',
+    'Deliver notifications to your {{platform}} DM via the {{appName}} bot',
   'notification.im.platform.enable': 'Enable {{platform}} notifications',
   'notification.im.platform.viewSetup': 'View setup',
   'notification.email.title': 'Email Notifications',
@@ -815,7 +815,7 @@ export default {
   'settingAgent.artwork.studio.generateHint':
     "Pick a style and we'll create an avatar from this Agent's profile.",
   'settingAgent.artwork.studio.generateTitle': 'Generate with AI',
-  'settingAgent.artwork.studio.lobeStyle': 'Lobe official style',
+  'settingAgent.artwork.studio.lobeStyle': '{{appName}} official style',
   'settingAgent.artwork.studio.moreStyles': 'More styles',
   'settingAgent.artwork.studio.noModel':
     'Enable an image generation model to use one-click generation.',
@@ -1340,7 +1340,7 @@ When I am ___, I need ___
   'startConversation': 'Start Conversation',
   'storage.actions.transfer.button': 'Move to...',
   'storage.actions.transfer.desc':
-    'Move agents and their data to another Workspace or your personal account. The originals leave the current space. LobeAI cannot be moved; copy it instead.',
+    'Move agents and their data to another Workspace or your personal account. The originals leave the current space. {{appName}} AI cannot be moved; copy it instead.',
   'storage.actions.transfer.title': 'Move Agents',
   'storage.actions.transferAgentGroups.button': 'Move to...',
   'storage.actions.transferAgentGroups.desc':
@@ -2411,7 +2411,7 @@ When I am ___, I need ___
   'workspace.general.devReset.confirm.title': 'Rerun setup wizard?',
   'workspace.general.devReset.cta': 'Rerun setup',
   'workspace.general.devReset.description':
-    'Reopens the setup wizard so you can revise LobeAI, pick new scenarios, or invite more teammates. Your existing settings and data are kept.',
+    'Reopens the setup wizard so you can revise {{appName}} AI, pick new scenarios, or invite more teammates. Your existing settings and data are kept.',
   'workspace.general.devReset.failed': 'Could not reopen setup wizard',
   'workspace.general.devReset.hint': '',
   'workspace.general.devReset.success': 'Setup wizard reopened',
@@ -3030,7 +3030,7 @@ When I am ___, I need ___
   'workspace.onboarding.finish': 'Finish',
   'workspace.onboarding.skipConfirm.title': 'Skip workspace setup?',
   'workspace.onboarding.skipConfirm.description':
-    'You can always customize LobeAI and add agents later in Workspace settings.',
+    'You can always customize {{appName}} AI and add agents later in Workspace settings.',
   'workspace.onboarding.skipConfirm.ok': 'Skip',
   'workspace.onboarding.skipConfirm.cancel': 'Continue setup',
   'workspace.onboarding.toast.saved': 'Saved',
@@ -3058,7 +3058,7 @@ When I am ___, I need ___
   'workspace.onboarding.step1.guide.growTogether.desc':
     "Every conversation teaches me your team's vibe — the longer we work together, the better.",
   'workspace.onboarding.step1.footer':
-    "Set up your workspace's LobeAI assistant — it learns from every conversation and grows into your team's go-to teammate.",
+    "Set up your workspace's {{appName}} AI assistant — it learns from every conversation and grows into your team's go-to teammate.",
   'workspace.onboarding.step1.sentence.1': "Ready? Let me be your team's go-to teammate.",
   'workspace.onboarding.step1.sentence.2': 'What role do you want me to play in this workspace?',
   'workspace.onboarding.step1.sentence.3': 'First, give me a name your team will love :)',
@@ -3251,8 +3251,8 @@ When I am ___, I need ___
   'tools.builtins.lobe-agent-management.description': 'Create, manage, and orchestrate AI agents',
   'tools.builtins.lobe-agent-management.title': 'Agent Management',
   'tools.builtins.lobe-agent.description':
-    'Built-in Lobe Agent capabilities: plan and todo management, sub-agent dispatch, and multimodal media analysis',
-  'tools.builtins.lobe-agent.title': 'Lobe Agent',
+    'Built-in {{appName}} Agent capabilities: plan and todo management, sub-agent dispatch, and multimodal media analysis',
+  'tools.builtins.lobe-agent.title': '{{appName}} Agent',
   'tools.builtins.lobe-brief.description':
     'Report progress, deliver results, and request user decisions',
   'tools.builtins.lobe-brief.title': 'Brief Tools',
