@@ -2,13 +2,14 @@
 
 ## Cron / worker entrypoints
 
-| Job             | Interval      | Entrypoint                                                       |
-| --------------- | ------------- | ---------------------------------------------------------------- |
-| Due renewals    | every 1–5 min | `GET /api/aico/cron/process-renewals` → `processDueRenewals(db)` |
-| Key outbox      | every 1 min   | `GET /api/aico/cron/process-key-outbox` → `processKeyOutbox(db)` |
-| Usage sync      | every 15 min  | sync active member keys                                          |
-| Daily reconcile | daily         | full org usage vs OR usage                                       |
-| Master monitor  | every 15 min  | update `aico_master_monitor_state`                               |
+| Job             | Interval      | Entrypoint                                                                      |
+| --------------- | ------------- | ------------------------------------------------------------------------------- |
+| Due renewals    | every 1–5 min | `GET /api/aico/cron/process-renewals` → `processDueRenewals(db)`                |
+| Key outbox      | every 1 min   | `GET /api/aico/cron/process-key-outbox` → `processKeyOutbox(db)`                |
+| Usage sync      | every 15 min  | sync active member keys                                                         |
+| Daily reconcile | daily         | full org usage vs OR usage                                                      |
+| Master monitor  | every 15 min  | update `aico_master_monitor_state`                                              |
+| Scheduled tasks | every 1 min   | `GET /api/aico/cron/dispatch-scheduled-tasks` → `dispatchDueScheduledTasks(db)` |
 
 Auth for Aico crons: `Authorization: Bearer $CRON_SECRET`.
 
@@ -22,6 +23,12 @@ Production runs every Aico job from the **`panachat` user's crontab** on the app
 */5 * * * *  aico-cron ledger-maintenance
 */15 * * * * aico-cron reconcile
 0 */6 * * *  aico-cron sync-openrouter-models
+```
+
+**Still to add on the host (owner):** the scheduled-task sweep. Without it, agent tasks with a cron schedule ("do this tomorrow at 10:00", "every day at 9:00") are saved but never run, because the upstream trigger is a QStash Schedule that this deployment does not have.
+
+```cron
+*   * * * *  aico-cron dispatch-scheduled-tasks
 ```
 
 Check it with `crontab -l -u panachat`. `crontab -l` as root shows nothing, so don't read an empty root crontab as "not scheduled".
@@ -40,6 +47,10 @@ curl -fsS -H "Authorization: Bearer $CRON_SECRET" \
 # Key outbox — every minute
 curl -fsS -H "Authorization: Bearer $CRON_SECRET" \
   "https://<host>/api/aico/cron/process-key-outbox"
+
+# Scheduled agent tasks — every minute
+curl -fsS -H "Authorization: Bearer $CRON_SECRET" \
+  "https://<host>/api/aico/cron/dispatch-scheduled-tasks"
 ```
 
 Example crontab:
@@ -48,7 +59,10 @@ Example crontab:
 */5 * * * * curl -fsS -H "Authorization: Bearer ${CRON_SECRET}" "https://<host>/api/aico/cron/process-renewals"
 *   * * * * curl -fsS -H "Authorization: Bearer ${CRON_SECRET}" "https://<host>/api/aico/cron/process-key-outbox"
 0 */6 * * * curl -fsS -H "Authorization: Bearer ${CRON_SECRET}" "https://<host>/api/aico/cron/sync-openrouter-models"
+*   * * * * curl -fsS -H "Authorization: Bearer ${CRON_SECRET}" "https://<host>/api/aico/cron/dispatch-scheduled-tasks"
 ```
+
+The scheduled-task sweep matches each task's cron pattern within a 5-minute window and skips tasks that already ran for that slot, so a one-minute cadence never runs a task twice. It returns 207 when some due tasks failed to start.
 
 The 6-hourly catalog sync refreshes CheapVibeCode per-model multipliers (`/v1/models`), which the
 usage ledger prices with. A sync that returns under half the current chat models, or no priced chat
