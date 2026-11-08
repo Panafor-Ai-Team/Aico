@@ -290,6 +290,7 @@ export const parseMemoryExtractionConfig = (): MemoryExtractionPrivateConfig => 
   const featureFlags = {
     enableBenchmarkLoCoMo: process.env.MEMORY_USER_MEMORY_FEATURE_FLAG_BENCHMARK_LOCOMO === 'true',
   };
+  // Topics the in-server runner (`extractLocalRunner`) extracts at once; default 5 there.
   const concurrencyRaw = process.env.MEMORY_USER_MEMORY_CONCURRENCY;
   const concurrency =
     concurrencyRaw !== undefined
