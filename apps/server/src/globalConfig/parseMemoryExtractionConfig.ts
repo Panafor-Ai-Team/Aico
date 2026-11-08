@@ -182,26 +182,32 @@ const parseLayerExtractorAgent = (fallbackModel: string): MemoryLayerExtractorCo
   };
 };
 
+/**
+ * Embeddings default to `DEFAULT_USER_MEMORY_EMBEDDING_MODEL_ITEM` (OpenRouter), not to
+ * the layer extractor's provider: the managed chat gateway (CheapVibeCode) serves no
+ * embeddings route, so inheriting its provider and chat model made every memory
+ * embedding 404. Only the `MEMORY_USER_MEMORY_EMBEDDING_*` env overrides the default.
+ */
 const parseEmbeddingAgent = (
-  fallbackModel: string,
-  fallbackProvider: string,
-  fallbackApiKey?: string,
+  credentialSources: { apiKey?: string; provider?: string }[],
 ): MemoryAgentConfig => {
   const { model: defaultModel, provider: defaultProvider } =
     DEFAULT_USER_MEMORY_EMBEDDING_MODEL_ITEM;
-  const model = process.env.MEMORY_USER_MEMORY_EMBEDDING_MODEL || fallbackModel || defaultModel;
+  const model = process.env.MEMORY_USER_MEMORY_EMBEDDING_MODEL || defaultModel;
   const provider =
-    process.env.MEMORY_USER_MEMORY_EMBEDDING_PROVIDER ||
-    fallbackProvider ||
-    defaultProvider ||
-    DEFAULT_MINI_PROVIDER;
+    process.env.MEMORY_USER_MEMORY_EMBEDDING_PROVIDER || defaultProvider || DEFAULT_MINI_PROVIDER;
+  // Reuse another agent's key only when it belongs to the same provider; otherwise a
+  // chat-gateway key would be sent to the embedding provider.
+  const sharedApiKey = credentialSources.find(
+    (source) => source.apiKey && source.provider === provider,
+  )?.apiKey;
 
   return {
     // Embeddings stay on OpenRouter while chat runs on another gateway; its key is
     // a dedicated one (see `initEmbeddingRuntimeFromDB`).
     apiKey:
       process.env.MEMORY_USER_MEMORY_EMBEDDING_API_KEY ??
-      fallbackApiKey ??
+      sharedApiKey ??
       (provider === 'openrouter' ? process.env.AICO_EMBEDDING_OPENROUTER_API_KEY : undefined),
     baseURL: process.env.MEMORY_USER_MEMORY_EMBEDDING_BASE_URL,
     // Embedding providers often have a smaller per-input limit than chat models.
@@ -279,11 +285,7 @@ export const parseMemoryExtractionConfig = (): MemoryExtractionPrivateConfig => 
   const agentBenchmarkLoCoMo = parseBenchmarkLoCoMoAgent(agentGateKeeper);
   const agentLayerExtractor = parseLayerExtractorAgent(agentGateKeeper.model);
   const agentPersonaWriter = parsePersonaWriterAgent(agentGateKeeper.model);
-  const embedding = parseEmbeddingAgent(
-    agentLayerExtractor.model,
-    agentLayerExtractor.provider || DEFAULT_MINI_PROVIDER,
-    agentGateKeeper.apiKey || agentLayerExtractor.apiKey,
-  );
+  const embedding = parseEmbeddingAgent([agentGateKeeper, agentLayerExtractor]);
   const extractorObservabilityS3 = parseExtractorAgentObservabilityS3();
   const featureFlags = {
     enableBenchmarkLoCoMo: process.env.MEMORY_USER_MEMORY_FEATURE_FLAG_BENCHMARK_LOCOMO === 'true',

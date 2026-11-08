@@ -1,3 +1,4 @@
+import { DEFAULT_EMBEDDING_MODEL } from '@lobechat/const';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { parseMemoryExtractionConfig } from './parseMemoryExtractionConfig';
@@ -72,5 +73,67 @@ describe('parseMemoryExtractionConfig runner', () => {
     process.env.QSTASH_TOKEN = 'rejected-token';
 
     expect(parseMemoryExtractionConfig().runner).toBe('local');
+  });
+});
+
+describe('parseMemoryExtractionConfig embedding agent', () => {
+  const KEYS = [
+    'AICO_EMBEDDING_OPENROUTER_API_KEY',
+    'MEMORY_USER_MEMORY_EMBEDDING_API_KEY',
+    'MEMORY_USER_MEMORY_EMBEDDING_MODEL',
+    'MEMORY_USER_MEMORY_EMBEDDING_PROVIDER',
+    'MEMORY_USER_MEMORY_GATEKEEPER_API_KEY',
+    'MEMORY_USER_MEMORY_LAYER_EXTRACTOR_API_KEY',
+    'MEMORY_USER_MEMORY_LAYER_EXTRACTOR_MODEL',
+    'MEMORY_USER_MEMORY_LAYER_EXTRACTOR_PROVIDER',
+  ] as const;
+  const original = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
+
+  afterEach(() => {
+    for (const key of KEYS) {
+      if (original[key] === undefined) delete process.env[key];
+      else process.env[key] = original[key];
+    }
+  });
+
+  const useChatGatewayExtractor = () => {
+    for (const key of KEYS) delete process.env[key];
+    // The chat gateway (CheapVibeCode) serves no embeddings route.
+    process.env.MEMORY_USER_MEMORY_LAYER_EXTRACTOR_PROVIDER = 'cheapvibecode';
+    process.env.MEMORY_USER_MEMORY_LAYER_EXTRACTOR_MODEL = 'glm-5.3-flash';
+  };
+
+  it('keeps embeddings on the embedding default instead of the layer extractor provider', () => {
+    useChatGatewayExtractor();
+    process.env.AICO_EMBEDDING_OPENROUTER_API_KEY = 'embedding-key';
+
+    const { embedding } = parseMemoryExtractionConfig();
+
+    expect(embedding.provider).toBe('openrouter');
+    expect(embedding.model).toBe(DEFAULT_EMBEDDING_MODEL);
+    expect(embedding.apiKey).toBe('embedding-key');
+  });
+
+  it('does not send the layer extractor key to a different embedding provider', () => {
+    useChatGatewayExtractor();
+    process.env.MEMORY_USER_MEMORY_LAYER_EXTRACTOR_API_KEY = 'gateway-key';
+    process.env.AICO_EMBEDDING_OPENROUTER_API_KEY = 'embedding-key';
+
+    expect(parseMemoryExtractionConfig().embedding.apiKey).toBe('embedding-key');
+  });
+
+  it('lets the embedding env override provider and model', () => {
+    useChatGatewayExtractor();
+    process.env.MEMORY_USER_MEMORY_EMBEDDING_PROVIDER = 'openai';
+    process.env.MEMORY_USER_MEMORY_EMBEDDING_MODEL = 'text-embedding-3-small';
+    process.env.MEMORY_USER_MEMORY_LAYER_EXTRACTOR_PROVIDER = 'openai';
+    process.env.MEMORY_USER_MEMORY_LAYER_EXTRACTOR_API_KEY = 'openai-key';
+
+    const { embedding } = parseMemoryExtractionConfig();
+
+    expect(embedding.provider).toBe('openai');
+    expect(embedding.model).toBe('text-embedding-3-small');
+    // Same provider as the layer extractor, so its key is reused.
+    expect(embedding.apiKey).toBe('openai-key');
   });
 });
