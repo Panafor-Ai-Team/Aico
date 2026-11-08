@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 
-import { OFFICIAL_DEVICE_GATEWAY_URL } from '@lobechat/const/url';
 import type {
   EnrollWorkspaceParams,
   EnrollWorkspaceResult,
@@ -30,7 +29,7 @@ import { ServiceModule } from './index';
 
 const logger = createLogger('services:GatewayConnectionSrv');
 
-const DEFAULT_GATEWAY_URL = OFFICIAL_DEVICE_GATEWAY_URL;
+const GATEWAY_NOT_CONFIGURED_ERROR = 'Device gateway is not configured';
 
 /**
  * Result envelope a tool-call handler must return. Mirrors
@@ -296,6 +295,11 @@ export default class GatewayConnectionService extends ServiceModule {
     return this.status;
   }
 
+  /** Whether a device gateway URL is set; without one the gateway feature is unavailable. */
+  isConfigured(): boolean {
+    return !!this.getGatewayUrl();
+  }
+
   getDeviceInfo() {
     return {
       deviceId: this.getDeviceId(),
@@ -335,6 +339,12 @@ export default class GatewayConnectionService extends ServiceModule {
       this.client = null;
     }
 
+    const gatewayUrl = this.getGatewayUrl();
+    if (!gatewayUrl) {
+      logger.info('Skipping connect: no device gateway URL configured');
+      return { error: GATEWAY_NOT_CONFIGURED_ERROR, success: false };
+    }
+
     if (!this.tokenProvider) {
       logger.warn('Cannot connect: no token provider configured');
       return { error: 'No token provider configured', success: false };
@@ -346,7 +356,6 @@ export default class GatewayConnectionService extends ServiceModule {
       return { error: 'No access token available', success: false };
     }
 
-    const gatewayUrl = this.getGatewayUrl();
     const userId = this.extractUserIdFromToken(token);
     logger.info(`Connecting to device gateway: ${gatewayUrl}, userId: ${userId || 'unknown'}`);
 
@@ -511,6 +520,9 @@ export default class GatewayConnectionService extends ServiceModule {
     workspaceId: string,
     token: string,
   ): Promise<EnrollWorkspaceResult> {
+    const gatewayUrl = this.getGatewayUrl();
+    if (!gatewayUrl) throw new Error(GATEWAY_NOT_CONFIGURED_ERROR);
+
     // Re-enroll replaces the previous share connection instead of stacking one.
     await this.closeWorkspaceClient(workspaceId);
 
@@ -524,7 +536,7 @@ export default class GatewayConnectionService extends ServiceModule {
       // predecessor, never the personal socket.
       connectionId: this.getConnectionId(),
       deviceId: identity.deviceId,
-      gatewayUrl: this.getGatewayUrl(),
+      gatewayUrl,
       logger,
       token,
       userAgent: getDesktopUserAgent(),
@@ -892,13 +904,12 @@ export default class GatewayConnectionService extends ServiceModule {
 
   // ─── Gateway URL ───
 
-  private getGatewayUrl(): string {
-    // Env override wins (dev: point at a local `wrangler dev` gateway), then the
-    // user-configured store value, then the production default.
+  private getGatewayUrl(): string | undefined {
+    // Env override wins (build-time / dev: point at a local `wrangler dev` gateway),
+    // then the user-configured store value. There is no hosted default: Panachat
+    // does not run a device gateway, so without a URL the gateway stays off.
     return (
-      getDesktopEnv().DEVICE_GATEWAY_URL ||
-      this.app.storeManager.get('gatewayUrl') ||
-      DEFAULT_GATEWAY_URL
+      getDesktopEnv().DEVICE_GATEWAY_URL || this.app.storeManager.get('gatewayUrl') || undefined
     );
   }
 

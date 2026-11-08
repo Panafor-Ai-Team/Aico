@@ -12,7 +12,12 @@ import semver from 'semver';
 
 import { isDev, isWindows } from '@/const/env';
 import { getDesktopEnv } from '@/env';
-import { UPDATE_CHANNEL, UPDATE_SERVER_URL, updaterConfig } from '@/modules/updater/configs';
+import {
+  GITHUB_UPDATE_REPO,
+  UPDATE_CHANNEL,
+  UPDATE_SERVER_URL,
+  updaterConfig,
+} from '@/modules/updater/configs';
 import { extractRestoreRoute } from '@/modules/updater/utils';
 import { createLogger } from '@/utils/logger';
 
@@ -428,15 +433,15 @@ export class UpdaterManager {
         url: feedUrl,
       });
     } else {
-      // Fallback to GitHub when no S3 URL configured (local dev)
+      // Without UPDATE_SERVER_URL, releases come from GitHub Releases on the Panachat repo
       logger.info(
-        `No UPDATE_SERVER_URL configured, falling back to GitHub provider for ${this.currentChannel} channel`,
+        `No UPDATE_SERVER_URL configured, using GitHub provider (${GITHUB_UPDATE_REPO.owner}/${GITHUB_UPDATE_REPO.repo}) for ${this.currentChannel} channel`,
       );
 
       autoUpdater.setFeedURL({
-        owner: 'lobehub',
+        owner: GITHUB_UPDATE_REPO.owner,
         provider: 'github',
-        repo: 'lobehub',
+        repo: GITHUB_UPDATE_REPO.repo,
       });
 
       autoUpdater.allowPrerelease = this.currentChannel !== 'stable';

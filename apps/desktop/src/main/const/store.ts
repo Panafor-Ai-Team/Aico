@@ -30,8 +30,9 @@ export const STORE_DEFAULTS: ElectronMainStore = {
   dataSyncConfig: { storageMode: 'cloud' },
   encryptedTokens: {},
   gatewayDeviceId: '',
-  gatewayEnabled: true,
-  gatewayUrl: 'https://device-gateway.lobehub.com',
+  // Off by default: there is no Panachat device gateway unless DEVICE_GATEWAY_URL is set.
+  gatewayEnabled: false,
+  gatewayUrl: '',
   gatewayWorkspaceEnrollments: [],
   heteroSessionDirPrefs: {},
   heteroTracingEnabled: false,

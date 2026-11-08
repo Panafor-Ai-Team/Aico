@@ -294,6 +294,8 @@ let mockGatewayConnectionSrv: GatewayConnectionService;
 
 // ─── Test Suite ───
 
+const TEST_GATEWAY_URL = 'https://gateway.test';
+
 describe('GatewayConnectionCtr', () => {
   let ctr: GatewayConnectionCtr;
 
@@ -304,6 +306,7 @@ describe('GatewayConnectionCtr', () => {
     MockGatewayClient.lastOptions = null;
     mockStoreGet.mockImplementation((key: string) => {
       if (key === 'gatewayEnabled') return true;
+      if (key === 'gatewayUrl') return TEST_GATEWAY_URL;
       return undefined;
     });
 
@@ -324,7 +327,7 @@ describe('GatewayConnectionCtr', () => {
       mockStoreGet.mockImplementation((key: string) => {
         if (key === 'gatewayEnabled') return true;
         if (key === 'gatewayDeviceId') return 'stored-device-id';
-        if (key === 'gatewayUrl') return undefined;
+        if (key === 'gatewayUrl') return TEST_GATEWAY_URL;
         return undefined;
       });
 
@@ -336,9 +339,9 @@ describe('GatewayConnectionCtr', () => {
       expect(options).not.toBeNull();
       expect(options.token).toBe('mock-access-token');
       expect(options.deviceId).toBe('stored-device-id');
-      expect(options.gatewayUrl).toBe('https://device-gateway.lobehub.com');
+      expect(options.gatewayUrl).toBe(TEST_GATEWAY_URL);
       expect(options.logger).toBeDefined();
-      expect(options.userAgent).toBe('LobeHub Desktop/1.2.3');
+      expect(options.userAgent).toBe('Panachat Desktop/1.2.3');
     });
 
     it('should use custom gateway URL from store when set', async () => {
@@ -353,6 +356,26 @@ describe('GatewayConnectionCtr', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(MockGatewayClient.lastOptions.gatewayUrl).toBe('http://localhost:8787');
+    });
+
+    it('should not connect anywhere when no gateway URL is configured', async () => {
+      // Panachat runs no hosted device gateway: without a URL nothing may reach
+      // device-gateway.lobehub.com (or any other host).
+      mockStoreGet.mockImplementation((key: string) => {
+        if (key === 'gatewayEnabled') return true;
+        return undefined;
+      });
+
+      ctr = new GatewayConnectionCtr(mockApp);
+      ctr.afterFirstFrame();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(MockGatewayClient.lastInstance).toBeNull();
+      expect(await ctr.connect()).toEqual({
+        error: 'Device gateway is not configured',
+        success: false,
+      });
+      expect(MockGatewayClient.lastInstance).toBeNull();
     });
 
     it('should return success:false when no access token', async () => {

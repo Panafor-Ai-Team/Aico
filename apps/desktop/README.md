@@ -102,6 +102,38 @@ production builds.
 | **Beta**    | Pre-release with new features    | 🟡 Medium | ✅ Yes       |
 | **Nightly** | Daily builds with latest changes | 🟠 Low    | ✅ Yes       |
 
+## 📦 Releasing Panachat Desktop
+
+Panachat ships unsigned stable builds for Windows, macOS and Linux through GitHub Releases on `Panafor-Ai-Team/Aico`. The in-app updater reads the same releases.
+
+**One-time setup** (repository Settings → Secrets and variables → Actions → Variables):
+
+| Variable                     | Required | Purpose                                                                                 |
+| ---------------------------- | -------- | --------------------------------------------------------------------------------------- |
+| `DESKTOP_SERVER_URL`         | Yes      | Panachat server the app connects to (the production `APP_URL`). Baked in at build time. |
+| `DESKTOP_DEVICE_GATEWAY_URL` | No       | Device gateway. Leave unset: the gateway stays off and its title-bar toggle is hidden.  |
+
+The server must have `JWKS_KEY` set: desktop sign-in uses the `lobehub-desktop` OIDC client, which is only enabled when it is present.
+
+**Release:**
+
+1. Actions → **Release Desktop Stable** → Run workflow.
+2. Enter the version (e.g. `1.0.0`). Leave **Publish the release** unticked for a test run: the release is created as a draft, which the updater ignores.
+3. Install and check the drafts, then publish the release in GitHub (or run again with **Publish the release** ticked).
+
+**Known limits:**
+
+- Unsigned builds: Windows SmartScreen and macOS Gatekeeper show warnings on install.
+- macOS does not auto-update unsigned apps; Mac users download each version by hand. Windows (NSIS) and Linux AppImage auto-update.
+- The updater reads the repository's **latest** GitHub release. If another workflow (e.g. `auto-tag-release.yml`) publishes a newer release without `latest*.yml` files, update checks fail until a desktop release is latest again.
+
+**Local Linux build:**
+
+```bash
+OFFICIAL_CLOUD_SERVER=https://your-server APP_URL=https://your-server npm run build:main
+npx electron-builder --linux AppImage --config electron-builder.mjs --publish never
+```
+
 ## 🛠 Technology Stack
 
 ### Core Framework

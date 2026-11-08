@@ -4,22 +4,25 @@ import type { McpSchema, ProtocolUrlParsed } from '../types/protocol';
 
 export type AppChannel = 'stable' | 'beta' | 'nightly';
 
+/** Base URL scheme registered by the desktop app (channel builds append `-beta`, `-nightly`, `-dev`). */
+export const PROTOCOL_SCHEME_BASE = 'panachat';
+
 export const getProtocolScheme = (): string => {
   // In Electron environment, version can be determined in multiple ways
   const bundleId = app.name;
   const appPath = app.getPath('exe');
 
   // Determine by bundle identifier
-  if (bundleId?.toLowerCase().includes('nightly')) return 'lobehub-nightly';
-  if (bundleId?.toLowerCase().includes('beta')) return 'lobehub-beta';
-  if (bundleId?.includes('dev')) return 'lobehub-dev';
+  if (bundleId?.toLowerCase().includes('nightly')) return `${PROTOCOL_SCHEME_BASE}-nightly`;
+  if (bundleId?.toLowerCase().includes('beta')) return `${PROTOCOL_SCHEME_BASE}-beta`;
+  if (bundleId?.includes('dev')) return `${PROTOCOL_SCHEME_BASE}-dev`;
 
   // Determine by executable file path
-  if (appPath?.toLowerCase().includes('nightly')) return 'lobehub-nightly';
-  if (appPath?.toLowerCase().includes('beta')) return 'lobehub-beta';
-  if (appPath?.includes('dev')) return 'lobehub-dev';
+  if (appPath?.toLowerCase().includes('nightly')) return `${PROTOCOL_SCHEME_BASE}-nightly`;
+  if (appPath?.toLowerCase().includes('beta')) return `${PROTOCOL_SCHEME_BASE}-beta`;
+  if (appPath?.includes('dev')) return `${PROTOCOL_SCHEME_BASE}-dev`;
 
-  return 'lobehub';
+  return PROTOCOL_SCHEME_BASE;
 };
 
 export const getVersionInfo = (): { channel: AppChannel; protocolScheme: string } => {
@@ -81,14 +84,14 @@ function validateMcpSchema(schema: any): schema is McpSchema {
 }
 
 /**
- * Parse lobehub:// protocol URL (supports multi-version protocols)
+ * Parse panachat:// protocol URL (supports multi-version protocols)
  *
  * Supported URL formats:
- * - lobehub://plugin/install?id=figma&schema=xxx&marketId=lobehub
- * - lobehub://plugin/configure?id=xxx&...
- * - lobehub-bet://plugin/install?id=figma&schema=xxx&marketId=lobehub
- * - lobehub-nightly://plugin/install?id=figma&schema=xxx&marketId=lobehub
- * - lobehub-dev://plugin/install?id=figma&schema=xxx&marketId=lobehub
+ * - panachat://plugin/install?id=figma&schema=xxx&marketId=lobehub
+ * - panachat://plugin/configure?id=xxx&...
+ * - panachat-beta://plugin/install?id=figma&schema=xxx&marketId=lobehub
+ * - panachat-nightly://plugin/install?id=figma&schema=xxx&marketId=lobehub
+ * - panachat-dev://plugin/install?id=figma&schema=xxx&marketId=lobehub
  *
  * @param url Protocol URL
  * @returns Parse result, including basic structure and all query parameters
@@ -98,13 +101,15 @@ export const parseProtocolUrl = (url: string): ProtocolUrlParsed | null => {
     const parsedUrl = new URL(url);
 
     // Support multiple protocol schemes
-    const validProtocols = ['lobehub:', 'lobehub-dev:', 'lobehub-nightly:', 'lobehub-beta:'];
+    const validProtocols = ['', '-dev', '-nightly', '-beta'].map(
+      (suffix) => `${PROTOCOL_SCHEME_BASE}${suffix}:`,
+    );
     if (!validProtocols.includes(parsedUrl.protocol)) {
       return null;
     }
 
     // For custom protocols, after URL parsing:
-    // lobehub://plugin/install -> hostname: "plugin", pathname: "/install"
+    // panachat://plugin/install -> hostname: "plugin", pathname: "/install"
     const urlType = parsedUrl.hostname; // "plugin"
     const pathParts = parsedUrl.pathname.split('/').filter(Boolean); // ["install"]
 
@@ -147,10 +152,10 @@ export function generateRFCProtocolUrl(params: {
   marketId?: string;
   /** MCP Schema object */
   schema: McpSchema;
-  /** Protocol scheme (default: lobehub) */
+  /** Protocol scheme (default: PROTOCOL_SCHEME_BASE) */
   scheme?: string;
 }): string {
-  const { id, schema, marketId, scheme = 'lobehub' } = params;
+  const { id, schema, marketId, scheme = PROTOCOL_SCHEME_BASE } = params;
 
   // Validate schema.identifier matches id
   if (schema.identifier !== id) {
@@ -205,6 +210,6 @@ export function generateRFCProtocolUrl(params: {
  *   },
  *   marketId: 'higress'
  * });
- * // Result: lobehub://plugin/install?id=edgeone-mcp&schema=%7B%22identifier%22%3A...&marketId=higress
+ * // Result: panachat://plugin/install?id=edgeone-mcp&schema=%7B%22identifier%22%3A...&marketId=higress
  * ```
  */

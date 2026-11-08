@@ -218,6 +218,11 @@ export default class GatewayConnectionCtr extends ControllerModule {
   }
 
   @IpcMethod()
+  async isConfigured(): Promise<boolean> {
+    return this.service.isConfigured();
+  }
+
+  @IpcMethod()
   async getConnectionStatus(): Promise<{ status: GatewayConnectionStatus }> {
     return { status: this.service.getStatus() };
   }

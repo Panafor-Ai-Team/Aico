@@ -65,6 +65,12 @@ export class ElectronGatewayActionImpl {
     );
   };
 
+  useFetchGatewayConfigured = (): SWRResponse<boolean> => {
+    return useSWR<boolean>('electron:isGatewayConfigured', async () =>
+      gatewayConnectionService.isConfigured(),
+    );
+  };
+
   useFetchGatewayStatus = (): SWRResponse<{ status: GatewayConnectionStatus }> => {
     return useSWR<{ status: GatewayConnectionStatus }>(
       'electron:getGatewayConnectionStatus',

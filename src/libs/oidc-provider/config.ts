@@ -17,7 +17,8 @@ export const defaultClients: ClientMetadata[] = [
     // Only supports authorization code flow
     grant_types: ['authorization_code', 'refresh_token'],
 
-    logo_uri: 'https://hub-apac-1.lobeobjects.space/lobehub-desktop-icon.png',
+    // Served by this app (public/app-icons) rather than LobeHub's CDN
+    logo_uri: urlJoin(appEnv.APP_URL!, '/app-icons/icon-512x512.png'),
 
     post_logout_redirect_uris: [
       // Dynamically construct web page callback URL
