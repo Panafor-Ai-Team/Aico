@@ -657,6 +657,12 @@ export interface TopicExtractionJob {
   from?: Date;
   layers: LayersEnum[];
   reportProgress?: boolean;
+  /**
+   * Run even when the topic is already marked extracted. Only for the identity pass
+   * of the same run: the first (CEPA) pass marks the topic completed, which would
+   * otherwise make the identity pass skip every topic.
+   */
+  skipExtractedCheck?: boolean;
   source: MemorySourceType;
   to?: Date;
   topicId: string;
@@ -1564,7 +1570,12 @@ export class MemoryExtractionExecutor {
               traceId: span.spanContext().traceId,
             };
           }
-          if (!job.forceAll && !job.forceTopics && isTopicExtracted(topic.metadata)) {
+          if (
+            !job.forceAll &&
+            !job.forceTopics &&
+            !job.skipExtractedCheck &&
+            isTopicExtracted(topic.metadata)
+          ) {
             span.setStatus({ code: SpanStatusCode.OK, message: 'already_extracted' });
             topicProcessed = true;
             return {

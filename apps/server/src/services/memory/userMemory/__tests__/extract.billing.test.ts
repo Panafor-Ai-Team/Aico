@@ -179,4 +179,46 @@ describe('MemoryExtractionExecutor billing', () => {
       );
     });
   });
+
+  describe('extractTopic already-extracted check', () => {
+    const job = {
+      layers: [],
+      source: MemorySourceType.ChatTopic,
+      topicId: 'topic-1',
+      userId: 'user-1',
+    };
+
+    const prepare = () => {
+      const executor = createExecutor('openrouter');
+      mocks.findFirst.mockResolvedValue({
+        createdAt: new Date('2026-01-01'),
+        id: 'topic-1',
+        // The first (CEPA) pass of the same run has just marked the topic completed.
+        metadata: { userMemoryExtractStatus: 'completed' },
+        updatedAt: new Date('2026-01-02'),
+        userId: 'user-1',
+      });
+      vi.spyOn(executor as any, 'getAiProviderRuntimeState').mockResolvedValue({});
+      vi.spyOn(executor as any, 'resolveRuntimeKeyVaults').mockResolvedValue({});
+      const getRuntime = vi.spyOn(executor as any, 'getRuntime').mockRejectedValue(fundsError());
+      return { executor, getRuntime };
+    };
+
+    it('skips a completed topic', async () => {
+      const { executor, getRuntime } = prepare();
+
+      const result = await executor.extractTopic(job);
+
+      expect(result).toMatchObject({ extracted: false });
+      expect(getRuntime).not.toHaveBeenCalled();
+    });
+
+    it('extracts a completed topic again when skipExtractedCheck is set', async () => {
+      const { executor, getRuntime } = prepare();
+
+      await executor.extractTopic({ ...job, skipExtractedCheck: true });
+
+      expect(getRuntime).toHaveBeenCalledTimes(1);
+    });
+  });
 });
