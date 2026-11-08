@@ -21,6 +21,12 @@ export interface IsExecutionTimeInput {
 
 const DAILY_PATTERN_HOUR_REGEX = /^\d+$/;
 
+/** `*` matches anything; otherwise a number or comma list must contain `value`. */
+const matchesListField = (field: string, value: number): boolean => {
+  if (field === '*') return true;
+  return field.split(',').some((part) => Number.parseInt(part.trim(), 10) === value);
+};
+
 /**
  * Decide whether a cron pattern is "due now" within a tolerance window.
  *
@@ -44,6 +50,8 @@ const DAILY_PATTERN_HOUR_REGEX = /^\d+$/;
  *   - `M H * * D[,D]`  — weekly on weekday list at H:M
  *   - `M *,M * * *`    — minute list (e.g. `0,15,30,45`)
  *   - `M H,H * * *`    — hour list
+ *   - `M H D Mo *`     — day-of-month / month (numbers or comma lists), e.g. a
+ *                        one-off "tomorrow at 10:00" written as `0 10 9 11 *`
  */
 export const isExecutionTime = (input: IsExecutionTimeInput): boolean => {
   const {
@@ -61,7 +69,7 @@ export const isExecutionTime = (input: IsExecutionTimeInput): boolean => {
 
   const parts = cronPattern.trim().split(/\s+/);
   if (parts.length !== 5) return false;
-  const [cronMinute, cronHour, , , cronWeekday] = parts;
+  const [cronMinute, cronHour, cronDay, cronMonth, cronWeekday] = parts;
 
   // ── Dedup against last execution ────────────────────────────────
   if (lastExecutedAt) {
@@ -96,6 +104,13 @@ export const isExecutionTime = (input: IsExecutionTimeInput): boolean => {
   }
 
   const weekday = localTime.day();
+  // Calendar fields (day-of-month, month, weekday) gate every path, including
+  // the daily catch-up below — otherwise a dated one-off pattern would be read
+  // as "every day" and fire on the wrong date.
+  const matchesCalendar =
+    matchesListField(cronDay, localTime.date()) &&
+    matchesListField(cronMonth, localTime.month() + 1) &&
+    matchesListField(cronWeekday, weekday);
 
   // ── Daily catch-up: scheduled hour passed today and we haven't run yet ──
   const isDailyPattern =
@@ -119,13 +134,7 @@ export const isExecutionTime = (input: IsExecutionTimeInput): boolean => {
       shouldCatchUp = hour > targetHour;
     }
 
-    if (shouldCatchUp) {
-      if (cronWeekday !== '*') {
-        const allowedWeekdays = cronWeekday.split(',').map((d) => Number.parseInt(d.trim(), 10));
-        if (!allowedWeekdays.includes(weekday)) return false;
-      }
-      return true;
-    }
+    if (shouldCatchUp) return matchesCalendar;
   }
 
   // ── Minute field ────────────────────────────────────────────────
@@ -159,11 +168,6 @@ export const isExecutionTime = (input: IsExecutionTimeInput): boolean => {
     }
   }
 
-  // ── Weekday field ───────────────────────────────────────────────
-  if (cronWeekday !== '*') {
-    const allowed = cronWeekday.split(',').map((d) => Number.parseInt(d.trim(), 10));
-    if (!allowed.includes(weekday)) return false;
-  }
-
-  return true;
+  // ── Day-of-month, month and weekday fields ──────────────────────
+  return matchesCalendar;
 };

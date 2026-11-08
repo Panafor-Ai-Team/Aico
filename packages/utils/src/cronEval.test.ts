@@ -176,6 +176,101 @@ describe('isExecutionTime', () => {
     });
   });
 
+  describe('day-of-month and month fields (one-off "tomorrow at 10:00")', () => {
+    // Bug: the matcher ignored the day-of-month and month fields, so a dated
+    // one-off pattern like `0 10 9 11 *` was treated as "daily at 10:00" and
+    // fired today — either at 10:00 or via the daily catch-up — instead of on
+    // the 9th of November.
+    const TEHRAN = 'Asia/Tehran';
+    const tehranLocal = (iso: string) => new Date(`${iso}+03:30`);
+
+    it('does NOT catch up today when the pattern is dated tomorrow', () => {
+      expect(
+        isExecutionTime({
+          cronPattern: '0 10 9 11 *',
+          currentTime: tehranLocal('2026-11-08T15:00:00'),
+          lastExecutedAt: null,
+          timezone: TEHRAN,
+        }),
+      ).toBe(false);
+    });
+
+    it('does NOT fire at the right hour on the wrong day', () => {
+      expect(
+        isExecutionTime({
+          cronPattern: '0 10 9 11 *',
+          currentTime: tehranLocal('2026-11-08T10:00:00'),
+          lastExecutedAt: null,
+          timezone: TEHRAN,
+        }),
+      ).toBe(false);
+    });
+
+    it('fires on the dated day within the tolerance window', () => {
+      expect(
+        isExecutionTime({
+          cronPattern: '0 10 9 11 *',
+          currentTime: tehranLocal('2026-11-09T10:02:00'),
+          lastExecutedAt: null,
+          timezone: TEHRAN,
+        }),
+      ).toBe(true);
+    });
+
+    it('catches up later on the dated day if the 10:00 tick was missed', () => {
+      expect(
+        isExecutionTime({
+          cronPattern: '0 10 9 11 *',
+          currentTime: tehranLocal('2026-11-09T13:00:00'),
+          lastExecutedAt: null,
+          timezone: TEHRAN,
+        }),
+      ).toBe(true);
+    });
+
+    it('does NOT fire in a different month on the same day-of-month', () => {
+      expect(
+        isExecutionTime({
+          cronPattern: '0 10 9 11 *',
+          currentTime: tehranLocal('2026-12-09T10:00:00'),
+          lastExecutedAt: null,
+          timezone: TEHRAN,
+        }),
+      ).toBe(false);
+    });
+
+    it('uses the local date, not the UTC date', () => {
+      // 2026-11-09 00:30 in Tehran is still 2026-11-08 in UTC.
+      expect(
+        isExecutionTime({
+          cronPattern: '30 0 9 11 *',
+          currentTime: tehranLocal('2026-11-09T00:30:00'),
+          lastExecutedAt: null,
+          timezone: TEHRAN,
+        }),
+      ).toBe(true);
+    });
+
+    it('accepts a comma list of days', () => {
+      expect(
+        isExecutionTime({
+          cronPattern: '0 9 1,15 * *',
+          currentTime: utc('2026-11-15T09:00:00'),
+          lastExecutedAt: null,
+          timezone: 'UTC',
+        }),
+      ).toBe(true);
+      expect(
+        isExecutionTime({
+          cronPattern: '0 9 1,15 * *',
+          currentTime: utc('2026-11-14T09:00:00'),
+          lastExecutedAt: null,
+          timezone: 'UTC',
+        }),
+      ).toBe(false);
+    });
+  });
+
   describe('null / first-run handling', () => {
     it('fires when there is no lastExecutedAt and clock matches', () => {
       expect(
