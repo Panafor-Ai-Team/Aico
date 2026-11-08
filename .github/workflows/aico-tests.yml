@@ -35,6 +35,11 @@ jobs:
         run: pnpm install --no-frozen-lockfile
         env:
           NODE_OPTIONS: --max-old-space-size=8192
+          # ffmpeg-static's install script downloads its binary from GitHub releases and
+          # fails the whole install on any 5xx (seen: 504s for over an hour on 2026-11-08).
+          # Nothing in this job runs ffmpeg (only generation/video does, at runtime), so
+          # point it at an existing file: the script then exits with "installed already".
+          FFMPEG_BIN: /usr/bin/true
 
       - name: Database models and migrations (PGlite, both journals)
         working-directory: packages/database
