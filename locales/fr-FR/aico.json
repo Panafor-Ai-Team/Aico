@@ -367,7 +367,7 @@
   "platform.multiplierActive": "Actif",
   "platform.multiplierCard": "Rendement de recharge",
   "platform.multiplierFailed": "Échec de la mise à jour du rendement",
-  "platform.multiplierHint": "Appliqué uniquement à la recharge : 1 $ achète moins de π (marge). Les prix des modèles et l’usage s’affichent en π aux taux CVC bruts — une valeur par fournisseur.",
+  "platform.multiplierHint": "Appliqué uniquement à la recharge : 1 $ achète moins de π (marge). Les prix des modèles et l’usage s’affichent en π aux taux bruts du fournisseur — une valeur par fournisseur.",
   "platform.multiplierLabel": "Multiplicateur",
   "platform.multiplierPreview": "1 $ crédite {{pi}} π.",
   "platform.multiplierSave": "Enregistrer le rendement",

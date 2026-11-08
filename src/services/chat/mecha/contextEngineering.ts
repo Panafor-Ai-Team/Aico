@@ -15,6 +15,7 @@ import { GroupAgentBuilderIdentifier } from '@lobechat/builtin-tool-group-agent-
 import { LobeAgentIdentifier } from '@lobechat/builtin-tool-lobe-agent';
 import { PageAgentIdentifier } from '@lobechat/builtin-tool-page-agent';
 import { WebOnboardingIdentifier } from '@lobechat/builtin-tool-web-onboarding';
+import { BRANDING_NAME } from '@lobechat/business-const';
 import {
   AGENT_PLAN_FILE_TYPE,
   COMPOSIO_APP_TYPES,
@@ -292,7 +293,7 @@ export const contextEngineering = async ({
             const server = allComposioServers.find((s) => s.identifier === composioType.identifier);
 
             officialTools.push({
-              description: `LobeHub Mcp Server: ${composioType.label}`,
+              description: `${BRANDING_NAME} Mcp Server: ${composioType.label}`,
               enabled: enabledPlugins.includes(composioType.identifier),
               identifier: composioType.identifier,
               installed: !!server,
@@ -314,7 +315,7 @@ export const contextEngineering = async ({
             const server = allLobehubSkillServers.find((s) => s.identifier === provider.id);
 
             officialTools.push({
-              description: `LobeHub Skill Provider: ${provider.label}`,
+              description: `${BRANDING_NAME} Skill Provider: ${provider.label}`,
               enabled: enabledPlugins.includes(provider.id),
               identifier: provider.id,
               installed: !!server,

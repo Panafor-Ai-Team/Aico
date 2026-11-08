@@ -641,7 +641,7 @@ export const initEmbeddingRuntimeFromDB = async (
   const apiKey = aicoEnv.AICO_EMBEDDING_OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error(
-      'EMBEDDING_PROVIDER_NOT_CONFIGURED: set AICO_EMBEDDING_OPENROUTER_API_KEY to embed while the managed provider is not OpenRouter',
+      'EMBEDDING_PROVIDER_NOT_CONFIGURED: no embedding gateway key is configured on the server',
     );
   }
 

@@ -1,4 +1,4 @@
-import { isDesktop } from '@lobechat/const';
+import { isDesktop, scrubVendorNames, scrubVendorNamesDeep } from '@lobechat/const';
 import { HeterogeneousAgentSessionErrorCode } from '@lobechat/electron-client-ipc';
 import { type ILobeAgentRuntimeErrorType } from '@lobechat/model-runtime';
 import { AgentRuntimeErrorType, getErrorCodeSpec } from '@lobechat/model-runtime';
@@ -40,11 +40,13 @@ interface ErrorMessageData {
   id: string;
 }
 
+// Raw error text and details come from the gateway or server as-is and can name
+// the upstream gateway or project; rewrite those names before display (D-018).
 const getRawErrorMessage = (error?: ChatMessageError | null) => {
   if (!error) return;
 
   if (typeof error.message === 'string' && error.message.trim()) {
-    return error.message;
+    return scrubVendorNames(error.message);
   }
 
   if (
@@ -54,19 +56,20 @@ const getRawErrorMessage = (error?: ChatMessageError | null) => {
     typeof error.body.message === 'string' &&
     error.body.message.trim()
   ) {
-    return error.body.message;
+    return scrubVendorNames(error.body.message);
   }
 
   return;
 };
 
-const getErrorDetails = (error?: ChatMessageError | null) => {
+export const getErrorDetails = (error?: ChatMessageError | null) => {
   if (!error) return;
 
   const rawErrorMessage = getRawErrorMessage(error);
-  if (!rawErrorMessage) return error.body;
-  if (isRecord(error.body)) return { ...error.body, message: rawErrorMessage };
-  if (error.body !== undefined) return { body: error.body, message: rawErrorMessage };
+  const body = scrubVendorNamesDeep(error.body);
+  if (!rawErrorMessage) return body;
+  if (isRecord(body)) return { ...body, message: rawErrorMessage };
+  if (body !== undefined) return { body, message: rawErrorMessage };
 
   return { message: rawErrorMessage };
 };

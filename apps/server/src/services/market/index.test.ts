@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { BRANDING_NAME } from '@lobechat/business-const';
 import { MarketSDK } from '@lobehub/market-sdk';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -331,10 +332,10 @@ describe('MarketService', () => {
         await vi.advanceTimersByTimeAsync(1000);
 
         await expect(resultPromise).resolves.toEqual({
-          content: 'LobeHub Skill execution timed out after 1000ms',
+          content: `${BRANDING_NAME} Skill execution timed out after 1000ms`,
           error: {
             code: 'LOBEHUB_SKILL_TIMEOUT',
-            message: 'LobeHub Skill execution timed out after 1000ms',
+            message: `${BRANDING_NAME} Skill execution timed out after 1000ms`,
           },
           success: false,
         });
@@ -424,8 +425,8 @@ describe('MarketService', () => {
       });
 
       expect(result).toEqual({
-        content: 'LobeHub Skill call failed',
-        error: { code: 'LOBEHUB_SKILL_ERROR', message: 'LobeHub Skill call failed' },
+        content: `${BRANDING_NAME} Skill call failed`,
+        error: { code: 'LOBEHUB_SKILL_ERROR', message: `${BRANDING_NAME} Skill call failed` },
         success: false,
       });
     });
@@ -556,7 +557,7 @@ describe('MarketService', () => {
         identifier: 'twitter',
         meta: {
           avatar: '🐦',
-          description: 'LobeHub Skill: X',
+          description: `${BRANDING_NAME} Skill: X`,
           tags: ['lobehub-skill', 'twitter'],
           title: 'X',
         },
@@ -595,7 +596,7 @@ describe('MarketService', () => {
       const manifests = await service.getLobehubSkillManifests();
       expect(manifests).toHaveLength(1);
       expect(manifests[0].meta).toMatchObject({
-        description: 'LobeHub Skill: Notion',
+        description: `${BRANDING_NAME} Skill: Notion`,
         title: 'Notion',
       });
     });
@@ -626,7 +627,7 @@ describe('MarketService', () => {
         identifier: 'posthog',
         meta: {
           avatar: 'posthog-icon',
-          description: 'LobeHub Skill: PostHog',
+          description: `${BRANDING_NAME} Skill: PostHog`,
           tags: ['lobehub-skill', 'posthog'],
           title: 'PostHog',
         },

@@ -701,12 +701,12 @@ export const buildSpecDocument = async (app: GenerateSpecsApp) => {
       },
       info: {
         description:
-          'LobeHub platform REST API. Generated from `packages/openapi` routes — do not edit openapi.yml by hand; run `bun generate:openapi` instead.',
-        title: 'LobeHub API',
+          'Platform REST API. Generated from `packages/openapi` routes — do not edit openapi.yml by hand; run `bun generate:openapi` instead.',
+        title: 'REST API',
         version: '1.0.0',
       },
       security: [{ bearerAuth: [] }],
-      servers: [{ description: 'LobeHub Cloud', url: 'https://app.lobehub.com' }],
+      servers: [{ description: 'This deployment', url: '/' }],
     },
   });
 

@@ -1,3 +1,5 @@
+import { BRANDING_NAME } from '@lobechat/business-const';
+
 import type { ModelProviderCard } from '../types';
 
 // ref :https://openrouter.ai/docs#models
@@ -9,7 +11,8 @@ const OpenRouter: ModelProviderCard = {
   id: 'openrouter',
   modelList: { showModelFetcher: true },
   modelsUrl: 'https://openrouter.ai/models',
-  name: 'OpenRouter',
+  // Managed gateway: shown to users under the product name (D-018).
+  name: BRANDING_NAME,
   settings: {
     // OpenRouter don't support browser request
     // https://github.com/lobehub/lobe-chat/issues/5900

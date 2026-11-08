@@ -9,7 +9,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import ErrorMessageExtra, { useErrorContent } from './index';
+import ErrorMessageExtra, { getErrorDetails, useErrorContent } from './index';
 
 const navigateMock = vi.fn();
 const updateMessageErrorMock = vi.fn();
@@ -642,5 +642,23 @@ describe('ErrorMessageExtra', () => {
 
     expect(screen.getByText('The provider rejected the tool count.')).toBeInTheDocument();
     expect(screen.queryByText('modelRuntime:ExceededToolLimit')).not.toBeInTheDocument();
+  });
+});
+
+describe('getErrorDetails', () => {
+  it('rewrites gateway and upstream names in the details shown to the user', () => {
+    const details = getErrorDetails({
+      body: {
+        endpoint: 'https://api.cheapvibecode.ru/v1',
+        error: { message: 'OpenRouter: upstream overloaded' },
+        provider: 'cheapvibecode',
+      },
+      message: 'CheapVibeCode API 502: Bad Gateway',
+      type: AgentRuntimeErrorType.ProviderBizError,
+    });
+
+    const text = JSON.stringify(details);
+    expect(text).not.toMatch(/cheap\s*vibe\s*code|openrouter|\bcvc\b|lobe/i);
+    expect(details).toMatchObject({ provider: 'Panachat' });
   });
 });

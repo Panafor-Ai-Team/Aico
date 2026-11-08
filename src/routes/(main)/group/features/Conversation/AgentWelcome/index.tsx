@@ -1,5 +1,6 @@
 'use client';
 
+import { getLocalizedBrandingInboxName } from '@lobechat/business-const';
 import { Flexbox, Markdown, Text } from '@lobehub/ui';
 import isEqual from 'fast-deep-equal';
 import React, { memo, useMemo } from 'react';
@@ -19,7 +20,7 @@ import OpeningQuestions from './OpeningQuestions';
 import ToolAuthAlert from './ToolAuthAlert';
 
 const InboxWelcome = memo(() => {
-  const { t } = useTranslation(['welcome', 'chat']);
+  const { t, i18n } = useTranslation(['welcome', 'chat']);
   const mobile = useIsMobile();
   const isInbox = useAgentStore(builtinAgentSelectors.isInboxAgent);
   const fontSize = useUserStore(userGeneralSettingsSelectors.fontSize);
@@ -75,7 +76,11 @@ const InboxWelcome = memo(() => {
         </Text>
         <Flexbox width={'min(100%, 640px)'}>
           <Markdown fontSize={fontSize} variant={'chat'}>
-            {isInbox ? t('guide.defaultMessageWithoutCreate', { appName: 'Lobe AI' }) : message}
+            {isInbox
+              ? t('guide.defaultMessageWithoutCreate', {
+                  appName: getLocalizedBrandingInboxName(i18n.language),
+                })
+              : message}
           </Markdown>
         </Flexbox>
         {openingQuestions.length > 0 && (

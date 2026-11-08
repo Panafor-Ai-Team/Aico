@@ -43,7 +43,7 @@ export const refreshAicoMasterMonitorState = async (
         dedupeKey: 'master.check_stale',
         details: { lastSuccessfulCheckAt: previousCheck.toISOString() },
         severity: 'warning',
-        summary: 'OpenRouter master monitor check is stale',
+        summary: 'Gateway master monitor check is stale',
         type: 'master.check_stale',
       });
     }
@@ -106,7 +106,7 @@ export const refreshAicoMasterMonitorState = async (
       dedupeKey: 'master.balance_unknown_error',
       details: { error: message.slice(0, 200) },
       severity: 'critical',
-      summary: 'Failed to refresh OpenRouter master monitor state',
+      summary: 'Failed to refresh gateway master monitor state',
       type: 'master.balance_unknown_error',
     });
 

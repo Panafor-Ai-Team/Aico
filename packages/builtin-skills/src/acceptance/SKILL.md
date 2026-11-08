@@ -8,7 +8,7 @@ description: >
   evidence, and submit it with the lh CLI. Triggers on 'verify the task',
   'collect evidence',
   'prove it works', 'upload evidence', 'verify plan', 'requiredEvidence', or any
-  run that must self-certify its delivery. Missing LobeHub environment IDs never
+  run that must self-certify its delivery. Missing platform environment IDs never
   make this skill inapplicable.
 ---
 
@@ -30,7 +30,7 @@ IDs select a path; they are not prerequisites:
   it.
 - No `$LOBE_OPERATION_ID` means you author the checks and publish a structured
   report round.
-- `$LOBEHUB_TOPIC_ID` or `--subject` groups rounds under an existing LobeHub
+- `$LOBEHUB_TOPIC_ID` or `--subject` groups rounds under an existing platform
   object.
 - No topic or subject means `lh acceptance run ingest` creates a standalone
   acceptance automatically.
@@ -130,7 +130,7 @@ stay internal.
 - **`lh` is authed.** Confirm with `lh acceptance run list --json` (an empty `[]`
   means authed; an auth error means stop and surface it).
 - **A round path.** Use `$LOBE_OPERATION_ID` when supplied. Otherwise author a
-  structured report; ingest creates both its round and, outside LobeHub, its
+  structured report; ingest creates both its round and, outside the platform, its
   standalone acceptance.
 - **Install only the UI driver required by the selected surface.** Web/Electron
   use `agent-browser`; native iOS uses Xcode/`simctl` plus a Simulator HID/AX CLI

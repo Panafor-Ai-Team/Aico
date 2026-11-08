@@ -1,3 +1,4 @@
+import { BRANDING_NAME } from '@lobechat/business-const';
 import type { BuiltinSkill } from '@lobechat/types';
 
 import { toResourceMeta } from '../lobehub/helpers';
@@ -24,7 +25,7 @@ export const AcceptanceIdentifier = 'acceptance';
  * skill (macOS scripts + project-specific working artifacts and probes), this one
  * keeps its acceptance contract independent of repository-local scripts, so any
  * external builder (Claude Code / Codex) can run it from a task's working
- * directory, with or without a LobeHub operation/topic: discover or author the
+ * directory, with or without a platform operation/topic: discover or author the
  * plan → pick a surface → capture evidence per criterion → publish a round →
  * self-check coverage. Surface-specific tools remain explicit: agent-browser for
  * Web/Electron, shell-level native automation for macOS, and an installed
@@ -41,8 +42,7 @@ export const AcceptanceIdentifier = 'acceptance';
 export const AcceptanceSkill: BuiltinSkill = {
   avatar: '✅',
   content,
-  description:
-    'Self-evidence for delivery acceptance in any repository, with or without a LobeHub operation or verify plan — discover or author checks, verify CLI, web, desktop, or iOS Simulator behavior on the correct surface, capture real evidence, and publish a standalone or subject-linked acceptance round.',
+  description: `Self-evidence for delivery acceptance in any repository, with or without a ${BRANDING_NAME} operation or verify plan — discover or author checks, verify CLI, web, desktop, or iOS Simulator behavior on the correct surface, capture real evidence, and publish a standalone or subject-linked acceptance round.`,
   identifier: AcceptanceIdentifier,
   name: 'acceptance',
   resources: toResourceMeta({

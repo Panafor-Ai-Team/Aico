@@ -18,8 +18,8 @@
   "email.footer.contactSupport": "Support kontaktieren",
   "email.footer.joinDiscord": "Discord beitreten",
   "email.footer.manage": "Benachrichtigungen verwalten",
-  "email.footer.preference": "Sie haben diese E-Mail erhalten, weil dies Ihren Benachrichtigungseinstellungen auf LobeHub entspricht.",
-  "email.footer.system": "Dies ist eine wichtige Konto-Benachrichtigung von LobeHub.",
+  "email.footer.preference": "Sie haben diese E-Mail erhalten, weil dies Ihren Benachrichtigungseinstellungen auf {{appName}} entspricht.",
+  "email.footer.system": "Dies ist eine wichtige Konto-Benachrichtigung von {{appName}}.",
   "email.viewDetails": "Details anzeigen",
   "image_generation_completed": "Ihr Bild „{{prompt}}“ ist fertig.",
   "image_generation_completed_title": "Bilderstellung abgeschlossen",
@@ -78,6 +78,6 @@
   "workspace_primary_ownership_transferred_title": "Sie sind jetzt der Hauptinhaber von {{workspaceName}}",
   "workspace_subscription_expired": "Das Abonnement für den Arbeitsbereich \"{{workspaceName}}\" ist abgelaufen. Verlängern Sie innerhalb von {{days}} Tagen, um den vollständigen Zugriff wiederherzustellen, bevor der Arbeitsbereich herabgestuft wird.",
   "workspace_subscription_expired_title": "Abonnement für {{workspaceName}} abgelaufen",
-  "workspace_waitlist_approved": "Ihr Workspace-Beta-Zugang ist bereit. Besuchen Sie LobeHub, um Ihren ersten Workspace zu erstellen und Ihr Team einzuladen.",
+  "workspace_waitlist_approved": "Ihr Workspace-Beta-Zugang ist bereit. Besuchen Sie {{appName}}, um Ihren ersten Workspace zu erstellen und Ihr Team einzuladen.",
   "workspace_waitlist_approved_title": "Workspace-Beta-Zugang genehmigt"
 }

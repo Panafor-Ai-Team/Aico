@@ -1,4 +1,5 @@
 import { createIoRedisState } from '@chat-adapter/state-ioredis';
+import { BRANDING_NAME } from '@lobechat/business-const';
 import { agentDisplayName } from '@lobechat/types';
 import {
   Chat,
@@ -599,7 +600,7 @@ export class MessengerRouter {
         if (!featureAccess.allowed) {
           await replyToSender(
             featureAccess.blockedMessage ??
-              'This messenger connection requires a paid plan. Upgrade in LobeHub Settings to continue.',
+              `This messenger connection requires a paid plan. Upgrade in ${BRANDING_NAME} Settings to continue.`,
           );
           return;
         }
@@ -821,7 +822,7 @@ export class MessengerRouter {
   private buildCommands(): MessengerCommand[] {
     return [
       {
-        description: 'Bind your account to LobeHub',
+        description: `Bind your account to ${BRANDING_NAME}`,
         handler: async (ctx) => {
           const strings = getMessengerSystemStrings(ctx.platform);
           // Already-linked short-circuit: re-running `/start` while bound
@@ -1055,7 +1056,7 @@ export class MessengerRouter {
         name: 'stop',
       },
       {
-        description: 'Send feedback directly to the LobeHub team (no AI reply)',
+        description: `Send feedback directly to the ${BRANDING_NAME} team (no AI reply)`,
         // Declaring the argument so Discord/Slack surface a `/feedback <message>`
         // prompt; without it the slash picker registers the command as zero-arg
         // and the user can't enter feedback text from the picker UI.
@@ -1524,8 +1525,8 @@ export class MessengerRouter {
       }
 
       const text = activeAgentName
-        ? `Welcome to LobeHub! Your active agent is *${activeAgentName}*. Send a message to chat, or use \`/agents\` to switch.`
-        : 'Welcome to LobeHub! Send `/agents` to pick an active agent and start chatting.';
+        ? `Welcome to ${BRANDING_NAME}! Your active agent is *${activeAgentName}*. Send a message to chat, or use \`/agents\` to switch.`
+        : `Welcome to ${BRANDING_NAME}! Send \`/agents\` to pick an active agent and start chatting.`;
       await bot.binder.sendDmText(event.channelId, text);
     } catch (error) {
       log('handleAppHomeOpened: dispatch failed: %O', error);
@@ -1560,10 +1561,10 @@ export class MessengerRouter {
     }
 
     const text = [
-      ":wave: Hi, I'm *LobeHub* — your AI agent on Slack.",
+      `:wave: Hi, I'm *${BRANDING_NAME}* — your AI agent on Slack.`,
       '',
-      '• Mention me with `@LobeHub <your question>` to chat in this channel.',
-      '• First time? Send me a *direct message* to link your LobeHub account.',
+      `• Mention me with \`@${BRANDING_NAME} <your question>\` to chat in this channel.`,
+      `• First time? Send me a *direct message* to link your ${BRANDING_NAME} account.`,
       '• Use `/agents` in DM to switch the active agent.',
     ].join('\n');
 

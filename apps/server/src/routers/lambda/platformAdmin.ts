@@ -1062,7 +1062,7 @@ export const platformAdminRouter = router({
     if (status.lastStatus !== 'success') {
       throw new TRPCError({
         code: 'BAD_GATEWAY',
-        message: status.lastError || 'OpenRouter model sync failed',
+        message: status.lastError || 'Gateway model sync failed',
       });
     }
     return status;

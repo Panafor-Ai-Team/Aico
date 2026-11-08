@@ -313,7 +313,7 @@ const comfyuiImageModels: AIImageModelCard[] = [
   },
   {
     description:
-      'Custom SD text-to-image model. Use custom_sd_lobe.safetensors as the model filename; if you have a VAE, use custom_sd_vae_lobe.safetensors. Place model files in the required Comfy folders.',
+      'Custom SD text-to-image model. Use custom_sd.safetensors as the model filename; if you have a VAE, use custom_sd_vae.safetensors. Place model files in the required Comfy folders.',
     displayName: 'Custom SD Text-to-Image',
     enabled: false,
     id: 'comfyui/stable-diffusion-custom',
@@ -323,7 +323,7 @@ const comfyuiImageModels: AIImageModelCard[] = [
   },
   {
     description:
-      'Custom SDXL image-to-image model. Use custom_sd_lobe.safetensors as the model filename; if you have a VAE, use custom_sd_vae_lobe.safetensors. Place model files in the required Comfy folders.',
+      'Custom SDXL image-to-image model. Use custom_sd.safetensors as the model filename; if you have a VAE, use custom_sd_vae.safetensors. Place model files in the required Comfy folders.',
     displayName: 'Custom SDXL Refiner',
     enabled: false,
     id: 'comfyui/stable-diffusion-custom-refiner',

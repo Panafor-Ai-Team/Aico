@@ -1,3 +1,4 @@
+import { BRANDING_NAME } from '@lobechat/business-const';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
@@ -541,7 +542,7 @@ describe('skillsRuntime', () => {
 
       expect(result.success).toBe(true);
       expect(result.state).toMatchObject({ executionEnv: 'sandbox' });
-      expect(result.content).toContain('update their LobeHub app');
+      expect(result.content).toContain(`update their ${BRANDING_NAME} app`);
       expect(mocks.executeToolCall).not.toHaveBeenCalled();
       expect(mocks.sandboxService.callTool).toHaveBeenCalledWith(
         'execScript',

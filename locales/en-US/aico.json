@@ -367,7 +367,7 @@
   "platform.multiplierActive": "Active",
   "platform.multiplierCard": "Top-up yield",
   "platform.multiplierFailed": "Failed to update top-up yield",
-  "platform.multiplierHint": "Applied only when credits are added: $1 buys fewer π (margin). Model prices and usage are shown in π at raw CVC rates — one value per upstream provider.",
+  "platform.multiplierHint": "Applied only when credits are added: $1 buys fewer π (margin). Model prices and usage are shown in π at raw upstream rates — one value per upstream provider.",
   "platform.multiplierLabel": "Multiplier",
   "platform.multiplierPreview": "$1 credits {{pi}} π.",
   "platform.multiplierSave": "Save yield",

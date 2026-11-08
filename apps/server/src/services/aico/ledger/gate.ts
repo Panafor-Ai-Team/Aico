@@ -64,7 +64,7 @@ export const assertManagedTrafficAllowed = async (db: LobeChatDatabase): Promise
       await alert(
         db,
         'ledger_misconfigured',
-        'Ledger enforce mode is refusing traffic: the managed provider is not CheapVibeCode',
+        'Ledger enforce mode is refusing traffic: the active managed gateway is not priced by the ledger',
       );
       refuse('ledger_misconfigured');
     }

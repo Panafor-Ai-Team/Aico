@@ -18,8 +18,8 @@
   "email.footer.contactSupport": "サポートに連絡する",
   "email.footer.joinDiscord": "Discordに参加する",
   "email.footer.manage": "通知を管理する",
-  "email.footer.preference": "このメールは、LobeHubの通知設定に基づいて送信されました。",
-  "email.footer.system": "これは、LobeHubからの重要なアカウント通知です。",
+  "email.footer.preference": "このメールは、{{appName}}の通知設定に基づいて送信されました。",
+  "email.footer.system": "これは、{{appName}}からの重要なアカウント通知です。",
   "email.viewDetails": "詳細を見る",
   "image_generation_completed": "画像「{{prompt}}」の生成が完了しました。",
   "image_generation_completed_title": "画像生成が完了しました",
@@ -78,6 +78,6 @@
   "workspace_primary_ownership_transferred_title": "あなたが{{workspaceName}}のプライマリオーナーになりました",
   "workspace_subscription_expired": "ワークスペース「{{workspaceName}}」のサブスクリプションが終了しました。ワークスペースがダウングレードされる前に、{{days}}日以内に更新して完全なアクセスを復元してください。",
   "workspace_subscription_expired_title": "{{workspaceName}}のサブスクリプションが終了しました",
-  "workspace_waitlist_approved": "ワークスペースのベータアクセスが準備完了しました。LobeHubにアクセスして、最初のワークスペースを作成し、チームを招待してください。",
+  "workspace_waitlist_approved": "ワークスペースのベータアクセスが準備完了しました。{{appName}}にアクセスして、最初のワークスペースを作成し、チームを招待してください。",
   "workspace_waitlist_approved_title": "ワークスペースのベータアクセスが承認されました"
 }

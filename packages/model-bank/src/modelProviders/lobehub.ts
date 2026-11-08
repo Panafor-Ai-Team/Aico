@@ -1,13 +1,14 @@
+import { BRANDING_CLOUD_NAME, BRANDING_NAME } from '@lobechat/business-const';
+
 import type { ModelProviderCard } from '../types';
 
 const LobeHub: ModelProviderCard = {
   chatModels: [],
-  description:
-    'LobeHub Cloud uses official APIs to access AI models and measures usage with Credits tied to model tokens.',
+  description: `${BRANDING_CLOUD_NAME} uses official APIs to access AI models and measures usage with Credits tied to model tokens.`,
   enabled: true,
   id: 'lobehub',
   modelsUrl: 'https://lobehub.com/zh/docs/usage/subscription/model-pricing',
-  name: 'LobeHub',
+  name: BRANDING_NAME,
   settings: {
     modelEditable: false,
     showAddNewModel: false,

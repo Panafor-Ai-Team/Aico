@@ -1,5 +1,6 @@
 'use client';
 
+import { BRANDING_NAME } from '@lobechat/business-const';
 import { toast } from '@lobehub/ui/base-ui';
 import { type ReactNode } from 'react';
 import { createContext, use, useCallback, useEffect, useState } from 'react';
@@ -394,7 +395,7 @@ export const MarketAuthProvider = ({ children, isDesktop }: MarketAuthProviderPr
    */
   const signIn = useCallback(async (scene: MarketAuthScene = 'default'): Promise<number | null> => {
     if (!useUserStore.getState().isSignedIn) {
-      throw new Error('LobeChat session required');
+      throw new Error(`${BRANDING_NAME} session required`);
     }
     setAuthScene(scene);
     return new Promise<number | null>((resolve, reject) => {

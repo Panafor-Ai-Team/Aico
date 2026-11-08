@@ -367,7 +367,7 @@
   "platform.multiplierActive": "فعال",
   "platform.multiplierCard": "بازده شارژ",
   "platform.multiplierFailed": "به‌روزرسانی بازده شارژ ناموفق بود",
-  "platform.multiplierHint": "فقط هنگام افزودن اعتبار اعمال می‌شود: هر ۱ دلار π کمتری می‌خرد (حاشیه سود). قیمت مدل‌ها و مصرف با نرخ خام CVC به π نشان داده می‌شود — یک مقدار برای هر ارائه‌دهنده.",
+  "platform.multiplierHint": "فقط هنگام افزودن اعتبار اعمال می‌شود: هر ۱ دلار π کمتری می‌خرد (حاشیه سود). قیمت مدل‌ها و مصرف با نرخ خام تأمین‌کننده به π نشان داده می‌شود — یک مقدار برای هر ارائه‌دهنده.",
   "platform.multiplierLabel": "ضریب",
   "platform.multiplierPreview": "۱ دلار = {{pi}} π اعتبار.",
   "platform.multiplierSave": "ذخیره بازده",

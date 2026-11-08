@@ -1,3 +1,4 @@
+import { getLocalizedBrandingInboxName } from '@lobechat/business-const';
 import { DEFAULT_AVATAR, DEFAULT_INBOX_AVATAR } from '@lobechat/const';
 import { agentDisplayName } from '@lobechat/types';
 import { Avatar } from '@lobehub/ui';
@@ -17,7 +18,7 @@ import { styles } from './styles';
 import { useCommandMenu } from './useCommandMenu';
 
 const AskAIMenu = memo(() => {
-  const { t } = useTranslation(['common', 'chat', 'home']);
+  const { t, i18n } = useTranslation(['common', 'chat', 'home']);
   const navigate = useWorkspaceAwareNavigate();
   const { handleAskLobeAI, handleAIPainting, closeCommandMenu } = useCommandMenu();
   const { search } = useCommandMenuContext();
@@ -63,7 +64,7 @@ const AskAIMenu = memo(() => {
       <Command.Item value="lobe-ai" onSelect={handleAskLobeAI}>
         <Avatar emojiScaleWithBackground avatar={DEFAULT_INBOX_AVATAR} shape="square" size={18} />
         <div className={styles.itemContent}>
-          <div className={styles.itemLabel}>Lobe AI</div>
+          <div className={styles.itemLabel}>{getLocalizedBrandingInboxName(i18n.language)}</div>
         </div>
       </Command.Item>
       <Command.Item value="agent-builder" onSelect={handleAgentBuilder}>

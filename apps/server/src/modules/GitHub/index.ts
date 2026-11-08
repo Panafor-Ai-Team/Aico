@@ -1,3 +1,4 @@
+import { BRANDING_NAME } from '@lobechat/business-const';
 import debug from 'debug';
 
 const log = debug('lobe-chat:module:github');
@@ -21,7 +22,7 @@ export class GitHub {
   private readonly userAgent: string;
 
   constructor(options?: { userAgent?: string }) {
-    this.userAgent = options?.userAgent || 'LobeHub';
+    this.userAgent = options?.userAgent || `${BRANDING_NAME}`;
   }
 
   /**

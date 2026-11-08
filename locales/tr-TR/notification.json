@@ -18,8 +18,8 @@
   "email.footer.contactSupport": "Destek ile iletişime geçin",
   "email.footer.joinDiscord": "Discord'a katılın",
   "email.footer.manage": "Bildirimleri yönet",
-  "email.footer.preference": "Bu e-postayı LobeHub'daki bildirim ayarlarınız nedeniyle aldınız.",
-  "email.footer.system": "Bu, LobeHub'dan önemli bir hesap bildirimidir.",
+  "email.footer.preference": "Bu e-postayı {{appName}}'daki bildirim ayarlarınız nedeniyle aldınız.",
+  "email.footer.system": "Bu, {{appName}}'dan önemli bir hesap bildirimidir.",
   "email.viewDetails": "Detayları Görüntüle",
   "image_generation_completed": "\"{{prompt}}\" adlı görseliniz hazır.",
   "image_generation_completed_title": "Görsel oluşturma tamamlandı",
@@ -78,6 +78,6 @@
   "workspace_primary_ownership_transferred_title": "Artık {{workspaceName}} çalışma alanının birincil sahibisiniz",
   "workspace_subscription_expired": "\"{{workspaceName}}\" çalışma alanı için abonelik sona erdi. Çalışma alanı düşürülmeden önce tam erişimi geri yüklemek için {{days}} gün içinde yenileyin.",
   "workspace_subscription_expired_title": "{{workspaceName}} için abonelik sona erdi",
-  "workspace_waitlist_approved": "Workspace beta erişiminiz hazır. İlk workspace'inizi oluşturmak ve ekibinizi davet etmek için LobeHub'a gidin.",
+  "workspace_waitlist_approved": "Workspace beta erişiminiz hazır. İlk workspace'inizi oluşturmak ve ekibinizi davet etmek için {{appName}}'a gidin.",
   "workspace_waitlist_approved_title": "Workspace beta erişimi onaylandı"
 }
