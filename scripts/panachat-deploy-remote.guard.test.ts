@@ -37,6 +37,39 @@ describe('control-plane CI/CD wiring', () => {
     }
   });
 
+  it('deploys canary without the host contacting GitHub', () => {
+    const canary = read('.github/workflows/deploy-canary.yml');
+    const deployStep = canary.slice(canary.indexOf('- name: Deploy over SSH'));
+
+    // Prod could not resolve github.com (2026-11-09): commits and, when ghcr.io is
+    // unreachable, images reach the host over SSH from the runner first.
+    expect(canary.indexOf('./scripts/panachat-ship-release.sh')).toBeGreaterThan(-1);
+    expect(canary.indexOf('./scripts/panachat-ship-release.sh')).toBeLessThan(
+      canary.indexOf('- name: Deploy over SSH'),
+    );
+    expect(canary).toContain('fetch-depth: 0');
+    expect(deployStep).not.toMatch(/git (fetch|pull)/);
+    expect(deployStep).toContain('docker login ghcr.io');
+    expect(deployStep).toMatch(/--password-stdin \|\|/);
+    expect(canary).toContain("IMAGE_TRANSFER: ${{ inputs.image_transfer || 'auto' }}");
+
+    // An image CI already shipped must not need the registry.
+    const script = read('scripts/panachat-deploy-remote.sh');
+    expect(script).toContain('docker image inspect "$ref"');
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'passes the ship script shell tests',
+    () => {
+      const out = execFileSync('bash', [path.join(root, 'scripts/panachat-ship-release.test.sh')], {
+        encoding: 'utf8',
+        timeout: 60_000,
+      });
+      expect(out).toContain('OK: panachat-ship-release');
+    },
+    70_000,
+  );
+
   it('prunes untagged images by the labels CI puts on them', () => {
     const script = read('scripts/panachat-deploy-remote.sh');
 
