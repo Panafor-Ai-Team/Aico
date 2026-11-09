@@ -15,7 +15,7 @@ import debug from 'debug';
 
 import { UserModel } from '@/database/models/user';
 import type { LobeChatDatabase } from '@/database/type';
-import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import { initServerModelRuntime } from '@/server/services/aico/serverModelRuntime';
 
 import { resolveSystemAgentModelConfig } from './modelConfig';
 
@@ -78,12 +78,13 @@ export class SystemAgentService {
 
       const payload = chainSummaryTitle(messages, locale);
 
-      const modelRuntime = await initModelRuntimeFromDB(
-        this.db,
-        this.userId,
+      const modelRuntime = await initServerModelRuntime({
+        db: this.db,
+        model,
         provider,
-        this.workspaceId,
-      );
+        userId: this.userId,
+        workspaceId: this.workspaceId,
+      });
       const result = await modelRuntime.generateObject(
         {
           messages: payload.messages as any[],
@@ -133,12 +134,13 @@ export class SystemAgentService {
       const payload = chainGenerateSkillMeta({ content, responseLanguage: locale });
       const tracingId = randomUUID();
 
-      const modelRuntime = await initModelRuntimeFromDB(
-        this.db,
-        this.userId,
+      const modelRuntime = await initServerModelRuntime({
+        db: this.db,
+        model,
         provider,
-        this.workspaceId,
-      );
+        userId: this.userId,
+        workspaceId: this.workspaceId,
+      });
       const result = await modelRuntime.generateObject(
         {
           messages: payload.messages as any[],

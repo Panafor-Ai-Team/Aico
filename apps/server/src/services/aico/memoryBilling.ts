@@ -1,10 +1,9 @@
-import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { type LobeChatDatabase } from '@/database/type';
 import { initEmbeddingRuntimeFromDB, initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
 
 import { type AicoBillingContext } from './billingContext';
-import { resolvePreferredGenerationBilling } from './generationBilling';
 import { AicoManagedPolicy, AicoManagedPolicyError } from './managedPolicy';
+import { resolveServerBillingContext } from './serverModelRuntime';
 
 /**
  * Policy / ledger refusals meaning "this subject cannot pay right now". Memory
@@ -40,13 +39,7 @@ export const isManagedMemoryProvider = (provider?: string): boolean =>
 export const resolveMemoryBillingContext = (
   db: LobeChatDatabase,
   userId: string,
-): Promise<AicoBillingContext> => {
-  const billingModel = new AicoBillingModel(db);
-  return resolvePreferredGenerationBilling(
-    async (uid) => (await billingModel.getUserWallet(uid)) ?? null,
-    userId,
-  );
-};
+): Promise<AicoBillingContext> => resolveServerBillingContext(db, userId);
 
 /**
  * Managed runtime for a background memory agent, metered against the user's

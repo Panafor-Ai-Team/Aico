@@ -53,6 +53,13 @@ vi.mock('@/server/modules/ModelRuntime', () => ({
   initModelRuntimeFromDB: (...args: any[]) => mockInitModelRuntimeFromDB(...args),
 }));
 
+const mockGetUserWallet = vi.hoisted(() => vi.fn());
+vi.mock('@/database/models/aicoBilling', () => ({
+  AicoBillingModel: vi.fn().mockImplementation(() => ({
+    getUserWallet: (...args: any[]) => mockGetUserWallet(...args),
+  })),
+}));
+
 vi.mock('@lobechat/model-runtime', () => ({
   consumeStreamUntilDone: (...args: any[]) => mockConsumeStreamUntilDone(...args),
 }));
@@ -240,6 +247,34 @@ describe('lobeAgentRuntime', () => {
       'test-provider',
       'workspace-1',
     );
+  });
+
+  // Without these, a managed provider refuses the call with BILLING_CONTEXT_REQUIRED.
+  it('should bill the multimodal call when the configured provider is managed', async () => {
+    mockToolsEnv.MULTIMODAL_UNDERSTANDING_PROVIDER = 'aico';
+    mockGetUserWallet.mockResolvedValue({
+      preferredBillingSource: 'organization',
+      preferredOrganizationId: 'org_test_1',
+    });
+    const runtime = lobeAgentRuntime.factory({ ...baseContext, workspaceId: 'workspace-1' });
+
+    const result = await runtime.analyzeMedia({
+      question: 'what is this?',
+      urls: ['https://example.com/generated.png'],
+    });
+
+    expect(result.success).toBe(true);
+    expect(mockInitModelRuntimeFromDB).toHaveBeenCalledWith(
+      baseContext.serverDB,
+      'user-1',
+      'aico',
+      'workspace-1',
+      {
+        billingContext: { organizationId: 'org_test_1', source: 'organization' },
+        modelId: 'vision-model',
+      },
+    );
+    expect(mockChat.mock.calls[0][0].model).toBe('vision-model');
   });
 
   it('should accumulate text content_part chunks from the multimodal model', async () => {
