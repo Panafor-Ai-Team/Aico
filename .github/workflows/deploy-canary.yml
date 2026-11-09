@@ -301,9 +301,11 @@ jobs:
             # The previous step already fast-forwarded this checkout over SSH.
             # Login is only needed when the host pulls images itself; if ghcr.io
             # is unreachable they were shipped and the deploy pulls nothing.
+            # Keep each command on one line: with script_stop, drone-ssh appends an
+            # exit-code check after every line (except one ending in a backslash),
+            # which became the right-hand side of a trailing `||` (2026-11-09).
             if [ -n "${GHCR_TOKEN:-}" ]; then
-              echo "$GHCR_TOKEN" | timeout 60 docker login ghcr.io -u "${GHCR_USER}" --password-stdin ||
-                echo "WARN: ghcr.io login failed; deploying with the images already on the host"
+              echo "$GHCR_TOKEN" | timeout 60 docker login ghcr.io -u "${GHCR_USER}" --password-stdin || echo "WARN: ghcr.io login failed; deploying with the images already on the host"
             fi
             export PANACHAT_CONTROL_PLANE_IMAGE="$CONTROL_PLANE_IMAGE"
             PANACHAT_ENV=canary ./scripts/panachat-deploy-remote.sh deploy "$IMAGE"

@@ -50,7 +50,20 @@ describe('control-plane CI/CD wiring', () => {
     expect(canary).toContain('fetch-depth: 0');
     expect(deployStep).not.toMatch(/git (fetch|pull)/);
     expect(deployStep).toContain('docker login ghcr.io');
-    expect(deployStep).toMatch(/--password-stdin \|\|/);
+    expect(deployStep).toMatch(/--password-stdin \|\| echo "WARN: ghcr\.io login failed/);
+
+    // drone-ssh (script_stop) appends an exit-code check after every script line
+    // not ending in a backslash, so an operator at the end of a line takes that
+    // check as its right-hand side: `login ||` then exited on the login failure.
+    const sshScript = deployStep.slice(
+      deployStep.indexOf('script: |') + 'script: |'.length,
+      deployStep.indexOf('\n        env:'),
+    );
+    const dangling = sshScript
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#') && /(?:\|\||&&|\|)$/.test(line));
+    expect(dangling).toEqual([]);
     expect(canary).toContain("IMAGE_TRANSFER: ${{ inputs.image_transfer || 'auto' }}");
 
     // An image CI already shipped must not need the registry.
