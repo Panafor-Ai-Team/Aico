@@ -33,7 +33,11 @@ import {
   tracer as agentRuntimeTracer,
 } from '@lobechat/observability-otel/modules/agent-runtime';
 
+import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import type { AicoBillingContext } from '@/server/services/aico/billingContext';
+import { resolvePreferredGenerationBilling } from '@/server/services/aico/generationBilling';
+import { AicoManagedPolicy } from '@/server/services/aico/managedPolicy';
 
 import type { RuntimeExecutorContext } from '../context';
 import { log, sleep } from '../executorHelpers';
@@ -198,10 +202,13 @@ class ServerLLMTrace implements LLMTrace {
 export class ServerLLMTransport implements LLMTransport {
   readonly retryPolicy: LLMRetryPolicy;
 
+  /** Keyed by provider + model: a managed runtime is authorized for one model. */
   private readonly modelRuntimePromises = new Map<
     string,
     ReturnType<ServerLLMTransport['createModelRuntime']>
   >();
+
+  private billingContextPromise?: Promise<AicoBillingContext>;
 
   // Cumulative first-byte budget tracking for the current call_llm step.
   // Attempt numbers restart at 1 on every step, which is the reset signal.
@@ -221,7 +228,7 @@ export class ServerLLMTransport implements LLMTransport {
   }
 
   async runAttempt(input: LLMAttemptInput): Promise<LLMAttemptExecution> {
-    const modelRuntime = await this.getModelRuntime(input.provider);
+    const modelRuntime = await this.getModelRuntime(input.provider, input.model);
     return this.runAttemptWithRuntime(input, modelRuntime);
   }
 
@@ -229,7 +236,7 @@ export class ServerLLMTransport implements LLMTransport {
     payload: LLMStreamPayload,
     handlers?: Parameters<LLMTransport['stream']>[1],
   ): Promise<LLMStreamResult> {
-    const runtime = await this.createModelRuntime(payload.provider);
+    const runtime = await this.createModelRuntime(payload.provider, payload.model);
     const { provider: _provider, ...runtimePayload } = payload;
     let content = '';
     let usage: LLMStreamResult['usage'];
@@ -263,20 +270,48 @@ export class ServerLLMTransport implements LLMTransport {
     return result;
   }
 
-  private createModelRuntime(provider: string) {
-    return initModelRuntimeFromDB(
-      this.ctx.serverDB,
-      this.ctx.userId!,
-      provider,
-      this.ctx.workspaceId,
-    );
+  /**
+   * Aico: a managed provider refuses any call without an explicit billing
+   * context and model (`BILLING_CONTEXT_REQUIRED` / `MODEL_ID_REQUIRED`). Server
+   * runs — task runs, scheduled ticks — have no browser request to carry one,
+   * so bill the user's preferred source, as background generation and memory
+   * work already do.
+   */
+  private async createModelRuntime(provider: string, model: string) {
+    const { serverDB, workspaceId } = this.ctx;
+    const userId = this.ctx.userId!;
+
+    if (!AicoManagedPolicy.isManagedProvider(provider)) {
+      return initModelRuntimeFromDB(serverDB, userId, provider, workspaceId);
+    }
+
+    return initModelRuntimeFromDB(serverDB, userId, provider, workspaceId, {
+      billingContext: await this.getBillingContext(),
+      modelId: toLiveManagedModelId(model),
+    });
   }
 
-  private getModelRuntime(provider: string) {
-    let promise = this.modelRuntimePromises.get(provider);
+  private getBillingContext() {
+    if (!this.billingContextPromise) {
+      const billingModel = new AicoBillingModel(this.ctx.serverDB);
+      this.billingContextPromise = resolvePreferredGenerationBilling(
+        async (uid) => (await billingModel.getUserWallet(uid)) ?? null,
+        this.ctx.userId!,
+      );
+      // Don't cache a failed lookup: the next attempt should retry it.
+      this.billingContextPromise.catch(() => {
+        this.billingContextPromise = undefined;
+      });
+    }
+    return this.billingContextPromise;
+  }
+
+  private getModelRuntime(provider: string, model: string) {
+    const key = `${provider}\u0000${model}`;
+    let promise = this.modelRuntimePromises.get(key);
     if (!promise) {
-      promise = this.createModelRuntime(provider);
-      this.modelRuntimePromises.set(provider, promise);
+      promise = this.createModelRuntime(provider, model);
+      this.modelRuntimePromises.set(key, promise);
     }
     return promise;
   }

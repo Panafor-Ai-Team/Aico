@@ -29,6 +29,46 @@ vi.mock('./serverCallLlmContextBuilder', () => ({
 
 const attached = 'https://cdn.example.com/balloon.png';
 
+const buildFor = (text: string) => {
+  processedMessagesMock.messages = [{ content: text, role: 'user' }];
+  return new ServerContextBuilder({} as any).build({
+    model: 'openrouter/auto',
+    payload: { messages: [{ content: text, role: 'user' }] } as any,
+    provider: 'cheapvibecode',
+    state: {} as any,
+  } as any);
+};
+
+describe('ServerContextBuilder one-shot media calls on task runs', () => {
+  // Bug: a scheduled "daily learning" task whose instruction said "bring me a
+  // 15-minute article, video or podcast" was read as a video request. The
+  // runtime skipped the model, called generateVideo directly and the run
+  // failed (video gateway 402) before the model ever saw the task.
+  const taskRunPrompt = [
+    '<task>',
+    '<hint>This tag contains the complete task context. Do NOT call viewTask to re-fetch it.</hint>',
+    'T-1 یادگیری روزانه',
+    'Automation: cron "30 7 * * *" (Asia/Tehran)',
+    'Instruction: هر روز صبح ساعت ۰۷:۳۰، یک محتوای ۱۵ دقیقه‌ای منتخب (مقاله، ویدیو یا پادکست) در حوزه یادگیری من بیاور، با یک نکته کلیدی.',
+    '</task>',
+  ].join('\n');
+
+  it('leaves a task run to the model instead of calling a generator directly', async () => {
+    const output = await buildFor(taskRunPrompt);
+
+    expect(output.directToolCalls).toBeUndefined();
+    expect(
+      (output.modelParameters as Record<string, unknown> | undefined)?.tool_choice,
+    ).toBeUndefined();
+  });
+
+  it('still calls the video generator directly for a plain chat request', async () => {
+    const output = await buildFor('یه ویدیو ۵ ثانیه‌ای از یه گربه بساز');
+
+    expect(output.directToolCalls?.[0]).toMatchObject({ apiName: 'generateVideo' });
+  });
+});
+
 describe('ServerContextBuilder image tool_choice fallback', () => {
   it('forces the image tool for an attached-image edit even when the direct call sees no pending ask', async () => {
     // Raw/display divergence: the raw transcript already records an answered
@@ -90,6 +130,8 @@ describe('ServerContextBuilder image tool_choice fallback', () => {
     } as any);
 
     expect(output.directToolCalls).toBeUndefined();
-    expect((output.modelParameters as Record<string, unknown> | undefined)?.tool_choice).toBeUndefined();
+    expect(
+      (output.modelParameters as Record<string, unknown> | undefined)?.tool_choice,
+    ).toBeUndefined();
   });
 });
