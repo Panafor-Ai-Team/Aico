@@ -37,7 +37,7 @@ import { TopicModel } from '@/database/models/topic';
 import { VerifyRunModel } from '@/database/models/verifyRun';
 import type { LobeChatDatabase } from '@/database/type';
 import { translation } from '@/libs/i18n/serverTranslation';
-import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import { initServerModelRuntime } from '@/server/services/aico/serverModelRuntime';
 import { SystemAgentService } from '@/server/services/systemAgent';
 import { TaskResultBridgeService } from '@/server/services/taskResultBridge';
 import { createTaskSchedulerModule } from '@/server/services/taskScheduler';
@@ -641,12 +641,13 @@ export class TaskLifecycleService {
         taskName: currentTask?.name || taskIdentifier,
       });
 
-      const modelRuntime = await initModelRuntimeFromDB(
-        this.db,
-        this.userId,
+      const modelRuntime = await initServerModelRuntime({
+        db: this.db,
+        model,
         provider,
-        this.workspaceId,
-      );
+        userId: this.userId,
+        workspaceId: this.workspaceId,
+      });
       const result = await modelRuntime.generateObject(
         {
           messages: payload.messages as any[],
@@ -755,12 +756,13 @@ export class TaskLifecycleService {
           taskName: currentTask.name || taskIdentifier,
         });
 
-        const modelRuntime = await initModelRuntimeFromDB(
-          this.db,
-          this.userId,
+        const modelRuntime = await initServerModelRuntime({
+          db: this.db,
+          model,
           provider,
-          this.workspaceId,
-        );
+          userId: this.userId,
+          workspaceId: this.workspaceId,
+        });
         const judgeResult = (await modelRuntime.generateObject(
           {
             messages: judgePayload.messages as any[],
@@ -820,12 +822,13 @@ export class TaskLifecycleService {
         taskName: currentTask.name || taskIdentifier,
       });
 
-      const modelRuntime = await initModelRuntimeFromDB(
-        this.db,
-        this.userId,
+      const modelRuntime = await initServerModelRuntime({
+        db: this.db,
+        model,
         provider,
-        this.workspaceId,
-      );
+        userId: this.userId,
+        workspaceId: this.workspaceId,
+      });
       const result = await modelRuntime.generateObject(
         {
           messages: payload.messages as any[],

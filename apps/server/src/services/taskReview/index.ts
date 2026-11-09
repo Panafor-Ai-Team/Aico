@@ -5,7 +5,7 @@ import debug from 'debug';
 
 import { UserModel } from '@/database/models/user';
 import type { LobeChatDatabase } from '@/database/type';
-import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import { initServerModelRuntime } from '@/server/services/aico/serverModelRuntime';
 
 import { resolveSystemAgentModelConfig } from '../systemAgent/modelConfig';
 
@@ -66,12 +66,13 @@ export class TaskReviewService {
     );
 
     // 2. Initialize ModelRuntime for LLM-based rubrics
-    const modelRuntime = await initModelRuntimeFromDB(
-      this.db,
-      this.userId,
+    const modelRuntime = await initServerModelRuntime({
+      db: this.db,
+      model,
       provider,
-      this.workspaceId,
-    );
+      userId: this.userId,
+      workspaceId: this.workspaceId,
+    });
 
     // 3. Run evaluate() from @lobechat/eval-rubric
     const result: EvaluateResult = await evaluate(

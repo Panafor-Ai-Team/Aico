@@ -6,7 +6,10 @@ import debug from 'debug';
 import { z } from 'zod';
 
 import type { LobeChatDatabase } from '@/database/type';
-import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import {
+  initServerModelRuntime,
+  toServerCallModelId,
+} from '@/server/services/aico/serverModelRuntime';
 
 import type {
   AgentSignalFeedbackEvidence,
@@ -168,9 +171,14 @@ export class FeedbackDomainJudgeAgentService {
     this.db = db;
     this.userId = userId;
     this.workspaceId = workspaceId;
+    const provider = modelConfig.provider ?? DEFAULT_MINI_SYSTEM_AGENT_ITEM.provider;
     this.modelConfig = {
-      model: modelConfig.model ?? DEFAULT_MINI_SYSTEM_AGENT_ITEM.model,
-      provider: modelConfig.provider ?? DEFAULT_MINI_SYSTEM_AGENT_ITEM.provider,
+      // Authorized and sent as the same id: a managed gateway only knows its own.
+      model: toServerCallModelId(
+        provider,
+        modelConfig.model ?? DEFAULT_MINI_SYSTEM_AGENT_ITEM.model,
+      ),
+      provider,
     };
   }
 
@@ -189,12 +197,13 @@ export class FeedbackDomainJudgeAgentService {
    */
   async judgeDomains(params: JudgeFeedbackDomainsParams): Promise<FeedbackDomainJudgeAgentResult> {
     const payload = chainAgentSignalAnalyzeIntentRoute(params);
-    const modelRuntime = await initModelRuntimeFromDB(
-      this.db,
-      this.userId,
-      this.modelConfig.provider,
-      this.workspaceId,
-    );
+    const modelRuntime = await initServerModelRuntime({
+      db: this.db,
+      model: this.modelConfig.model,
+      provider: this.modelConfig.provider,
+      userId: this.userId,
+      workspaceId: this.workspaceId,
+    });
 
     log('judgeDomains model=%s provider=%s', this.modelConfig.model, this.modelConfig.provider);
 

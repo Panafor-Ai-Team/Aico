@@ -25,7 +25,10 @@ import { RequestTrigger } from '@lobechat/types';
 
 import { MessageModel } from '@/database/models/message';
 import { toolsEnv } from '@/envs/tools';
-import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import {
+  initServerModelRuntime,
+  toServerCallModelId,
+} from '@/server/services/aico/serverModelRuntime';
 import { FileService } from '@/server/services/file';
 
 import type { ToolExecutionContext } from '../types';
@@ -363,7 +366,14 @@ class LobeAgentExecutionRuntime {
 
     let content = '';
     let usage: unknown;
-    const runtime = await initModelRuntimeFromDB(this.db, this.userId, provider, this.workspaceId);
+    const callModel = toServerCallModelId(provider, model);
+    const runtime = await initServerModelRuntime({
+      db: this.db,
+      model: callModel,
+      provider,
+      userId: this.userId,
+      workspaceId: this.workspaceId,
+    });
     const payload = {
       messages: [
         {
@@ -371,7 +381,7 @@ class LobeAgentExecutionRuntime {
           role: 'user' as const,
         },
       ],
-      model,
+      model: callModel,
       stream: false,
     } satisfies ChatStreamPayload;
 
