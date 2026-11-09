@@ -139,6 +139,7 @@ describe('HomeEditorInput attachment actions', () => {
   const renderInput = (mode: 'chat' | 'task') =>
     render(
       <HomeEditorInput
+        contextSelectionKey={`home:${mode}:agt_home`}
         initialValue=""
         isAgentConfigLoading={false}
         loading={false}
