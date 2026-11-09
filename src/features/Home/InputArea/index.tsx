@@ -99,17 +99,13 @@ const InputArea = ({ inputValue, mode, onInputValueChange, onModeChange }: Input
         style={{ paddingBottom: showMessengerBanner ? 32 : 0, position: 'relative' }}
       >
         {showMessengerBanner && <MessengerBanner />}
-        {mode === 'chat' ? (
-          <InputDragUpload
-            radius={20}
-            style={{ position: 'relative', zIndex: 1 }}
-            onUploadFiles={handleUploadFiles}
-          >
-            {editorSlot}
-          </InputDragUpload>
-        ) : (
-          editorSlot
-        )}
+        <InputDragUpload
+          radius={20}
+          style={{ position: 'relative', zIndex: 1 }}
+          onUploadFiles={handleUploadFiles}
+        >
+          {editorSlot}
+        </InputDragUpload>
       </Flexbox>
     </Flexbox>
   );

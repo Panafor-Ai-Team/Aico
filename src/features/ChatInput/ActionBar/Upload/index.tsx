@@ -31,7 +31,12 @@ const hotArea = css`
   }
 `;
 
-const FileUpload = memo(() => {
+interface FileUploadProps {
+  /** Task instructions carry no library/knowledge selections — uploads only. */
+  includeKnowledge?: boolean;
+}
+
+const FileUpload = memo<FileUploadProps>(({ includeKnowledge = true }) => {
   const { t } = useTranslation('chat');
 
   const enableKnowledgeBase = useServerConfigStore(
@@ -54,7 +59,10 @@ const FileUpload = memo(() => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
 
-  const knowledgeItems = useKnowledgeMenuItems({ onUpdatingChange: setUpdating });
+  const knowledgeItems = useKnowledgeMenuItems({
+    enabled: includeKnowledge,
+    onUpdatingChange: setUpdating,
+  });
 
   // Viewer doesn't have `file:upload` permission — backend would 403.
   // Render the disabled paperclip with a tooltip so the entry stays visible
@@ -62,7 +70,7 @@ const FileUpload = memo(() => {
   // otherwise let users trigger the upload anyway.
   const { allowed: canUpload, reason } = usePermission('create_content');
 
-  if (!enableKnowledgeBase) return null;
+  if (includeKnowledge && !enableKnowledgeBase) return null;
 
   if (!canUpload) {
     return (
@@ -205,7 +213,7 @@ const FileUpload = memo(() => {
     <Suspense
       fallback={<ChatInputAction disabled icon={Paperclip} title={t('upload.action.tooltip')} />}
     >
-      {showTip ? (
+      {includeKnowledge && showTip ? (
         <TipGuide
           open={showTip}
           placement={'top'}

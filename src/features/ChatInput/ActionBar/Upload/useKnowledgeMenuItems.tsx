@@ -33,8 +33,10 @@ export const MENU_ICON_SIZE = 20;
  * applies to its Attachments submenu.
  */
 export const useKnowledgeMenuItems = ({
+  enabled = true,
   onUpdatingChange,
 }: {
+  enabled?: boolean;
   onUpdatingChange: (updating: boolean) => void;
 }): ItemType[] => {
   const { t } = useTranslation('chat');
@@ -56,6 +58,8 @@ export const useKnowledgeMenuItems = ({
     s.attachChatFile,
     s.detachChatFile,
   ]);
+
+  if (!enabled) return [];
 
   if (!canConfigureResource) return [];
 
