@@ -169,6 +169,28 @@ describe('control-plane CI/CD wiring', () => {
     expect(preview).toContain('group: deploy-preview-ssh');
   });
 
+  // Prod (2026-11-09): the DC resolvers refused foreign domains, so the app could
+  // not resolve the model gateway (EAI_AGAIN) and every chat and task failed.
+  it('pins public DNS on every container that calls out', () => {
+    const compose = read('docker-compose/deploy/docker-compose.panachat.yml');
+
+    expect(compose).toMatch(
+      /^x-panachat-dns: &panachat-dns\n {2}- \$\{PANACHAT_DNS_1:-1\.1\.1\.1\}/m,
+    );
+    for (const service of [
+      'panachat-blue',
+      'panachat-green',
+      'panachat-control-plane',
+      'searxng',
+    ]) {
+      const start = compose.indexOf(`\n  ${service}:\n`);
+      expect(start).toBeGreaterThan(-1);
+      const next = compose.slice(start + 1).search(/\n {2}[\w-]+:\n|\n\S/);
+      const block = compose.slice(start, next === -1 ? undefined : start + 1 + next);
+      expect(block, service).toContain('dns: *panachat-dns');
+    }
+  });
+
   it('configures S3 CORS so browser chat-image PUT is not blocked', () => {
     const compose = read('docker-compose/deploy/docker-compose.panachat.yml');
     const nginx = read('docker-compose/deploy/nginx/panachat-s3-site.example.conf');

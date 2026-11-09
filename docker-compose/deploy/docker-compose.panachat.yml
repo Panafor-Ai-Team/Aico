@@ -12,6 +12,15 @@
 
 name: ${PANACHAT_STACK:-panachat}
 
+# Upstream DNS for containers that call out (model gateway, OpenRouter, web
+# search). Docker's embedded DNS otherwise forwards to the host's resolvers;
+# on 2026-11-09 the ParsPack resolvers started answering REFUSED for foreign
+# domains and every chat and task failed with EAI_AGAIN. Override per host.
+x-panachat-dns: &panachat-dns
+  - ${PANACHAT_DNS_1:-1.1.1.1}
+  - ${PANACHAT_DNS_2:-8.8.8.8}
+  - ${PANACHAT_DNS_3:-178.22.122.100}
+
 services:
   # App slots are profile-gated so `compose up -d` (data plane) never
   # accidentally restarts a stopped color. Deploy script starts one profile.
@@ -66,6 +75,7 @@ services:
     # SMTP reaches the stalwart container directly: the deploy attaches it to
     # this network with the alias "mailer.panafor.com" (TLS cert hostname).
     # Never re-add extra_hosts:host-gateway — cross-bridge hairpin drops data.
+    dns: *panachat-dns
     networks:
       - panachat-network
     restart: unless-stopped
@@ -121,6 +131,7 @@ services:
     # SMTP reaches the stalwart container directly: the deploy attaches it to
     # this network with the alias "mailer.panafor.com" (TLS cert hostname).
     # Never re-add extra_hosts:host-gateway — cross-bridge hairpin drops data.
+    dns: *panachat-dns
     networks:
       - panachat-network
     restart: unless-stopped
@@ -177,6 +188,7 @@ services:
       retries: 12
       start_period: 20s
     restart: unless-stopped
+    dns: *panachat-dns
     networks:
       - panachat-network
 
@@ -266,6 +278,7 @@ services:
     environment:
       - 'SEARXNG_SETTINGS_FILE=/etc/searxng/settings.yml'
     restart: always
+    dns: *panachat-dns
     networks:
       - panachat-network
     env_file:
