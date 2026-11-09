@@ -181,6 +181,37 @@ for u in https://download.docker.com/linux/ubuntu/gpg https://registry-1.docker.
 done
 ```
 
+### 7a. DNS: do not rely on the DC resolvers (2026-11-09)
+
+The netplan config from cloud-init points the host at the DC resolvers (`85.208.255.182`, `85.208.255.71`). On 2026-11-09 they started answering **REFUSED** for foreign domains (model gateway, `openrouter.ai`, `github.com`, `ghcr.io`), while `1.1.1.1`, `8.8.8.8` and `178.22.122.100` still resolved them from this host. Every chat and task failed with `getaddrinfo EAI_AGAIN`, and deploys failed at `git fetch`.
+
+Two layers keep this from coming back:
+
+1. **Host** — a systemd-resolved drop-in (cloud-init does not rewrite it) routes all lookups to public resolvers:
+
+   ```ini
+   # /etc/systemd/resolved.conf.d/panachat-dns.conf
+   [Resolve]
+   DNS=1.1.1.1 8.8.8.8 178.22.122.100
+   FallbackDNS=9.9.9.9
+   Domains=~.
+   ```
+
+   Apply with `systemctl restart systemd-resolved`. Docker's embedded DNS picked the new upstream list up without restarting containers.
+
+2. **Containers** — `docker-compose.panachat.yml` sets `dns:` on the services that call out (app slots, control plane, searxng), overridable with `PANACHAT_DNS_1..3` in the infra `.env`. This holds even if the host drop-in is lost.
+
+Check both:
+
+```bash
+for s in 85.208.255.182 1.1.1.1 8.8.8.8 178.22.122.100; do
+  printf '%-16s ' $s
+  dig +time=3 +tries=1 @$s ru.cheapvibecode.ru A +short | head -1 || echo FAIL
+done
+resolvectl query ru.cheapvibecode.ru
+docker exec panachat-blue node -e "require('dns').lookup('ru.cheapvibecode.ru',(e,a)=>console.log(e?e.code:a))"
+```
+
 ---
 
 ## 8. Backups: off-site copy of kamyar + restore drill
