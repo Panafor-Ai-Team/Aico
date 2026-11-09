@@ -64,6 +64,31 @@ describe('TaskReviewService managed-model billing', () => {
     );
   });
 
+  it('authorizes a rubric judge-model override with its own runtime', async () => {
+    const generateObject = vi.fn().mockResolvedValue({ score: 1 });
+    mocks.initModelRuntimeFromDB.mockResolvedValue({ generateObject });
+    mocks.evaluate.mockImplementation(async (_input, { matchContext }) => {
+      await matchContext.generateObject({ messages: [], model: 'synthetic/rubric-model' });
+      await matchContext.generateObject({ messages: [] });
+      return { passed: true, rubricResults: [], score: 1 };
+    });
+    const service = new TaskReviewService({} as any, 'user_test_1');
+
+    await service.review({
+      content: 'the run output',
+      judge: { model: 'synthetic/judge-model', provider: 'aico' },
+      rubrics: [],
+      taskName: 'Daily news',
+    });
+
+    const authorized = mocks.initModelRuntimeFromDB.mock.calls.map((call) => call[4].modelId);
+    expect(authorized).toEqual(['synthetic/judge-model', 'synthetic/rubric-model']);
+    expect(generateObject.mock.calls.map(([payload]) => payload.model)).toEqual([
+      'synthetic/rubric-model',
+      'synthetic/judge-model',
+    ]);
+  });
+
   it('keeps a BYOK judge unbilled', async () => {
     const service = new TaskReviewService({} as any, 'user_test_1');
 

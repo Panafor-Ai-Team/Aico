@@ -5,7 +5,10 @@ import debug from 'debug';
 
 import { UserModel } from '@/database/models/user';
 import type { LobeChatDatabase } from '@/database/type';
-import { initServerModelRuntime } from '@/server/services/aico/serverModelRuntime';
+import {
+  initServerModelRuntime,
+  toServerCallModelId,
+} from '@/server/services/aico/serverModelRuntime';
 
 import { resolveSystemAgentModelConfig } from '../systemAgent/modelConfig';
 
@@ -65,14 +68,25 @@ export class TaskReviewService {
       rubrics.length,
     );
 
-    // 2. Initialize ModelRuntime for LLM-based rubrics
-    const modelRuntime = await initServerModelRuntime({
-      db: this.db,
-      model,
-      provider,
-      userId: this.userId,
-      workspaceId: this.workspaceId,
-    });
+    // 2. Initialize ModelRuntime for LLM-based rubrics. A managed runtime is
+    // authorized (allow-list + billing) for one model, so a rubric that
+    // overrides the judge model gets its own runtime.
+    const runtimes = new Map<string, ReturnType<typeof initServerModelRuntime>>();
+    const getRuntime = (callModel: string) => {
+      let runtime = runtimes.get(callModel);
+      if (!runtime) {
+        runtime = initServerModelRuntime({
+          db: this.db,
+          model: callModel,
+          provider,
+          userId: this.userId,
+          workspaceId: this.workspaceId,
+        });
+        runtimes.set(callModel, runtime);
+      }
+      return runtime;
+    };
+    await getRuntime(model);
 
     // 3. Run evaluate() from @lobechat/eval-rubric
     const result: EvaluateResult = await evaluate(
@@ -84,10 +98,12 @@ export class TaskReviewService {
       {
         matchContext: {
           generateObject: async (payload) => {
+            const callModel = payload.model ? toServerCallModelId(provider, payload.model) : model;
+            const modelRuntime = await getRuntime(callModel);
             return (modelRuntime as any).generateObject(
               {
                 messages: payload.messages as any[],
-                model: payload.model || model,
+                model: callModel,
                 schema: { name: 'judge_score', schema: payload.schema },
               },
               { metadata: { trigger: 'task-review' } },
