@@ -43,6 +43,8 @@ export const TIMEZONE_OPTIONS: TimezoneOption[] = [
   { label: 'Europe/Istanbul', offset: 'TRT · UTC+3', value: 'Europe/Istanbul' },
 
   // Asia
+  // Iran has no DST since 2022 — fixed UTC+3:30.
+  { label: 'Asia/Tehran', offset: 'IRST · UTC+3:30', value: 'Asia/Tehran' },
   { label: 'Asia/Dubai', offset: 'GST · UTC+4', value: 'Asia/Dubai' },
   { label: 'Asia/Kolkata', offset: 'IST · UTC+5:30', value: 'Asia/Kolkata' },
   { label: 'Asia/Shanghai', offset: 'CST · UTC+8', value: 'Asia/Shanghai' },
