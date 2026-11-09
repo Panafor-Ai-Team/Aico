@@ -30,8 +30,9 @@ trap 'rm -rf "$tmp"' EXIT
 # Fake docker. `pull` fails FAKE_PULL_FAILS times (or hangs with
 # FAKE_PULL_HANG=1), then succeeds; attempts are counted in $tmp/pulls.
 # `images` prints $tmp/images; `rmi` logs its argument to $tmp/rmi and refuses
-# the refs listed in $tmp/in-use; `image` logs its arguments to $tmp/prune and
-# fails with FAKE_PRUNE_FAIL=1.
+# the refs listed in $tmp/in-use; `image inspect` succeeds for the refs listed
+# in $tmp/present; other `image` calls log their arguments to $tmp/prune and
+# fail with FAKE_PRUNE_FAIL=1.
 mkdir -p "$tmp/bin"
 cat >"$tmp/bin/docker" <<'EOF'
 #!/usr/bin/env bash
@@ -55,6 +56,11 @@ case "$1" in
     ;;
   image)
     shift
+    # `image inspect <ref>` succeeds for the refs listed in $tmp/present.
+    if [[ "$1" == inspect ]]; then
+      grep -qxF "$2" "$FAKE_DIR/present" 2>/dev/null
+      exit
+    fi
     echo "$*" >>"$FAKE_DIR/prune"
     [[ "${FAKE_PRUNE_FAIL:-0}" == 1 ]] && { echo "Error response from daemon: a prune operation is already running" >&2; exit 1; }
     printf 'Deleted Images:\ndeleted: sha256:5949dcdc4726\n\nTotal reclaimed space: 9.57GB\n'
@@ -75,7 +81,7 @@ source "$DEPLOY"
 set +e
 
 reset_fake() {
-  rm -f "$tmp/pulls" "$tmp/rmi" "$tmp/in-use" "$tmp/prune"
+  rm -f "$tmp/pulls" "$tmp/rmi" "$tmp/in-use" "$tmp/prune" "$tmp/present"
   unset FAKE_PULL_FAILS FAKE_PULL_HANG FAKE_PRUNE_FAIL
 }
 
@@ -102,6 +108,21 @@ if pull_with_retry "$CP:abc1234" >"$tmp/out.log" 2>&1; then
   fail "a hung pull must fail"
 fi
 ((SECONDS - start < 20)) || fail "hung pull was not bounded by PANACHAT_PULL_TIMEOUT_SEC"
+
+# 3b. A commit-tagged image already on the host (CI shipped it over SSH, or a
+#     re-run) is not pulled again: the host may have no route to the registry.
+reset_fake
+echo "$CP:abc1234" >"$tmp/present"
+export FAKE_PULL_FAILS=99
+pull_with_retry "$CP:abc1234" >"$tmp/out.log" 2>&1 || fail "a present image must not need the registry: $(cat "$tmp/out.log")"
+[[ ! -e "$tmp/pulls" ]] || fail "a present commit-tagged image must not be pulled"
+grep -q 'already on this host' "$tmp/out.log" || fail "skipped pull must say so: $(cat "$tmp/out.log")"
+
+# 3c. A moving tag (:canary) is pulled even when present.
+reset_fake
+echo "$CP:canary" >"$tmp/present"
+pull_with_retry "$CP:canary" >"$tmp/out.log" 2>&1 || fail "moving-tag pull should succeed: $(cat "$tmp/out.log")"
+[[ "$(cat "$tmp/pulls")" == 1 ]] || fail "a moving tag must be pulled even when present"
 
 # 4. The control-plane ref exported by the workflow wins over the infra .env…
 printf 'PANACHAT_CONTROL_PLANE_IMAGE=%s:canary\nPANACHAT_PORT_BLUE=3210\n' "$CP" >"$tmp/infra.env"
@@ -224,5 +245,14 @@ run_deploy
 ((rc != 0)) || fail "deploy must fail when the new control plane is unhealthy"
 grep -qxF "PANACHAT_CONTROL_PLANE_IMAGE=$CP:old" "$tmp/infra.env" ||
   fail "an unhealthy control-plane image must not be persisted: $(cat "$tmp/infra.env")"
+
+# 12. Images CI already shipped to the host deploy with no registry at all.
+reset_deploy
+printf '%s\n' "$APP:new" "$CP:new" >"$tmp/present"
+export FAKE_PULL_FAILS=99
+run_deploy
+((rc == 0)) || fail "deploy with shipped images must not need the registry: $(cat "$tmp/out.log")"
+[[ ! -e "$tmp/pulls" ]] || fail "shipped images must not be pulled: $(cat "$tmp/pulls") pulls"
+grep -qxF "PANACHAT_CONTROL_PLANE_IMAGE=$CP:new" "$tmp/infra.env" || fail "shipped control plane not persisted: $(cat "$tmp/infra.env")"
 
 echo "OK: panachat-deploy-remote"

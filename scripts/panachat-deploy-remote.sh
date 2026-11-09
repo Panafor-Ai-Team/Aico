@@ -322,8 +322,16 @@ wait_control_plane() {
 # A stalled registry transfer must fail the deploy cleanly, not hang it until the
 # SSH step's timeout cuts the script off. Only the client is killed; the daemon
 # is never restarted.
+#
+# A commit-tagged image already on disk is that build: CI streams the images over
+# SSH when this host cannot reach the registry (scripts/panachat-ship-release.sh),
+# and a re-run or rollback finds them here. Moving tags are always pulled.
 pull_with_retry() {
   local ref="$1" attempt
+  if ! is_moving_tag "$ref" && docker image inspect "$ref" >/dev/null 2>&1; then
+    log "$ref is already on this host; not pulling"
+    return 0
+  fi
   for ((attempt = 1; attempt <= PULL_ATTEMPTS; attempt++)); do
     log "Pulling $ref (attempt $attempt/$PULL_ATTEMPTS, limit ${PULL_TIMEOUT}s)"
     if timeout -k 30 "$PULL_TIMEOUT" docker pull "$ref"; then
@@ -335,6 +343,14 @@ pull_with_retry() {
   done
   err "docker pull $ref failed after $PULL_ATTEMPTS attempts"
   return 1
+}
+
+# Tags CI moves to every new build (deploy-*.yml); anything else names one build.
+is_moving_tag() {
+  local ref="$1" tag
+  [[ "${ref##*/}" == *:* ]] || return 0 # no tag means :latest
+  tag="${ref##*:}"
+  [[ "$tag" == canary || "$tag" == preview || "$tag" == latest ]]
 }
 
 # The ref pull_control_plane_image already fetched in this run.

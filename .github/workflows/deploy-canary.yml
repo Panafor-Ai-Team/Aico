@@ -11,6 +11,10 @@ name: Deploy Panachat Canary
 # Optional secrets:
 #   DEPLOY_PATH (repo root on server; default ~/panachat)
 #
+# The host never contacts GitHub during a deploy: scripts/panachat-ship-release.sh
+# sends the new commits over SSH as a git bundle and, when the host cannot reach
+# ghcr.io, streams the images too (prod could not resolve github.com, 2026-11-09).
+#
 # Package visibility: workflow attempts to set the GHCR package to private
 # after push (public GitHub repo does not mean a public image).
 on:
@@ -22,6 +26,11 @@ on:
         description: 'Build/push only (skip SSH deploy)'
         type: boolean
         default: false
+      image_transfer:
+        description: 'How images reach the host: auto = over SSH only when the host cannot reach ghcr.io'
+        type: choice
+        options: [auto, ssh, registry]
+        default: auto
 
 # No workflow-level queue: a newer canary SHA must start building immediately.
 # Image jobs cancel the previous SHA. SSH deploy never cancels (blue-green in flight).
@@ -241,6 +250,38 @@ jobs:
     if: ${{ always() && needs.quality-gate.result == 'success' && needs.aico-tests.result == 'success' && needs.build.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.skip_deploy != true) }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Full history: the bundle for the host starts at whatever commit its
+          # checkout is on.
+          fetch-depth: 0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Ship commits and images to the host
+        env:
+          DEPLOY_HOST: ${{ secrets.CANARY_DEPLOY_HOST || secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          IMAGE: ${{ needs.build.outputs.image }}:${{ needs.build.outputs.sha_short }}
+          CONTROL_PLANE_IMAGE: ${{ needs.build-control-plane.result == 'success' && format('{0}:{1}', needs.build-control-plane.outputs.image, needs.build-control-plane.outputs.sha_short) || '' }}
+          IMAGE_TRANSFER: ${{ inputs.image_transfer || 'auto' }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" >~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Same trust as the ssh-action step below, which pins no host key.
+          ssh-keyscan -T 30 "$DEPLOY_HOST" >>~/.ssh/known_hosts
+          DEPLOY_SSH_KEY_FILE=~/.ssh/deploy_key DEPLOY_SSH_TARGET="$DEPLOY_USER@$DEPLOY_HOST" \
+            ./scripts/panachat-ship-release.sh
+
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -257,10 +298,12 @@ jobs:
             set -euo pipefail
             DEPLOY_PATH="${DEPLOY_PATH:-$HOME/panachat}"
             cd "$DEPLOY_PATH"
-            git fetch origin canary
-            git merge --ff-only FETCH_HEAD || echo "WARN: could not fast-forward (local changes?); deploying with existing scripts"
+            # The previous step already fast-forwarded this checkout over SSH.
+            # Login is only needed when the host pulls images itself; if ghcr.io
+            # is unreachable they were shipped and the deploy pulls nothing.
             if [ -n "${GHCR_TOKEN:-}" ]; then
-              echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+              echo "$GHCR_TOKEN" | timeout 60 docker login ghcr.io -u "${GHCR_USER}" --password-stdin ||
+                echo "WARN: ghcr.io login failed; deploying with the images already on the host"
             fi
             export PANACHAT_CONTROL_PLANE_IMAGE="$CONTROL_PLANE_IMAGE"
             PANACHAT_ENV=canary ./scripts/panachat-deploy-remote.sh deploy "$IMAGE"
