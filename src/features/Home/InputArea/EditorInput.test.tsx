@@ -26,6 +26,10 @@ vi.mock('@/features/ChatInput/ActionBar', () => ({
   default: () => <div data-testid="action-bar" />,
 }));
 
+vi.mock('@/features/ChatInput/ActionBar/Upload', () => ({
+  default: () => <div data-testid="file-upload" />,
+}));
+
 const chatInputProviderProps = vi.fn();
 
 vi.mock('@/features/ChatInput', () => ({
@@ -33,8 +37,17 @@ vi.mock('@/features/ChatInput', () => ({
     chatInputProviderProps(props);
     return <>{children}</>;
   },
-  DesktopChatInput: ({ sendAreaPrefix }: { sendAreaPrefix?: React.ReactNode }) => (
-    <div data-testid="desktop-chat-input">{sendAreaPrefix}</div>
+  DesktopChatInput: ({
+    leftContent,
+    sendAreaPrefix,
+  }: {
+    leftContent?: React.ReactNode;
+    sendAreaPrefix?: React.ReactNode;
+  }) => (
+    <div data-testid="desktop-chat-input">
+      {leftContent}
+      {sendAreaPrefix}
+    </div>
   ),
 }));
 
@@ -115,5 +128,37 @@ describe('HomeEditorInput thinking level', () => {
         rightActions: ['modelLabel', 'reasoningEffort'],
       }),
     );
+  });
+});
+
+describe('HomeEditorInput attachment actions', () => {
+  beforeEach(() => {
+    chatInputProviderProps.mockClear();
+  });
+
+  const renderInput = (mode: 'chat' | 'task') =>
+    render(
+      <HomeEditorInput
+        initialValue=""
+        isAgentConfigLoading={false}
+        loading={false}
+        mode={mode}
+        send={async () => {}}
+        onModeChange={() => {}}
+        onValueChange={() => {}}
+      />,
+    );
+
+  it('keeps the full plus menu in chat mode', () => {
+    renderInput('chat');
+
+    expect(screen.getByTestId('action-bar')).toBeInTheDocument();
+    expect(screen.queryByTestId('file-upload')).not.toBeInTheDocument();
+  });
+
+  it('keeps the attachment action in task mode', () => {
+    renderInput('task');
+
+    expect(screen.getByTestId('file-upload')).toBeInTheDocument();
   });
 });
