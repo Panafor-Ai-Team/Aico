@@ -183,7 +183,10 @@ const executePreparedCall = async (
           stepIndex: host.operation.stepIndex,
           type: 'stream_retry',
         });
-        await (retryPolicy.waitForRetry ?? waitForRetry)(delayMs);
+        // Called as a method: a policy may keep state on `this` (the server
+        // policy skips backoff after a stall).
+        if (retryPolicy.waitForRetry) await retryPolicy.waitForRetry(delayMs);
+        else await waitForRetry(delayMs);
 
         interrupted = await isOperationInterrupted(host);
         if (!interrupted) continue;

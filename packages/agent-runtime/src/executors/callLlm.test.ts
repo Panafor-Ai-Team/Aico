@@ -543,6 +543,48 @@ describe('callLlm executor', () => {
     expect(transport.trace.close).toHaveBeenCalledWith(undefined);
   });
 
+  // Prod (2026-11-09): the server retry policy is a class whose waitForRetry reads
+  // `this`; calling it detached failed every retried task run with "Cannot read
+  // properties of undefined (reading 'lastFailureWasStall')".
+  it('calls a class-based waitForRetry with the policy as `this`', async () => {
+    const state = createState();
+    const error = new Error('temporary outage');
+    const runAttempt = vi
+      .fn()
+      .mockResolvedValueOnce({ error, ok: false, output: createAttemptOutput('') })
+      .mockResolvedValueOnce({ ok: true, output: createAttemptOutput('complete') });
+
+    class StatefulRetryPolicy implements LLMRetryPolicy {
+      waits: number[] = [];
+      classifyError() {
+        return { kind: 'retry' as const, message: error.message };
+      }
+      maxAttempts() {
+        return 3;
+      }
+      resolveRetryBudget() {
+        return 2;
+      }
+      async waitForRetry(delayMs: number) {
+        this.waits.push(delayMs);
+      }
+    }
+    const policy = new StatefulRetryPolicy();
+    const transport = createCallTransport({ policy, runAttempt });
+    const host = createHost(
+      transport.llm,
+      createMessageTransport(),
+      createStreamSink(),
+      createContextBuilder(),
+      { clearRunningMark: vi.fn(), loadState: vi.fn().mockResolvedValue(null) },
+    );
+
+    const result = await callLlm(host)(instruction, state);
+
+    expect(policy.waits).toEqual([1000]);
+    expect(result.newState.messages.at(-1)).toMatchObject({ content: 'complete' });
+  });
+
   it('reports the error-specific retry budget as maxAttempts in stream_retry', async () => {
     const state = createState();
     const error = new Error('Chat start timed out: upstream-headers');
