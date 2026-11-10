@@ -18,6 +18,7 @@ const marketProcedure = publicProcedure
       ctx: {
         marketService: new MarketService({
           accessToken: ctx.marketAccessToken,
+          db: ctx.serverDB,
           userInfo: ctx.marketUserInfo,
         }),
       },

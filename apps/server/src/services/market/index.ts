@@ -1,5 +1,6 @@
 import { BRANDING_NAME } from '@lobechat/business-const';
 import { type LobeToolManifest } from '@lobechat/context-engine';
+import { type LobeChatDatabase } from '@lobechat/database';
 import { MarketSDK, type OrgRef, orgRefToPathSegment } from '@lobehub/market-sdk';
 import debug from 'debug';
 import { type NextRequest } from 'next/server';
@@ -8,6 +9,7 @@ import { type TrustedClientUserInfo } from '@/libs/trusted-client';
 import { generateTrustedClientToken, getTrustedClientTokenForSession } from '@/libs/trusted-client';
 
 import { listSkillToolsWithLiveFallback } from './listSkillToolsWithLiveFallback';
+import { getSkillCategoriesFromCatalog, getSkillFromCatalog, searchSkills } from './skillCatalog';
 
 const log = debug('lobe-server:market-service');
 
@@ -45,13 +47,14 @@ export interface LobehubSkillExecuteResult {
 }
 
 export interface MarketServiceOptions {
-  /** Access token from OIDC flow (user token) */
   accessToken?: string;
   /** Client credentials for M2M authentication */
   clientCredentials?: {
     clientId: string;
     clientSecret: string;
   };
+  /** Self-hosted skill catalog DB; when set, skill browse reads never hit market.lobehub.com */
+  db?: LobeChatDatabase;
   /**
    * Owner account id for organization-scoped operations.
    *
@@ -94,10 +97,12 @@ export interface MarketServiceOptions {
  */
 export class MarketService {
   market: MarketSDK;
+  private db?: LobeChatDatabase;
 
   constructor(options: MarketServiceOptions = {}) {
     const { accessToken, userInfo, clientCredentials, trustedClientToken, ownerAccountId } =
       options;
+    this.db = options.db;
 
     // Use provided trustedClientToken or generate from userInfo
     const resolvedTrustedClientToken =
@@ -444,6 +449,15 @@ export class MarketService {
   }) {
     log('searchSkill: %O', params);
 
+    if (this.db) {
+      try {
+        return await searchSkills(this.db, params);
+      } catch (error) {
+        // Missing/empty skill_catalog (fresh deployment): serve upstream.
+        log('searchSkill: catalog unavailable, falling back to market: %O', error);
+      }
+    }
+
     const result = await this.market.marketSkills.getSkillList(params);
 
     log('searchSkill response: %O', result);
@@ -456,6 +470,15 @@ export class MarketService {
    */
   async getSkillDetail(identifier: string, options?: { locale?: string; version?: string }) {
     log('getSkillDetail: %s, options: %O', identifier, options);
+
+    if (this.db) {
+      try {
+        const hit = await getSkillFromCatalog(this.db, identifier);
+        if (hit) return hit;
+      } catch (error) {
+        log('getSkillDetail: catalog unavailable, falling back to market: %O', error);
+      }
+    }
 
     const result = await this.market.marketSkills.getSkillDetail(identifier, options);
 
@@ -511,6 +534,14 @@ export class MarketService {
    */
   async getSkillCategories() {
     log('getSkillCategories');
+
+    if (this.db) {
+      try {
+        return await getSkillCategoriesFromCatalog(this.db);
+      } catch (error) {
+        log('getSkillCategories: catalog unavailable, falling back to market: %O', error);
+      }
+    }
 
     return this.market.marketSkills.getCategories();
   }
