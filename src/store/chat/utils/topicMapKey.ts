@@ -62,3 +62,18 @@ export const topicMapKey = (input: TopicMapKeyInput): string => {
     }
   }
 };
+
+/**
+ * Narrow a conversation context's `scope` to the values `topicMapKey` accepts as
+ * an explicit override, dropping everything else (`main`, `thread`, `sub_agent`,
+ * …) so auto-detection keeps handling those.
+ *
+ * Group runs MUST carry this through on every topic write. Auto-detection maps
+ * agentId+groupId to `group_agent`, but a group's main topic row lives in the
+ * `group_{groupId}` bucket — the one the sidebar renders. Patch the derived
+ * bucket instead and the visible row never sees the update, so a finished group
+ * chat keeps the run-start `status: 'running'` (and its spinner) until the next
+ * refetch.
+ */
+export const resolveGroupTopicScope = (scope?: string): TopicMapScope | undefined =>
+  scope === 'group' || scope === 'group_agent' ? scope : undefined;

@@ -1,5 +1,6 @@
 'use client';
 
+import { agentDisplayName } from '@lobechat/types';
 import { Flexbox } from '@lobehub/ui';
 import { cx } from 'antd-style';
 import { memo } from 'react';
@@ -55,7 +56,7 @@ const ChatItem = memo<ChatItemProps>(
 
     const avatarContent = (
       <Avatar
-        alt={avatarProps?.alt || avatar.title || 'avatar'}
+        alt={avatarProps?.alt || agentDisplayName(avatar, 'avatar')}
         loading={loading}
         shape={'square'}
         onClick={onAvatarClick}
@@ -72,6 +73,9 @@ const ChatItem = memo<ChatItemProps>(
         gap={8}
         paddingBlock={8}
         style={{
+          // Keep physical L/R placement under html[dir=rtl]: logical flex-end
+          // would flip user bubbles to the left in Persian.
+          direction: 'ltr',
           paddingInlineStart: isUser ? 36 : 0,
           ...style,
         }}

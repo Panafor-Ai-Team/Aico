@@ -1,3 +1,4 @@
+import { grokImagineImageParameters } from '../const/imageParameters';
 import type { AIChatModelCard, AIImageModelCard, AIVideoModelCard } from '../types/aiModel';
 
 // https://docs.x.ai/docs/models
@@ -28,7 +29,7 @@ const xaiChatModels: AIChatModelCard[] = [
     releasedAt: '2026-07-08',
     settings: {
       extendParams: ['grok4_5ReasoningEffort'],
-      searchImpl: 'params',
+      searchImpl: 'tool',
     },
     type: 'chat',
   },
@@ -81,7 +82,7 @@ const xaiChatModels: AIChatModelCard[] = [
     releasedAt: '2026-05-01',
     settings: {
       extendParams: ['grok4_3ReasoningEffort'],
-      searchImpl: 'params',
+      searchImpl: 'tool',
     },
     type: 'chat',
   },
@@ -132,7 +133,7 @@ const xaiChatModels: AIChatModelCard[] = [
     },
     releasedAt: '2026-03-09',
     settings: {
-      searchImpl: 'params',
+      searchImpl: 'tool',
     },
     type: 'chat',
   },
@@ -184,7 +185,7 @@ const xaiChatModels: AIChatModelCard[] = [
     },
     releasedAt: '2026-03-09',
     settings: {
-      searchImpl: 'params',
+      searchImpl: 'tool',
     },
     type: 'chat',
   },
@@ -237,7 +238,7 @@ const xaiChatModels: AIChatModelCard[] = [
     releasedAt: '2026-03-09',
     settings: {
       extendParams: ['grok4_20ReasoningEffort'],
-      searchImpl: 'params',
+      searchImpl: 'tool',
     },
     type: 'chat',
   },
@@ -291,35 +292,7 @@ const xaiImageModels: AIImageModelCard[] = [
     displayName: 'Grok Imagine Image',
     enabled: true,
     id: 'grok-imagine-image',
-    parameters: {
-      aspectRatio: {
-        default: 'auto',
-        enum: [
-          'auto',
-          '1:1',
-          '3:4',
-          '4:3',
-          '9:16',
-          '16:9',
-          '2:3',
-          '3:2',
-          '9:19.5',
-          '19.5:9',
-          '9:20',
-          '20:9',
-          '1:2',
-          '2:1',
-        ],
-      },
-      imageUrls: { default: [] },
-      prompt: {
-        default: '',
-      },
-      resolution: {
-        default: '1k',
-        enum: ['1k', '2k'],
-      },
-    },
+    parameters: grokImagineImageParameters,
     pricing: {
       units: [{ name: 'imageGeneration', rate: 0.02, strategy: 'fixed', unit: 'image' }],
     },

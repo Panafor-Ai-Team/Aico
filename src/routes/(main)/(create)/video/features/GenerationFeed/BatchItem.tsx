@@ -1,8 +1,8 @@
 'use client';
 
-import { ModelTag } from '@lobehub/icons';
+import { scrubVendorNames } from '@lobechat/const';
 import { ActionIconGroup, Block, Flexbox, Markdown, Tag, Text } from '@lobehub/ui';
-import { App } from 'antd';
+import { toast } from '@lobehub/ui/base-ui';
 import { createStaticStyles } from 'antd-style';
 import dayjs from 'dayjs';
 import { CopyIcon, RotateCcwSquareIcon, Trash2 } from 'lucide-react';
@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useActiveWorkspaceId } from '@/business/client/hooks/useActiveWorkspaceId';
 import useRenderBusinessVideoBatchItem from '@/business/client/hooks/useRenderBusinessVideoBatchItem';
+import { BrandedModelTag } from '@/components/Branding/BrandedModelTag';
 import { GenerationInvalidAPIKey } from '@/routes/(main)/(create)/features/GenerationInput';
 import { useVideoStore } from '@/store/video';
 import { AsyncTaskErrorType, AsyncTaskStatus } from '@/types/asyncTask';
@@ -45,7 +46,6 @@ interface VideoGenerationBatchItemProps {
 }
 
 export const VideoGenerationBatchItem = memo<VideoGenerationBatchItemProps>(({ batch }) => {
-  const { message } = App.useApp();
   const { t } = useTranslation(['video', 'image']);
   const useCheckGenerationStatus = useVideoStore((s) => s.useCheckGenerationStatus);
   const removeGeneration = useVideoStore((s) => s.removeGeneration);
@@ -57,6 +57,8 @@ export const VideoGenerationBatchItem = memo<VideoGenerationBatchItemProps>(({ b
   const { shouldRenderBusinessBatchItem, businessBatchItem } =
     useRenderBusinessVideoBatchItem(batch);
 
+  // Resolve the model's display name from the enabled model catalog, falling back
+  // to the raw model id when the model is not found (e.g. removed/renamed models).
   const creator = batch.creator;
   const showCreator = Boolean(activeWorkspaceId && creator?.id);
   const creatorName = creator?.fullName || creator?.username || '';
@@ -91,12 +93,12 @@ export const VideoGenerationBatchItem = memo<VideoGenerationBatchItemProps>(({ b
   const handleCopyPrompt = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(batch.prompt);
-      message.success(t('generation.actions.promptCopied', { ns: 'image' }));
+      toast.success(t('generation.actions.promptCopied', { ns: 'image' }));
     } catch (error) {
       console.error('Failed to copy prompt:', error);
-      message.error(t('generation.actions.promptCopyFailed', { ns: 'image' }));
+      toast.error(t('generation.actions.promptCopyFailed', { ns: 'image' }));
     }
-  }, [batch.prompt, message, t]);
+  }, [batch.prompt, t]);
 
   const handleReuseSettings = useCallback(() => {
     setModelAndProviderOnSelect(batch.model, batch.provider);
@@ -145,13 +147,13 @@ export const VideoGenerationBatchItem = memo<VideoGenerationBatchItemProps>(({ b
         : generation.task.error.body?.detail || generation.task.error.name || 'Unknown error';
 
     try {
-      await navigator.clipboard.writeText(errorMessage);
-      message.success(t('generation.actions.errorCopied'));
+      await navigator.clipboard.writeText(scrubVendorNames(errorMessage));
+      toast.success(t('generation.actions.errorCopied'));
     } catch (error) {
       console.error('Failed to copy error message:', error);
-      message.error(t('generation.actions.errorCopyFailed'));
+      toast.error(t('generation.actions.errorCopyFailed'));
     }
-  }, [generation?.task.error, message, t]);
+  }, [generation?.task.error, t]);
 
   const displayAspectRatio = useMemo(() => {
     const ratio = batch.config?.aspectRatio;
@@ -246,7 +248,7 @@ export const VideoGenerationBatchItem = memo<VideoGenerationBatchItemProps>(({ b
         style={{ opacity: 0.66 }}
       >
         <Flexbox horizontal align={'center'} gap={4}>
-          <ModelTag model={batch.model} variant={'borderless'} />
+          <BrandedModelTag model={batch.model} variant={'borderless'} />
           {batch.config?.resolution && <Tag variant={'borderless'}>{batch.config.resolution}</Tag>}
         </Flexbox>
         <Flexbox horizontal align={'center'} gap={6}>

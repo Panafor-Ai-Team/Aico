@@ -1,10 +1,17 @@
-import type { ChatCitationItem, ModelPerformance, ModelUsage } from '@lobechat/types';
+import type {
+  ChatCitationItem,
+  ModelPerformance,
+  ModelReasoningResponseItem,
+  ModelUsage,
+} from '@lobechat/types';
+import { mergeStreamUsage } from '@lobechat/utils/mergeStreamUsage';
 import type { Pricing } from 'model-bank';
 
 import { parseToolCalls } from '../../helpers';
 import type { ChatStreamCallbacks, OnFinishData, UsageMissingDiagnostics } from '../../types';
 import { AgentRuntimeErrorType } from '../../types/error';
 import { safeParseJSON } from '../../utils/safeParseJSON';
+import type { SignatureScope } from '../../utils/signatureScope';
 import { nanoid } from '../../utils/uuid';
 import type { ComputeChatCostOptions } from '../usageConverters/utils/computeChatCost';
 
@@ -15,6 +22,8 @@ export type ChatPayloadForTransformStream = {
   pricing?: Pricing;
   pricingOptions?: ComputeChatCostOptions;
   provider?: string;
+  reasoningSignatureScope?: SignatureScope;
+  thoughtSignatureScope?: SignatureScope;
 };
 
 /**
@@ -23,6 +32,12 @@ export type ChatPayloadForTransformStream = {
 export interface StreamContext {
   chunkIndex?: number;
   id: string;
+  /**
+   * Model id the provider reported for this response. Only set when the request
+   * targeted a router alias (e.g. `openrouter/auto`), so it names the model the
+   * router actually picked. Tracked here to emit the chunk only once per stream.
+   */
+  resolvedModel?: string;
   /**
    * As pplx citations is in every chunk, but we only need to return it once
    * this flag is used to check if the pplx citation is returned,and then not return it again.
@@ -110,6 +125,8 @@ export interface StreamProtocolChunk {
     | 'reasoning'
     // use for reasoning signature, maybe only anthropic
     | 'reasoning_signature'
+    // complete OpenAI Responses reasoning item persisted for stateless replay
+    | 'reasoning_response_item'
     // flagged reasoning signature
     | 'flagged_reasoning_signature'
     // multimodal content part in reasoning
@@ -124,6 +141,8 @@ export interface StreamProtocolChunk {
     | 'error'
     // token usage
     | 'usage'
+    // model a router alias (e.g. `openrouter/auto`) actually dispatched to
+    | 'resolved_model'
     // performance monitor
     | 'speed'
     // unknown data result
@@ -217,10 +236,12 @@ export type StreamErrorContext = {
  *   one this enrichment is meant to diagnose.
  */
 const buildStreamErrorPayload = (error: Error, context?: StreamErrorContext): string => {
+  const includeStack = process.env.NODE_ENV !== 'production';
   const payload: Record<string, unknown> = {
     message: error.message,
     name: error.name,
-    stack: error.stack,
+    // DATA-008: omit stack traces from client-facing stream errors in production
+    ...(includeStack ? { stack: error.stack } : {}),
   };
 
   if (context?.provider) payload.provider = context.provider;
@@ -438,8 +459,10 @@ export function createCallbacksTransformer(
   let aggregatedText = '';
   let aggregatedThinking: string | undefined = undefined;
   let reasoningSignature: string | undefined;
+  const reasoningResponseItems: ModelReasoningResponseItem[] = [];
   let usage: ModelUsage | undefined;
   let speed: ModelPerformance | undefined;
+  let resolvedModel: string | undefined;
   let grounding: any;
   let toolsCalling: any;
   let streamError: any;
@@ -452,19 +475,33 @@ export function createCallbacksTransformer(
 
   return new TransformStream<string, Uint8Array>({
     async flush(): Promise<void> {
+      /**
+       * Non-streaming Responses conversion emits reasoning items without summary
+       * deltas, so derive visible thinking text from the item summaries whenever
+       * nothing was streamed — otherwise the summary would persist but never render.
+       */
+      const responseItemsThinking = reasoningResponseItems
+        .flatMap(({ summary }) => summary ?? [])
+        .map(({ text }) => text)
+        .filter(Boolean)
+        .join('\n');
+      const reasoningContent = aggregatedThinking || responseItemsThinking || undefined;
+
       const data: OnFinishData = {
         error: streamError,
         finishReason,
         grounding,
+        resolvedModel,
         speed,
         text: aggregatedText,
-        thinking: aggregatedThinking,
+        thinking: reasoningContent,
         toolsCalling,
         usage,
       };
-      if (aggregatedThinking || reasoningSignature) {
+      if (reasoningContent || reasoningSignature || reasoningResponseItems.length > 0) {
         data.reasoning = {
-          content: aggregatedThinking,
+          content: reasoningContent,
+          responseItems: reasoningResponseItems.length > 0 ? reasoningResponseItems : undefined,
           signature: reasoningSignature,
         };
       }
@@ -496,12 +533,13 @@ export function createCallbacksTransformer(
       // if the message is a data chunk, handle the callback
       else if (chunk.startsWith('data:')) {
         // `base64_image` payloads are raw data-URIs (`data:image/png;base64,...`)
-        // that contain `data:` themselves, which the legacy `split('data:')[1]`
-        // corrupts (it splits on the embedded marker too). Strip only the leading
-        // field marker for that type; every other event type keeps the original
-        // split path unchanged for compatibility.
+        // and `reasoning_response_item` payloads carry arbitrary model-authored
+        // summary text — both can contain `data:` themselves, which the legacy
+        // `split('data:')[1]` corrupts (it splits on the embedded marker too).
+        // Strip only the leading field marker for those types; every other event
+        // type keeps the original split path unchanged for compatibility.
         const content =
-          currentType === 'base64_image'
+          currentType === 'base64_image' || currentType === 'reasoning_response_item'
             ? chunk.slice('data:'.length).trim()
             : chunk.split('data:')[1].trim();
 
@@ -527,7 +565,12 @@ export function createCallbacksTransformer(
           }
 
           case 'reasoning_signature': {
-            reasoningSignature = data;
+            if (typeof data === 'string') reasoningSignature = data;
+            break;
+          }
+
+          case 'reasoning_response_item': {
+            reasoningResponseItems.push(data as ModelReasoningResponseItem);
             break;
           }
 
@@ -574,13 +617,21 @@ export function createCallbacksTransformer(
           }
 
           case 'usage': {
-            usage = data;
+            // A stream can carry several usage events; merge monotonically so
+            // a trailing zero-total artifact can never wipe out the real
+            // totals delivered to onCompletion.
+            usage = mergeStreamUsage(usage, data);
             await callbacks.onUsage?.(data);
             break;
           }
 
           case 'speed': {
             speed = data;
+            break;
+          }
+
+          case 'resolved_model': {
+            if (typeof data === 'string' && data) resolvedModel = data;
             break;
           }
 

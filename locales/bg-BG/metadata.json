@@ -12,7 +12,7 @@
   "discover.models.title": "Общност на моделите",
   "discover.plugins.description": "Разгледайте диаграми, академични инструменти, генериране на изображения/видео/глас и работни потоци — добавете умения към вашите агенти.",
   "discover.plugins.title": "Общност на уменията",
-  "discover.providers.description": "Разгледайте водещи доставчици на модели OpenAI / Qwen / Ollama / Anthropic / DeepSeek / Google Gemini / OpenRouter",
+  "discover.providers.description": "Разгледайте водещи доставчици на модели OpenAI / Qwen / Ollama / Anthropic / DeepSeek / Google Gemini",
   "discover.providers.title": "Общност на доставчиците",
   "discover.search": "Търсене",
   "discover.title": "Открийте",

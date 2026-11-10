@@ -4,6 +4,15 @@ import type {
   ContextBuildInput,
   ContextBuildOutput,
 } from '@lobechat/agent-runtime';
+import {
+  didPreviousTurnGenerateImage,
+  findPendingUserMessageText,
+  hasPreviousImageGeneration,
+  isImageGenerationUserIntent,
+  resolveDirectImageGenerationToolCall,
+  resolveForcedImageGenerationToolChoice,
+} from '@lobechat/builtin-tool-image-generation';
+import { resolveDirectVideoGenerationToolCall } from '@lobechat/builtin-tool-video-generation';
 import { ToolResolver, type ToolsEngine } from '@lobechat/context-engine';
 import type { MessageMetadata } from '@lobechat/types';
 import { TraceNameMap } from '@lobechat/types';
@@ -76,6 +85,7 @@ export class ClientContextBuilder implements ContextBuilder {
     const prepared = await chatService.buildAssistantMessageContext(
       {
         agentId: effectiveAgentId || undefined,
+        additionalContexts: input.payload.additionalContexts,
         groupId,
         messages,
         model: input.model,
@@ -89,19 +99,48 @@ export class ClientContextBuilder implements ContextBuilder {
         metadata: this.context.metadata,
         stepContext: this.context.runtimeContext?.stepContext,
         trace: chatService.mapChatTrace({
-          traceId: operation.metadata?.traceId,
           topicId: topicId ?? undefined,
+          traceId: operation.metadata?.traceId,
           traceName: TraceNameMap.Conversation,
         }),
       },
     );
     const { messages: preparedMessages = [], ...params } = prepared.params;
 
+    const latestUserText = findPendingUserMessageText(preparedMessages);
+    // Video first: "make a video from this photo" names a photo too.
+    // Prefer raw display messages for image intent so assistantGroup nesting and
+    // pipeline injectors on prepared rows cannot hide a second clear photo ask.
+    const directToolCall =
+      resolveDirectVideoGenerationToolCall({
+        executorMap: resolvedTools.executorMap,
+        messages: preparedMessages,
+        sourceMap: resolvedTools.sourceMap,
+      }) ??
+      resolveDirectImageGenerationToolCall({
+        executorMap: resolvedTools.executorMap,
+        historyMessages: messages,
+        messages: preparedMessages,
+        sourceMap: resolvedTools.sourceMap,
+      });
+    const toolChoice =
+      !directToolCall &&
+      isImageGenerationUserIntent(latestUserText, {
+        hasPreviousGenerated: hasPreviousImageGeneration(messages),
+        previousTurnGeneratedImage: didPreviousTurnGenerateImage(messages),
+      })
+        ? resolveForcedImageGenerationToolChoice(resolvedTools.tools)
+        : undefined;
+
     return {
+      ...(directToolCall ? { directToolCalls: [directToolCall] } : {}),
       messages: preparedMessages,
       modelParameters: {
         options: prepared.options,
-        params,
+        params: {
+          ...params,
+          ...(toolChoice ? { tool_choice: toolChoice as unknown as string } : {}),
+        },
       } satisfies ClientLLMModelParameters,
       preserveThinking:
         typeof prepared.params.preserveThinking === 'boolean'

@@ -19,6 +19,11 @@ import { asyncTasks, generationBatches, generations } from '@/database/schemas';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { createAsyncCaller } from '@/server/routers/async/caller';
+import {
+  managedPolicyErrorToTrpc,
+  resolveManagedGenerationBilling,
+} from '@/server/services/aico/generationBilling';
+import { AicoManagedPolicyError } from '@/server/services/aico/managedPolicy';
 import { FileService } from '@/server/services/file';
 import {
   AsyncTaskError,
@@ -47,7 +52,13 @@ const imageProcedure = wsCompatProcedure.use(serverDatabase).use(async (opts) =>
 
 const imageCreateProcedure = imageProcedure.use(withScopedPermission('file:upload'));
 
+const aicoBillingSchema = z.union([
+  z.object({ source: z.literal('personal') }),
+  z.object({ organizationId: z.string().min(1), source: z.literal('organization') }),
+]);
+
 const createImageInputSchema = z.object({
+  aicoBilling: aicoBillingSchema.optional(),
   generationTopicId: z.string(),
   imageNum: z.number(),
   model: z.string(),
@@ -87,9 +98,19 @@ export const imageRouter = router({
     .mutation(async ({ input, ctx }) => {
       const { userId, serverDB, asyncTaskModel, fileService, generationTopicModel } = ctx;
       const wsId = ctx.workspaceId ?? undefined;
-      const { generationTopicId, provider, model, imageNum, params } = input;
+      const { generationTopicId, provider, model, imageNum, params, aicoBilling } = input;
 
       log('Starting image creation process, input: %O', input);
+
+      let billingContext;
+      try {
+        billingContext = resolveManagedGenerationBilling({ aicoBilling, provider });
+      } catch (error) {
+        if (error instanceof AicoManagedPolicyError) {
+          throw new TRPCError(managedPolicyErrorToTrpc(error));
+        }
+        throw error;
+      }
 
       const { resolvedModelId } = await resolveBusinessModelMapping(provider, model);
 
@@ -121,7 +142,10 @@ export const imageRouter = router({
               if (key) {
                 log('Converted URL %s to key %s', url, key);
               } else {
-                log('Failed to extract key from URL: %s', url);
+                // Dropped below (imageKeys filters out nulls), which de-aligns
+                // this reference's index against params.imageUrls. Warn loudly
+                // since this is silent data loss, not just a debug detail.
+                console.warn('Failed to extract storage key from reference image URL: %s', url);
               }
               return key;
             }),
@@ -134,8 +158,9 @@ export const imageRouter = router({
           };
           log('Successfully converted imageUrls to keys for database: %O', imageKeys);
         } catch (error) {
-          console.error('Error converting imageUrls to keys: %O', error);
-          console.error('Keeping original imageUrls due to conversion error');
+          // configForDatabase.imageUrls keeps the original full URLs on this
+          // path; validateNoUrlsInConfig below will name the offending one.
+          console.error('Error converting imageUrls %O to keys: %O', params.imageUrls, error);
         }
       }
       // 2) Process single image in imageUrl
@@ -146,11 +171,15 @@ export const imageRouter = router({
             log('Converted single imageUrl to key: %s -> %s', params.imageUrl, key);
             configForDatabase = { ...configForDatabase, imageUrl: key };
           } else {
-            log('Failed to extract key from single imageUrl: %s', params.imageUrl);
+            console.warn(
+              'Failed to extract storage key from reference image URL: %s',
+              params.imageUrl,
+            );
           }
         } catch (error) {
-          console.error('Error converting imageUrl to key: %O', error);
-          // Keep original value if conversion fails
+          // configForDatabase.imageUrl keeps the original full URL on this
+          // path; validateNoUrlsInConfig below will name it in the thrown error.
+          console.error('Error converting imageUrl %s to key: %O', params.imageUrl, error);
         }
       }
 
@@ -268,7 +297,10 @@ export const imageRouter = router({
               const [createdAsyncTask] = await tx
                 .insert(asyncTasks)
                 .values({
-                  metadata: prechargeItem === undefined ? undefined : { precharge: prechargeItem },
+                  metadata: {
+                    aicoBilling: billingContext,
+                    ...(prechargeItem === undefined ? {} : { precharge: prechargeItem }),
+                  },
                   status: AsyncTaskStatus.Pending,
                   type: AsyncTaskType.ImageGeneration,
                   userId,

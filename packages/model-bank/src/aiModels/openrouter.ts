@@ -1,12 +1,25 @@
-import type { AIChatModelCard } from '../types/aiModel';
+import {
+  nanoBanana2Parameters,
+  nanoBananaParameters,
+  nanoBananaProParameters,
+} from '../const/imageParameters';
+import type { AIChatModelCard, AIEmbeddingModelCard, AIImageModelCard } from '../types/aiModel';
 
 // https://openrouter.ai/docs/api-reference/list-available-models
 const openrouterChatModels: AIChatModelCard[] = [
   {
+    // Tool- and vision-capable: the managed Auto router resolves tool requests
+    // to tool-capable models and image requests to vision-capable models at
+    // runtime. Without these the mode switcher disables the agent option and
+    // image uploads are rejected for the product default model.
+    abilities: {
+      functionCall: true,
+      vision: true,
+    },
     contextWindowTokens: 2_000_000,
     description:
       'Based on context length, topic, and complexity, your request is routed to Llama 3 70B Instruct, Claude 3.5 Sonnet (self-moderated), or GPT-4o.',
-    displayName: 'Auto (best for prompt)',
+    displayName: 'Auto',
     enabled: true,
     id: 'openrouter/auto',
     type: 'chat',
@@ -490,6 +503,7 @@ const openrouterChatModels: AIChatModelCard[] = [
     description:
       'ChatGPT-4o is a dynamic model updated in real time. It combines strong language understanding and generation for large-scale use cases like customer support, education, and technical assistance.',
     displayName: 'GPT-4o',
+    enabled: true,
     family: 'gpt',
     generation: 'gpt-4o',
     id: 'openai/gpt-4o',
@@ -848,6 +862,116 @@ const openrouterChatModels: AIChatModelCard[] = [
   },
 ];
 
-export const allModels = [...openrouterChatModels];
+/**
+ * Image-tab siblings for OpenRouter Nano Banana models.
+ *
+ * Chat cards above stay `type: 'chat'` (with `imageOutput`) for the Chat picker.
+ * Image Create filters on `type: 'image'`, so without these static `:image` entries
+ * OpenRouter never appears in `enabledImageModelList` until a remote fetch runs
+ * `postProcessModelList` — which leaves Aico managed Image Create stuck on
+ * `provider=openrouter` with a "provider disabled" notice.
+ */
+const openrouterImageModels: AIImageModelCard[] = [
+  {
+    description:
+      'Gemini 3.1 Flash Image Preview, a.k.a. "Nano Banana 2," is Google’s latest state of the art image generation and editing model, delivering Pro-level visual quality at Flash speed. It combines advanced contextual understanding with fast, cost-efficient inference, making complex image generation and iterative edits significantly more accessible.',
+    displayName: 'Nano Banana 2',
+    enabled: true,
+    id: 'google/gemini-3.1-flash-image-preview:image',
+    parameters: nanoBanana2Parameters,
+    pricing: {
+      approximatePricePerImage: 0.067,
+      units: [
+        { name: 'imageOutput', rate: 60, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textInput', rate: 0.25, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 1.5, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    },
+    releasedAt: '2026-02-26',
+    type: 'image',
+  },
+  {
+    description:
+      'Nano Banana Pro is Google’s most advanced image-generation and editing model, built on Gemini 3 Pro. It extends the original Nano Banana with significantly improved multimodal reasoning, real-world grounding, and high-fidelity visual synthesis.',
+    displayName: 'Nano Banana Pro',
+    enabled: true,
+    id: 'google/gemini-3-pro-image-preview:image',
+    parameters: nanoBananaProParameters,
+    pricing: {
+      approximatePricePerImage: 0.134,
+      units: [
+        { name: 'imageOutput', rate: 120, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textInput', rate: 2, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 12, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    },
+    releasedAt: '2025-11-20',
+    type: 'image',
+  },
+  {
+    description:
+      'Gemini 2.5 Flash Image, a.k.a. "Nano Banana," is a state of the art image generation model with contextual understanding. It is capable of image generation, edits, and multi-turn conversations.',
+    displayName: 'Nano Banana',
+    enabled: true,
+    id: 'google/gemini-2.5-flash-image:image',
+    parameters: nanoBananaParameters,
+    pricing: {
+      approximatePricePerImage: 0.039,
+      units: [
+        { name: 'imageOutput', rate: 30, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textInput', rate: 0.3, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 2.5, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    },
+    releasedAt: '2025-10-07',
+    type: 'image',
+  },
+];
+
+/**
+ * Embedding siblings for the managed OpenRouter surface.
+ *
+ * Service Model memory-embedding (and knowledge base) default to
+ * `openai/text-embedding-3-small` under `provider=openrouter`. Without these
+ * static entries the managed provider has no `type: 'embedding'` cards until a
+ * remote catalog fetch runs, so the default renders as disabled out of the box.
+ */
+const openrouterEmbeddingModels: AIEmbeddingModelCard[] = [
+  {
+    contextWindowTokens: 8192,
+    description:
+      'An efficient, cost-effective next-generation embedding model for retrieval and RAG scenarios.',
+    displayName: 'Text Embedding 3 Small',
+    enabled: true,
+    id: 'openai/text-embedding-3-small',
+    maxDimension: 1536,
+    pricing: {
+      currency: 'USD',
+      units: [{ name: 'textInput', rate: 0.02, strategy: 'fixed', unit: 'millionTokens' }],
+    },
+    releasedAt: '2024-01-25',
+    type: 'embedding',
+  },
+  {
+    contextWindowTokens: 8192,
+    description: 'The most capable embedding model for English and non-English tasks.',
+    displayName: 'Text Embedding 3 Large',
+    enabled: true,
+    id: 'openai/text-embedding-3-large',
+    maxDimension: 3072,
+    pricing: {
+      currency: 'USD',
+      units: [{ name: 'textInput', rate: 0.13, strategy: 'fixed', unit: 'millionTokens' }],
+    },
+    releasedAt: '2024-01-25',
+    type: 'embedding',
+  },
+];
+
+export const allModels = [
+  ...openrouterChatModels,
+  ...openrouterImageModels,
+  ...openrouterEmbeddingModels,
+];
 
 export default allModels;

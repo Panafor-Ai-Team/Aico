@@ -21,9 +21,14 @@ packages:
   - '../../packages/model-bank'
   - '../../packages/utils'
   - '.'
+# pnpm reads settings here, not from .npmrc: without hoisting, optional platform
+# binaries (@lydell/node-pty-linux-x64, node-screenshots-*) stay out of node_modules
+# and electron-builder packages an app that crashes on start.
+shamefullyHoist: true
+
 allowBuilds:
-  electron: set this to true or false
-  electron-winstaller: set this to true or false
-  esbuild: set this to true or false
-  get-windows: set this to true or false
-  node-mac-permissions: set this to true or false
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+  get-windows: true
+  node-mac-permissions: true

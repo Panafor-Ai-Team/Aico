@@ -16,7 +16,7 @@ const DeprecatedModelError = memo<DeprecatedModelErrorProps>(({ requestedModel }
     <BaseErrorForm
       avatar={<Icon icon={AlertTriangle} size={24} />}
       title={t('fetchError.title')}
-      desc={t('response.LobeHubModelDeprecated', {
+      desc={t('response.ModelDeprecated', {
         model: requestedModel ?? '-',
       })}
     />

@@ -1,3 +1,4 @@
+import { AsyncTaskStatus } from '@/types/asyncTask';
 import { type GenerationBatch } from '@/types/generation';
 
 import { type ImageStoreState } from '../../initialState';
@@ -26,6 +27,26 @@ const isCurrentGenerationTopicLoaded = (s: ImageStoreState): boolean => {
   return Array.isArray(s.generationBatchesMap[activeTopicId]);
 };
 
+/**
+ * Successful image URLs from the newest batch in the active topic (batches are
+ * newest-first). Prefer durable OSS `url`, then provider `originalUrl`.
+ */
+const latestGeneratedImageUrls = (s: ImageStoreState): string[] => {
+  const batches = currentGenerationBatches(s);
+  for (const batch of batches) {
+    const urls = batch.generations
+      .filter((generation) => generation.task?.status === AsyncTaskStatus.Success)
+      .map(
+        (generation) =>
+          generation.asset?.url || generation.asset?.originalUrl || generation.asset?.thumbnailUrl,
+      )
+      .filter((url): url is string => typeof url === 'string' && /^https?:\/\//i.test(url));
+
+    if (urls.length > 0) return [...new Set(urls)];
+  }
+  return [];
+};
+
 // ====== aggregate selectors ====== //
 
 export const generationBatchSelectors = {
@@ -33,4 +54,5 @@ export const generationBatchSelectors = {
   currentGenerationBatches,
   getGenerationBatchByBatchId,
   isCurrentGenerationTopicLoaded,
+  latestGeneratedImageUrls,
 };

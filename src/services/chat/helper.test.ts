@@ -49,6 +49,23 @@ describe('chat helper', () => {
     expect(isCanUseAudio('gemini-3.1-flash-lite-preview', ModelProvider.OpenAI)).toBe(false);
   });
 
+  it('should resolve vision across managed provider aliases', () => {
+    useAiInfraStore.setState({
+      enabledAiModels: [
+        {
+          abilities: { vision: true },
+          id: 'openrouter/auto',
+          providerId: 'cheapvibecode',
+          type: 'chat',
+        } as EnabledAiModel,
+      ],
+    });
+
+    // Stored under the openrouter slot while the live list groups it under
+    // cheapvibecode: same model id, same gateway family — must resolve.
+    expect(isCanUseVision('openrouter/auto', 'openrouter')).toBe(true);
+  });
+
   it('should resolve exact model knowledge cutoff', () => {
     useAiInfraStore.setState({
       enabledAiModels: [

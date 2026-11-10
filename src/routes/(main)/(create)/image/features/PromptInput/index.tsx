@@ -1,6 +1,5 @@
 'use client';
 
-import { ModelIcon } from '@lobehub/icons';
 import { ActionIcon, Flexbox, Text } from '@lobehub/ui';
 import { Switch, Tabs } from '@lobehub/ui/base-ui';
 import { Divider } from 'antd';
@@ -8,10 +7,13 @@ import { Images } from 'lucide-react';
 import { memo, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { getBusinessGenerationSendAreaPrefix } from '@/business/client/hooks/useBusinessChatInputSendAreaPrefix';
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
 import { loginRequired } from '@/components/Error/loginRequiredNotification';
 import Action from '@/features/ChatInput/ActionBar/components/Action';
 import ModelSwitchPanel from '@/features/ModelSwitchPanel';
 import PromptTransformAction from '@/features/PromptTransform/PromptTransformAction';
+import { useEnabledImageModels } from '@/hooks/useEnabledImageModels';
 import { useFetchAiImageConfig } from '@/hooks/useFetchAiImageConfig';
 import { useIsDark } from '@/hooks/useIsDark';
 import { usePermission } from '@/hooks/usePermission';
@@ -30,6 +32,7 @@ import {
   DimensionControlGroup,
   ImageNum,
   QualitySelect,
+  ReasoningEffortSelect,
   ResolutionSelect,
   SeedNumberInput,
   SizeSelect,
@@ -166,6 +169,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
   const currentProvider = useImageStore(imageGenerationConfigSelectors.provider);
   const isInit = useImageStore((s) => s.isInit);
   const isSupportQuality = useImageStore(isSupportedParamSelector('quality'));
+  const isSupportReasoningEffort = useImageStore(isSupportedParamSelector('reasoningEffort'));
   const isSupportResolution = useImageStore(isSupportedParamSelector('resolution'));
   const isSupportSize = useImageStore(isSupportedParamSelector('size'));
   const isSupportSeed = useImageStore(isSupportedParamSelector('seed'));
@@ -175,7 +179,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
   const isSupportWatermark = useImageStore(isSupportedParamSelector('watermark'));
   const isSupportWebSearch = useImageStore(isSupportedParamSelector('webSearch'));
   const isLogin = useUserStore(authSelectors.isLogin);
-  const enabledImageModelList = useAiInfraStore(aiProviderSelectors.enabledImageModelList);
+  const enabledImageModelList = useEnabledImageModels().list;
   const isModelConfigReady = useAiInfraStore((s) =>
     aiProviderSelectors.isInitAiProviderRuntimeState(s),
   );
@@ -193,7 +197,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
     if (!canCreate) return;
 
     if (!isLogin) {
-      loginRequired.redirect({ timeout: 2000 });
+      loginRequired.redirect();
       return;
     }
 
@@ -315,7 +319,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
               enabledList={enabledImageModelList}
               model={currentModel ?? undefined}
               openOnHover={false}
-              placement="topLeft"
+              placement="bottomLeft"
               pricingMode="image"
               provider={currentProvider ?? undefined}
               onModelChange={async ({ model, provider }) => {
@@ -325,7 +329,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
               }}
             >
               <ActionIcon
-                icon={<ModelIcon model={currentModel ?? ''} size={22} />}
+                icon={<BrandedModelIcon model={currentModel ?? ''} size={22} />}
                 size={{
                   blockSize: 36,
                   size: 20,
@@ -340,6 +344,12 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
                     <Flexbox gap={6}>
                       <Text fontSize={12}>{t('config.quality.label')}</Text>
                       <QualitySelect />
+                    </Flexbox>
+                  )}
+                  {isSupportReasoningEffort && (
+                    <Flexbox gap={6}>
+                      <Text fontSize={12}>{t('config.reasoningEffort.label')}</Text>
+                      <ReasoningEffortSelect />
                     </Flexbox>
                   )}
                   {isSupportResolution && (
@@ -417,6 +427,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
               visibility={displayVisibility}
               onChange={setNewGenerationTopicVisibility}
             />
+            {getBusinessGenerationSendAreaPrefix()}
           </>
         }
         onGenerate={handleGenerate}

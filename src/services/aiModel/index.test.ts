@@ -1,6 +1,6 @@
-import { DEFAULT_PROVIDER } from '@lobechat/business-const';
+import { DEFAULT_EMBEDDING_PROVIDER, DEFAULT_PROVIDER } from '@lobechat/business-const';
 import { DEFAULT_SETTINGS } from '@lobechat/config';
-import { DEFAULT_MINI_MODEL, DEFAULT_MODEL } from '@lobechat/const';
+import { DEFAULT_EMBEDDING_MODEL, DEFAULT_MINI_MODEL, DEFAULT_MODEL } from '@lobechat/const';
 import { LOBE_DEFAULT_MODEL_LIST } from 'model-bank';
 import { DEFAULT_MODEL_PROVIDER_LIST } from 'model-bank/modelProviders';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -61,6 +61,33 @@ describe('AiModelService', () => {
       });
       expect(result.map((model) => model.id)).toEqual(['deepseek-v4-pro']);
     });
+
+    it('filters free models marked by :free id or (free) display name', async () => {
+      mockLambdaClient.aiModel.getAiProviderModelList.query.mockResolvedValueOnce([
+        {
+          displayName: 'GPT-4o',
+          enabled: true,
+          id: 'openai/gpt-4o',
+          type: 'chat',
+        },
+        {
+          displayName: 'Llama 3.3 70B Instruct',
+          enabled: false,
+          id: 'meta-llama/llama-3.3-70b-instruct:free',
+          type: 'chat',
+        },
+        {
+          displayName: 'Gemma 2 9B (free)',
+          enabled: false,
+          id: 'google/gemma-2-9b-it',
+          type: 'chat',
+        },
+      ]);
+
+      const result = await aiModelService.getAiProviderModelList('openrouter');
+
+      expect(result.map((model) => model.id)).toEqual(['openai/gpt-4o']);
+    });
   });
 });
 
@@ -104,5 +131,19 @@ describe('Default model configuration', () => {
       `DEFAULT_MINI_MODEL "${DEFAULT_MINI_MODEL}" not found in LOBE_DEFAULT_MODEL_LIST`,
     ).toBeDefined();
     expect(match!.enabled, `DEFAULT_MINI_MODEL "${DEFAULT_MINI_MODEL}" is not enabled`).toBe(true);
+  });
+
+  it('DEFAULT_EMBEDDING_MODEL should be enabled under DEFAULT_EMBEDDING_PROVIDER', () => {
+    const match = LOBE_DEFAULT_MODEL_LIST.find(
+      (m) => m.id === DEFAULT_EMBEDDING_MODEL && m.providerId === DEFAULT_EMBEDDING_PROVIDER,
+    );
+    expect(
+      match,
+      `DEFAULT_EMBEDDING_MODEL "${DEFAULT_EMBEDDING_PROVIDER}/${DEFAULT_EMBEDDING_MODEL}" not found in LOBE_DEFAULT_MODEL_LIST`,
+    ).toBeDefined();
+    expect(
+      match!.enabled,
+      `DEFAULT_EMBEDDING_MODEL "${DEFAULT_EMBEDDING_PROVIDER}/${DEFAULT_EMBEDDING_MODEL}" is not enabled`,
+    ).toBe(true);
   });
 });

@@ -22,8 +22,8 @@ const testState = vi.hoisted(() => ({
     enabledVideoModelList: [] as TestProviderWithModels[],
     isInitAiProviderRuntimeState: false,
   },
-  // Mirrors the buggy default: falls back to the Google provider even when Google
-  // is disabled (lobehub/lobehub#17400).
+  // Mirrors a stale selection: falls back to Google even when Aico managed mode
+  // only exposes OpenRouter (lobehub/lobehub#17400 pattern).
   image: { model: 'gemini-3.1-flash-image-preview:image', provider: 'google' },
   video: { model: 'veo-3.1', provider: 'google' },
 }));
@@ -62,6 +62,20 @@ vi.mock('@/store/aiInfra', () => ({
   },
   useAiInfraStore: <T,>(selector: StoreSelector<T, typeof testState.aiInfra>) =>
     selector(testState.aiInfra),
+}));
+
+vi.mock('@/hooks/useEnabledImageModels', () => ({
+  useEnabledImageModels: () => ({
+    isManagedStatusLoading: false,
+    list: testState.aiInfra.enabledImageModelList,
+  }),
+}));
+
+vi.mock('@/hooks/useEnabledVideoModels', () => ({
+  useEnabledVideoModels: () => ({
+    isManagedStatusLoading: false,
+    list: testState.aiInfra.enabledVideoModelList,
+  }),
 }));
 
 describe('resolveGenerationModelNotice', () => {

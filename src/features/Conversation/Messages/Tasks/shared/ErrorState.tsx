@@ -1,6 +1,8 @@
 'use client';
 
-import { Alert, Flexbox, Highlighter } from '@lobehub/ui';
+import { scrubVendorNames } from '@lobechat/const';
+import { Flexbox, Highlighter } from '@lobehub/ui';
+import { Alert } from '@lobehub/ui/base-ui';
 import { createStaticStyles } from 'antd-style';
 import { MessageSquare, Timer, Wrench } from 'lucide-react';
 import { memo, useMemo } from 'react';
@@ -90,8 +92,12 @@ const ErrorState = memo<ErrorStateProps>(({ taskDetail }) => {
   const formattedDuration = useMemo(() => formatDuration(duration), [duration]);
   const formattedCost = useMemo(() => formatCost(totalCost), [totalCost]);
 
-  // Extract error content
-  const errorContent = useMemo(() => getErrorContent(error), [error]);
+  // Task errors come from the async-task backend, not tRPC, so the gateway
+  // names they carry (D-018) have to be scrubbed before display here.
+  const errorContent = useMemo(() => {
+    const content = getErrorContent(error);
+    return content ? scrubVendorNames(content) : content;
+  }, [error]);
 
   const hasMetrics = !!(formattedDuration || totalToolCalls || totalMessages || formattedCost);
 

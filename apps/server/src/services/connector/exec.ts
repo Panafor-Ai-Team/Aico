@@ -1,11 +1,19 @@
-import { ConnectorToolPermission } from '@/database/schemas';
+import { isLocalOrPrivateUrl } from '@lobechat/utils';
+
+import {
+  ConnectorMcpConnectionType,
+  ConnectorStatus,
+  ConnectorToolPermission,
+} from '@/database/schemas';
+import { deviceGateway } from '@/server/services/deviceGateway';
 import { mcpService } from '@/server/services/mcp';
 
 import { buildLastSyncedAtMap, scheduleStaleConnectorToolsRefresh } from './refresh';
 import { buildConnectorMcpParams, type ConnectorToolSyncContext } from './sync';
 import { ensureFreshConnectorToken } from './tokens';
 
-export type ConnectorToolCallErrorCode = 'NOT_FOUND' | 'FORBIDDEN' | 'BAD_REQUEST';
+export type ConnectorToolCallErrorCode =
+  'NOT_FOUND' | 'FORBIDDEN' | 'BAD_REQUEST' | 'PRECONDITION_FAILED';
 
 /** Typed error so the tRPC layer can map to the right code and tests can assert. */
 export class ConnectorToolCallError extends Error {
@@ -80,11 +88,59 @@ export const callConnectorToolById = async (
     // Background tool-list refresh is best-effort — never fail the tool call.
   }
 
-  const fresh = await ensureFreshConnectorToken(connector, ctx.connectorModel);
+  // Fail fast with an actionable message instead of a cryptic spawn/fetch
+  // error: on a cloud deployment (device gateway configured) the server can
+  // never reach a stdio binary or a localhost/LAN endpoint. Those calls run on
+  // the user's device via the gateway-mode tunnel — this path is only hit when
+  // the user manually turned gateway mode off. Gated so a self-hosted server
+  // that shares a LAN with the endpoint keeps working.
+  const isDeviceOnlyEndpoint =
+    connector.mcpConnectionType === ConnectorMcpConnectionType.stdio ||
+    (!!connector.mcpServerUrl && isLocalOrPrivateUrl(connector.mcpServerUrl));
+  if (deviceGateway.isConfigured && isDeviceOnlyEndpoint) {
+    throw new ConnectorToolCallError(
+      'BAD_REQUEST',
+      `Connector '${connector.name}' points at an MCP endpoint that only your machine can reach (stdio or local network). ` +
+        'These tools run through the agent gateway on desktop — please re-enable gateway mode in settings.',
+    );
+  }
 
-  return mcpService.callTool({
-    argsStr: params.args ?? '{}',
-    clientParams: buildConnectorMcpParams(fresh),
-    toolName: params.toolName,
-  });
+  const fresh = await ensureFreshConnectorToken(connector, ctx.connectorModel);
+  const call = (target: typeof fresh) =>
+    mcpService.callTool({
+      argsStr: params.args ?? '{}',
+      clientParams: buildConnectorMcpParams(target),
+      toolName: params.toolName,
+    });
+
+  try {
+    return await call(fresh);
+  } catch (error) {
+    if (!isMcpAuthRequiredError(error)) throw error;
+  }
+
+  // The MCP server rejected the token (401). The stored expiry can be wrong or
+  // missing, so force one refresh and retry with the new token.
+  const refreshed = await ensureFreshConnectorToken(fresh, ctx.connectorModel, { force: true });
+  if (refreshed.credentials !== fresh.credentials) {
+    try {
+      return await call(refreshed);
+    } catch (error) {
+      if (!isMcpAuthRequiredError(error)) throw error;
+    }
+  }
+
+  // Still unauthorized: the sign-in expired or was revoked and cannot be
+  // renewed. Mark the connector so it stops being offered as connected, and
+  // tell the model what the user must do.
+  await ctx.connectorModel.updateStatus(connector.id, ConnectorStatus.error);
+  throw new ConnectorToolCallError(
+    'PRECONDITION_FAILED',
+    `The sign-in for connector '${connector.name}' has expired or was revoked. ` +
+      'Ask the user to reconnect it in Settings > Connectors, then try again.',
+  );
 };
+
+/** `mcpService` reports an upstream 401 as a TRPCError with this message. */
+const isMcpAuthRequiredError = (error: unknown): boolean =>
+  error instanceof Error && error.message === 'MCP_AUTH_REQUIRED';

@@ -90,14 +90,12 @@ describe('ArtifactsUI', () => {
     mockArtifactState.setState.mockClear();
   });
 
-  it('shows scrollable source while an HTML artifact is still streaming', () => {
+  it('streams a live HTML preview while the artifact is still generating', () => {
     render(<ArtifactsUI />);
 
-    expect(screen.getByTestId('artifact-code')).toHaveTextContent('<script>');
-    expect(screen.getByTestId('artifact-code')).toHaveAttribute('data-animated', 'true');
-    expect(screen.getByTestId('artifact-code')).toHaveAttribute('data-language', 'html');
-    expect(screen.getByTestId('artifact-scroll-container')).toBeDefined();
-    expect(screen.queryByTestId('artifact-preview')).toBeNull();
+    expect(screen.getByTestId('artifact-preview')).toHaveTextContent('<script>');
+    expect(screen.getByTestId('artifact-preview')).toHaveAttribute('data-animated', 'true');
+    expect(screen.queryByTestId('artifact-code')).toBeNull();
     expect(mockArtifactState.setState).not.toHaveBeenCalled();
   });
 
@@ -108,7 +106,19 @@ describe('ArtifactsUI', () => {
     render(<ArtifactsUI />);
 
     expect(screen.getByTestId('artifact-preview')).toHaveTextContent('Done');
+    expect(screen.getByTestId('artifact-preview')).toHaveAttribute('data-animated', 'false');
     expect(screen.queryByTestId('artifact-code')).toBeNull();
+  });
+
+  it('respects explicit Code display mode for HTML artifacts', () => {
+    mockArtifactState.displayMode = ArtifactDisplayMode.Code;
+
+    render(<ArtifactsUI />);
+
+    expect(screen.getByTestId('artifact-code')).toHaveTextContent('<script>');
+    expect(screen.getByTestId('artifact-code')).toHaveAttribute('data-animated', 'true');
+    expect(screen.getByTestId('artifact-scroll-container')).toBeDefined();
+    expect(screen.queryByTestId('artifact-preview')).toBeNull();
   });
 
   it('keeps explicit code artifacts in source mode after they close', () => {
@@ -119,6 +129,16 @@ describe('ArtifactsUI', () => {
     render(<ArtifactsUI />);
 
     expect(screen.getByTestId('artifact-code')).toHaveTextContent('console.log("done");');
+    expect(screen.queryByTestId('artifact-preview')).toBeNull();
+  });
+
+  it('keeps React artifacts on the highlighter while streaming', () => {
+    mockArtifactState.artifactType = ArtifactType.React;
+    mockArtifactState.artifactContent = 'export default function App() {';
+
+    render(<ArtifactsUI />);
+
+    expect(screen.getByTestId('artifact-code')).toHaveTextContent('export default function App()');
     expect(screen.queryByTestId('artifact-preview')).toBeNull();
   });
 });

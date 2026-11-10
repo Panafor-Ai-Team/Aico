@@ -1,6 +1,7 @@
 import type { ModelTokensUsage, ModelUsage } from '@lobechat/types';
 import debug from 'debug';
 import type { Pricing } from 'model-bank';
+import { ModelProvider } from 'model-bank';
 import type OpenAI from 'openai';
 
 import type { ChatPayloadForTransformStream } from '../streams/protocol';
@@ -9,7 +10,8 @@ import { withUsageCost } from './utils/withUsageCost';
 const log = debug('lobe-cost:convertOpenAIUsage');
 
 // Keep the reference implementation's behavior of filtering out zero/falsy values,
-// except for inputCacheMissTokens where 0 is semantically meaningful for fully cached prompts.
+// except for fields where 0 is semantically meaningful. `inputAudioTokens` must preserve an
+// explicitly reported zero so callers can distinguish it from a provider omission.
 // `!!value` would filter out 0, which is often desired for token counts.
 const shouldKeepUsageValue = (key: string, value: unknown) => {
   if (value === undefined || value === null) return false;
@@ -18,7 +20,7 @@ const shouldKeepUsageValue = (key: string, value: unknown) => {
 
   if (value !== 0) return true;
 
-  return key === 'inputCacheMissTokens';
+  return key === 'inputAudioTokens' || key === 'inputCacheMissTokens';
 };
 
 /**
@@ -42,6 +44,36 @@ type CacheWriteUsageDetails =
 const readCacheWriteTokens = (details: CacheWriteUsageDetails | undefined): number | undefined => {
   const value = details?.cache_write_tokens;
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+};
+
+/**
+ * OpenRouter (and some compatible proxies) report the actual billed USD on
+ * `usage.cost`. Prefer that over model-bank estimates so the message cost chip
+ * matches wallet charge — pricing lookup often misses Aico/OpenRouter model ids.
+ */
+export const readProviderReportedCost = (usage: unknown): number | undefined => {
+  if (!usage || typeof usage !== 'object') return undefined;
+  const cost = (usage as { cost?: unknown }).cost;
+  if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0) return undefined;
+  return cost;
+};
+
+const withPricingOrProviderCost = (
+  usage: ModelUsage,
+  pricing: Pricing | undefined,
+  providerUsage: unknown,
+  providerId?: string,
+): ModelUsage => {
+  const priced = withUsageCost(usage, pricing);
+  // Only OpenRouter documents usage.cost as billed USD. CheapVibeCode's
+  // figure (when present) is denominated in its own token unit — trusting it
+  // as USD debited hundreds of phantom "dollars" from the optimistic wallet
+  // balance for a trivial message until the reconcile restored it. A missing
+  // cost safely degrades to no optimistic debit + authoritative reconcile.
+  if (providerId === ModelProvider.CheapVibeCode) return priced;
+  const reported = readProviderReportedCost(providerUsage);
+  if (reported === undefined) return priced;
+  return { ...priced, cost: reported };
 };
 
 const resolveOpenAIInputCacheMissTokens = (params: {
@@ -69,12 +101,18 @@ export const convertOpenAIUsage = (
   payload?: ChatPayloadForTransformStream,
 ): ModelUsage => {
   // Currently only pplx has citation_tokens
-  const inputTextTokens = usage.prompt_tokens || 0;
+  const inputAudioTokens = usage.prompt_tokens_details?.audio_tokens;
+  // OpenAI prompt_tokens is the aggregate input count. Keep modality buckets disjoint so a
+  // dedicated audioInput pricing unit cannot charge the same tokens again as textInput.
+  const inputTextTokens = Math.max(0, (usage.prompt_tokens || 0) - (inputAudioTokens ?? 0));
   const inputCitationTokens = (usage as any).citation_tokens || 0;
-  const totalInputTokens = inputCitationTokens + inputTextTokens;
+  const totalInputTokens = inputCitationTokens + (usage.prompt_tokens || 0);
 
   const cachedTokens =
     (usage as any).prompt_cache_hit_tokens || usage.prompt_tokens_details?.cached_tokens;
+  // OpenAI reports aggregate cached prompt tokens, but does not identify how many cached tokens
+  // are audio. Do not infer inputCachedAudioTokens from overlapping aggregate counters; callers
+  // can handle the unavailable modality split without receiving fabricated usage.
   const inputWriteCacheTokens = readCacheWriteTokens(usage.prompt_tokens_details);
 
   const inputCacheMissTokens = resolveOpenAIInputCacheMissTokens({
@@ -101,7 +139,7 @@ export const convertOpenAIUsage = (
 
   const data = {
     acceptedPredictionTokens: usage.completion_tokens_details?.accepted_prediction_tokens,
-    inputAudioTokens: usage.prompt_tokens_details?.audio_tokens,
+    inputAudioTokens,
     inputCacheMissTokens,
     inputCachedTokens: cachedTokens,
     inputCitationTokens,
@@ -128,7 +166,12 @@ export const convertOpenAIUsage = (
 
   log('convertOpenAIUsage data(completion-api): %O', finalData);
 
-  return withUsageCost(finalData as ModelUsage, payload?.pricing);
+  return withPricingOrProviderCost(
+    finalData as ModelUsage,
+    payload?.pricing,
+    usage,
+    payload?.provider,
+  );
 };
 
 export const convertOpenAIResponseUsage = (
@@ -194,21 +237,40 @@ export const convertOpenAIResponseUsage = (
 
   log('convertOpenAIResponseUsage data(response-api): %O', finalData);
 
-  return withUsageCost(finalData as ModelUsage, payload?.pricing); // Cast because we've built it to match
+  // Cast because we've built it to match; prefer provider-reported cost when present.
+  return withPricingOrProviderCost(
+    finalData as ModelUsage,
+    payload?.pricing,
+    usage,
+    payload?.provider,
+  );
 };
 
 export const convertOpenAIImageUsage = (
   usage: OpenAI.Images.ImagesResponse.Usage,
   pricing?: Pricing,
+  providerId?: string,
 ): ModelUsage => {
+  // OpenAI's Images API reports `input_tokens` / `output_tokens` plus an
+  // `input_tokens_details` breakdown. OpenRouter's /images/generations instead
+  // returns the chat-style `prompt_tokens` / `completion_tokens` and no details
+  // object at all, so reading `input_tokens_details.image_tokens` directly threw
+  // `Cannot read properties of undefined (reading 'image_tokens')` and discarded
+  // an image the provider had already generated (and billed for).
+  // Read both shapes, and never assume the details object exists.
+  const raw = usage as unknown as Record<string, any>;
+  const inputTokens = raw.input_tokens ?? raw.prompt_tokens;
+  const outputTokens = raw.output_tokens ?? raw.completion_tokens;
+  const inputDetails = raw.input_tokens_details;
+
   const data: ModelTokensUsage = {
-    inputImageTokens: usage.input_tokens_details.image_tokens,
-    inputTextTokens: usage.input_tokens_details.text_tokens,
-    outputImageTokens: usage.output_tokens,
-    totalInputTokens: usage.input_tokens,
-    totalOutputTokens: usage.output_tokens,
-    totalTokens: usage.total_tokens,
+    inputImageTokens: inputDetails?.image_tokens,
+    inputTextTokens: inputDetails?.text_tokens,
+    outputImageTokens: outputTokens,
+    totalInputTokens: inputTokens,
+    totalOutputTokens: outputTokens,
+    totalTokens: raw.total_tokens,
   };
 
-  return withUsageCost(data as ModelUsage, pricing);
+  return withPricingOrProviderCost(data as ModelUsage, pricing, usage, providerId);
 };

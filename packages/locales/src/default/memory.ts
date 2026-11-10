@@ -12,7 +12,7 @@ export default {
   'analysis.action.button': 'Request memory analysis',
   'analysis.modal.cancel': 'Cancel',
   'analysis.modal.helper':
-    "By default Lobe AI will analyze all unprocessed conversations. It's optional to select a date range to analyze.",
+    "By default Panachat AI will analyze all unprocessed conversations. It's optional to select a date range to analyze.",
   'analysis.modal.rangePlaceholder': 'No range selected; all conversations will be analyzed.',
   'analysis.modal.rangeSelected': 'Analyzing conversations from {{start}} to {{end}}',
   'analysis.modal.submit': 'Request memory analysis',
@@ -44,6 +44,7 @@ export default {
     'Memory retrieval is a gradual process. Please engage in more conversations to enrich the content available for recall. Try having deeper interactions with the agent to better capture and store valuable information.',
   'empty.search': 'No matching memories found',
   'empty.title': 'No Memories Yet',
+  'edit.error': 'Failed to save the memory. Please try again.',
   'experience.actions.delete': 'Delete',
   'experience.actions.edit': 'Edit',
   'experience.defaultType': 'Experience',

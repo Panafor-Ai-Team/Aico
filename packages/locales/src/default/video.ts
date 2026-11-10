@@ -2,6 +2,8 @@ export default {
   'config.aspectRatio.label': 'Aspect Ratio',
   'config.cameraFixed.label': 'Fixed Camera',
   'config.duration.label': 'Duration',
+  'config.duration.labelWithUnit': 'Duration (seconds)',
+  'config.duration.value': '{{seconds}}s',
   'config.endImageUrl.label': 'End Frame',
   'config.generateAudio.label': 'Generate Audio',
   'config.header.title': 'Video',
@@ -21,6 +23,7 @@ export default {
   'generation.actions.errorCopied': 'Error Message Copied to Clipboard',
   'generation.actions.errorCopyFailed': 'Failed to Copy Error Message',
   'generation.actions.generate': 'Generate',
+  'generation.cost': 'Cost',
   'generation.freeQuota.exhausted': '🎁 Free quota used up, credits will be consumed',
   'generation.freeQuota.remaining': '🎁 {{remaining}} free videos today',
   'generation.validation.endFrameRequiresStartFrame':

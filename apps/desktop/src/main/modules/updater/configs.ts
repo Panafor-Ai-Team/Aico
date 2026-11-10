@@ -18,6 +18,10 @@ export const UPDATE_CHANNEL: UpdateChannel =
 // Each channel resolves to {base}/{channel}/
 export const UPDATE_SERVER_URL = getDesktopEnv().UPDATE_SERVER_URL;
 
+// GitHub repository used for updates when UPDATE_SERVER_URL is not set.
+// Keep in sync with getPublishConfig() in apps/desktop/electron-builder.mjs.
+export const GITHUB_UPDATE_REPO = { owner: 'Panafor-Ai-Team', repo: 'Aico' } as const;
+
 export const updaterConfig = {
   app: {
     autoCheckUpdate: true,

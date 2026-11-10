@@ -5,7 +5,6 @@ import { vector } from '@electric-sql/pglite/vector';
 import { sql } from 'drizzle-orm';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { drizzle as nodeDrizzle } from 'drizzle-orm/node-postgres';
-import { migrate as nodeMigrate } from 'drizzle-orm/node-postgres/migrator';
 import { drizzle as pgliteDrizzle } from 'drizzle-orm/pglite';
 import { Pool as NodePool } from 'pg';
 
@@ -14,7 +13,14 @@ import { serverDBEnv } from '@/config/db';
 import * as schema from '../schemas';
 import type { LobeChatDatabase } from '../type';
 
-const migrationsFolder = join(__dirname, '../../migrations');
+/**
+ * Both journals, in the order production applies them: upstream-shaped `migrations/`, then
+ * Aico's own `migrations-aico/` (see scripts/migrateServerDB/dualJournalRunner.cjs).
+ */
+const migrationsRoot = join(__dirname, '../..');
+const migrationsFolders = ['migrations', 'migrations-aico'].map((folder) =>
+  join(migrationsRoot, folder),
+);
 
 const isServerDBMode = process.env.TEST_SERVER_DB === '1';
 
@@ -35,7 +41,19 @@ export const getTestDB = async (): Promise<LobeChatDatabase> => {
     const client = new NodePool({ connectionString });
     testServerDB = nodeDrizzle(client, { schema });
 
-    await nodeMigrate(testServerDB, { migrationsFolder });
+    // Drizzle's migrator runs one journal; use the production runner for both.
+    // @ts-ignore tsgo handle esm import cjs and compatibility issues
+    const runner = await import('../../../../scripts/migrateServerDB/dualJournalRunner.cjs');
+    const connection = await client.connect();
+    try {
+      await runner.runDualJournal({
+        equivalences: runner.AICO_EQUIVALENCES,
+        executor: runner.createPgExecutor(connection),
+        tracks: runner.readTracks(migrationsRoot),
+      });
+    } finally {
+      connection.release();
+    }
 
     return testServerDB as unknown as LobeChatDatabase;
   }
@@ -47,7 +65,9 @@ export const getTestDB = async (): Promise<LobeChatDatabase> => {
   testClientDB = pgliteDrizzle({ client: pglite, schema });
 
   // Custom migration that skips pg_search-related SQL for PGlite compatibility
-  const migrations = readMigrationFiles({ migrationsFolder });
+  const migrations = migrationsFolders.flatMap((migrationsFolder) =>
+    readMigrationFiles({ migrationsFolder }),
+  );
 
   await testClientDB.execute(sql`CREATE SCHEMA IF NOT EXISTS "drizzle"`);
   await testClientDB.execute(sql`

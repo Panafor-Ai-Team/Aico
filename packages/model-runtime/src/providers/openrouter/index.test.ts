@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { BRANDING_NAME, OFFICIAL_URL } from '@lobechat/const';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { LobeOpenAICompatibleRuntime } from '../../core/BaseAI';
@@ -50,6 +51,18 @@ describe('LobeOpenRouterAI - custom features', () => {
       expect(params).toBeDefined();
       expect(params.provider).toBe('openrouter');
       expect(params.baseURL).toBe('https://openrouter.ai/api/v1');
+      expect(params.createVideo).toBeDefined();
+      expect(params.handlePollVideoStatus).toBeDefined();
+    });
+
+    it('edits images via input_references, not the nonexistent /images/edits route', () => {
+      expect(params.imageEditMode).toBe('inputReferences');
+      // Deliberately NOT a custom createImage: the factory does not forward
+      // `pricingContext` to custom impls, so routing through the shared
+      // createOpenAICompatibleImage is what keeps billing behaviour identical.
+      // Accessed through a widened view: the property is intentionally absent
+      // from the params type, which is exactly what this asserts.
+      expect((params as { createImage?: unknown }).createImage).toBeUndefined();
     });
 
     it('should have chatCompletion configuration', () => {
@@ -60,8 +73,8 @@ describe('LobeOpenRouterAI - custom features', () => {
     it('should have constructorOptions with headers', () => {
       expect(params.constructorOptions).toBeDefined();
       expect(params.constructorOptions.defaultHeaders).toBeDefined();
-      expect(params.constructorOptions.defaultHeaders['HTTP-Referer']).toBe('https://lobehub.com');
-      expect(params.constructorOptions.defaultHeaders['X-Title']).toBe('LobeHub');
+      expect(params.constructorOptions.defaultHeaders['HTTP-Referer']).toBe(OFFICIAL_URL);
+      expect(params.constructorOptions.defaultHeaders['X-Title']).toBe(BRANDING_NAME);
     });
 
     it('should have debug configuration', () => {
@@ -628,6 +641,12 @@ describe('LobeOpenRouterAI - custom features', () => {
       const models = await params.models();
 
       expect(fetch).toHaveBeenCalledWith('https://openrouter.ai/api/v1/models');
+      expect(fetch).toHaveBeenCalledWith(
+        'https://openrouter.ai/api/v1/models?output_modalities=image',
+      );
+      expect(fetch).toHaveBeenCalledWith(
+        'https://openrouter.ai/api/v1/models?output_modalities=video',
+      );
       expect(models.length).toBeGreaterThan(0);
     });
 
@@ -882,6 +901,100 @@ describe('LobeOpenRouterAI - custom features', () => {
 
       const visionModel = models.find((m) => m.id === 'vision/model');
       expect(visionModel?.vision).toBe(true);
+    });
+
+    it('should detect imageOutput and synthesize :image clone for whitelisted generators', async () => {
+      const mockModels = [
+        {
+          id: 'google/gemini-3.1-flash-image-preview',
+          canonical_slug: 'google/gemini-3.1-flash-image-preview',
+          name: 'Google: Nano Banana 2',
+          created: 1679587200,
+          context_length: 8192,
+          architecture: {
+            modality: 'text+image->text+image',
+            input_modalities: ['text', 'image'],
+            output_modalities: ['text', 'image'],
+            tokenizer: 'default',
+            instruct_type: null,
+          },
+          pricing: {
+            prompt: '0.00001',
+            completion: '0.00002',
+          },
+          top_provider: {
+            context_length: 8192,
+            max_completion_tokens: 4096,
+            is_moderated: false,
+          },
+          supported_parameters: [],
+        },
+      ];
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ data: mockModels }),
+        }),
+      );
+
+      const models = await params.models!();
+
+      const chatModel = models.find((m) => m.id === 'google/gemini-3.1-flash-image-preview');
+      const imageModel = models.find((m) => m.id === 'google/gemini-3.1-flash-image-preview:image');
+
+      expect(chatModel?.type).toBe('chat');
+      expect(chatModel?.imageOutput).toBe(true);
+      expect(chatModel?.vision).toBe(true);
+      expect(imageModel?.type).toBe('image');
+      expect(imageModel?.parameters).toBeDefined();
+    });
+
+    it('should detect video and files abilities from input_modalities', async () => {
+      const mockModels = [
+        {
+          id: 'google/gemini-video',
+          canonical_slug: 'google/gemini-video',
+          name: 'Google: Gemini Video',
+          created: 1679587200,
+          context_length: 8192,
+          architecture: {
+            modality: 'text+image+file+video->text',
+            input_modalities: ['text', 'image', 'file', 'video'],
+            output_modalities: ['text'],
+            tokenizer: 'default',
+            instruct_type: null,
+          },
+          pricing: {
+            prompt: '0.00001',
+            completion: '0.00002',
+          },
+          top_provider: {
+            context_length: 8192,
+            max_completion_tokens: 4096,
+            is_moderated: false,
+          },
+          supported_parameters: [],
+        },
+      ];
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ data: mockModels }),
+        }),
+      );
+
+      const models = await params.models!();
+      const model = models.find((m) => m.id === 'google/gemini-video');
+
+      expect(model?.type).toBe('chat');
+      expect(model?.video).toBe(true);
+      expect(model?.files).toBe(true);
+      expect(model?.vision).toBe(true);
+      expect(models.some((m) => m.type === 'video')).toBe(false);
     });
 
     it('should detect function call from supported_parameters', async () => {

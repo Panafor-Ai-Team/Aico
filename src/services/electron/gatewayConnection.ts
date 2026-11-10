@@ -9,20 +9,16 @@ class GatewayConnectionService {
     return ensureElectronIpc().gatewayConnection.disconnect();
   };
 
+  isConfigured = async () => {
+    return ensureElectronIpc().gatewayConnection.isConfigured();
+  };
+
   getConnectionStatus = async () => {
     return ensureElectronIpc().gatewayConnection.getConnectionStatus();
   };
 
   getDeviceInfo = async () => {
     return ensureElectronIpc().gatewayConnection.getDeviceInfo();
-  };
-
-  setDeviceDescription = async (description: string) => {
-    return ensureElectronIpc().gatewayConnection.setDeviceDescription({ description });
-  };
-
-  setDeviceName = async (name: string) => {
-    return ensureElectronIpc().gatewayConnection.setDeviceName({ name });
   };
 }
 

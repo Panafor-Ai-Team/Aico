@@ -3,6 +3,7 @@
 import { SignInEmailSentStep } from './SignInEmailSentStep';
 import { SignInEmailStep } from './SignInEmailStep';
 import { SignInPasswordStep } from './SignInPasswordStep';
+import { SignInPhoneStep } from './SignInPhoneStep';
 import { useSignIn } from './useSignIn';
 
 const SignIn = () => {
@@ -14,15 +15,23 @@ const SignIn = () => {
     handleBackToEmail,
     handleCheckUser,
     handleForgotPassword,
+    handleGoToPhone,
     handleGoToSignup,
     handleResendEmail,
+    handleResendPhoneOtp,
+    handleSendPhoneOtp,
     handleSignIn,
     handleSocialSignIn,
+    handleVerifyPhoneOtp,
     isSocialOnly,
-    lastAuthProvider,
     loading,
     oAuthSSOProviders,
+    otpForm,
+    phoneDisplay,
+    phoneForm,
+    resending,
     sending,
+    sessionExpired,
     sentInfo,
     serverConfigInit,
     socialLoading,
@@ -37,6 +46,22 @@ const SignIn = () => {
         type={sentInfo.type}
         onBack={handleBackFromSent}
         onResend={handleResendEmail}
+      />
+    );
+
+  if (step === 'phone' || step === 'phoneOtp')
+    return (
+      <SignInPhoneStep
+        loading={loading}
+        otpForm={otpForm}
+        phoneDisplay={phoneDisplay}
+        phoneForm={phoneForm}
+        resending={resending}
+        step={step}
+        onBackToEmail={handleBackToEmail}
+        onResend={handleResendPhoneOtp}
+        onSendOtp={handleSendPhoneOtp}
+        onVerifyOtp={handleVerifyPhoneOtp}
       />
     );
 
@@ -58,12 +83,13 @@ const SignIn = () => {
       disableEmailPassword={disableEmailPassword}
       form={form as any}
       isSocialOnly={isSocialOnly}
-      lastAuthProvider={lastAuthProvider}
       loading={loading}
       oAuthSSOProviders={oAuthSSOProviders}
       serverConfigInit={serverConfigInit}
+      sessionExpired={sessionExpired}
       socialLoading={socialLoading}
       onCheckUser={handleCheckUser}
+      onGoToPhone={handleGoToPhone}
       onGoToSignup={handleGoToSignup}
       onResetEmail={handleBackToEmail}
       onSetPassword={handleForgotPassword}

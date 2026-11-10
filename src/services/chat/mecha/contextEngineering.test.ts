@@ -1,9 +1,12 @@
+import { LobeAgentIdentifier } from '@lobechat/builtin-tool-lobe-agent';
+import { type AgentContextDocument } from '@lobechat/context-engine';
 import { type UIChatMessage } from '@lobechat/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as isCanUseFCModule from '@/helpers/isCanUseFC';
 import { agentService } from '@/services/agent';
 import { agentDocumentService } from '@/services/agentDocument';
+import { notebookService } from '@/services/notebook';
 import { useAgentStore } from '@/store/agent';
 
 import * as helpers from '../helper';
@@ -45,6 +48,12 @@ vi.mock('@/helpers/parserPlaceholder', () => ({
 vi.mock('@/services/agentDocument', () => ({
   agentDocumentService: {
     getDocuments: vi.fn(),
+  },
+}));
+
+vi.mock('@/services/notebook', () => ({
+  notebookService: {
+    listDocuments: vi.fn(),
   },
 }));
 
@@ -147,6 +156,40 @@ describe('contextEngineering', () => {
     });
   });
 
+  it('looks up the topic plan while agent documents are still loading', async () => {
+    vi.mocked(notebookService.listDocuments).mockResolvedValue({ data: [], total: 0 } as any);
+    let resolveDocuments!: (documents: AgentContextDocument[]) => void;
+    const agentDocuments = new Promise<AgentContextDocument[]>((resolve) => {
+      resolveDocuments = resolve;
+    });
+
+    const output = contextEngineering({
+      agentDocuments,
+      agentId: 'agent-1',
+      messages: [{ content: 'Summarize the setup', role: 'user' }] as UIChatMessage[],
+      model: 'gpt-4',
+      provider: 'openai',
+      tools: [LobeAgentIdentifier],
+      topicId: 'topic-1',
+    });
+
+    // Regression: the plan lookup used to start only after the documents
+    // round trip finished, adding a full round trip before the first token.
+    await vi.waitFor(() => expect(notebookService.listDocuments).toHaveBeenCalled());
+
+    resolveDocuments([
+      {
+        content: 'Project setup steps',
+        filename: 'setup.md',
+        id: 'doc-1',
+        policyLoad: 'always',
+        title: 'Setup',
+      },
+    ]);
+
+    expect(JSON.stringify(await output)).toContain('Project setup steps');
+  });
+
   it('should suppress agent documents when runtime agent mode is disabled', async () => {
     const output = await contextEngineering({
       agentDocuments: [
@@ -222,6 +265,7 @@ describe('contextEngineering', () => {
           backgroundColor: null,
           description: null,
           id: 'agent-1',
+          name: null,
           title: 'Current Agent',
         },
         {
@@ -229,6 +273,7 @@ describe('contextEngineering', () => {
           backgroundColor: null,
           description: 'Helps with setup',
           id: 'agent-2',
+          name: null,
           title: 'Setup Agent',
         },
       ],

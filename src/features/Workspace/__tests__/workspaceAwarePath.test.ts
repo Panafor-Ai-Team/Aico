@@ -21,6 +21,8 @@ describe('buildWorkspaceAwarePath', () => {
       '/acme/community/agent/jailbreak',
     );
     expect(buildWorkspaceAwarePath('/group/group-1', 'acme')).toBe('/acme/group/group-1');
+    expect(buildWorkspaceAwarePath('/project/project-1', 'acme')).toBe('/acme/project/project-1');
+    expect(buildWorkspaceAwarePath('/projects', 'acme')).toBe('/acme/projects');
   });
 
   it('prefixes deep agent and evaluation paths used by cross-page navigation', () => {
@@ -72,6 +74,12 @@ describe('buildWorkspaceAwarePath', () => {
     // `/:workspaceSlug` mirror), so notifications linking to it must not be
     // prefixed while the recipient sits inside another workspace.
     expect(buildWorkspaceAwarePath('/invite/tok-123', 'acme')).toBe('/invite/tok-123');
+    // Aico personal billing / org admin surfaces (no workspace mirror).
+    expect(buildWorkspaceAwarePath('/wallet', 'acme')).toBe('/wallet');
+    expect(buildWorkspaceAwarePath('/org', 'acme')).toBe('/org');
+    expect(buildWorkspaceAwarePath('/org/org-1/members', 'acme')).toBe('/org/org-1/members');
+    expect(buildWorkspaceAwarePath('/platform', 'acme')).toBe('/platform');
+    expect(buildWorkspaceAwarePath('/panel', 'acme')).toBe('/panel');
   });
 
   it('prefixes settings sub-paths that have a workspace mirror', () => {
@@ -84,6 +92,7 @@ describe('buildWorkspaceAwarePath', () => {
     expect(buildWorkspaceAwarePath('/settings/skill', 'acme')).toBe('/acme/settings/skill');
     expect(buildWorkspaceAwarePath('/settings/connector', 'acme')).toBe('/acme/settings/connector');
     expect(buildWorkspaceAwarePath('/settings/devices', 'acme')).toBe('/acme/settings/devices');
+    expect(buildWorkspaceAwarePath('/settings/labels', 'acme')).toBe('/acme/settings/labels');
     expect(buildWorkspaceAwarePath('/settings/audit-log', 'acme')).toBe('/acme/settings/audit-log');
     expect(buildWorkspaceAwarePath('/settings/storage', 'acme')).toBe('/acme/settings/storage');
     expect(buildWorkspaceAwarePath('/settings/credential', 'acme')).toBe(
@@ -91,6 +100,11 @@ describe('buildWorkspaceAwarePath', () => {
     );
     // Legacy alias — prefixed, then the router redirects to `credential`.
     expect(buildWorkspaceAwarePath('/settings/creds', 'acme')).toBe('/acme/settings/creds');
+    expect(buildWorkspaceAwarePath('/settings/statistics', 'acme')).toBe(
+      '/acme/settings/statistics',
+    );
+    // Legacy alias — prefixed, then the router redirects to `statistics`.
+    expect(buildWorkspaceAwarePath('/settings/stats', 'acme')).toBe('/acme/settings/stats');
     expect(buildWorkspaceAwarePath('/settings/oauth-apps', 'acme')).toBe(
       '/acme/settings/oauth-apps',
     );

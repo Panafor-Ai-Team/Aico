@@ -33,12 +33,20 @@ export const FeatureFlagsSchema = z.object({
   // internal flag
   agent_self_iteration: FeatureFlagValue.optional(),
   agent_onboarding: FeatureFlagValue.optional(),
+  dev_dock: FeatureFlagValue.optional(),
+  dev_dock_workspaces: z.array(z.string()).optional(),
   // Cloud feature flag. Keep here until cloud owns a separate runtime flag domain.
   auth_captcha: FeatureFlagValue.optional(),
   cloud_promotion: FeatureFlagValue.optional(),
   onboarding_v2: FeatureFlagValue.optional(),
   storage_overage: FeatureFlagValue.optional(),
   workspace: FeatureFlagValue.optional(),
+
+  // Aico capability gate: upstream features that stay off until product sign-off.
+  // Enforced server-side (routers, tool engine, tool execution, background loops).
+  expertise: FeatureFlagValue.optional(),
+  goals: FeatureFlagValue.optional(),
+  projects: FeatureFlagValue.optional(),
 
   // the flags below can only be used with commercial license
   // if you want to use it in the commercial usage
@@ -77,7 +85,9 @@ export const DEFAULT_FEATURE_FLAGS: IFeatureFlags = {
 
   ai_image: true,
 
-  check_updates: true,
+  // Aico is shipped via CI/CD; comparing package.json to @lobehub/chat on npm
+  // always looks "behind" even on a freshly deployed image.
+  check_updates: false,
   welcome_suggest: true,
   token_counter: true,
 
@@ -86,11 +96,17 @@ export const DEFAULT_FEATURE_FLAGS: IFeatureFlags = {
 
   agent_self_iteration: isDev,
   agent_onboarding: isDev,
+  dev_dock: isDev,
   auth_captcha: true,
   cloud_promotion: false,
   onboarding_v2: isDev,
   storage_overage: true,
   workspace: isDev,
+
+  // Aico capability gate — off everywhere (including dev) until enabled by an operator.
+  expertise: false,
+  goals: false,
+  projects: false,
 
   market: true,
   speech_to_text: true,
@@ -129,12 +145,17 @@ export const mapFeatureFlagsEnvToState = (
     enableRAGEval: evaluateFeatureFlag(config.rag_eval, userId),
     enableAgentSelfIteration: evaluateFeatureFlag(config.agent_self_iteration, userId),
     enableAgentOnboarding: evaluateFeatureFlag(config.agent_onboarding, userId),
+    enableDevDock: evaluateFeatureFlag(config.dev_dock, userId),
     enableAuthCaptcha: evaluateFeatureFlag(config.auth_captcha, userId),
     enableOnboardingV2: evaluateFeatureFlag(config.onboarding_v2, userId),
     enableStorageOverage: evaluateFeatureFlag(config.storage_overage, userId),
 
     showCloudPromotion: evaluateFeatureFlag(config.cloud_promotion, userId),
     enableWorkspace: evaluateFeatureFlag(config.workspace, userId),
+
+    enableExpertise: evaluateFeatureFlag(config.expertise, userId),
+    enableGoals: evaluateFeatureFlag(config.goals, userId),
+    enableProjects: evaluateFeatureFlag(config.projects, userId),
 
     showMarket: evaluateFeatureFlag(config.market, userId),
     enableSTT: evaluateFeatureFlag(config.speech_to_text, userId),

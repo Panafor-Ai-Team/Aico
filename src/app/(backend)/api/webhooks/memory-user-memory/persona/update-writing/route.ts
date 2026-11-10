@@ -8,6 +8,7 @@ import {
   buildUserPersonaJobInput,
   UserPersonaService,
 } from '@/server/services/memory/userMemory/persona/service';
+import { verifyMemoryWebhookHeaders } from '@/server/services/memory/userMemory/webhookAuth';
 
 const userPersonaWebhookSchema = z.object({
   baseUrl: z.string().url().optional(),
@@ -37,19 +38,12 @@ const normalizeUserPersonaPayload = (
 };
 
 export const POST = async (req: Request) => {
-  const { upstashWorkflowExtraHeaders, webhook } = parseMemoryExtractionConfig();
-
-  if (webhook.headers && Object.keys(webhook.headers).length > 0) {
-    for (const [key, value] of Object.entries(webhook.headers)) {
-      const headerValue = req.headers.get(key);
-      if (headerValue !== value) {
-        return NextResponse.json(
-          { error: `Unauthorized: Missing or invalid header '${key}'` },
-          { status: 403 },
-        );
-      }
-    }
+  const authFailure = verifyMemoryWebhookHeaders(req.headers);
+  if (authFailure) {
+    return NextResponse.json({ error: authFailure.error }, { status: authFailure.status });
   }
+
+  const { upstashWorkflowExtraHeaders, webhook } = parseMemoryExtractionConfig();
 
   try {
     const json = await req.json();

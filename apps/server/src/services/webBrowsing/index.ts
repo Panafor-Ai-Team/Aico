@@ -34,6 +34,57 @@ export interface UpsertCrawledDocumentResult {
 const hashContent = (content: string): string => Md5.hashStr(content);
 
 /**
+ * Converting markdown into editor state is synchronous and superlinear on some
+ * shapes (pretty-printed JSON especially), so a 6 MB crawled REST API dump blocked
+ * the event loop for 15+ minutes. The model only reads the first 25k chars of a
+ * crawl anyway (`CRAWL_CONTENT_LIMITED_COUNT`).
+ */
+export const MAX_CRAWLED_DOCUMENT_LENGTH = 50_000;
+
+const isJson = (content: string) => {
+  const first = content.trimStart()[0];
+  if (first !== '{' && first !== '[') return false;
+
+  try {
+    JSON.parse(content);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const truncate = (content: string, max: number) => {
+  if (content.length <= max) return content;
+
+  // Don't split a surrogate pair at the cut.
+  const code = content.charCodeAt(max - 1);
+  return content.slice(0, code >= 0xd8_00 && code <= 0xdb_ff ? max - 1 : max);
+};
+
+/**
+ * Caps what gets converted and stored, and fences JSON so the markdown parser
+ * treats it as code (linear) instead of indented markdown.
+ */
+const prepareCrawledContent = (content: string): string => {
+  const json = isJson(content);
+  const body = truncate(content, MAX_CRAWLED_DOCUMENT_LENGTH);
+  const notice =
+    body.length < content.length
+      ? `\n\n> Truncated to the first ${body.length} of ${content.length} characters.`
+      : '';
+
+  if (!json) return body + notice;
+
+  let longestBacktickRun = 0;
+  for (const run of body.match(/`+/g) ?? []) {
+    longestBacktickRun = Math.max(longestBacktickRun, run.length);
+  }
+  const fence = '`'.repeat(Math.max(3, longestBacktickRun + 1));
+
+  return `${fence}json\n${body}\n${fence}${notice}`;
+};
+
+/**
  * Single owner of "crawl a web page, persist it as a document" semantics.
  *
  * Both the server agent runtime (`serverRuntimes/webBrowsing.ts`) and the
@@ -84,7 +135,8 @@ export class WebBrowsingDocumentService {
   upsertCrawledDocument = async (
     params: UpsertCrawledDocumentParams,
   ): Promise<UpsertCrawledDocumentResult> => {
-    const { content, description, title, topicId, url } = params;
+    const { description, title, topicId, url } = params;
+    const content = prepareCrawledContent(params.content);
 
     const existing = await this.documentModel.findBySource(url, 'web');
 

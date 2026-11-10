@@ -10,7 +10,9 @@ import { auth } from '@/auth';
 import { canUseWorkspaceApiKeys } from '@/business/server/workspaceApiKey';
 import { getServerDB } from '@/database/core/db-adaptor';
 import { ApiKeyModel } from '@/database/models/apiKey';
-import { hasWorkspaceAdminAccess } from '@/database/models/workspace';
+import { PlatformAdminUserModel } from '@/database/models/platformAdminUser';
+import { hasActiveWorkspaceMembership } from '@/database/models/workspace';
+import { ADMIN_SESSION_COOKIE, hashSessionToken } from '@/database/utils/operatorPassword';
 import { authEnv, LOBE_CHAT_OIDC_AUTH_HEADER } from '@/envs/auth';
 import { extractTraceContext } from '@/libs/observability/traceparent';
 import { assertOIDCUserActive, isOIDCUserInactiveError } from '@/libs/oidc-provider/access-control';
@@ -35,6 +37,7 @@ const extractClientIp = (request: NextRequest): string | undefined => {
 };
 
 interface ValidatedApiKey {
+  scopes: string[] | null;
   userId: string;
   workspaceId: string | null;
 }
@@ -60,7 +63,11 @@ const validateApiKey = async (apiKey: string): Promise<ValidatedApiKey | null> =
       console.error('Failed to update API key last used timestamp:', error);
     });
 
-    return { userId: apiKeyRecord.userId, workspaceId: apiKeyRecord.workspaceId ?? null };
+    return {
+      scopes: apiKeyRecord.scopes ?? null,
+      userId: apiKeyRecord.userId,
+      workspaceId: apiKeyRecord.workspaceId ?? null,
+    };
   } catch (error) {
     log('API key authentication failed: %O', error);
     console.error('API key authentication failed, trying other methods:', error);
@@ -78,6 +85,13 @@ export interface OIDCAuth {
 }
 
 export interface AuthContext {
+  adminId?: string | null;
+  /**
+   * Set only when the request authenticated via an API key: the key's
+   * capability scopes (`null` = full-access key). `undefined` means the
+   * request used another auth method and scope enforcement does not apply.
+   */
+  apiKeyScopes?: string[] | null;
   clientIp?: string | null;
   clientMetadata?: ClientMetadata;
   jwtPayload?: ClientSecretPayload | null;
@@ -97,6 +111,8 @@ export interface AuthContext {
  * This is useful for testing when we don't want to mock Next.js' request/response
  */
 export const createContextInner = async (params?: {
+  adminId?: string | null;
+  apiKeyScopes?: string[] | null;
   clientMetadata?: ClientMetadata;
   clientIp?: string | null;
   marketAccessToken?: string;
@@ -111,6 +127,8 @@ export const createContextInner = async (params?: {
   const responseHeaders = new Headers();
 
   return {
+    adminId: params?.adminId,
+    apiKeyScopes: params?.apiKeyScopes,
     clientMetadata: params?.clientMetadata || { type: 'unknown' },
     clientIp: params?.clientIp,
     marketAccessToken: params?.marketAccessToken,
@@ -133,13 +151,22 @@ export type LambdaContext = Awaited<ReturnType<typeof createContextInner>>;
 export const createLambdaContext = async (request: NextRequest): Promise<LambdaContext> => {
   const clientMetadata = parseClientMetadata(request.headers);
 
-  // we have a special header to debug the api endpoint in development mode
-  // IT WON'T GO INTO PRODUCTION ANYMORE
+  // Dev-only mock / debug header auth. Disabled on the control plane so a
+  // published :3020 with NODE_ENV=development cannot elevate to platformAdmin
+  // via `lobe-auth-dev-backend-api` / ENABLE_MOCK_DEV_USER from repo .env.
   const isDebugApi = request.headers.get('lobe-auth-dev-backend-api') === '1';
   const isMockUser = process.env.ENABLE_MOCK_DEV_USER === '1';
+  const controlPlaneBlocksDevAuthBypass =
+    process.env.AICO_IS_CONTROL_PLANE === '1' &&
+    process.env.AICO_ALLOW_CONTROL_PLANE_MOCK_AUTH !== '1';
 
-  if (process.env.NODE_ENV === 'development' && (isDebugApi || isMockUser)) {
+  if (
+    process.env.NODE_ENV === 'development' &&
+    !controlPlaneBlocksDevAuthBypass &&
+    (isDebugApi || isMockUser)
+  ) {
     return createContextInner({
+      adminId: process.env.AICO_MOCK_ADMIN_ID || undefined,
       clientMetadata,
       userId: process.env.MOCK_DEV_USER_ID,
     });
@@ -168,6 +195,28 @@ export const createLambdaContext = async (request: NextRequest): Promise<LambdaC
     userAgent,
     workspaceId,
   };
+
+  if (process.env.AICO_IS_CONTROL_PLANE === '1') {
+    const token = cookies[ADMIN_SESSION_COOKIE];
+    if (!token) {
+      return createContextInner({ ...commonContext, adminId: null, traceContext, userId: null });
+    }
+    try {
+      const db = await getServerDB();
+      const found = await new PlatformAdminUserModel(db).findValidSessionByTokenHash(
+        hashSessionToken(token),
+      );
+      return createContextInner({
+        ...commonContext,
+        adminId: found?.admin.id ?? null,
+        traceContext,
+        userId: null,
+      });
+    } catch (error) {
+      log('Control-plane admin session lookup failed: %O', error);
+      return createContextInner({ ...commonContext, adminId: null, traceContext, userId: null });
+    }
+  }
 
   const apiKeyToken = request.headers.get(LOBE_CHAT_API_KEY_HEADER)?.trim();
   log('X-API-Key header: %s', apiKeyToken ? 'exists' : 'not found');
@@ -211,19 +260,19 @@ export const createLambdaContext = async (request: NextRequest): Promise<LambdaC
       });
     }
 
-    // Same gates as the OpenAPI workspace middleware: workspace API keys are
-    // Admin-or-higher, so the issuer must still hold admin status (a demoted or
-    // removed admin's key stops working), and a workspace that loses the
-    // workspace-API-key entitlement must not keep serving already-issued keys.
+    // Same gates as the OpenAPI workspace middleware: the issuer must remain
+    // an active member, and the workspace must retain its API-key entitlement.
+    // Current RBAC is evaluated later and intersects with the key's scopes, so
+    // a role downgrade automatically narrows even a full-access key.
     if (apiKeyAuth.workspaceId) {
       const db = await getServerDB();
-      const isAdmin = await hasWorkspaceAdminAccess(db, {
+      const isActiveMember = await hasActiveWorkspaceMembership(db, {
         userId: apiKeyAuth.userId,
         workspaceId: apiKeyAuth.workspaceId,
       });
 
-      if (!isAdmin) {
-        log('Workspace API key issuer is no longer a workspace admin; rejecting request');
+      if (!isActiveMember) {
+        log('Workspace API key issuer is no longer an active member; rejecting request');
 
         return createContextInner({
           ...commonContext,
@@ -249,6 +298,7 @@ export const createLambdaContext = async (request: NextRequest): Promise<LambdaC
 
     return createContextInner({
       ...commonContext,
+      apiKeyScopes: apiKeyAuth.scopes,
       traceContext,
       userId: apiKeyAuth.userId,
       workspaceId: apiKeyAuth.workspaceId ?? undefined,
@@ -315,8 +365,10 @@ export const createLambdaContext = async (request: NextRequest): Promise<LambdaC
   // If OIDC is not enabled or validation fails, try Better Auth authentication
   log('Attempting Better Auth authentication');
   try {
+    // AUTH-002: skip cookie cache so logout / password-reset revoke is honored immediately
     const session = await auth.api.getSession({
       headers: request.headers,
+      query: { disableCookieCache: true },
     });
 
     if (session && session?.user?.id) {

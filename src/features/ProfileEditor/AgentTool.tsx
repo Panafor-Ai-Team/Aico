@@ -1,7 +1,7 @@
 'use client';
 
 import { COMPOSIO_APP_TYPES, LOBEHUB_SKILL_PROVIDERS } from '@lobechat/const';
-import { getActivePluginIds, parsePluginEntry, upsertPluginMode } from '@lobechat/types';
+import { getActivePluginIds, upsertPluginMode } from '@lobechat/types';
 import type { ItemType } from '@lobehub/ui';
 import { Avatar, Flexbox, Icon } from '@lobehub/ui';
 import { Button } from '@lobehub/ui/base-ui';
@@ -17,12 +17,14 @@ import ComposioServerItem from '@/features/ChatInput/ActionBar/Tools/ComposioSer
 import ComposioSkillIcon, {
   SKILL_ICON_SIZE,
 } from '@/features/ChatInput/ActionBar/Tools/ComposioSkillIcon';
+import { formatSkillAuthor } from '@/features/ChatInput/ActionBar/Tools/formatSkillAuthor';
 import LobehubSkillIcon from '@/features/ChatInput/ActionBar/Tools/LobehubSkillIcon';
 import LobehubSkillServerItem from '@/features/ChatInput/ActionBar/Tools/LobehubSkillServerItem';
 import MarketAgentSkillPopoverContent from '@/features/ChatInput/ActionBar/Tools/MarketAgentSkillPopoverContent';
 import MarketSkillIcon from '@/features/ChatInput/ActionBar/Tools/MarketSkillIcon';
 import ToolItem from '@/features/ChatInput/ActionBar/Tools/ToolItem';
 import ToolItemDetailPopover from '@/features/ChatInput/ActionBar/Tools/ToolItemDetailPopover';
+import { useResourceAccess } from '@/features/ResourcePermission/useResourceAccess';
 import { createSkillStoreModal } from '@/features/SkillStore';
 import { useCheckPluginsIsInstalled } from '@/hooks/useCheckPluginsIsInstalled';
 import { useFetchInstalledPlugins } from '@/hooks/useFetchInstalledPlugins';
@@ -43,6 +45,7 @@ import { connectorSelectors } from '@/store/tool/slices/connector';
 import PluginTag from './PluginTag';
 import PopoverContent from './PopoverContent';
 import { getVisibleProfileToolIds } from './profileToolVisibility';
+import { resolveStalePluginCleanup } from './staleProfilePlugins';
 
 export interface AgentToolProps {
   /**
@@ -95,6 +98,17 @@ const AgentTool = memo<AgentToolProps>(
     const effectiveAgentId = agentId || activeAgentId || '';
     const config = useAgentStore(agentSelectors.getAgentConfigById(effectiveAgentId), isEqual);
     const isManualSkillMode = config?.chatConfig?.skillActivateMode === 'manual';
+    // Workspace General access on this agent. A private agent is creator-only and
+    // has no shared access row, so skip the query for it (same shape as the
+    // prompt editor's gate). Only the automatic stale-plugin cleanup below reads
+    // this — the visible controls keep their own `canEdit` gating.
+    const isPrivateAgent = useAgentStore(
+      (s) => s.agentMap[effectiveAgentId]?.visibility === 'private',
+    );
+    const { canEditResource, isAccessResolved } = useResourceAccess(
+      'agent',
+      isPrivateAgent ? undefined : effectiveAgentId || undefined,
+    );
 
     // Plugin state management — pinned identifiers only (a disabled entry
     // is a distinct, valid config state; this component has no tri-state UI
@@ -298,7 +312,7 @@ const AgentTool = memo<AgentToolProps>(
                 <ToolItemDetailPopover
                   icon={<ComposioSkillIcon icon={type.icon} label={type.label} size={36} />}
                   identifier={type.identifier}
-                  sourceLabel={type.author}
+                  sourceLabel={formatSkillAuthor(type.author)}
                   title={type.label}
                   description={t(`tools.composio.servers.${type.identifier}.description` as any, {
                     defaultValue: type.description,
@@ -334,7 +348,7 @@ const AgentTool = memo<AgentToolProps>(
                 <ToolItemDetailPopover
                   icon={<LobehubSkillIcon icon={provider.icon} label={provider.label} size={36} />}
                   identifier={provider.id}
-                  sourceLabel={provider.author}
+                  sourceLabel={formatSkillAuthor(provider.author)}
                   title={provider.label}
                   description={t(`tools.lobehubSkill.providers.${provider.id}.description` as any, {
                     defaultValue: provider.description,
@@ -759,35 +773,35 @@ const AgentTool = memo<AgentToolProps>(
     // Uses a short debounce to allow async data (SWR) to complete loading
     useEffect(() => {
       if (cleanupDoneRef.current) return;
-      if (validIdentifiers.size === 0) return;
-      const rawPlugins = config?.plugins ?? [];
-      if (rawPlugins.length === 0) return;
-      // Don't prune until the connector store has loaded — connector identifiers
-      // are absent from validIdentifiers until fetchConnectors() resolves, so
-      // running cleanup before that would incorrectly mark enabled connectors as stale.
-      if (!isConnectorsInit) return;
 
       // Defer cleanup to avoid race with async data loading (SWR, Composio, etc.)
       const timer = setTimeout(() => {
-        // Checked (and filtered) by identifier regardless of entry shape, so
-        // a stale disabled/pinned object entry is pruned exactly like a
-        // stale legacy string one — untouched valid entries keep their
-        // original shape (lazy per-item upgrade).
-        const isValid = (entry: (typeof rawPlugins)[number]) =>
-          validIdentifiers.has(parsePluginEntry(entry).identifier);
-        const hasStale = rawPlugins.some((entry) => !isValid(entry));
+        const cleanedPlugins = resolveStalePluginCleanup({
+          canEditContent: canEdit,
+          canEditResource,
+          isAccessResolved,
+          isConnectorsInit,
+          plugins: config?.plugins,
+          validIdentifiers,
+        });
 
-        if (hasStale && effectiveAgentId) {
-          const cleanedPlugins = rawPlugins.filter(isValid);
-          updateAgentConfigById(effectiveAgentId, { plugins: cleanedPlugins });
+        if (cleanedPlugins && effectiveAgentId) {
+          // Best-effort self-healing the user never asked for, so a rejection
+          // (edit lock held by another member, resource access revoked between
+          // render and write) must not claim "your change was not applied" —
+          // there was no change to apply. It retries on the next open.
+          updateAgentConfigById(
+            effectiveAgentId,
+            { plugins: cleanedPlugins },
+            { showErrorMessage: false },
+          );
+          cleanupDoneRef.current = true;
         }
-
-        cleanupDoneRef.current = true;
       }, 500);
 
       return () => clearTimeout(timer);
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [validIdentifiers]);
+    }, [validIdentifiers, canEdit, canEditResource, isAccessResolved, isConnectorsInit]);
 
     // Only display tools that this profile surface actually manages. Runtime-
     // managed entries remain untouched in config for compatibility with other

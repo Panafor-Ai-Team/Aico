@@ -12,7 +12,12 @@ import semver from 'semver';
 
 import { isDev, isWindows } from '@/const/env';
 import { getDesktopEnv } from '@/env';
-import { UPDATE_CHANNEL, UPDATE_SERVER_URL, updaterConfig } from '@/modules/updater/configs';
+import {
+  GITHUB_UPDATE_REPO,
+  UPDATE_CHANNEL,
+  UPDATE_SERVER_URL,
+  updaterConfig,
+} from '@/modules/updater/configs';
 import { extractRestoreRoute } from '@/modules/updater/utils';
 import { createLogger } from '@/utils/logger';
 
@@ -112,7 +117,6 @@ export class UpdaterManager {
 
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
-    autoUpdater.allowDowngrade = false;
 
     const useDevConfig = isDev || FORCE_DEV_UPDATE_CONFIG;
     if (useDevConfig) {
@@ -128,6 +132,10 @@ export class UpdaterManager {
       );
       this.configureUpdateProvider();
     }
+
+    // Keep every release channel rollback-capable. Assign this after configuring the provider because
+    // electron-updater's channel setter mutates allowDowngrade as a side effect.
+    autoUpdater.allowDowngrade = true;
 
     this.registerEvents();
 
@@ -149,14 +157,13 @@ export class UpdaterManager {
   public switchChannel = (channel: UpdateChannel) => {
     logger.info(`Switching update channel: ${this.currentChannel} -> ${channel}`);
 
-    const isDowngrade = this.currentChannel === 'canary' && channel === 'stable';
-
     this.currentChannel = channel;
-    autoUpdater.allowDowngrade = isDowngrade;
-    logger.info(`allowDowngrade=${isDowngrade}`);
-
     autoUpdater.allowPrerelease = channel !== 'stable';
     this.configureUpdateProvider();
+
+    // Reapply after configureUpdateProvider for the same channel-setter side effect as initialize.
+    autoUpdater.allowDowngrade = true;
+    logger.info('allowDowngrade=true');
 
     this.installLaterVersion = null;
 
@@ -426,15 +433,15 @@ export class UpdaterManager {
         url: feedUrl,
       });
     } else {
-      // Fallback to GitHub when no S3 URL configured (local dev)
+      // Without UPDATE_SERVER_URL, releases come from GitHub Releases on the Panachat repo
       logger.info(
-        `No UPDATE_SERVER_URL configured, falling back to GitHub provider for ${this.currentChannel} channel`,
+        `No UPDATE_SERVER_URL configured, using GitHub provider (${GITHUB_UPDATE_REPO.owner}/${GITHUB_UPDATE_REPO.repo}) for ${this.currentChannel} channel`,
       );
 
       autoUpdater.setFeedURL({
-        owner: 'lobehub',
+        owner: GITHUB_UPDATE_REPO.owner,
         provider: 'github',
-        repo: 'lobehub',
+        repo: GITHUB_UPDATE_REPO.repo,
       });
 
       autoUpdater.allowPrerelease = this.currentChannel !== 'stable';

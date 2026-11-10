@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { CloudSandboxManifest } from '@lobechat/builtin-tool-cloud-sandbox';
 import { GroupAgentBuilderManifest } from '@lobechat/builtin-tool-group-agent-builder';
 import { GroupManagementManifest } from '@lobechat/builtin-tool-group-management';
 import { ImageGenerationManifest } from '@lobechat/builtin-tool-image-generation';
@@ -8,13 +9,25 @@ import { LocalSystemManifest } from '@lobechat/builtin-tool-local-system';
 import { MemoryManifest } from '@lobechat/builtin-tool-memory';
 import { RemoteDeviceManifest } from '@lobechat/builtin-tool-remote-device';
 import { SkillsApiName, SkillsManifest } from '@lobechat/builtin-tool-skills';
+import { VideoGenerationManifest } from '@lobechat/builtin-tool-video-generation';
 import { WebBrowsingManifest } from '@lobechat/builtin-tool-web-browsing';
 import { builtinTools } from '@lobechat/builtin-tools';
 import { ToolsEngine } from '@lobechat/context-engine';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createServerAgentToolsEngine, createServerToolsEngine } from '../index';
 import { type InstalledPlugin, type ServerAgentToolsContext } from '../types';
+
+// The Cloud Sandbox deployment gate reads server env; drive it explicitly so the
+// suite doesn't depend on whatever sandbox credentials the test env happens to
+// carry. Defaults to a configured deployment.
+const { mockIsCloudSandboxConfigured } = vi.hoisted(() => ({
+  mockIsCloudSandboxConfigured: vi.fn(() => true),
+}));
+
+vi.mock('@/server/services/sandbox/config', () => ({
+  isCloudSandboxConfigured: mockIsCloudSandboxConfigured,
+}));
 
 // Mock installed plugins
 const mockInstalledPlugins: InstalledPlugin[] = [
@@ -184,6 +197,37 @@ describe('createServerToolsEngine', () => {
     // Non-device plugins survive.
     expect(availablePlugins).toContain('test-plugin');
   });
+
+  it('drops manifests without an api array instead of crashing the tools build', () => {
+    // A DB plugin row whose manifest jsonb lacks `api` used to crash
+    // ToolsEngine.convertManifestsToTools (`manifest.api.map`) and with it
+    // every execAgent call of the affected user.
+    const brokenPlugin: InstalledPlugin = {
+      identifier: 'broken-plugin',
+      type: 'plugin',
+      runtimeType: 'mcp',
+      manifest: { identifier: 'broken-plugin', meta: { title: 'Broken' } } as any,
+    };
+    const brokenAdditional = { identifier: 'broken-additional', meta: { title: 'Broken' } } as any;
+
+    const context = createMockContext({
+      installedPlugins: [...mockInstalledPlugins, brokenPlugin],
+    });
+    const engine = createServerToolsEngine(context, {
+      additionalManifests: [brokenAdditional],
+    });
+
+    const result = engine.generateTools({
+      toolIds: ['broken-plugin', 'broken-additional', 'test-plugin'],
+      model: 'gpt-4',
+      provider: 'openai',
+    });
+
+    // Valid plugin still produces its tool; broken sources are dropped.
+    expect(result).toHaveLength(1);
+    expect(engine.getAvailablePlugins()).not.toContain('broken-plugin');
+    expect(engine.getAvailablePlugins()).not.toContain('broken-additional');
+  });
 });
 
 describe('createServerAgentToolsEngine', () => {
@@ -277,7 +321,7 @@ describe('createServerAgentToolsEngine', () => {
     expect(result.enabledToolIds).not.toContain(WebBrowsingManifest.identifier);
   });
 
-  it('should enable ImageGeneration in chat mode when model lacks native image output', () => {
+  it('should not enable ImageGeneration in chat mode without a media offer', () => {
     const context = createMockContext();
     const engine = createServerAgentToolsEngine(context, {
       agentConfig: {
@@ -295,16 +339,17 @@ describe('createServerAgentToolsEngine', () => {
       toolIds: [],
     });
 
-    expect(result.enabledToolIds).toContain(ImageGenerationManifest.identifier);
+    expect(result.enabledToolIds).not.toContain(ImageGenerationManifest.identifier);
   });
 
-  it('should not enable ImageGeneration in chat mode when model has native image output', () => {
+  it('should enable ImageGeneration in chat mode when media offer is on, even with native image output', () => {
     const context = createMockContext();
     const engine = createServerAgentToolsEngine(context, {
       agentConfig: {
         chatConfig: { enableAgentMode: false },
-        plugins: [],
+        plugins: [ImageGenerationManifest.identifier],
       },
+      mediaGenerationOffer: { image: true },
       model: 'gpt-image-chat',
       modelAbilities: { functionCall: true, imageOutput: true },
       provider: 'openai',
@@ -313,10 +358,10 @@ describe('createServerAgentToolsEngine', () => {
     const result = engine.generateToolsDetailed({
       model: 'gpt-image-chat',
       provider: 'openai',
-      toolIds: [],
+      toolIds: [ImageGenerationManifest.identifier],
     });
 
-    expect(result.enabledToolIds).not.toContain(ImageGenerationManifest.identifier);
+    expect(result.enabledToolIds).toContain(ImageGenerationManifest.identifier);
   });
 
   it('should not enable ImageGeneration in chat mode when model cannot call tools', () => {
@@ -326,8 +371,9 @@ describe('createServerAgentToolsEngine', () => {
     const engine = createServerAgentToolsEngine(context, {
       agentConfig: {
         chatConfig: { enableAgentMode: false },
-        plugins: [],
+        plugins: [ImageGenerationManifest.identifier],
       },
+      mediaGenerationOffer: { image: true },
       model: 'plain-text-model',
       modelAbilities: { functionCall: false, imageOutput: false },
       provider: 'test',
@@ -336,13 +382,13 @@ describe('createServerAgentToolsEngine', () => {
     const result = engine.generateToolsDetailed({
       model: 'plain-text-model',
       provider: 'test',
-      toolIds: [],
+      toolIds: [ImageGenerationManifest.identifier],
     });
 
     expect(result.enabledToolIds).not.toContain(ImageGenerationManifest.identifier);
   });
 
-  it('should not enable ImageGeneration by default in agent mode', () => {
+  it('should not enable ImageGeneration in agent mode without offer or pin', () => {
     const context = createMockContext();
     const engine = createServerAgentToolsEngine(context, {
       agentConfig: { plugins: [] },
@@ -354,6 +400,46 @@ describe('createServerAgentToolsEngine', () => {
     const result = engine.generateToolsDetailed({
       model: 'gpt-4',
       provider: 'openai',
+      toolIds: [],
+    });
+
+    expect(result.enabledToolIds).not.toContain(ImageGenerationManifest.identifier);
+  });
+
+  it('should enable ImageGeneration in agent mode when media offer is on', () => {
+    const context = createMockContext();
+    const engine = createServerAgentToolsEngine(context, {
+      agentConfig: { plugins: [] },
+      mediaGenerationOffer: { image: true },
+      model: 'gpt-image-chat',
+      modelAbilities: { functionCall: true, imageOutput: true },
+      provider: 'openai',
+    });
+
+    const result = engine.generateToolsDetailed({
+      model: 'gpt-image-chat',
+      provider: 'openai',
+      toolIds: [],
+    });
+
+    expect(result.enabledToolIds).toContain(ImageGenerationManifest.identifier);
+  });
+
+  it('should not enable ImageGeneration in agent mode when model cannot call tools', () => {
+    const context = createMockContext({
+      isModelSupportToolUse: () => false,
+    });
+    const engine = createServerAgentToolsEngine(context, {
+      agentConfig: { plugins: [] },
+      mediaGenerationOffer: { image: true },
+      model: 'plain-text-model',
+      modelAbilities: { functionCall: false, imageOutput: false },
+      provider: 'test',
+    });
+
+    const result = engine.generateToolsDetailed({
+      model: 'plain-text-model',
+      provider: 'test',
       toolIds: [],
     });
 
@@ -378,6 +464,71 @@ describe('createServerAgentToolsEngine', () => {
     });
 
     expect(result.enabledToolIds).toContain(ImageGenerationManifest.identifier);
+  });
+
+  it('should enable VideoGeneration in chat mode when media offer is on', () => {
+    const context = createMockContext();
+    const engine = createServerAgentToolsEngine(context, {
+      agentConfig: {
+        chatConfig: { enableAgentMode: false },
+        plugins: [],
+      },
+      mediaGenerationOffer: { video: true },
+      model: 'claude-sonnet',
+      modelAbilities: { functionCall: true },
+      provider: 'anthropic',
+    });
+
+    const result = engine.generateToolsDetailed({
+      model: 'claude-sonnet',
+      provider: 'anthropic',
+      toolIds: [],
+    });
+
+    expect(result.enabledToolIds).toContain(VideoGenerationManifest.identifier);
+  });
+
+  it('should enable VideoGeneration in agent mode when media offer is on', () => {
+    const context = createMockContext();
+    const engine = createServerAgentToolsEngine(context, {
+      agentConfig: { plugins: [] },
+      mediaGenerationOffer: { video: true },
+      model: 'gpt-4',
+      modelAbilities: { functionCall: true },
+      provider: 'openai',
+    });
+
+    const result = engine.generateToolsDetailed({
+      model: 'gpt-4',
+      provider: 'openai',
+      toolIds: [],
+    });
+
+    expect(result.enabledToolIds).toContain(VideoGenerationManifest.identifier);
+  });
+
+  it('should not enable VideoGeneration when model cannot call tools', () => {
+    const context = createMockContext({
+      isModelSupportToolUse: () => false,
+    });
+    const engine = createServerAgentToolsEngine(context, {
+      agentConfig: {
+        chatConfig: { enableAgentMode: false },
+        plugins: [],
+      },
+      mediaGenerationOffer: { video: true },
+      model: 'plain-text-model',
+      modelAbilities: { functionCall: false },
+      provider: 'test',
+    });
+
+    const result = engine.generateToolsDetailed({
+      model: 'plain-text-model',
+      provider: 'test',
+      toolIds: [],
+    });
+
+    expect(result.enabledToolIds).not.toContain(VideoGenerationManifest.identifier);
   });
 
   it('should enable VisualUnderstanding when injected into runtime plugins', () => {
@@ -695,6 +846,56 @@ describe('createServerAgentToolsEngine', () => {
       });
 
       expect(result.enabledToolIds).toContain(MemoryManifest.identifier);
+    });
+  });
+
+  describe('CloudSandbox tool enable rules', () => {
+    // Regression: a deployment with no sandbox backend (no Onlyboxes console, no
+    // Market Trusted Client credentials) 401s on every sandbox call, which the
+    // client surfaces as a LobeHub sign-in popup. The tool must not reach the
+    // model at all in that case.
+    const buildEnabledToolIds = () => {
+      const engine = createServerAgentToolsEngine(createMockContext(), {
+        agentConfig: { agencyConfig: { executionTarget: 'sandbox' } },
+        model: 'gpt-4',
+        provider: 'openai',
+      });
+
+      return engine.generateToolsDetailed({
+        model: 'gpt-4',
+        provider: 'openai',
+        toolIds: [CloudSandboxManifest.identifier],
+      }).enabledToolIds;
+    };
+
+    it('should enable CloudSandbox on the cloud runtime when a sandbox backend is configured', () => {
+      mockIsCloudSandboxConfigured.mockReturnValue(true);
+
+      expect(buildEnabledToolIds()).toContain(CloudSandboxManifest.identifier);
+    });
+
+    it('should disable CloudSandbox when the deployment has no sandbox backend', () => {
+      mockIsCloudSandboxConfigured.mockReturnValue(false);
+
+      expect(buildEnabledToolIds()).not.toContain(CloudSandboxManifest.identifier);
+    });
+
+    it('should disable CloudSandbox when the agent is not on the cloud runtime', () => {
+      mockIsCloudSandboxConfigured.mockReturnValue(true);
+
+      const engine = createServerAgentToolsEngine(createMockContext(), {
+        agentConfig: { agencyConfig: { executionTarget: 'none' } },
+        model: 'gpt-4',
+        provider: 'openai',
+      });
+
+      const result = engine.generateToolsDetailed({
+        model: 'gpt-4',
+        provider: 'openai',
+        toolIds: [CloudSandboxManifest.identifier],
+      });
+
+      expect(result.enabledToolIds).not.toContain(CloudSandboxManifest.identifier);
     });
   });
 

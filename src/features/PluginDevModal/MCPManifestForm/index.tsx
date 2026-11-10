@@ -1,5 +1,5 @@
-import { Alert, Flexbox, FormItem, Input, InputPassword } from '@lobehub/ui';
-import { Button, RadioGroup } from '@lobehub/ui/base-ui';
+import { Flexbox, FormItem, Input, InputPassword } from '@lobehub/ui';
+import { Alert, Button, RadioGroup } from '@lobehub/ui/base-ui';
 import { type FormInstance } from 'antd';
 import { Divider, Form } from 'antd';
 import isEqual from 'fast-deep-equal';
@@ -18,6 +18,7 @@ import ArgsInput from './ArgsInput';
 import CollapsibleSection from './CollapsibleSection';
 import MCPTypeSelect from './MCPTypeSelect';
 import QuickImportSection from './QuickImportSection';
+import { getDefaultMcpAuthType, getMcpAuthTypeOptions, type McpAuthType } from './utils';
 
 interface MCPManifestFormProps {
   /**
@@ -44,6 +45,11 @@ const MCP_TYPE = ['customParams', 'mcp', 'type'];
 const DESC_TYPE = ['customParams', 'description'];
 // Authentication-related constants
 const AUTH_TYPE = ['customParams', 'mcp', 'auth', 'type'];
+const AUTH_TYPE_LABEL_KEYS = {
+  bearer: 'dev.mcp.auth.bear',
+  none: 'dev.mcp.auth.none',
+  oauth2: 'dev.mcp.auth.oauth',
+} as const satisfies Record<McpAuthType, string>;
 const AUTH_TOKEN = ['customParams', 'mcp', 'auth', 'token'];
 const AUTH_CLIENT_ID = ['customParams', 'mcp', 'auth', 'clientId'];
 const AUTH_CLIENT_SECRET = ['customParams', 'mcp', 'auth', 'clientSecret'];
@@ -145,9 +151,10 @@ const MCPManifestForm = ({
         setErrorMetadata(null);
       } else if (result.error) {
         // Store has already handled the error state; optionally show additional user-friendly messages here
-        const errorMessage = t('error.testConnectionFailed', {
-          error: result.error,
-        });
+        const errorMessage =
+          result.error === 'MCP_AUTH_REQUIRED' || result.error.includes('MCP_AUTH_REQUIRED')
+            ? t('error.mcpAuthRequired')
+            : t('error.testConnectionFailed', { error: result.error });
         setConnectionError(errorMessage);
 
         // Build error metadata for detailed display
@@ -169,9 +176,9 @@ const MCPManifestForm = ({
     } catch (error) {
       // Handle unexpected errors
       const err = error as Error;
-      const errorMessage = t('error.testConnectionFailed', {
-        error: err.message || t('unknownError'),
-      });
+      const errorMessage = err.message?.includes('MCP_AUTH_REQUIRED')
+        ? t('error.mcpAuthRequired')
+        : t('error.testConnectionFailed', { error: err.message || t('unknownError') });
       setConnectionError(errorMessage);
     } finally {
       setIsTesting(false);
@@ -249,30 +256,16 @@ const MCPManifestForm = ({
               </FormItem>
               <FormItem
                 desc={t('dev.mcp.auth.desc')}
-                initialValue={'none'}
+                initialValue={getDefaultMcpAuthType(enableOAuth)}
                 label={t('dev.mcp.auth.label')}
                 name={AUTH_TYPE}
               >
                 <RadioGroup
                   style={{ width: '100%' }}
-                  options={[
-                    {
-                      label: t('dev.mcp.auth.none'),
-                      value: 'none',
-                    },
-                    {
-                      label: t('dev.mcp.auth.bear'),
-                      value: 'bearer',
-                    },
-                    ...(enableOAuth
-                      ? [
-                          {
-                            label: t('dev.mcp.auth.oauth'),
-                            value: 'oauth2',
-                          },
-                        ]
-                      : []),
-                  ]}
+                  options={getMcpAuthTypeOptions(enableOAuth).map((value) => ({
+                    label: t(AUTH_TYPE_LABEL_KEYS[value]),
+                    value,
+                  }))}
                 />
               </FormItem>
               {authType === 'bearer' && (

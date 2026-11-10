@@ -1,3 +1,4 @@
+import { BRANDING_NAME } from '@lobechat/business-const';
 import { isWorkSkillProvider } from '@lobechat/types';
 
 import { type MCPToolCallResult } from '@/libs/mcp';
@@ -41,13 +42,8 @@ const createFailedResult = (
 
 export const composioExecutor: RemoteToolExecutor = async (p, _context) => {
   const identifier = p.identifier;
-  const composioServers = useToolStore.getState().composioServers || [];
-  const server = composioServers.find((s) => s.identifier === identifier);
-
-  if (!server) {
-    return createFailedResult(`Composio server not found: ${identifier}`);
-  }
-
+  // No gate on the local Composio store: it may not be loaded yet, and the
+  // server resolves the caller's connection itself (NOT_FOUND when missing).
   const args = safeParseJSON(p.arguments) || {};
 
   const result = await useToolStore.getState().callComposioTool({
@@ -62,11 +58,14 @@ export const composioExecutor: RemoteToolExecutor = async (p, _context) => {
 
   const toolResult = result.data;
   if (toolResult) {
+    // A failed Composio call comes back as an MCP error result (`state.isError`);
+    // report it as a failure so it is stored as a tool error, not a success.
+    const isError = !!toolResult.state?.isError;
     return {
       content: toolResult.content,
-      error: toolResult.state?.isError ? toolResult.state : undefined,
+      error: isError ? { message: toolResult.content } : undefined,
       state: toolResult.state,
-      success: toolResult.success,
+      success: toolResult.success && !isError,
     };
   }
 
@@ -91,7 +90,7 @@ export const lobehubSkillExecutor: RemoteToolExecutor = async (p, context) => {
 
   if (!result.success) {
     return createFailedResult(
-      result.error || `LobeHub Skill tool ${provider} ${p.apiName} execution failed`,
+      result.error || `${BRANDING_NAME} Skill tool ${provider} ${p.apiName} execution failed`,
     );
   }
 

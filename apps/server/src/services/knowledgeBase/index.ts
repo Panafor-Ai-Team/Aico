@@ -16,7 +16,7 @@ import { type KnowledgeBaseDocumentHit, SearchRepo } from '@/database/repositori
 import { knowledgeBaseFiles } from '@/database/schemas';
 import { buildWorkspaceWhere } from '@/database/utils/workspace';
 import { getServerDefaultFilesConfig } from '@/server/globalConfig';
-import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import { initEmbeddingRuntimeFromDB } from '@/server/modules/ModelRuntime';
 import { DocumentService } from '@/server/services/document';
 
 export interface FileContentResult {
@@ -134,7 +134,7 @@ export class KnowledgeBaseSearchService {
     const vectorPath = async (): Promise<ChatSemanticSearchChunk[]> => {
       const { model, provider } =
         getServerDefaultFilesConfig().embeddingModel || DEFAULT_FILE_EMBEDDING_MODEL_ITEM;
-      const modelRuntime = await initModelRuntimeFromDB(
+      const modelRuntime = await initEmbeddingRuntimeFromDB(
         this.serverDB,
         this.userId,
         provider,

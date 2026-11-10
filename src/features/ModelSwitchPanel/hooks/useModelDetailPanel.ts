@@ -1,4 +1,9 @@
-import { BRANDING_PROVIDER } from '@lobechat/business-const';
+import {
+  BRANDING_PROVIDER,
+  DEFAULT_MANAGED_PROVIDER_ID,
+  MANAGED_PROVIDER_IDS,
+  type ManagedProviderId,
+} from '@lobechat/business-const';
 import { getCachedTextInputUnitRate } from '@lobechat/utils';
 import type { TFunction } from 'i18next';
 import type { LucideIcon } from 'lucide-react';
@@ -23,19 +28,27 @@ import type {
   PricingUnitName,
   TieredPricingUnit,
 } from 'model-bank';
+import { isReasoningBilledTwice } from 'model-bank';
 import { useCallback, useMemo } from 'react';
 
 import { useBusinessModelPricing } from '@/business/client/hooks/useBusinessModelPricing';
 import { useBusinessModelRating } from '@/business/client/hooks/useBusinessModelRating';
+import {
+  formatPiAmount,
+  formatTokenCoefficient,
+  rawUsdToPiTokens,
+} from '@/features/AicoBilling/piToken';
+import { useCvcTokensPerUsd } from '@/features/AicoBilling/useCvcTokensPerUsd';
 import { useEnabledChatModels } from '@/hooks/useEnabledChatModels';
 import { useGlobalStore } from '@/store/global';
 import type { ModelDetailPanelExpandedKey } from '@/store/global/initialState';
 import { systemStatusSelectors } from '@/store/global/selectors';
 import type { EnabledProviderWithModels } from '@/types/aiProvider';
-import { formatNumber, formatShortenNumber, formatTokenNumber } from '@/utils/format';
+import { formatTokenNumber } from '@/utils/format';
 import { formatPriceByCurrency, getOriginalUnitRateByName, getUnitRateByName } from '@/utils/index';
 
 import type { PricingMode } from '../types';
+import { splitExpandedKeys, useModelDetailSectionsStore } from './useModelDetailSections';
 
 export interface FormattedUnitPrice {
   current: string;
@@ -48,19 +61,33 @@ interface TextPriceSummary {
   output: FormattedUnitPrice;
 }
 
-const BRANDING_CREDIT_UNIT = 1_000_000;
-const MILLION_SCALE_UNITS = new Set<PricingUnit['unit']>(['millionCharacters', 'millionTokens']);
-
 interface FormatPricingRateOptions {
   isCreditPricing?: boolean;
   unit?: PricingUnit['unit'];
 }
 
-const formatBrandingCreditRate = (rate: number, unit?: PricingUnit['unit']) => {
-  if (unit && MILLION_SCALE_UNITS.has(unit)) return `${formatNumber(rate)}M`;
-
-  return String(formatShortenNumber(Math.round(rate * BRANDING_CREDIT_UNIT)));
+/**
+ * Managed / branding catalog prices are shown in π (raw USD × CVC bridge).
+ * Direct third-party providers (openai, anthropic, …) keep `$`.
+ */
+export const isPiPricingProvider = (provider?: string): boolean => {
+  if (!provider) return false;
+  if (provider === BRANDING_PROVIDER) return true;
+  if (provider === DEFAULT_MANAGED_PROVIDER_ID) return true;
+  return MANAGED_PROVIDER_IDS.includes(provider as ManagedProviderId);
 };
+
+/** Format a raw USD catalog rate as π amount (no unit). */
+export const formatPiRate = (rate: number) => formatPiAmount(rawUsdToPiTokens(rate));
+
+const isTokenUnit = (unit?: PricingUnit['unit']) => unit === 'millionTokens' || unit === undefined;
+
+/**
+ * Token rates: coefficient only (`4×`).
+ * Non-token units (image/video/…): π amount, rendered next to the π coin.
+ */
+export const formatManagedPricingRate = (rate: number, unit?: PricingUnit['unit']): string =>
+  isTokenUnit(unit) ? formatTokenCoefficient(rate) : formatPiRate(rate);
 
 const formatPricingRate = (
   rate: number | undefined,
@@ -69,9 +96,11 @@ const formatPricingRate = (
 ) => {
   if (typeof rate !== 'number') return '0';
 
-  return options.isCreditPricing
-    ? formatBrandingCreditRate(rate, options.unit)
-    : formatPriceByCurrency(rate, currency);
+  if (options.isCreditPricing) {
+    return formatManagedPricingRate(rate, options.unit);
+  }
+
+  return formatPriceByCurrency(rate, currency);
 };
 
 const getFormattedUnitPrice = (
@@ -126,6 +155,20 @@ const UNIT_GROUP_MAP: Record<PricingUnitName, PricingGroup> = {
 
 const GROUP_ORDER: PricingGroup[] = ['text', 'image', 'audio', 'video'];
 
+/**
+ * CVC bills input and output at one coefficient; when a managed catalog says
+ * the same, the picker shows one rate instead of two identical ones.
+ */
+export const hasSingleTextRate = (pricing: Pricing): boolean => {
+  const textUnits = pricing.units.filter((unit) => UNIT_GROUP_MAP[unit.name] === 'text');
+  if (textUnits.some((unit) => unit.name !== 'textInput' && unit.name !== 'textOutput')) {
+    return false;
+  }
+  const input = getUnitRateByName(pricing, 'textInput');
+  const output = getUnitRateByName(pricing, 'textOutput');
+  return typeof input === 'number' && input === output;
+};
+
 export const UNIT_ICON_MAP: Partial<Record<PricingUnitName, LucideIcon>> = {
   audioInput: ArrowUpFromDot,
   audioInput_cacheRead: CircleFadingArrowUp,
@@ -138,6 +181,7 @@ export const UNIT_ICON_MAP: Partial<Record<PricingUnitName, LucideIcon>> = {
   textInput_cacheRead: CircleFadingArrowUp,
   textInput_cacheWrite: CircleFadingArrowUp,
   textOutput: ArrowDownToDot,
+  videoGeneration: VideoIcon,
 };
 
 const UNIT_SORT_ORDER: Record<PricingUnitName, number> = {
@@ -162,6 +206,7 @@ const UNIT_LABEL_MAP: Record<string, string> = {
   millionCharacters: '/M chars',
   millionTokens: '/M tokens',
   second: '/s',
+  video: '/video',
 };
 
 const formatUnitRate = (
@@ -293,6 +338,8 @@ export const useModelDetailPanel = ({
   provider,
   t,
 }: UseModelDetailPanelParams) => {
+  // Coefficients are catalog prices converted back at the server's CVC rate.
+  const cvcTokensPerUsd = useCvcTokensPerUsd();
   const enabledListFromHook = useEnabledChatModels();
   const enabledList = enabledListProp ?? enabledListFromHook;
   const model = useMemo(() => {
@@ -301,7 +348,13 @@ export const useModelDetailPanel = ({
     return providerData?.children.find((m) => m.id === modelId);
   }, [enabledList, modelId, provider]);
 
-  const expandedKeys = useGlobalStore(systemStatusSelectors.modelDetailPanelExpandedKeys);
+  const persistedExpandedKeys = useGlobalStore(systemStatusSelectors.modelDetailPanelExpandedKeys);
+  const sessionOpenKeys = useModelDetailSectionsStore((s) => s.openKeys);
+  const setSessionOpenKeys = useModelDetailSectionsStore((s) => s.setOpenKeys);
+  const expandedKeys = useMemo(
+    () => [...persistedExpandedKeys, ...sessionOpenKeys],
+    [persistedExpandedKeys, sessionOpenKeys],
+  );
   const updateExpandedKeys = useGlobalStore((s) => s.updateModelDetailPanelExpandedKeys);
   const applyBusinessModelPricing = useBusinessModelPricing();
   const applyBusinessModelRating = useBusinessModelRating();
@@ -316,61 +369,77 @@ export const useModelDetailPanel = ({
     () => applyBusinessModelPricing({ model: modelId, pricing, provider }),
     [applyBusinessModelPricing, modelId, pricing, provider],
   );
-  const isCreditPricing = provider === BRANDING_PROVIDER;
+  const isCreditPricing = isPiPricingProvider(provider);
+  // CVC counts thinking tokens twice for a few models, so the published coefficient
+  // understates their real cost. Only managed (π) pricing carries that coefficient.
+  const reasoningBilledTwice = isCreditPricing && isReasoningBilledTwice(modelId);
   const hasPricing = !!displayPricing;
   const formatPrice = displayPricing ? getPrice(displayPricing, isCreditPricing) : null;
   const hasCachedInputPricing = displayPricing
     ? !!getCachedTextInputUnitRate(displayPricing)
     : false;
-  const pricingGroups = useMemo(
-    () => (displayPricing ? groupPricingUnits(displayPricing.units) : []),
-    [displayPricing],
-  );
+  const isSingleTextRate = isCreditPricing && !!displayPricing && hasSingleTextRate(displayPricing);
+  const pricingGroups = useMemo(() => {
+    if (!displayPricing) return [];
+    const units = isSingleTextRate
+      ? displayPricing.units.filter((unit) => unit.name !== 'textOutput')
+      : displayPricing.units;
+    return groupPricingUnits(units);
+  }, [displayPricing, isSingleTextRate]);
+
+  /** Managed image/video estimate as a bare π amount; the panel renders the coin. */
+  const approximatePiPrice = useMemo(() => {
+    if (!isCreditPricing || !displayPricing || !pricingMode) return null;
+    const rate =
+      pricingMode === 'image'
+        ? (model?.approximatePricePerImage ?? displayPricing.approximatePricePerImage)
+        : pricingMode === 'video'
+          ? (model?.approximatePricePerVideo ?? displayPricing.approximatePricePerVideo)
+          : undefined;
+    if (typeof rate !== 'number') return null;
+    return {
+      amount: formatPiRate(rate),
+      unit: pricingMode === 'image' ? 'image' : 'video',
+    } as const;
+  }, [cvcTokensPerUsd, displayPricing, isCreditPricing, model, pricingMode]);
 
   const approximatePriceLabel = useMemo(() => {
-    if (!displayPricing || !pricingMode) return null;
+    if (isCreditPricing || !displayPricing || !pricingMode) return null;
     const currency = displayPricing.currency as ModelPriceCurrency | undefined;
-    if (pricingMode === 'image' && typeof displayPricing.approximatePricePerImage === 'number') {
-      const amount = isCreditPricing
-        ? formatBrandingCreditRate(displayPricing.approximatePricePerImage, 'image')
-        : formatPriceByCurrency(displayPricing.approximatePricePerImage, currency);
-      return t(
-        isCreditPricing
-          ? 'ModelSwitchPanel.detail.pricing.credits.perImage'
-          : 'ModelSwitchPanel.detail.pricing.perImage',
-        {
-          amount,
-          defaultValue: isCreditPricing ? '~ {{amount}} credits / image' : '~ ${{amount}} / image',
-        },
-      );
+    // Prefer the per-model approximatePricePerImage/Video field: it is computed
+    // by resolveImageSinglePrice/resolveVideoSinglePrice from the pricing units
+    // (including token-priced generators, which have no dedicated pricing-unit
+    // field of their own), whereas displayPricing.approximatePricePerImage only
+    // ever holds a value when a model-bank entry sets it explicitly.
+    const approximatePricePerImage =
+      model?.approximatePricePerImage ?? displayPricing.approximatePricePerImage;
+    const approximatePricePerVideo =
+      model?.approximatePricePerVideo ?? displayPricing.approximatePricePerVideo;
+    if (pricingMode === 'image' && typeof approximatePricePerImage === 'number') {
+      return t('ModelSwitchPanel.detail.pricing.perImage', {
+        amount: formatPriceByCurrency(approximatePricePerImage, currency),
+        defaultValue: '~ ${{amount}} / image',
+      });
     }
-    if (pricingMode === 'video' && typeof displayPricing.approximatePricePerVideo === 'number') {
-      const amount = isCreditPricing
-        ? formatBrandingCreditRate(displayPricing.approximatePricePerVideo)
-        : formatPriceByCurrency(displayPricing.approximatePricePerVideo, currency);
-      return t(
-        isCreditPricing
-          ? 'ModelSwitchPanel.detail.pricing.credits.perVideo'
-          : 'ModelSwitchPanel.detail.pricing.perVideo',
-        {
-          amount,
-          defaultValue: isCreditPricing ? '~ {{amount}} credits / video' : '~ ${{amount}} / video',
-        },
-      );
+    if (pricingMode === 'video' && typeof approximatePricePerVideo === 'number') {
+      return t('ModelSwitchPanel.detail.pricing.perVideo', {
+        amount: formatPriceByCurrency(approximatePricePerVideo, currency),
+        defaultValue: '~ ${{amount}} / video',
+      });
     }
     return null;
-  }, [displayPricing, isCreditPricing, pricingMode, t]);
+  }, [displayPricing, isCreditPricing, model, pricingMode, t]);
 
   const getCreditsUnitLabel = useCallback(
     (unit: PricingUnit['unit']) =>
       t(`ModelSwitchPanel.detail.pricing.credits.${unit}` as any, {
-        defaultValue: `credits${UNIT_LABEL_MAP[unit] || ''}`,
+        defaultValue: UNIT_LABEL_MAP[unit] || '',
       }),
     [t],
   );
 
   const getPricingTooltip = useCallback(
-    (key: 'cachedInput' | 'input' | 'output', amount: string): string => {
+    (key: 'cachedInput' | 'coefficient' | 'input' | 'output', amount: string): string => {
       if (isCreditPricing) {
         return t(`ModelSwitchPanel.detail.pricing.credits.${key}` as any, { amount });
       }
@@ -392,14 +461,31 @@ export const useModelDetailPanel = ({
   );
 
   const getUnitPriceSuffix = useCallback(
-    (unit: PricingUnit['unit']) =>
-      isCreditPricing ? ` ${getCreditsUnitLabel(unit)}` : UNIT_LABEL_MAP[unit] || '',
-    [getCreditsUnitLabel, isCreditPricing],
+    (unit: PricingUnit['unit']) => {
+      if (!isCreditPricing) {
+        return unit === 'millionTokens'
+          ? t('ModelSwitchPanel.detail.pricing.perMillionTokens')
+          : getCreditsUnitLabel(unit);
+      }
+      return isTokenUnit(unit) ? '' : getCreditsUnitLabel(unit);
+    },
+    [getCreditsUnitLabel, isCreditPricing, t],
+  );
+
+  /** Managed non-token units show a π amount, so the panel renders the coin before the suffix. */
+  const isPiAmountUnit = useCallback(
+    (unit: PricingUnit['unit']) => isCreditPricing && !isTokenUnit(unit),
+    [isCreditPricing],
   );
 
   const handleExpandedChange = useCallback(
-    (keys: unknown[]) => updateExpandedKeys(keys as ModelDetailPanelExpandedKey[]),
-    [updateExpandedKeys],
+    (keys: unknown[]) => {
+      const { persisted, session } = splitExpandedKeys(keys as ModelDetailPanelExpandedKey[]);
+
+      updateExpandedKeys(persisted);
+      setSessionOpenKeys(session);
+    },
+    [setSessionOpenKeys, updateExpandedKeys],
   );
 
   const contextWindowLabel = useMemo(() => {
@@ -407,8 +493,10 @@ export const useModelDetailPanel = ({
 
     return model.contextWindowTokens === 0
       ? '∞'
-      : `${formatTokenNumber(model.contextWindowTokens)} tokens`;
-  }, [model?.contextWindowTokens]);
+      : t('ModelSwitchPanel.detail.contextTokens', {
+          amount: formatTokenNumber(model.contextWindowTokens),
+        });
+  }, [model?.contextWindowTokens, t]);
 
   const enabledAbilities = useMemo(
     () =>
@@ -419,21 +507,26 @@ export const useModelDetailPanel = ({
   );
 
   return {
+    approximatePiPrice,
     approximatePriceLabel,
     contextWindowLabel,
     enabledAbilities,
     expandedKeys,
     formatPrice,
     formatUnitPrice,
+    getCreditsUnitLabel,
     getPricingTooltip,
     getUnitPriceSuffix,
     handleExpandedChange,
     hasAbilities: enabledAbilities.length > 0,
     hasCachedInputPricing,
     hasPricing,
+    reasoningBilledTwice,
     isAbilitiesExpanded: expandedKeys.includes('abilities'),
     isCreditPricing,
+    isPiAmountUnit,
     isPricingExpanded: expandedKeys.includes('pricing'),
+    isSingleTextRate,
     model,
     pricingGroups,
     rating,

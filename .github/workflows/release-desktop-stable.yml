@@ -20,9 +20,15 @@ name: Release Desktop Stable
 #   - UPDATE_SERVER_URL (客户端检查更新的 URL)
 # ============================================
 
+# Panachat: manual dispatch only. Builds unsigned installers and publishes them to
+# GitHub Releases on this repo, which the in-app updater reads (no UPDATE_SERVER_URL).
+#
+# Required repository variable (Settings → Secrets and variables → Actions → Variables):
+#   - DESKTOP_SERVER_URL: the Panachat server the app connects to (production APP_URL)
+# Optional repository variable:
+#   - DESKTOP_DEVICE_GATEWAY_URL: device gateway; leave unset to keep the gateway off
+# Optional secrets: APPLE_* / CSC_* to sign macOS builds later.
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       version:
@@ -58,7 +64,12 @@ on:
         description: 'Skip GitHub release upload (for testing)'
         required: false
         type: boolean
-        default: true
+        default: false
+      publish_release:
+        description: 'Publish the release (unchecked = draft; the in-app updater only sees published releases)'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
@@ -82,6 +93,15 @@ jobs:
       is_manual: ${{ steps.check.outputs.is_manual }}
       release_notes: ${{ steps.check.outputs.release_notes }}
     steps:
+      - name: Require desktop server URL
+        env:
+          DESKTOP_SERVER_URL: ${{ vars.DESKTOP_SERVER_URL }}
+        run: |
+          if [ -z "$DESKTOP_SERVER_URL" ]; then
+            echo "::error::Set the DESKTOP_SERVER_URL repository variable to the Panachat server URL."
+            exit 1
+          fi
+
       - name: Check release info
         id: check
         env:
@@ -180,7 +200,6 @@ jobs:
       - name: Setup build environment
         uses: ./.github/actions/desktop-build-setup
         with:
-          cloud-token: ${{ secrets.LOBEHUB_CLOUD_TOKEN }}
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Set package version
@@ -202,7 +221,9 @@ jobs:
           UPDATE_CHANNEL: stable
           UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
           RELEASE_NOTES: ${{ needs.check-stable.outputs.release_notes }}
-          APP_URL: http://localhost:3015
+          APP_URL: ${{ vars.DESKTOP_SERVER_URL }}
+          OFFICIAL_CLOUD_SERVER: ${{ vars.DESKTOP_SERVER_URL }}
+          DEVICE_GATEWAY_URL: ${{ vars.DESKTOP_DEVICE_GATEWAY_URL }}
           DATABASE_URL: 'postgresql://postgres@localhost:5432/postgres'
           KEY_VAULTS_SECRET: 'oLXWIiR/AKF+rWaqy9lHkrYgzpATbW3CtJp3UfkVgpE='
           CSC_LINK: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
@@ -211,8 +232,6 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          NEXT_PUBLIC_DESKTOP_PROJECT_ID: ${{ secrets.UMAMI_STABLE_DESKTOP_PROJECT_ID }}
-          NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL: ${{ secrets.UMAMI_STABLE_DESKTOP_BASE_URL }}
           # Debug hdiutil issues (https://github.com/electron-userland/electron-builder/issues/8415)
           DEBUG_DMG: true
 
@@ -224,11 +243,11 @@ jobs:
           UPDATE_CHANNEL: stable
           UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
           RELEASE_NOTES: ${{ needs.check-stable.outputs.release_notes }}
-          APP_URL: http://localhost:3015
+          APP_URL: ${{ vars.DESKTOP_SERVER_URL }}
+          OFFICIAL_CLOUD_SERVER: ${{ vars.DESKTOP_SERVER_URL }}
+          DEVICE_GATEWAY_URL: ${{ vars.DESKTOP_DEVICE_GATEWAY_URL }}
           DATABASE_URL: 'postgresql://postgres@localhost:5432/postgres'
           KEY_VAULTS_SECRET: 'oLXWIiR/AKF+rWaqy9lHkrYgzpATbW3CtJp3UfkVgpE='
-          NEXT_PUBLIC_DESKTOP_PROJECT_ID: ${{ secrets.UMAMI_STABLE_DESKTOP_PROJECT_ID }}
-          NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL: ${{ secrets.UMAMI_STABLE_DESKTOP_BASE_URL }}
           TEMP: C:\temp
           TMP: C:\temp
 
@@ -238,16 +257,16 @@ jobs:
         run: |
           npm run desktop:package:app
           test -d apps/desktop/dist/renderer
-          tar -czf apps/desktop/release/lobehub-renderer.tar.gz -C apps/desktop/dist/renderer .
+          tar -czf apps/desktop/release/panachat-renderer.tar.gz -C apps/desktop/dist/renderer .
         env:
           UPDATE_CHANNEL: stable
           UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
           RELEASE_NOTES: ${{ needs.check-stable.outputs.release_notes }}
-          APP_URL: http://localhost:3015
+          APP_URL: ${{ vars.DESKTOP_SERVER_URL }}
+          OFFICIAL_CLOUD_SERVER: ${{ vars.DESKTOP_SERVER_URL }}
+          DEVICE_GATEWAY_URL: ${{ vars.DESKTOP_DEVICE_GATEWAY_URL }}
           DATABASE_URL: 'postgresql://postgres@localhost:5432/postgres'
           KEY_VAULTS_SECRET: 'oLXWIiR/AKF+rWaqy9lHkrYgzpATbW3CtJp3UfkVgpE='
-          NEXT_PUBLIC_DESKTOP_PROJECT_ID: ${{ secrets.UMAMI_STABLE_DESKTOP_PROJECT_ID }}
-          NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL: ${{ secrets.UMAMI_STABLE_DESKTOP_BASE_URL }}
 
       - name: Upload artifacts
         uses: ./.github/actions/desktop-upload-artifacts
@@ -326,8 +345,8 @@ jobs:
         with:
           # 手动触发时使用输入的版本号创建 tag
           tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', needs.check-stable.outputs.version) || github.event.release.tag_name }}
-          # 手动触发时创建为 draft
-          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          # Draft unless publish_release is ticked: electron-updater ignores drafts
+          draft: ${{ github.event_name == 'workflow_dispatch' && !inputs.publish_release }}
           files: |
             release/stable*
             release/latest*

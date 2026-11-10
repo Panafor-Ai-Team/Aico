@@ -1,32 +1,30 @@
 'use client';
 
-import {
-  ActionIcon,
-  DropdownMenu,
-  type DropdownMenuCheckboxItem,
-  Flexbox,
-  Text,
-} from '@lobehub/ui';
-import { Languages } from 'lucide-react';
+import { DropdownMenu, type DropdownMenuCheckboxItem, Flexbox, Text } from '@lobehub/ui';
+import { Button } from '@lobehub/ui/base-ui';
+import { GlobeIcon } from 'lucide-react';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { LOBE_LOCALE_COOKIE } from '@/const/locale';
-import { localeOptions, normalizeLocale } from '@/locales/resources';
+import { normalizeLocale, visibleLocaleOptions } from '@/locales/resources';
+import { applyDocumentDirection } from '@/utils/client/applyDocumentDirection';
 
 const setCookieSimple = (key: string, value: string, days: number) => {
   const expires = new Date(Date.now() + days * 86_400_000).toUTCString();
   document.cookie = `${key}=${value};expires=${expires};path=/;`;
 };
 
-const AuthLangButton = memo<{ size?: number }>((props) => {
+const AuthLangButton = memo(() => {
   const { i18n } = useTranslation();
   const browserLanguage = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
   const current = normalizeLocale(i18n.resolvedLanguage || i18n.language || browserLanguage);
+  const currentLabel =
+    visibleLocaleOptions.find((item) => item.value === current)?.label || 'English';
 
   const items = useMemo<DropdownMenuCheckboxItem[]>(
     () =>
-      localeOptions.map((item) => ({
+      visibleLocaleOptions.map((item) => ({
         checked: current === item.value,
         closeOnClick: true,
         key: item.value,
@@ -37,8 +35,9 @@ const AuthLangButton = memo<{ size?: number }>((props) => {
         ),
         onCheckedChange: (checked: boolean) => {
           if (!checked) return;
-          i18n.changeLanguage(item.value);
+          void i18n.changeLanguage(item.value);
           document.documentElement.lang = item.value;
+          applyDocumentDirection(item.value);
           setCookieSimple(LOBE_LOCALE_COOKIE, item.value, 365);
         },
         type: 'checkbox',
@@ -57,7 +56,18 @@ const AuthLangButton = memo<{ size?: number }>((props) => {
         },
       }}
     >
-      <ActionIcon icon={Languages} size={props.size || { blockSize: 32, size: 16 }} />
+      <Button
+        icon={GlobeIcon}
+        iconPosition="end"
+        size="small"
+        type="text"
+        style={{
+          height: 32,
+          paddingInline: 8,
+        }}
+      >
+        <Text fontSize={12}>{currentLabel}</Text>
+      </Button>
     </DropdownMenu>
   );
 });

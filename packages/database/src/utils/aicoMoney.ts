@@ -1,0 +1,665 @@
+/**
+ * Aico money helpers — integer minor units only.
+ * USD is stored as micro-USD (1 USD = 1_000_000 µUSD).
+ * Toman is stored as integer Toman.
+ * Never use IEEE-754 float arithmetic for balances, reservations, refunds, or FX.
+ */
+
+export const MICRO_USD_PER_USD = 1_000_000n;
+
+export type BudgetPeriod = 'total' | 'daily' | 'weekly' | 'monthly';
+
+/** Product-facing org member periods (AICO-140). Legacy `total` is grandfathered only. */
+export type ProductBudgetPeriod = 'daily' | 'weekly' | 'monthly';
+
+export const BUDGET_PERIODS: readonly BudgetPeriod[] = [
+  'total',
+  'daily',
+  'weekly',
+  'monthly',
+] as const;
+
+export const PRODUCT_BUDGET_PERIODS: readonly ProductBudgetPeriod[] = [
+  'daily',
+  'weekly',
+  'monthly',
+] as const;
+
+export const isBudgetPeriod = (value: string): value is BudgetPeriod =>
+  (BUDGET_PERIODS as readonly string[]).includes(value);
+
+export const isProductBudgetPeriod = (value: string): value is ProductBudgetPeriod =>
+  (PRODUCT_BUDGET_PERIODS as readonly string[]).includes(value);
+
+/**
+ * Whether OpenRouter meters this budget on a period counter rather than the
+ * lifetime one. A `total` budget — and a legacy row with no period at all — is
+ * created without `limit_reset`, so lifetime `usage` is its correct counter;
+ * for every other period the lifetime counter is in different units than the
+ * cycle and must never be substituted for a missing period counter.
+ */
+export const isPeriodScopedBudget = (period: string | null | undefined): boolean =>
+  !!period && isProductBudgetPeriod(period);
+
+/** OpenRouter Management API `limit_reset` mapping (midnight UTC; weeks Mon–Sun). */
+export const periodToOpenRouterLimitReset = (
+  period: BudgetPeriod,
+): 'daily' | 'weekly' | 'monthly' | null => {
+  switch (period) {
+    case 'daily': {
+      return 'daily';
+    }
+    case 'weekly': {
+      return 'weekly';
+    }
+    case 'monthly': {
+      return 'monthly';
+    }
+    default: {
+      return null;
+    }
+  }
+};
+
+const assertFiniteIntegerString = (raw: string, label: string): bigint => {
+  const trimmed = raw.trim();
+  if (!/^-?\d+$/.test(trimmed)) {
+    throw new Error(`INVALID_MONEY:${label}`);
+  }
+  return BigInt(trimmed);
+};
+
+/** Parse a decimal USD string (e.g. "12.345678") into micro-USD, truncating toward zero. */
+export const usdDecimalStringToMicro = (value: string): bigint => {
+  const trimmed = value.trim();
+  if (!/^-?\d+(?:\.\d+)?$/.test(trimmed)) throw new Error('INVALID_USD_DECIMAL');
+
+  const negative = trimmed.startsWith('-');
+  const unsigned = negative ? trimmed.slice(1) : trimmed;
+  const [wholePart, fracPart = ''] = unsigned.split('.');
+  const frac = (fracPart + '000000').slice(0, 6);
+  const micro = BigInt(wholePart || '0') * MICRO_USD_PER_USD + BigInt(frac || '0');
+  return negative ? -micro : micro;
+};
+
+/** Format micro-USD as a fixed 6-decimal string for API/tRPC. */
+export const microUsdToDecimalString = (micro: bigint | number | string): string => {
+  const value =
+    typeof micro === 'bigint' ? micro : assertFiniteIntegerString(String(micro), 'micro');
+  const negative = value < 0n;
+  const abs = negative ? -value : value;
+  const whole = abs / MICRO_USD_PER_USD;
+  const frac = abs % MICRO_USD_PER_USD;
+  const fracStr = frac.toString().padStart(6, '0');
+  return `${negative ? '-' : ''}${whole.toString()}.${fracStr}`;
+};
+
+/** Convert OpenRouter USD number/limit into micro-USD (floor toward zero — never over-credit). */
+export const openRouterUsdToMicroFloor = (usd: number): bigint => {
+  if (!Number.isFinite(usd)) throw new Error('INVALID_OR_USD');
+  // Capture extra fractional digits then truncate to micro (do not use toFixed(6), which rounds).
+  const negative = usd < 0;
+  const [wholePart, fracPart = ''] = Math.abs(usd).toFixed(8).split('.');
+  const frac = fracPart.slice(0, 6).padEnd(6, '0');
+  const micro = BigInt(wholePart || '0') * MICRO_USD_PER_USD + BigInt(frac || '0');
+  return negative ? -micro : micro;
+};
+
+/**
+ * FX: toman → micro-USD using integer math.
+ * rate = toman per 1 USD (positive integer or integer string).
+ * Floor toward zero so Aico never over-credits.
+ */
+export const tomanToMicroUsd = (
+  amountToman: bigint | number | string,
+  tomanPerUsd: bigint | number | string,
+): bigint => {
+  const toman = typeof amountToman === 'bigint' ? amountToman : BigInt(amountToman);
+  const rate = typeof tomanPerUsd === 'bigint' ? tomanPerUsd : BigInt(tomanPerUsd);
+  if (toman <= 0n) throw new Error('INVALID_TOMAN_AMOUNT');
+  if (rate <= 0n) throw new Error('INVALID_FX_RATE');
+  return (toman * MICRO_USD_PER_USD) / rate;
+};
+
+/** Inverse of tomanToMicroUsd — floor toward zero. */
+export const microUsdToToman = (
+  micro: bigint | number | string,
+  tomanPerUsd: bigint | number | string,
+): bigint => {
+  const microValue =
+    typeof micro === 'bigint' ? micro : assertFiniteIntegerString(String(micro), 'micro');
+  const rate = typeof tomanPerUsd === 'bigint' ? tomanPerUsd : BigInt(tomanPerUsd);
+  if (microValue <= 0n) throw new Error('INVALID_MICRO_USD_AMOUNT');
+  if (rate <= 0n) throw new Error('INVALID_FX_RATE');
+  return (microValue * rate) / MICRO_USD_PER_USD;
+};
+
+/**
+ * Toman still spendable on a personal wallet (FIN-016).
+ *
+ * Deliberately *not* `microUsdToToman(remaining, currentRate)`. The toman a user
+ * paid bought a fixed amount of USD credit at the rate in force that day, so the
+ * toman view of what is left is that same money pro-rated by how much of the
+ * balance survives — not a fresh conversion at today's rate. Converting live
+ * would make the number drift every time the FX feed moves (and inherit the
+ * silent env-rate fallback, FIN-038), so a user who spent nothing would still
+ * watch their credit change.
+ *
+ * Floors, so the toman figure is never optimistic, and reaches exactly 0 when
+ * the balance is spent out.
+ */
+export const remainingTomanFromBalance = (wallet: {
+  balanceMicroUsd: bigint | number | string | null | undefined;
+  balanceToman: bigint | number | string | null | undefined;
+  remainingMicroUsd: bigint | number | string | null | undefined;
+}): number => {
+  const toBig = (value: bigint | number | string | null | undefined): bigint => {
+    if (value == null) return 0n;
+    return typeof value === 'bigint' ? value : BigInt(Math.trunc(Number(value) || 0));
+  };
+
+  const balance = toBig(wallet.balanceMicroUsd);
+  const paidToman = toBig(wallet.balanceToman);
+  const remaining = toBig(wallet.remainingMicroUsd);
+
+  if (balance <= 0n || paidToman <= 0n || remaining <= 0n) return 0;
+  if (remaining >= balance) return Number(paidToman);
+
+  return Number((paidToman * remaining) / balance);
+};
+
+/** Confirmed unused reservation: never negative; floor already implied by integer subtraction. */
+export const confirmedUnusedMicro = (reserved: bigint, authoritativeUsage: bigint): bigint => {
+  const unused = reserved - authoritativeUsage;
+  return unused > 0n ? unused : 0n;
+};
+
+export const assertPositiveMicro = (value: bigint, label = 'amount'): void => {
+  if (value <= 0n) throw new Error(`AMOUNT_MUST_BE_POSITIVE:${label}`);
+};
+
+export const assertNonNegativeMicro = (value: bigint, label = 'amount'): void => {
+  if (value < 0n) throw new Error(`AMOUNT_MUST_BE_NON_NEGATIVE:${label}`);
+};
+
+/** JSON-safe money field (decimal string). */
+export const moneyString = (micro: bigint | number | string): string =>
+  microUsdToDecimalString(micro);
+
+export const tomanString = (toman: bigint | number | string): string => {
+  const value = typeof toman === 'bigint' ? toman : BigInt(toman);
+  return value.toString();
+};
+
+/** Member budget fields needed for current-cycle spend math (FIN-001). */
+export type MemberBudgetCycleFields = {
+  periodAmountMicroUsd?: number | null;
+  reservedMicroUsd?: number | null;
+  settledUsageMicroUsd?: number | null;
+};
+
+/**
+ * Current-cycle spendable cap for a member budget.
+ * Pending next-period holds inflate `reservedMicroUsd` but must not raise the
+ * live OpenRouter limit until renewal applies them.
+ */
+export const currentCycleLimitMicroUsd = (budget: MemberBudgetCycleFields): number => {
+  const periodAmount = Number(budget.periodAmountMicroUsd ?? 0);
+  if (periodAmount > 0) return periodAmount;
+  return Number(budget.reservedMicroUsd ?? 0);
+};
+
+/** Spendable remaining in the active billing cycle (excludes pending next-period hold). */
+export const cycleRemainingMicroUsd = (budget: MemberBudgetCycleFields): number => {
+  const limit = currentCycleLimitMicroUsd(budget);
+  const settled = Math.max(0, Number(budget.settledUsageMicroUsd ?? 0));
+  return Math.max(0, limit - settled);
+};
+
+export const isStaleManagedKeyId = (keyId: string | null | undefined): boolean =>
+  !keyId || keyId.startsWith('mock_');
+
+export const hasValidManagedKeyId = (keyId: string | null | undefined): boolean =>
+  Boolean(keyId) && !isStaleManagedKeyId(keyId);
+
+// ─── Usage multiplier (AICO-180) ───────────────────────────────────────
+//
+// Aico resells upstream capacity at a per-provider markup. Everything the
+// user sees — prices, per-message cost, wallet balance and remaining — is the
+// *billed* figure; the upstream gateway's own numbers are *raw* and never leave
+// the server. `bp` is the multiplier in basis points (12000 = 1.20x).
+//
+// The markup is keyed by managed provider because the unit economics differ:
+// OpenRouter is resold at 1.20x, CheapVibeCode at 1.25x (CVC sells 25M tokens
+// per USD; a $1 top-up should credit 20M, i.e. buy $0.80 of raw capacity).
+
+/**
+ * Fallback row id in `platform_usage_multiplier_config`. Predates the
+ * per-provider split and is retained so a deployment whose managed provider has
+ * no row of its own still resolves to a configured rate rather than a constant.
+ */
+export const FALLBACK_MULTIPLIER_CONFIG_ID = 'default';
+
+/** Default markup applied when no platform config row exists yet. */
+export const DEFAULT_USAGE_MULTIPLIER_BP = 12_000;
+
+/**
+ * Seed markup per managed provider, used by migration 0151 and as the
+ * get-or-create value when a provider row is missing. Keyed by the provider ids
+ * in `MANAGED_PROVIDER_IDS` (`@lobechat/business-const`).
+ */
+export const DEFAULT_PROVIDER_MULTIPLIER_BP: Record<string, number> = {
+  cheapvibecode: 12_500,
+  openrouter: 12_000,
+};
+
+/** Seed markup for `providerId`, falling back to the platform default. */
+export const defaultMultiplierBpForProvider = (providerId: string | null | undefined): number =>
+  DEFAULT_PROVIDER_MULTIPLIER_BP[providerId ?? ''] ?? DEFAULT_USAGE_MULTIPLIER_BP;
+
+const MULTIPLIER_BP_SCALE = 10_000;
+
+/** Accepted band for the platform multiplier: 1.00x – 3.00x. */
+export const MIN_USAGE_MULTIPLIER_BP = 10_000;
+export const MAX_USAGE_MULTIPLIER_BP = 30_000;
+
+export const assertValidMultiplierBp = (bp: number): number => {
+  const value = Math.trunc(Number(bp));
+  if (
+    !Number.isFinite(value) ||
+    value < MIN_USAGE_MULTIPLIER_BP ||
+    value > MAX_USAGE_MULTIPLIER_BP
+  ) {
+    throw new Error('INVALID_USAGE_MULTIPLIER');
+  }
+  return value;
+};
+
+/**
+ * Accepted band for a *per-model* coefficient override: 0.10x - 10.00x.
+ *
+ * Deliberately wider, and open below 1.00x, than the platform band above. The
+ * platform multiplier is a margin and must never sell below cost; a per-model
+ * override is a correction to a published coefficient we have measured to be
+ * wrong, so it has to be able to move in either direction.
+ */
+export const MIN_MODEL_MULTIPLIER_BP = 1_000;
+export const MAX_MODEL_MULTIPLIER_BP = 100_000;
+
+export const assertValidModelMultiplierBp = (bp: number): number => {
+  const value = Math.trunc(Number(bp));
+  if (
+    !Number.isFinite(value) ||
+    value < MIN_MODEL_MULTIPLIER_BP ||
+    value > MAX_MODEL_MULTIPLIER_BP
+  ) {
+    throw new Error('INVALID_MODEL_MULTIPLIER');
+  }
+  return value;
+};
+
+/**
+ * Normalize an untrusted/stored bp value for *math* (not for validation).
+ * Legacy rows and missing config fall back to the default rather than throwing,
+ * so a bad row can never wedge billing.
+ */
+const safeBp = (bp: number | null | undefined): number => {
+  const value = Math.trunc(Number(bp ?? DEFAULT_USAGE_MULTIPLIER_BP));
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_USAGE_MULTIPLIER_BP;
+  return value;
+};
+
+/**
+ * `floor(a * b / c)` for non-negative integers, exact. A plain `a * b / c`
+ * passes 2^53 once both factors reach about $95 of micro-USD, and the quotient
+ * is then off by one micro-USD at an integer boundary (N13).
+ */
+export const mulDivFloor = (a: number, b: number, c: number): number =>
+  Number((BigInt(Math.trunc(a)) * BigInt(Math.trunc(b))) / BigInt(Math.trunc(c)));
+
+/** `ceil(a * b / c)` for non-negative integers, exact. */
+export const mulDivCeil = (a: number, b: number, c: number): number => {
+  const divisor = BigInt(Math.trunc(c));
+  return Number((BigInt(Math.trunc(a)) * BigInt(Math.trunc(b)) + divisor - 1n) / divisor);
+};
+
+/** Raw OpenRouter micro-USD → billed micro-USD. Ceil: never under-charge. */
+export const applyMultiplierMicroUsd = (micro: number, bp: number | null | undefined): number => {
+  const value = Math.trunc(Number(micro ?? 0));
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return mulDivCeil(value, safeBp(bp), MULTIPLIER_BP_SCALE);
+};
+
+/** Billed micro-USD → raw micro-USD. Floor: never hand out more headroom than paid for. */
+export const removeMultiplierMicroUsd = (micro: number, bp: number | null | undefined): number => {
+  const value = Math.trunc(Number(micro ?? 0));
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return mulDivFloor(value, MULTIPLIER_BP_SCALE, safeBp(bp));
+};
+
+/**
+ * Checkpoint carried on a wallet / member budget so a multiplier change never
+ * reprices usage that was already billed at the old rate.
+ *
+ * `baselineRaw` is OpenRouter's raw usage counter at the moment of the last
+ * change; `billedBefore` is what we had already billed by then.
+ */
+export type UsageMultiplierCheckpoint = {
+  billedUsageBeforeBaselineMicroUsd?: number | null;
+  checkpointMultiplierBp?: number | null;
+  usageBaselineMicroUsd?: number | null;
+};
+
+/**
+ * Billed usage from OpenRouter's raw counter:
+ *   billed = billedBefore + (rawUsage − baselineRaw) x M
+ *
+ * Usage below the baseline (an OpenRouter-side period reset) contributes
+ * nothing rather than going negative.
+ */
+export const billedUsageFromRaw = (params: {
+  baselineRaw: number;
+  billedBefore: number;
+  bp: number | null | undefined;
+  rawUsage: number;
+}): number => {
+  const baseline = Math.max(0, Math.trunc(Number(params.baselineRaw ?? 0)));
+  const billedBefore = Math.max(0, Math.trunc(Number(params.billedBefore ?? 0)));
+  const raw = Math.max(0, Math.trunc(Number(params.rawUsage ?? 0)));
+  const sinceBaseline = Math.max(0, raw - baseline);
+  return billedBefore + applyMultiplierMicroUsd(sinceBaseline, params.bp);
+};
+
+/**
+ * Inverse of `billedUsageFromRaw`, solved for the raw usage at which the billed
+ * amount reaches `balance` — i.e. the OpenRouter key limit:
+ *   keyLimit = baselineRaw + (balance − billedBefore) / M
+ *
+ * An over-spent wallet (billedBefore >= balance) still yields the baseline, so
+ * the limit never drops below usage OpenRouter has already recorded.
+ */
+export const keyLimitFromBilled = (params: {
+  balance: number;
+  baselineRaw: number;
+  billedBefore: number;
+  bp: number | null | undefined;
+}): number => {
+  const baseline = Math.max(0, Math.trunc(Number(params.baselineRaw ?? 0)));
+  const billedBefore = Math.max(0, Math.trunc(Number(params.billedBefore ?? 0)));
+  const balance = Math.trunc(Number(params.balance ?? 0));
+  if (!Number.isFinite(balance) || balance <= 0) return 0;
+  const headroom = Math.max(0, balance - billedBefore);
+  return baseline + removeMultiplierMicroUsd(headroom, params.bp);
+};
+
+/**
+ * Roll a checkpoint forward to `nextBp` at the current raw usage, so usage up to
+ * now keeps the rate it was billed at and only later usage uses the new rate.
+ */
+export const rebaseCheckpoint = (params: {
+  checkpoint: UsageMultiplierCheckpoint;
+  nextBp: number;
+  rawUsage: number;
+}): { billedUsageBeforeBaselineMicroUsd: number; usageBaselineMicroUsd: number } => {
+  const raw = Math.max(0, Math.trunc(Number(params.rawUsage ?? 0)));
+  return {
+    billedUsageBeforeBaselineMicroUsd: billedUsageFromRaw({
+      baselineRaw: Number(params.checkpoint.usageBaselineMicroUsd ?? 0),
+      billedBefore: Number(params.checkpoint.billedUsageBeforeBaselineMicroUsd ?? 0),
+      bp: params.checkpoint.checkpointMultiplierBp,
+      rawUsage: raw,
+    }),
+    usageBaselineMicroUsd: raw,
+  };
+};
+
+/**
+ * Roll a checkpoint onto a freshly minted key whose counter restarts at zero.
+ *
+ * `rebaseCheckpoint` keeps the baseline on the *same* upstream counter, which is
+ * right for OpenRouter: a key's limit can be raised in place, so the counter is
+ * continuous for the life of the budget. CheapVibeCode has no update endpoint —
+ * `token_limit` is fixed at mint — so growing a member's funding means minting a
+ * new key, and the new key's counter starts at 0.
+ *
+ * Freeze everything billed so far into `billedUsageBeforeBaselineMicroUsd` and
+ * set the baseline to zero, so the next reading is measured against the new key
+ * from its own origin. Usage already billed keeps the rate it was billed at, in
+ * exactly the way a multiplier rebase does.
+ */
+export const rotateCheckpointToNewKey = (params: {
+  checkpoint: UsageMultiplierCheckpoint;
+  /** Final raw counter of the key being retired, in its own units. */
+  finalRawUsage: number;
+}): { billedUsageBeforeBaselineMicroUsd: number; usageBaselineMicroUsd: number } => ({
+  billedUsageBeforeBaselineMicroUsd: billedUsageFromRaw({
+    baselineRaw: Number(params.checkpoint.usageBaselineMicroUsd ?? 0),
+    billedBefore: Number(params.checkpoint.billedUsageBeforeBaselineMicroUsd ?? 0),
+    bp: params.checkpoint.checkpointMultiplierBp,
+    rawUsage: params.finalRawUsage,
+  }),
+  usageBaselineMicroUsd: 0,
+});
+
+/**
+ * Raw spend on a key whose provider reports only what is *left*.
+ *
+ * CheapVibeCode's `GET /v1/balance` returns the calling key's remaining
+ * allowance and nothing else, so spend is what the mint-time limit no longer
+ * covers. The limit is known only to us — it is what we asked for at mint — and
+ * `member_budgets.managed_key_limit_micro_usd` is where we keep it.
+ *
+ * Returns `null` rather than 0 when either side is unknown: a missing limit must
+ * never read as "this key has spent nothing", which would hand a member the
+ * whole cap again.
+ */
+export const rawUsageFromRemaining = (params: {
+  limitMicroUsd: number | null | undefined;
+  remainingMicroUsd: number | null | undefined;
+}): number | null => {
+  // `Number(null)` is 0, not NaN, so nullish values must be rejected before the
+  // finite check — otherwise a missing limit reads as "the whole key is spent"
+  // and a missing remaining reads as "nothing is left".
+  if (params.limitMicroUsd == null || params.remainingMicroUsd == null) return null;
+  const limit = Number(params.limitMicroUsd);
+  const remaining = Number(params.remainingMicroUsd);
+  if (!Number.isFinite(limit) || limit < 0) return null;
+  if (!Number.isFinite(remaining) || remaining < 0) return null;
+  // A remaining figure above the limit means the limit we hold is stale (the key
+  // was re-minted larger). Clamping to 0 is the honest floor; the caller's
+  // checkpoint carries anything already billed.
+  return Math.max(0, Math.trunc(limit) - Math.trunc(remaining));
+};
+
+/**
+ * AICO-184 wallet capacity. A top-up buys raw upstream spend once, at the
+ * multiplier in force when it was paid, and no later change to the platform
+ * multiplier may revalue it.
+ *
+ * `rawCapacityMicroUsd` accumulates `deposit / M_at_payment` across every
+ * top-up, so it is the raw counterpart of the wallet's cumulative
+ * `balanceMicroUsd` and doubles as the OpenRouter key limit.
+ */
+export const rawCapacityFromDeposit = (
+  depositMicroUsd: number,
+  bp: number | null | undefined,
+): number => removeMultiplierMicroUsd(depositMicroUsd, bp);
+
+/**
+ * The rate a wallet actually bought at, blended across its top-ups:
+ * `balance / rawCapacity`. Falls back to the platform rate for a wallet that
+ * has bought nothing yet (a trial key funds the key without crediting the
+ * wallet), so usage is still billed rather than shown as free.
+ */
+export const blendedMultiplierBp = (params: {
+  balanceMicroUsd: number;
+  fallbackBp: number | null | undefined;
+  rawCapacityMicroUsd: number;
+}): number => {
+  const balance = Math.trunc(Number(params.balanceMicroUsd ?? 0));
+  const capacity = Math.trunc(Number(params.rawCapacityMicroUsd ?? 0));
+  if (!Number.isFinite(balance) || !Number.isFinite(capacity) || balance <= 0 || capacity <= 0) {
+    return safeBp(params.fallbackBp);
+  }
+  return Math.round((balance * MULTIPLIER_BP_SCALE) / capacity);
+};
+
+/**
+ * Billed usage from OpenRouter's raw counter at the wallet's blended rate.
+ * Reaches `balanceMicroUsd` exactly when raw usage reaches capacity, so
+ * remaining still lands on zero when the wallet is spent.
+ */
+export const billedUsageFromCapacity = (params: {
+  balanceMicroUsd: number;
+  fallbackBp: number | null | undefined;
+  rawCapacityMicroUsd: number;
+  rawUsageMicroUsd: number;
+}): number => {
+  const raw = Math.max(0, Math.trunc(Number(params.rawUsageMicroUsd ?? 0)));
+  const capacity = Math.max(0, Math.trunc(Number(params.rawCapacityMicroUsd ?? 0)));
+  const balance = Math.max(0, Math.trunc(Number(params.balanceMicroUsd ?? 0)));
+  if (raw <= 0) return 0;
+  // Spending the whole capacity bills the whole balance — never a rounding
+  // cent more or less, whatever the blend divides to.
+  if (capacity > 0 && balance > 0 && raw >= capacity) return balance;
+  return applyMultiplierMicroUsd(
+    raw,
+    blendedMultiplierBp({
+      balanceMicroUsd: balance,
+      fallbackBp: params.fallbackBp,
+      rawCapacityMicroUsd: capacity,
+    }),
+  );
+};
+
+/**
+ * User-facing π tokens (Aico product unit).
+ *
+ * 1 π = {@link CVC_TOKENS_PER_PI} CheapVibeCode tokens. π is derived from **raw**
+ * upstream USD (what the managed key can spend), not billed USD — the usage
+ * multiplier is applied only at top-up as a yield haircut ($1 → fewer π).
+ *
+ * At defaults (`AICO_CVC_TOKENS_PER_USD` = 25M, CVC multiplier 1.25×):
+ *   $1 billed → $0.80 raw → 20_000_000 CVC → 20_000 π.
+ */
+export const CVC_TOKENS_PER_PI = 1000;
+export const DEFAULT_CVC_TOKENS_PER_USD = 25_000_000;
+
+const safeCvcTokensPerUsd = (cvcTokensPerUsd: number | null | undefined): number => {
+  const value = Math.trunc(Number(cvcTokensPerUsd ?? DEFAULT_CVC_TOKENS_PER_USD));
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_CVC_TOKENS_PER_USD;
+  return value;
+};
+
+/**
+ * Raw micro-USD → whole π tokens. Floor so remaining never looks more generous
+ * than the upstream key can spend.
+ *
+ *   π = floor(raw_usd × cvc_per_usd / 1000)
+ *     = floor(raw_micro × cvc_per_usd / 1_000_000_000)
+ */
+export const rawMicroUsdToPiTokens = (
+  rawMicroUsd: number,
+  cvcTokensPerUsd: number | null | undefined = DEFAULT_CVC_TOKENS_PER_USD,
+): number => {
+  const raw = Math.trunc(Number(rawMicroUsd ?? 0));
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  const cvcPerUsd = BigInt(safeCvcTokensPerUsd(cvcTokensPerUsd));
+  const denom = MICRO_USD_PER_USD * BigInt(CVC_TOKENS_PER_PI);
+  return Number((BigInt(raw) * cvcPerUsd) / denom);
+};
+
+/**
+ * Whole π tokens → raw micro-USD. Floor so we never credit more capacity than
+ * the π figure implies.
+ */
+export const piTokensToRawMicroUsd = (
+  piTokens: number,
+  cvcTokensPerUsd: number | null | undefined = DEFAULT_CVC_TOKENS_PER_USD,
+): number => {
+  const pi = Math.trunc(Number(piTokens ?? 0));
+  if (!Number.isFinite(pi) || pi <= 0) return 0;
+  const cvcPerUsd = BigInt(safeCvcTokensPerUsd(cvcTokensPerUsd));
+  if (cvcPerUsd <= 0n) return 0;
+  const numer = BigInt(pi) * MICRO_USD_PER_USD * BigInt(CVC_TOKENS_PER_PI);
+  return Number(numer / cvcPerUsd);
+};
+
+/**
+ * How many π a $1 billed top-up credits at the given multiplier.
+ * Default CVC path: 25_000_000 / 1.25 / 1000 = 20_000.
+ */
+export const topupPiTokensPerUsd = (
+  multiplierBp: number | null | undefined,
+  cvcTokensPerUsd: number | null | undefined = DEFAULT_CVC_TOKENS_PER_USD,
+): number =>
+  rawMicroUsdToPiTokens(rawCapacityFromDeposit(1_000_000, multiplierBp), cvcTokensPerUsd);
+
+/** π credited for a billed deposit (toman/USD top-up after FX). */
+export const topupPiTokensFromDeposit = (
+  depositMicroUsd: number,
+  multiplierBp: number | null | undefined,
+  cvcTokensPerUsd: number | null | undefined = DEFAULT_CVC_TOKENS_PER_USD,
+): number =>
+  rawMicroUsdToPiTokens(rawCapacityFromDeposit(depositMicroUsd, multiplierBp), cvcTokensPerUsd);
+
+/**
+ * Convert a billed micro-USD amount (wallet remaining, message cost after markup,
+ * org budget remaining) into π via the wallet's blended rate — i.e. undo the
+ * top-up haircut so π tracks raw CVC capacity 1:1.
+ */
+export const billedMicroUsdToPiTokens = (params: {
+  balanceMicroUsd?: number | null;
+  billedMicroUsd: number;
+  cvcTokensPerUsd?: number | null;
+  fallbackBp?: number | null;
+  multiplierBp?: number | null;
+  rawCapacityMicroUsd?: number | null;
+}): number => {
+  const billed = Math.trunc(Number(params.billedMicroUsd ?? 0));
+  if (!Number.isFinite(billed) || billed <= 0) return 0;
+
+  const bp =
+    params.multiplierBp != null
+      ? safeBp(params.multiplierBp)
+      : blendedMultiplierBp({
+          balanceMicroUsd: Number(params.balanceMicroUsd ?? 0),
+          fallbackBp: params.fallbackBp,
+          rawCapacityMicroUsd: Number(params.rawCapacityMicroUsd ?? 0),
+        });
+
+  return rawMicroUsdToPiTokens(
+    removeMultiplierMicroUsd(billed, bp),
+    params.cvcTokensPerUsd ?? DEFAULT_CVC_TOKENS_PER_USD,
+  );
+};
+
+/**
+ * Fractional π for tiny costs / model rates (not balances).
+ * Uses IEEE only for *display* of sub-π amounts; balances stay integer.
+ */
+export const rawUsdToPiTokensDecimal = (
+  rawUsd: number,
+  cvcTokensPerUsd: number | null | undefined = DEFAULT_CVC_TOKENS_PER_USD,
+): number => {
+  if (!Number.isFinite(rawUsd) || rawUsd <= 0) return 0;
+  return (rawUsd * safeCvcTokensPerUsd(cvcTokensPerUsd)) / CVC_TOKENS_PER_PI;
+};
+
+/**
+ * What a transaction did to the wallet it was written against, signed: the
+ * balance after minus the balance before. Stored `amount` is not always that
+ * (an org `allocate` row carries the member's point of view and is positive
+ * even when it takes money back to the org), so displays use this and fall
+ * back to `amount` only for rows without both balances.
+ */
+export const walletChangeMicroUsd = (row: {
+  amountMicroUsd?: number | null;
+  balanceAfterMicroUsd?: number | null;
+  balanceBeforeMicroUsd?: number | null;
+}): number => {
+  if (row.balanceAfterMicroUsd != null && row.balanceBeforeMicroUsd != null) {
+    return Number(row.balanceAfterMicroUsd) - Number(row.balanceBeforeMicroUsd);
+  }
+  return Number(row.amountMicroUsd ?? 0);
+};

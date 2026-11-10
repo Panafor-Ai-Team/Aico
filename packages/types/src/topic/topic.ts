@@ -1,11 +1,11 @@
 import { z } from 'zod';
 
 import type { SerializedAgentHook } from '../agentHook';
-import { serializedAgentHookSchema } from '../agentHook';
 import type { WorkingDirConfig } from '../device';
 import { workingDirConfigSchema } from '../device';
 import type { BaseDataModel } from '../meta';
 import type { OnboardingUnderstandingSession } from '../understanding';
+import type { OnboardingTaskRecommendationSession } from '../user/onboardingTasks';
 
 // Type definitions
 export type ShareVisibility = 'private' | 'link';
@@ -20,7 +20,7 @@ export type TopicSortBy = 'createdAt' | 'updatedAt';
  * Server-side ordering for the topic list query.
  * - `updatedAt` (default): favorites first, then most-recently-updated.
  * - `status`: favorites first, then by status priority
- *   (waitingForHuman → running → active → paused → failed → completed →
+ *   (waitingForHuman → running → active → failed → completed →
  *   archived), then most-recently-updated within each status. Backs the
  *   sidebar "group by status" mode so the highest-priority topics stay on the
  *   first page regardless of pagination.
@@ -103,15 +103,51 @@ export interface OnboardingSessionSnapshot {
   lastActiveAt: string;
   phase: 'agent_identity' | 'user_identity' | 'discovery' | 'summary';
   startedAt: string;
+  taskRecommendations?: OnboardingTaskRecommendationSession;
   understanding?: OnboardingUnderstandingSession;
   userIdentityCompletedAt?: string;
   version: number;
 }
 
 export interface ChatTopicMetadata {
+  /**
+   * The user chose "Always approve in this chat": tool calls in this topic run
+   * as if the approval mode were `auto-run` (hard stops such as the security
+   * blacklist still ask). Scoped to this topic only; new topics ask again.
+   */
+  autoApproveTools?: boolean;
+  /** Watermark written by the background topic-summary workflow. */
+  autoSummary?: {
+    lastMessageId: string;
+    lastMessageUpdatedAt: string;
+    summarizedAt: string;
+    version: number;
+  };
   bot?: ChatTopicBotContext;
   boundDeviceId?: string;
   cronJobId?: string;
+  /**
+   * The agent whose Profile page this Agent Builder conversation was started
+   * from (mirrors `ExecAgentAppContext.editingAgentId`).
+   *
+   * Recorded for the same reason as {@link editingGroupId} — see there.
+   */
+  editingAgentId?: string;
+  /**
+   * The group whose Profile page this Group Agent Builder conversation was
+   * started from (mirrors `ExecAgentAppContext.editingGroupId`).
+   *
+   * Builder panels run on one builtin agent shared by every target, and their
+   * topics carry no `groupId` / `sessionId` on purpose — those columns would
+   * pull the builder's side-conversation into the target's own chat read path.
+   * So nothing else in the row records what the conversation was configuring.
+   *
+   * Showing the builder's full build history in one list is intentional, so
+   * nothing filters on this today. It is captured because it can only be
+   * captured now: the association exists solely at run time, and a topic
+   * written without it can never be attributed afterwards.
+   */
+  editingGroupId?: string;
   /**
    * Scoped pointer to the currently active assistant message for a running
    * heterogeneous agent operation. Includes `operationId` so cold-start
@@ -183,6 +219,14 @@ export interface ChatTopicMetadata {
    */
   runningOperation?: {
     assistantMessageId: string;
+    /** Device selected for a notify-based platform task. */
+    deviceId?: string;
+    /** Personal-device owner used to route dispatch and cancellation through the same principal. */
+    deviceUserId?: string;
+    /** Workspace principal used for a workspace-enrolled device. */
+    deviceWorkspaceId?: string;
+    /** Notify-based platform type used to select the cancellation protocol. */
+    heteroType?: string;
     /**
      * Serialized lifecycle hooks (onComplete / onError) registered for this run.
      *
@@ -208,6 +252,17 @@ export interface ChatTopicMetadata {
    * `runningOperation`); every reader treats a nullish value as "not scheduled".
    */
   scheduledRun?: TopicScheduledRun | null;
+  /**
+   * Short-lived ownership marker used while a task result is being appended
+   * and its continuation is being dispatched. Callback deliveries acquire
+   * this only when `runningOperation` is empty, which serializes callback
+   * bursts behind the foreground turn without holding a database transaction
+   * open while the agent operation starts.
+   */
+  taskCallbackReservation?: {
+    messageId: string;
+    reservedAt: string;
+  } | null;
   userMemoryExtractRunState?: TopicUserMemoryExtractRunState;
   userMemoryExtractStatus?: 'pending' | 'completed' | 'failed';
   /**
@@ -385,6 +440,7 @@ export const parseTopicScheduledRun = (raw: unknown): TopicScheduledRun | null =
 
 /** Metadata patch accepted by the topic update API. */
 export const chatTopicMetadataUpdateSchema = z.object({
+  autoApproveTools: z.boolean().optional(),
   boundDeviceId: z.string().optional(),
   heteroSessionId: z.string().optional(),
   heteroSessionIdByWorkingDirectory: z.record(z.string(), z.string()).optional(),
@@ -423,20 +479,17 @@ export const chatTopicMetadataUpdateSchema = z.object({
     .optional(),
   provider: z.string().optional(),
   repos: z.array(z.string()).optional(),
-  runningOperation: z
-    .object({
-      assistantMessageId: z.string(),
-      hooks: z.array(serializedAgentHookSchema).optional(),
-      operationId: z.string(),
-      scope: z.string().optional(),
-      threadId: z.string().nullish(),
-    })
-    .nullable()
-    .optional(),
+  // Runtime state, hooks and task-callback reservations are server-owned; clients may
+  // only clear a stale marker (upstream accepts the full objects here).
+  runningOperation: z.null().optional(),
+  taskCallbackReservation: z.null().optional(),
   scheduledRun: topicScheduledRunSchema.nullish(),
   workingDirectory: z.string().optional(),
   workingDirectoryConfig: workingDirConfigSchema.optional(),
 });
+
+/** Public topic metadata patch, distinct from the full persisted metadata. */
+export type UpdateTopicMetadataInput = z.input<typeof chatTopicMetadataUpdateSchema>;
 
 export interface ChatTopicSummary {
   content: string;
@@ -456,7 +509,6 @@ export interface ChatTopicSummary {
 export const TOPIC_STATUSES = [
   'active',
   'running',
-  'paused',
   'waitingForHuman',
   'scheduled',
   'failed',
@@ -498,7 +550,7 @@ export interface ChatTopic extends Omit<BaseDataModel, 'meta'> {
    * (server `topicActivityAt`), falling back to `updatedAt`. Kept separate from
    * `updatedAt` so the client sort matches the server ORDER BY (no list jumping)
    * while `updatedAt` still reflects real row edits like rename/favorite.
-   * (LOBE-11543)
+   *
    */
   sortUpdatedAt?: number;
   status?: ChatTopicStatus | null;
@@ -562,6 +614,12 @@ export interface QueryTopicParams {
   agentId?: string | null;
   current?: number;
   /**
+   * Scope an `agentId` query to the builder conversations that configured one
+   * target — see `ChatTopicMetadata.editingGroupId`. Ignored without `agentId`.
+   */
+  editingAgentId?: string | null;
+  editingGroupId?: string | null;
+  /**
    * Exclude topics by status (e.g. ['completed'])
    */
   excludeStatuses?: string[];
@@ -622,6 +680,8 @@ export interface SharedTopicData {
     avatar?: string | null;
     backgroundColor?: string | null;
     marketIdentifier?: string | null;
+    /** Personal name; renderers resolve the label with `agentDisplayName`. */
+    name?: string | null;
     slug?: string | null;
     title?: string | null;
   };
@@ -634,6 +694,8 @@ export interface SharedTopicData {
       avatar: string | null;
       backgroundColor: string | null;
       id: string;
+      /** Personal name; renderers resolve the label with `agentDisplayName`. */
+      name?: string | null;
       title: string | null;
     }[];
     title?: string | null;

@@ -1,9 +1,10 @@
-import { ModelIcon } from '@lobehub/icons';
 import { Block, Flexbox, Text } from '@lobehub/ui';
 import { createStaticStyles } from 'antd-style';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
 import { type DiscoverModelItem } from '@/types/discover';
 
 const styles = createStaticStyles(({ css, cssVar }) => {
@@ -30,7 +31,7 @@ const RelatedItem = memo<DiscoverModelItem>(({ description, identifier, displayN
   const { t } = useTranslation('models');
   return (
     <Block horizontal gap={12} key={identifier} padding={12} variant={'outlined'}>
-      <ModelIcon model={identifier} size={40} style={{ flex: 'none' }} type={'avatar'} />
+      <BrandedModelIcon model={identifier} size={40} style={{ flex: 'none' }} type={'avatar'} />
       <Flexbox
         flex={1}
         gap={6}
@@ -39,7 +40,7 @@ const RelatedItem = memo<DiscoverModelItem>(({ description, identifier, displayN
         }}
       >
         <Text ellipsis as={'h2'} className={styles.title}>
-          {displayName || identifier}
+          {displayName || formatBrandedModelId(identifier)}
         </Text>
         <Text
           as={'p'}

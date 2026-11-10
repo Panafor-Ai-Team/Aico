@@ -113,6 +113,13 @@ export class LobeFalAI implements LobeRuntimeAI {
         });
       }
 
+      // 503 Service Unavailable — transient overload/maintenance, safe to retry
+      if (error instanceof Error && 'status' in error && error.status === 503) {
+        throw AgentRuntimeError.createError(AgentRuntimeErrorType.ProviderServiceUnavailable, {
+          error,
+        });
+      }
+
       // 422 ValidationError with content_policy_violation — show a clean message
       if (error instanceof Error && 'status' in error && error.status === 422) {
         const body = 'body' in error ? (error as any).body : undefined;

@@ -9,8 +9,10 @@
  */
 
 import { openTelemetry } from '../middleware/openTelemetry';
+import { platformAdminAuth } from '../middleware/platformAdminAuth';
 import { userAuth } from '../middleware/userAuth';
 import { trpc } from './init';
+import { apiKeyScopeGuard } from './middleware/apiKeyScope';
 import { heteroOperationAuth } from './middleware/heteroOperationAuth';
 import { oidcAuth } from './middleware/oidcAuth';
 
@@ -26,10 +28,18 @@ export const router = trpc.router;
  **/
 const baseProcedure = trpc.procedure.use(openTelemetry);
 
-export const publicProcedure = baseProcedure;
+// `apiKeyScopeGuard` also covers public procedures: `createLambdaContext`
+// authenticates an `X-API-Key` before procedure selection, and several public
+// procedures serve authenticated data off `ctx.userId`. The guard is a no-op
+// without API-key auth, so anonymous access is untouched.
+export const publicProcedure = baseProcedure.use(apiKeyScopeGuard);
 
 // procedure that asserts that the user is logged in
-export const authedProcedure = baseProcedure.use(oidcAuth).use(userAuth);
+// `apiKeyScopeGuard` narrows API-key-authenticated calls to the key's scopes;
+// session/OIDC auth and full-access keys pass through untouched.
+export const authedProcedure = baseProcedure.use(oidcAuth).use(userAuth).use(apiKeyScopeGuard);
+
+export const platformAdminProcedure = baseProcedure.use(platformAdminAuth);
 
 // procedure for hetero-agent ingest/finish endpoints — requires a `hetero-operation` JWT
 export const heteroAuthedProcedure = baseProcedure.use(heteroOperationAuth).use(userAuth);

@@ -1,5 +1,7 @@
 import type { PageSelection } from '@lobechat/types';
 
+import { truncatePromptContent } from './contentBudget';
+
 /**
  * Format page selections into a system prompt context
  * Each selection is wrapped in a <selection> tag with metadata
@@ -22,7 +24,10 @@ ${sel.xml}
     })
     .join('\n');
 
-  return `<user_selections count="${selections.length}">
+  return truncatePromptContent(
+    `<user_selections count="${selections.length}">
 ${formattedSelections}
-</user_selections>`;
+</user_selections>`,
+    'page selections',
+  );
 };

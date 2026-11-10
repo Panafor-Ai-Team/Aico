@@ -77,6 +77,57 @@ describe('chatTopicMetadataUpdateSchema', () => {
   });
 });
 
+describe('chatTopicMetadataUpdateSchema runningOperation', () => {
+  it('accepts clearing a stale running operation and omitting it', () => {
+    expect(chatTopicMetadataUpdateSchema.parse({ runningOperation: null })).toEqual({
+      runningOperation: null,
+    });
+    expect(chatTopicMetadataUpdateSchema.parse({})).toEqual({});
+  });
+
+  const operation = { assistantMessageId: 'assistant-1', operationId: 'operation-1' };
+  const hooks = [
+    {
+      id: 'client-hook',
+      type: 'onComplete',
+      webhook: { body: { userId: 'client-supplied' }, url: 'https://example.com/hook' },
+    },
+  ];
+
+  it.each([
+    ['root hooks', { ...operation, hooks }],
+    ['operation identifiers without hooks', operation],
+    ['empty object', {}],
+    ['array', []],
+    ['string', 'operation-1'],
+    ['boolean', false],
+    ['number', 1],
+  ])('rejects %s instead of silently stripping runtime state', (_, runningOperation) => {
+    const result = chatTopicMetadataUpdateSchema.safeParse({
+      model: 'test-model',
+      runningOperation,
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path[0] === 'runningOperation')).toBe(true);
+    }
+  });
+
+  it('preserves supported metadata patches alongside a stale-marker clear', () => {
+    const metadata = {
+      boundDeviceId: 'device-1',
+      model: 'test-model',
+      provider: 'test-provider',
+      repos: ['owner/repo'],
+      runningOperation: null,
+      workingDirectory: '/repo',
+    };
+
+    expect(chatTopicMetadataUpdateSchema.parse(metadata)).toEqual(metadata);
+  });
+});
+
 describe('parseTopicScheduledRun', () => {
   /** What the pre-`kind` version parked: no `kind`, no `runAt`, gated on `resetsAt`. */
   const legacy = {

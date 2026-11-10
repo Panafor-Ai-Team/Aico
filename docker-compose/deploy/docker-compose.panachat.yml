@@ -1,0 +1,298 @@
+# Panachat production / canary / preview CI-CD stack (blue-green app + durable data plane).
+#
+# Usage (from docker-compose/deploy):
+#   export PANACHAT_IMAGE=ghcr.io/panafor-ai-team/panachat:<sha>
+#   export PANACHAT_STACK=panachat                    # or panachat-preview
+#   export PANACHAT_VOLUME_PREFIX=panachat            # or panachat_preview
+#   docker compose -p "$PANACHAT_STACK" -f docker-compose.panachat.yml \
+#     --env-file ../../.env --env-file .env up -d
+#
+# Preview uses a separate project, volumes, and ports — never share prod data.
+# Never run `docker compose down -v` — named volumes hold durable data.
+
+name: ${PANACHAT_STACK:-panachat}
+
+# Upstream DNS for containers that call out (model gateway, OpenRouter, web
+# search). Docker's embedded DNS otherwise forwards to the host's resolvers;
+# on 2026-11-09 the ParsPack resolvers started answering REFUSED for foreign
+# domains and every chat and task failed with EAI_AGAIN. Override per host.
+x-panachat-dns: &panachat-dns
+  - ${PANACHAT_DNS_1:-1.1.1.1}
+  - ${PANACHAT_DNS_2:-8.8.8.8}
+  - ${PANACHAT_DNS_3:-178.22.122.100}
+
+services:
+  # App slots are profile-gated so `compose up -d` (data plane) never
+  # accidentally restarts a stopped color. Deploy script starts one profile.
+  panachat-blue:
+    image: ${PANACHAT_IMAGE:?set PANACHAT_IMAGE to ghcr.io/<owner>/panachat:<sha>}
+    container_name: ${PANACHAT_STACK:-panachat}-blue
+    pull_policy: always
+    profiles:
+      - slot-blue
+    ports:
+      - '127.0.0.1:${PANACHAT_PORT_BLUE:-3210}:3210'
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
+    environment:
+      - 'DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@postgresql:5432/${PANACHAT_DB_NAME}'
+      # env_file can leak DATABASE_DRIVER=neon; Neon WS fails against compose Postgres.
+      - 'DATABASE_DRIVER=node'
+      - 'INTERNAL_APP_URL=http://localhost:3210'
+      - 'S3_ENDPOINT=${S3_ENDPOINT}'
+      - 'S3_INTERNAL_ENDPOINT=${S3_INTERNAL_ENDPOINT:-http://rustfs:9000}'
+      - 'S3_BUCKET=${RUSTFS_LOBE_BUCKET}'
+      - 'S3_ENABLE_PATH_STYLE=1'
+      - 'S3_ACCESS_KEY=${RUSTFS_ACCESS_KEY}'
+      - 'S3_ACCESS_KEY_ID=${RUSTFS_ACCESS_KEY}'
+      - 'S3_SECRET_ACCESS_KEY=${RUSTFS_SECRET_KEY}'
+      - 'LLM_VISION_IMAGE_USE_BASE64=1'
+      - 'S3_SET_ACL=0'
+      - 'SEARXNG_URL=http://searxng:8080'
+      - 'REDIS_URL=redis://redis:6379'
+      - 'REDIS_PREFIX=${REDIS_PREFIX:-panachat}'
+      - 'REDIS_TLS=0'
+      - 'AICO_CONTROL_PLANE_URL=${AICO_CONTROL_PLANE_URL:-http://panachat-control-plane:3020}'
+      - 'OPENROUTER_MANAGEMENT_API_KEY='
+      # Same containment as OpenRouter: the CVC primary key is a management AND
+      # inference credential. It reaches the product container only as
+      # AICO_SHARED_INFERENCE_API_KEY when AICO_MANAGED_INFERENCE_KEY=shared
+      # (accepted risk, 2026-09-16), where the usage ledger meters every call.
+      # CHEAPVIBECODE_API_KEY stays blank so the unmetered env provider can
+      # never use it.
+      - 'CHEAPVIBECODE_MANAGEMENT_API_KEY='
+      - 'CHEAPVIBECODE_API_KEY='
+    env_file:
+      - ${PANACHAT_APP_ENV_FILE:-../../.env}
+      - ${PANACHAT_INFRA_ENV_FILE:-.env}
+    # SMTP reaches the stalwart container directly: the deploy attaches it to
+    # this network with the alias "mailer.panafor.com" (TLS cert hostname).
+    # Never re-add extra_hosts:host-gateway — cross-bridge hairpin drops data.
+    dns: *panachat-dns
+    networks:
+      - panachat-network
+    restart: unless-stopped
+
+  panachat-green:
+    image: ${PANACHAT_IMAGE:?set PANACHAT_IMAGE to ghcr.io/<owner>/panachat:<sha>}
+    container_name: ${PANACHAT_STACK:-panachat}-green
+    pull_policy: always
+    profiles:
+      - slot-green
+    ports:
+      - '127.0.0.1:${PANACHAT_PORT_GREEN:-3211}:3210'
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
+    environment:
+      - 'DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@postgresql:5432/${PANACHAT_DB_NAME}'
+      # env_file can leak DATABASE_DRIVER=neon; Neon WS fails against compose Postgres.
+      - 'DATABASE_DRIVER=node'
+      - 'INTERNAL_APP_URL=http://localhost:3210'
+      - 'S3_ENDPOINT=${S3_ENDPOINT}'
+      - 'S3_INTERNAL_ENDPOINT=${S3_INTERNAL_ENDPOINT:-http://rustfs:9000}'
+      - 'S3_BUCKET=${RUSTFS_LOBE_BUCKET}'
+      - 'S3_ENABLE_PATH_STYLE=1'
+      - 'S3_ACCESS_KEY=${RUSTFS_ACCESS_KEY}'
+      - 'S3_ACCESS_KEY_ID=${RUSTFS_ACCESS_KEY}'
+      - 'S3_SECRET_ACCESS_KEY=${RUSTFS_SECRET_KEY}'
+      - 'LLM_VISION_IMAGE_USE_BASE64=1'
+      - 'S3_SET_ACL=0'
+      - 'SEARXNG_URL=http://searxng:8080'
+      - 'REDIS_URL=redis://redis:6379'
+      - 'REDIS_PREFIX=${REDIS_PREFIX:-panachat}'
+      - 'REDIS_TLS=0'
+      - 'AICO_CONTROL_PLANE_URL=${AICO_CONTROL_PLANE_URL:-http://panachat-control-plane:3020}'
+      - 'OPENROUTER_MANAGEMENT_API_KEY='
+      # Same containment as OpenRouter: the CVC primary key is a management AND
+      # inference credential. It reaches the product container only as
+      # AICO_SHARED_INFERENCE_API_KEY when AICO_MANAGED_INFERENCE_KEY=shared
+      # (accepted risk, 2026-09-16), where the usage ledger meters every call.
+      # CHEAPVIBECODE_API_KEY stays blank so the unmetered env provider can
+      # never use it.
+      - 'CHEAPVIBECODE_MANAGEMENT_API_KEY='
+      - 'CHEAPVIBECODE_API_KEY='
+    env_file:
+      - ${PANACHAT_APP_ENV_FILE:-../../.env}
+      - ${PANACHAT_INFRA_ENV_FILE:-.env}
+    # SMTP reaches the stalwart container directly: the deploy attaches it to
+    # this network with the alias "mailer.panafor.com" (TLS cert hostname).
+    # Never re-add extra_hosts:host-gateway — cross-bridge hairpin drops data.
+    dns: *panachat-dns
+    networks:
+      - panachat-network
+    restart: unless-stopped
+
+  panachat-control-plane:
+    image: ${PANACHAT_CONTROL_PLANE_IMAGE:-panachat-control-plane:canary}
+    container_name: ${PANACHAT_STACK:-panachat}-control-plane
+    pull_policy: always
+    profiles:
+      - control-plane
+    working_dir: /app
+    command: ['node', 'dist/standalone.js']
+    env_file:
+      - ${PANACHAT_APP_ENV_FILE:-../../.env}
+      - ${PANACHAT_INFRA_ENV_FILE:-.env}
+    environment:
+      AICO_IS_CONTROL_PLANE: '1'
+      AICO_CONTROL_PLANE_PORT: '3020'
+      HONO_HOST: '0.0.0.0'
+      AICO_CONTROL_PLANE_SERVICE_TOKEN: ${AICO_CONTROL_PLANE_SERVICE_TOKEN:-}
+      OPENROUTER_MANAGEMENT_API_KEY: ${OPENROUTER_MANAGEMENT_API_KEY:-}
+      CHEAPVIBECODE_MANAGEMENT_API_KEY: ${CHEAPVIBECODE_MANAGEMENT_API_KEY:-}
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgresql:5432/${PANACHAT_DB_NAME}
+      # env_file can leak DATABASE_DRIVER=neon; Neon WS fails against compose Postgres.
+      DATABASE_DRIVER: node
+      REDIS_URL: redis://redis:6379
+      REDIS_PREFIX: ${REDIS_PREFIX:-panachat}
+      REDIS_TLS: '0'
+      APP_URL: ${AICO_CONTROL_PLANE_PUBLIC_URL:-http://127.0.0.1:${PANACHAT_CONTROL_PLANE_PORT:-3020}}
+      AICO_CONTROL_PLANE_UI_URL: ${AICO_CONTROL_PLANE_PUBLIC_URL:-http://127.0.0.1:${PANACHAT_CONTROL_PLANE_PORT:-3020}}
+      INTERNAL_APP_URL: http://panachat-app:3210
+      AICO_INSECURE_AUTH_COOKIES: ${AICO_INSECURE_AUTH_COOKIES:-0}
+      NODE_ENV: production
+      ENABLE_MOCK_DEV_USER: '0'
+      MOCK_DEV_USER_ID: ''
+      AICO_ALLOW_CONTROL_PLANE_MOCK_AUTH: '0'
+      AICO_OPENROUTER_MOCK: '0'
+      AICO_ALLOW_INSECURE_CONTROL_PLANE: '0'
+      AICO_BOOTSTRAP_ADMIN_EMAIL: ${AICO_BOOTSTRAP_ADMIN_EMAIL:-}
+      AICO_BOOTSTRAP_ADMIN_PASSWORD: ${AICO_BOOTSTRAP_ADMIN_PASSWORD:-}
+    ports:
+      - '127.0.0.1:${PANACHAT_CONTROL_PLANE_PORT:-3020}:3020'
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(\"http://127.0.0.1:3020/health\").then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+    dns: *panachat-dns
+    networks:
+      - panachat-network
+
+  postgresql:
+    image: paradedb/paradedb:latest-pg17
+    container_name: ${PANACHAT_STACK:-panachat}-postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    command:
+      - 'postgres'
+      - '-c'
+      - 'shared_preload_libraries=pg_search'
+      - '-c'
+      - 'paradedb.enable_join_custom_scan=off'
+    environment:
+      - 'POSTGRES_DB=${PANACHAT_DB_NAME}'
+      - 'POSTGRES_PASSWORD=${POSTGRES_PASSWORD}'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - panachat-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${PANACHAT_STACK:-panachat}-redis
+    command: redis-server --save 60 1000 --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: always
+    networks:
+      - panachat-network
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: ${PANACHAT_STACK:-panachat}-rustfs
+    ports:
+      - '127.0.0.1:${RUSTFS_PORT:-9000}:9000'
+    environment:
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_ACCESS_KEY=${RUSTFS_ACCESS_KEY}
+      - RUSTFS_SECRET_KEY=${RUSTFS_SECRET_KEY}
+      # Unset = RustFS sends no CORS headers. Chat image PUT is cross-origin
+      # (chat.* → s3.*) via a presigned URL, so browsers block it. * is safe:
+      # the XHR does not send cookies.
+      - 'RUSTFS_CORS_ALLOWED_ORIGINS=${RUSTFS_CORS_ALLOWED_ORIGINS:-*}'
+    volumes:
+      - rustfs_data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:9000/health >/dev/null 2>&1 || exit 1']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    command:
+      ['--access-key', '${RUSTFS_ACCESS_KEY}', '--secret-key', '${RUSTFS_SECRET_KEY}', '/data']
+    restart: always
+    networks:
+      - panachat-network
+
+  rustfs-init:
+    image: minio/mc:latest
+    container_name: ${PANACHAT_STACK:-panachat}-rustfs-init
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    volumes:
+      - ./bucket.config.json:/bucket.config.json:ro
+    entrypoint: /bin/sh
+    command: -c ' set -eux; mc alias set rustfs "http://rustfs:9000" "${RUSTFS_ACCESS_KEY}" "${RUSTFS_SECRET_KEY}"; mc ls rustfs || true; mc mb "rustfs/lobe" --ignore-existing; mc admin info rustfs || true; mc anonymous set none "rustfs/lobe"; '
+    restart: 'no'
+    networks:
+      - panachat-network
+
+  searxng:
+    image: searxng/searxng
+    container_name: ${PANACHAT_STACK:-panachat}-searxng
+    volumes:
+      - './searxng-settings.yml:/etc/searxng/settings.yml'
+    environment:
+      - 'SEARXNG_SETTINGS_FILE=/etc/searxng/settings.yml'
+    restart: always
+    dns: *panachat-dns
+    networks:
+      - panachat-network
+    env_file:
+      - ${PANACHAT_INFRA_ENV_FILE:-.env}
+
+networks:
+  panachat-network:
+    name: ${PANACHAT_STACK:-panachat}-network
+    driver: bridge
+
+volumes:
+  postgres_data:
+    name: ${PANACHAT_VOLUME_PREFIX:-panachat}_postgres_data
+  redis_data:
+    name: ${PANACHAT_VOLUME_PREFIX:-panachat}_redis_data
+  rustfs_data:
+    name: ${PANACHAT_VOLUME_PREFIX:-panachat}_rustfs_data

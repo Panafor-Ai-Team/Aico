@@ -20,7 +20,7 @@ import {
   getErrorCodeSpec,
   isEmptyModelCompletion,
   ModelEmptyError,
-} from '@lobechat/model-runtime';
+} from '@lobechat/model-runtime/errors';
 import type { ChatMessageError, MessageMetadata, ModelReasoning } from '@lobechat/types';
 import { ChatErrorType } from '@lobechat/types';
 import { t } from 'i18next';
@@ -145,14 +145,42 @@ class ClientLLMRetryPolicy implements LLMRetryPolicy {
       },
       { operationId: this.operationId },
     );
+
+    // callLlm only invokes onError for the terminal attempt. End the operation
+    // here so Stop/loading clear with the message error, not after outer completeRun.
+    const operation = this.get().operations[this.operationId];
+    if (operation?.status === 'running') {
+      this.get().failOperation(this.operationId, {
+        message: localizedError.message || 'LLM execution failed',
+        type: String(localizedError.type ?? 'runtime_error'),
+      });
+
+      // Match completeRun's client failed-path topic reset. streamingExecutor
+      // writes status:'running' at start; without this, the sidebar keeps the
+      // spinner until the outer loop later reaches completeRun.
+      const { agentId, groupId, scope, topicId } = operation.context;
+      if (topicId && scope !== 'sub_agent') {
+        void this.get()
+          .updateTopicStatus?.({
+            agentId,
+            groupId,
+            ...(scope === 'group' || scope === 'group_agent' ? { scope } : {}),
+            status: 'active',
+            topicId,
+          })
+          ?.catch((error) => {
+            console.error('[ClientLLMTransport] topic status reset failed:', error);
+          });
+      }
+    }
   }
 
   onRetry(_input: LLMRetryInput) {
     // The package publishes the canonical stream_retry event through StreamSink.
   }
 
-  resolveRetryBudget(provider: string) {
-    return resolveLLMRetryBudget(provider, CLIENT_LLM_RETRY_POLICY);
+  resolveRetryBudget(provider: string, error?: unknown) {
+    return resolveLLMRetryBudget(provider, CLIENT_LLM_RETRY_POLICY, error);
   }
 
   async waitForRetry(delayMs: number): Promise<void> {
@@ -264,12 +292,23 @@ export class ClientLLMTransport implements LLMTransport {
           },
           onFinish: async (
             _content,
-            { traceId, observationId, toolCalls, reasoning, grounding, usage, speed, type },
+            {
+              traceId,
+              observationId,
+              toolCalls,
+              reasoning,
+              grounding,
+              usage,
+              speed,
+              type,
+              resolvedModel,
+            },
           ) => {
             finishData = {
               grounding,
               observationId,
               reasoning,
+              resolvedModel,
               speed,
               toolCalls,
               traceId,
@@ -415,6 +454,7 @@ export class ClientLLMTransport implements LLMTransport {
       observationId: finishData.observationId ?? undefined,
       reasoning,
       reasoningParts: handler.getReasoningParts(),
+      resolvedModel: finishData.resolvedModel,
       speed: result.metadata.performance,
       thinkingContent,
       toolCalls: result.toolCalls ?? [],

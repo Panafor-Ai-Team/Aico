@@ -1,7 +1,8 @@
 'use client';
 
 import type { BuiltinRenderProps } from '@lobechat/types';
-import { Alert, Block, Flexbox, Text } from '@lobehub/ui';
+import { Block, Flexbox, Text } from '@lobehub/ui';
+import { Alert } from '@lobehub/ui/base-ui';
 import { createStaticStyles } from 'antd-style';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -134,9 +135,7 @@ export const GetImageModelParametersRender = memo<
         >
           <Flexbox flex={1} gap={1}>
             <span className={styles.modelName}>{displayName}</span>
-            <span className={styles.modelId}>
-              {pluginState.provider}/{pluginState.model}
-            </span>
+            {pluginState.model && <span className={styles.modelId}>{pluginState.model}</span>}
           </Flexbox>
           <span className={styles.count}>
             {t('builtins.lobe-image-generation.render.parameterList.parameters', {

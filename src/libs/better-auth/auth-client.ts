@@ -4,6 +4,7 @@ import {
   genericOAuthClient,
   inferAdditionalFields,
   magicLinkClient,
+  phoneNumberClient,
 } from 'better-auth/client/plugins';
 import { createAuthClient } from 'better-auth/react';
 
@@ -11,10 +12,12 @@ import { type auth } from '@/auth';
 
 export const {
   changeEmail,
+  getSession,
   linkSocial,
   oauth2,
   accountInfo,
   listAccounts,
+  phoneNumber,
   requestPasswordReset,
   resetPassword,
   sendVerificationEmail,
@@ -33,6 +36,7 @@ export const {
     adminClient(),
     inferAdditionalFields<typeof auth>(),
     genericOAuthClient(),
+    phoneNumberClient(),
     // Always include magicLinkClient - server will reject if not enabled
     magicLinkClient(),
   ],

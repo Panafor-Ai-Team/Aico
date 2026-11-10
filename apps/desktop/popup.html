@@ -16,7 +16,7 @@
       html[data-theme='light'] {
         background: #fafafa;
       }
-            #loading-screen {
+      #loading-screen {
         position: fixed;
         inset: 0;
         z-index: 99999;
@@ -55,7 +55,7 @@
           document.documentElement.setAttribute('data-theme', resolvedTheme);
         }
         var urlParams = new URLSearchParams(window.location.search);
-        var locale = urlParams.get('lng') || navigator.language || 'en-US';
+        var locale = urlParams.get('lng') || navigator.language || 'fa-IR';
         document.documentElement.lang = locale;
         var rtl = ['ar', 'arc', 'dv', 'fa', 'ha', 'he', 'khw', 'ks', 'ku', 'ps', 'ur', 'yi'];
         document.documentElement.dir =
@@ -64,9 +64,10 @@
     </script>
     <div id="loading-screen">
       <div id="loading-brand" aria-label="Loading" role="status">
-        <img alt="Aico" height="40" src="/icons/icon-192x192.png" width="40" />
+        <img alt="Aico" height="40" src="/app-icons/icon-192x192.png" width="40" />
       </div>
-        <div id="root" style="height: 100%"></div>
+    </div>
+    <div id="root" style="height: 100%"></div>
     <script>
       window.__SERVER_CONFIG__ = undefined;
     </script>

@@ -1,0 +1,152 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { mutate } from '@/libs/swr';
+
+import { invalidateBillingSourcesAllowGateCache } from './billingSourcesAllowGateCache';
+import { AICO_BILLING_SOURCES_SWR_KEY, AICO_MY_WALLET_SWR_KEY } from './cacheKeys';
+import { refreshAicoBillingBalance } from './refreshAicoBillingBalance';
+import type { AicoBillingSourcesResponse } from './types';
+
+vi.mock('@/libs/swr', () => ({ mutate: vi.fn() }));
+vi.mock('./billingSourcesAllowGateCache', () => ({
+  invalidateBillingSourcesAllowGateCache: vi.fn(),
+  seedBillingSourcesAllowGateCache: vi.fn(),
+}));
+
+const billingSources: AicoBillingSourcesResponse = {
+  preferredBillingSource: 'personal',
+  preferredOrganizationId: null,
+  sources: [
+    {
+      hasManagedKey: true,
+      isActive: true,
+      remainingMicroUsd: '2000000',
+      remainingPi: '40000',
+      remainingToman: '100000',
+      remainingUsd: '2.000000',
+      source: 'personal',
+      usageKnown: true,
+    },
+    {
+      budgetAllocated: true,
+      hasManagedKey: true,
+      isActive: true,
+      organizationId: 'org-1',
+      organizationName: 'One',
+      remainingMicroUsd: '5000000',
+      remainingPi: '100000',
+      remainingUsd: '5.000000',
+      renewalBlocked: false,
+      source: 'organization',
+    },
+  ],
+  trialActive: false,
+  trialAvailable: false,
+};
+
+describe('refreshAicoBillingBalance', () => {
+  beforeEach(() => {
+    vi.mocked(mutate).mockReset().mockResolvedValue(undefined);
+    vi.mocked(invalidateBillingSourcesAllowGateCache).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("C9: keeps the source's own π rate instead of assuming the default one", async () => {
+    vi.useFakeTimers();
+    // A wallet bought at a higher blended multiplier: 2 USD is 48,000 π, not 40,000.
+    const blended: AicoBillingSourcesResponse = {
+      ...billingSources,
+      sources: [{ ...billingSources.sources[0], remainingPi: '48000' }, billingSources.sources[1]],
+    };
+
+    await refreshAicoBillingBalance({ billingContext: { source: 'personal' }, costUsd: 0.25 });
+
+    const optimisticUpdater = vi.mocked(mutate).mock.calls[0][1] as (
+      data: AicoBillingSourcesResponse,
+    ) => AicoBillingSourcesResponse;
+    const next = optimisticUpdater(blended);
+    expect(next.sources[0].remainingMicroUsd).toBe('1750000');
+    // 1.75 USD at 24,000 π/USD — the old constant gave 35,000, which the next
+    // revalidation then snapped back.
+    expect(next.sources[0].remainingPi).toBe('42000');
+    await vi.runAllTimersAsync();
+  });
+
+  it('C9: falls back to the default rate when the source has no usable π figure', async () => {
+    vi.useFakeTimers();
+    const empty: AicoBillingSourcesResponse = {
+      ...billingSources,
+      sources: [{ ...billingSources.sources[0], remainingPi: '0' }, billingSources.sources[1]],
+    };
+
+    await refreshAicoBillingBalance({ billingContext: { source: 'personal' }, costUsd: 0.25 });
+
+    const optimisticUpdater = vi.mocked(mutate).mock.calls[0][1] as (
+      data: AicoBillingSourcesResponse,
+    ) => AicoBillingSourcesResponse;
+    expect(optimisticUpdater(empty).sources[0].remainingPi).toBe('35000');
+    await vi.runAllTimersAsync();
+  });
+
+  it('updates the selected source immediately before authoritative revalidation', async () => {
+    vi.useFakeTimers();
+
+    await refreshAicoBillingBalance({ billingContext: { source: 'personal' }, costUsd: 0.25 });
+
+    const optimisticUpdater = vi.mocked(mutate).mock.calls[0][1] as (
+      data: AicoBillingSourcesResponse,
+    ) => AicoBillingSourcesResponse;
+    expect(optimisticUpdater).toBeTypeOf('function');
+    expect(optimisticUpdater(billingSources)).toEqual({
+      ...billingSources,
+      sources: [
+        {
+          ...billingSources.sources[0],
+          remainingMicroUsd: '1750000',
+          remainingPi: '35000',
+          remainingUsd: '1.750000',
+        },
+        billingSources.sources[1],
+      ],
+    });
+    expect(mutate).toHaveBeenNthCalledWith(1, AICO_BILLING_SOURCES_SWR_KEY, expect.any(Function), {
+      revalidate: false,
+    });
+    expect(mutate).toHaveBeenCalledTimes(1);
+
+    await vi.runAllTimersAsync();
+
+    expect(mutate).toHaveBeenNthCalledWith(2, AICO_BILLING_SOURCES_SWR_KEY);
+    expect(mutate).toHaveBeenNthCalledWith(3, AICO_MY_WALLET_SWR_KEY);
+    // The gate must not keep deciding sends on the optimistic (pre-settlement)
+    // snapshot once the authoritative refresh runs.
+    expect(invalidateBillingSourcesAllowGateCache).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidates the allow-gate snapshot on a plain refresh too', async () => {
+    await refreshAicoBillingBalance();
+
+    expect(invalidateBillingSourcesAllowGateCache).toHaveBeenCalledTimes(1);
+  });
+
+  it('invalidates the allow-gate before the refetch is awaited', () => {
+    // Chat no longer awaits a cost-less refresh, so the next send's gate must
+    // already be invalidated when the call returns its promise.
+    vi.mocked(mutate).mockReturnValue(new Promise(() => {}) as ReturnType<typeof mutate>);
+
+    void refreshAicoBillingBalance();
+
+    expect(invalidateBillingSourcesAllowGateCache).toHaveBeenCalledTimes(1);
+  });
+
+  it('revalidates both balance caches when no optimistic cost is available', async () => {
+    await refreshAicoBillingBalance();
+
+    expect(mutate).toHaveBeenCalledTimes(2);
+    expect(mutate).toHaveBeenCalledWith(AICO_BILLING_SOURCES_SWR_KEY);
+    expect(mutate).toHaveBeenCalledWith(AICO_MY_WALLET_SWR_KEY);
+  });
+});

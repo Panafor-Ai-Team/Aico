@@ -1,5 +1,7 @@
 import type { LobeChatDatabase } from '@lobechat/database';
+import { FILE_PROMPT_CONTENT_BUDGET } from '@lobechat/prompts';
 import type { ChatAudioItem, ChatFileItem, ChatImageItem, ChatVideoItem } from '@lobechat/types';
+import { readAudioDurationMs } from '@lobechat/utils/audio';
 import debug from 'debug';
 
 import { FileModel } from '@/database/models/file';
@@ -30,6 +32,24 @@ interface ResolveArgs {
 }
 
 const dedupe = (ids: string[]) => Array.from(new Set(ids));
+
+const getAudioMetadata = (
+  metadata: unknown,
+  fileType: string,
+): Pick<ChatAudioItem, 'codec' | 'durationMs' | 'mimeType'> => {
+  const value =
+    metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? (metadata as Record<string, unknown>)
+      : {};
+
+  const durationMs = readAudioDurationMs(metadata);
+
+  return {
+    ...(typeof value.codec === 'string' ? { codec: value.codec } : undefined),
+    ...(durationMs === undefined ? {} : { durationMs }),
+    mimeType: typeof value.mimeType === 'string' ? value.mimeType : fileType,
+  };
+};
 
 /**
  * Resolve fileIds into image/video/file lists for the LLM prompt layer.
@@ -88,8 +108,16 @@ export const resolveAttachmentsByFileIds = async ({
       let content: string | undefined;
       let parseError: unknown;
       try {
+        const parseStart = Date.now();
         const document = await documentService.parseFile(file.id);
         content = document.content ?? undefined;
+        log(
+          '[PERF] parseFile id=%s name=%s took=%dms contentChars=%d',
+          id,
+          file.name,
+          Date.now() - parseStart,
+          content?.length ?? 0,
+        );
       } catch (error) {
         parseError = error;
       }
@@ -113,13 +141,23 @@ export const resolveAttachmentsByFileIds = async ({
       continue;
     }
     if (fileType.startsWith('audio')) {
-      result.audioList.push({ alt: file.name || 'audio', id: file.id, url: resolvedUrl });
+      result.audioList.push({
+        ...getAudioMetadata(file.metadata, fileType),
+        alt: file.name || 'audio',
+        id: file.id,
+        url: resolvedUrl,
+      });
       continue;
     }
     if (entry.parseError) {
       log('parseFile failed for %s (id=%s): %O', file.name, file.id, entry.parseError);
       result.warnings.push(
         `File "${file.name || 'unknown'}" was attached but its contents could not be extracted.`,
+      );
+    }
+    if ('content' in entry && entry.content && entry.content.length > FILE_PROMPT_CONTENT_BUDGET) {
+      result.warnings.push(
+        `File "${file.name || 'unknown'}" is large; only the first ${FILE_PROMPT_CONTENT_BUDGET} characters were shown to the agent.`,
       );
     }
     result.fileList.push({

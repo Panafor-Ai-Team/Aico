@@ -550,6 +550,7 @@ export const marketRouter = router({
    * List all user connections
    */
   connectListConnections: lobehubSkillBaseProcedure.query(async ({ ctx }) => {
+    const routeStart = Date.now();
     log('connectListConnections');
 
     try {
@@ -557,11 +558,17 @@ export const marketRouter = router({
       // Debug logging
       log('connectListConnections raw response: %O', response);
       log('connectListConnections connections: %O', response.connections);
+      log(
+        '[PERF] connectListConnections took=%dms count=%d',
+        Date.now() - routeStart,
+        response.connections?.length ?? 0,
+      );
       return {
         connections: response.connections || [],
       };
     } catch (error) {
       log('connectListConnections error: %O', error);
+      log('[PERF] connectListConnections failed took=%dms', Date.now() - routeStart);
       if (isMarketConnectionsTimeoutError(error)) {
         throw new TRPCError({
           cause: error,

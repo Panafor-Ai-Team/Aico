@@ -1,8 +1,8 @@
-import { App } from 'antd';
+import { toast } from '@lobehub/ui/base-ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useVisualMediaUploadAbility } from '@/hooks/useVisualMediaUploadAbility';
+import { isUploadBlockedByAbility, useMediaUploadAbility } from '@/hooks/useMediaUploadAbility';
 import { useAgentStore } from '@/store/agent';
 import { agentSelectors } from '@/store/agent/selectors';
 
@@ -68,7 +68,7 @@ const getFileListFromDataTransferItems = async (items: DataTransferItem[]) => {
 
 export const useDragUpload = (onUploadFiles: (files: File[]) => Promise<void>) => {
   const { t } = useTranslation('chat');
-  const { message } = App.useApp();
+
   const [isDragging, setIsDragging] = useState(false);
   // When a file is dragged to a different area, the 'dragleave' event may be triggered,
   // causing isDragging to be mistakenly set to false.
@@ -78,21 +78,26 @@ export const useDragUpload = (onUploadFiles: (files: File[]) => Promise<void>) =
   const model = useAgentStore(agentSelectors.currentAgentModel);
   const provider = useAgentStore(agentSelectors.currentAgentModelProvider);
   const agentId = useAgentStore((s) => s.activeAgentId ?? undefined);
-  const { canUploadImage, canUploadVideo } = useVisualMediaUploadAbility(model, provider, agentId);
+  const mediaUploadAbility = useMediaUploadAbility(model, provider, agentId);
 
   const warnIfVisualUploadUnsupported = useCallback(
     (files: File[]) => {
-      const hasImageFiles = files.some((file) => file.type.startsWith('image/'));
-      const hasVideoFiles = files.some((file) => file.type.startsWith('video/'));
-
-      if ((hasImageFiles && !canUploadImage) || (hasVideoFiles && !canUploadVideo)) {
-        message.warning(t('upload.clientMode.visionNotSupported'));
+      // Reject the whole batch on the first unsupported file (image, video,
+      // audio, or document — all four are gated here now; audio and document
+      // were previously not checked at all, letting them through silently).
+      const blocked = files.filter((file) => isUploadBlockedByAbility(file, mediaUploadAbility));
+      if (blocked.length > 0) {
+        toast.warning(
+          t('upload.action.mediaDisabled', {
+            files: blocked.map((file) => file.name).join(', '),
+          }),
+        );
         return true;
       }
 
       return false;
     },
-    [canUploadImage, canUploadVideo, message, t],
+    [mediaUploadAbility, t],
   );
 
   const handleDragEnter = useCallback((e: DragEvent) => {

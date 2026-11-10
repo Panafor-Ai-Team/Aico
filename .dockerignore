@@ -1,9 +1,14 @@
 Dockerfile
 .dockerignore
 node_modules
+**/node_modules
 npm-debug.log
 .next
 .git
 .github
 *.md
+.env
+.env.*
+!.env.example
+!.env.example.*
 .env.example

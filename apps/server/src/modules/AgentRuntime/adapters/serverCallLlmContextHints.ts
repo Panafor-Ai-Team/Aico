@@ -1,14 +1,21 @@
 import { type CallLLMPayload, stripAssistantReasoningForReplay } from '@lobechat/agent-runtime';
-import { BRANDING_PROVIDER } from '@lobechat/business-const';
+import { BRANDING_PROVIDER, isManagedAutoModelId } from '@lobechat/business-const';
 import {
   applyModelExtendParams,
   isDeepSeekThinkingEligibleModel,
   isDeepSeekV4FamilyModel,
   isKimiAlwaysPreserveThinkingModel,
   type ModelExtendParams,
+  resolveEffectiveReasoningChatConfig,
 } from '@lobechat/model-runtime';
-import type { UIChatMessage } from '@lobechat/types';
-import { type ExtendParamsType, ModelProvider } from 'model-bank';
+import type { LobeAgentChatConfig, UIChatMessage } from '@lobechat/types';
+import {
+  type AiModelReasoningConfig,
+  type ExtendParamsType,
+  MODEL_REASONING_EXTEND_PARAMS,
+  type ModelAbilities,
+  ModelProvider,
+} from 'model-bank';
 
 import { AiModelModel } from '@/database/models/aiModel';
 
@@ -78,29 +85,76 @@ export const resolveServerCallLlmContextHints = async ({
     modelCard?.displayName ??
     (provider === ModelProvider.LobeHub ? canonicalModelCard?.displayName : undefined);
 
-  // Custom/remote user models aren't in the bundled model bank, so both cards
-  // miss. Fall back to the user's own AI model record so server-side runs still
-  // surface identity (the inbox `{{model}}` fallback no longer exists).
-  if (!modelDisplayName && ctx.serverDB && ctx.userId) {
+  const aiModelModel =
+    ctx.serverDB && ctx.userId
+      ? new AiModelModel(ctx.serverDB, ctx.userId, ctx.workspaceId)
+      : undefined;
+
+  // The user's own AI model row serves two purposes: custom/remote models miss
+  // both bundled cards entirely (displayName + extendParams live only on the
+  // row), and builtin models may carry user-edited `settings.extendParams`
+  // from a provider-settings edit, which the client honors by merging user
+  // settings over the card. One indexed read per attempt.
+  let userModelRow: Awaited<ReturnType<AiModelModel['findByIdAndProvider']>> | undefined;
+  if (aiModelModel) {
     try {
-      const aiModelModel = new AiModelModel(ctx.serverDB, ctx.userId, ctx.workspaceId);
-      const userModel = await aiModelModel.findByIdAndProvider(model, provider);
-      modelDisplayName = userModel?.displayName ?? undefined;
+      userModelRow = await aiModelModel.findByIdAndProvider(model, provider);
     } catch (error) {
-      log('Failed to resolve user model display name for %s: %O', model, error);
+      log('Failed to resolve user model row for %s: %O', model, error);
+    }
+  }
+  // User-set displayName wins, matching the client list merge
+  modelDisplayName = userModelRow?.displayName ?? modelDisplayName;
+
+  // User-edited settings win over the bundled card, matching the client's
+  // `getEnabledModels` settings merge (arrays replace wholesale there, so an
+  // explicit empty array is an opt-out from the card's params, not a miss —
+  // only a row without `extendParams` falls back to the cards).
+  let modelExtendParams: string[] | undefined = userModelRow?.settings?.extendParams ?? undefined;
+
+  if (modelExtendParams === undefined) {
+    modelExtendParams = readExtendParams(modelCard);
+
+    // Aggregation providers (e.g. `lobehub`) may serve a model without copying
+    // its origin `settings.extendParams`. Fall back to the canonical model card
+    // (matched by id across any provider) so reasoning/thinking params like
+    // `thinkingLevel` still reach the model. Mirrors the client-side
+    // `transformToAiModelList` re-namespacing behavior.
+    if (!modelExtendParams || modelExtendParams.length === 0) {
+      modelExtendParams = readExtendParams(canonicalModelCard);
     }
   }
 
-  let modelExtendParams = readExtendParams(modelCard);
-
-  // Aggregation providers (e.g. `lobehub`) may serve a model without copying
-  // its origin `settings.extendParams`. Fall back to the canonical model card
-  // (matched by id across any provider) so reasoning/thinking params like
-  // `thinkingLevel` still reach the model. Mirrors the client-side
-  // `transformToAiModelList` re-namespacing behavior.
-  if (!modelExtendParams || modelExtendParams.length === 0) {
-    modelExtendParams = readExtendParams(canonicalModelCard);
+  // Reasoning fields (effort family + reasoningMode) are user-level
+  // model-instance settings (personal scope, cross-workspace): same-named
+  // agent chatConfig values are ignored and the saved per-model config applies
+  // instead — except explicit sub-agent overrides, which stay honored.
+  // Only read the saved config when the model can actually consume it
+  // (applyModelExtendParams ignores it otherwise) — this runs on every server
+  // LLM attempt, so non-reasoning models must not pay the extra DB read.
+  const modelHasReasoningExtendParams = (modelExtendParams ?? []).some((param) =>
+    (MODEL_REASONING_EXTEND_PARAMS as readonly string[]).includes(param),
+  );
+  let modelReasoningConfig: AiModelReasoningConfig | undefined;
+  if (aiModelModel && modelHasReasoningExtendParams) {
+    try {
+      modelReasoningConfig = await aiModelModel.getModelReasoningConfig(model, provider);
+    } catch (error) {
+      log('Failed to resolve model reasoning config for %s: %O', model, error);
+    }
   }
+
+  const agentChatConfig: LobeAgentChatConfig | undefined = agentConfig?.chatConfig;
+  const subAgentChatConfigOverride: Partial<LobeAgentChatConfig> | undefined =
+    agentConfig?.subAgentChatConfigOverride ?? undefined;
+  const effectiveChatConfig =
+    agentChatConfig || modelReasoningConfig || subAgentChatConfigOverride
+      ? resolveEffectiveReasoningChatConfig({
+          agentChatConfig: agentChatConfig ?? {},
+          modelReasoningConfig,
+          subAgentReasoningOverrides: subAgentChatConfigOverride,
+        })
+      : undefined;
 
   const modelSupportsPreserveThinkingFromCard =
     Array.isArray(modelExtendParams) && modelExtendParams.includes('preserveThinking');
@@ -118,13 +172,16 @@ export const resolveServerCallLlmContextHints = async ({
   // visible text (controlled replay: ~30% answer-in-thinking with the
   // placeholder vs ~2.5% when the genuine reasoning is replayed). The only
   // opt-out is a V4 model whose thinking the user explicitly disabled via
-  // `deepseekV4ReasoningEffort: 'none'`. That flag is V4-specific and may
-  // linger on an agent after switching models, so it must NOT suppress
-  // replay for `deepseek-reasoner`, which is thinking-only and always
-  // forces reasoning history in the payload builder — suppressing it there
-  // would reintroduce the 400/answer-hidden behavior.
+  // `deepseekV4ReasoningEffort` / `deepseekV4GAReasoningEffort` `'none'`.
+  // Those flags are V4-specific and may linger on an agent after switching
+  // models, so they must NOT suppress replay for `deepseek-reasoner`, which
+  // is thinking-only and always forces reasoning history in the payload
+  // builder — suppressing it there would reintroduce the 400/answer-hidden
+  // behavior.
   const deepseekV4ThinkingDisabled =
-    isDeepSeekV4FamilyModel(model) && agentConfig?.chatConfig?.deepseekV4ReasoningEffort === 'none';
+    isDeepSeekV4FamilyModel(model) &&
+    (effectiveChatConfig?.deepseekV4GAReasoningEffort === 'none' ||
+      effectiveChatConfig?.deepseekV4ReasoningEffort === 'none');
   const deepseekForcesPreserveThinking =
     isDeepSeekThinkingEligibleModel(model) && !deepseekV4ThinkingDisabled;
   const modelForcesPreserveThinking = kimiForcesPreserveThinking || deepseekForcesPreserveThinking;
@@ -143,9 +200,9 @@ export const resolveServerCallLlmContextHints = async ({
       ? preserveThinkingConfigured
       : undefined;
 
-  const resolvedModelExtendParams = agentConfig?.chatConfig
+  const resolvedModelExtendParams = effectiveChatConfig
     ? applyModelExtendParams({
-        chatConfig: agentConfig.chatConfig,
+        chatConfig: effectiveChatConfig,
         extendParams: modelExtendParams as ExtendParamsType[] | undefined,
         model,
       })
@@ -165,9 +222,27 @@ export const resolveServerCallLlmContextHints = async ({
     ? (llmPayload.messages as UIChatMessage[])
     : stripAssistantReasoningForReplay(llmPayload.messages as UIChatMessage[]);
 
+  // The product Auto router has no static model-bank card, yet it resolves
+  // image and tool requests to capable models at request time
+  // (`resolveAutoModel` keeps dedicated slots). Without this carve-out every
+  // server-side run on Auto reads as vision-less and context engineering
+  // strips image parts before the router ever sees them.
+  const autoRouterInfo = (
+    targetModel: string,
+    targetProvider: string,
+  ): { abilities: ModelAbilities; id: string; providerId: string } | undefined =>
+    isManagedAutoModelId(targetModel)
+      ? {
+          abilities: { functionCall: true, vision: true },
+          id: targetModel,
+          providerId: targetProvider,
+        }
+      : undefined;
+
   const findModelInfo = (targetModel: string, targetProvider: string) =>
     builtinModels.find((item) => item.id === targetModel && item.providerId === targetProvider) ??
-    builtinModels.find((item) => item.id === targetModel);
+    builtinModels.find((item) => item.id === targetModel) ??
+    autoRouterInfo(targetModel, targetProvider);
 
   return {
     capabilities: {

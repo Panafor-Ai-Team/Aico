@@ -1,5 +1,6 @@
 'use client';
 
+import { BRANDING_NAME } from '@lobechat/business-const';
 import isEqual from 'fast-deep-equal';
 import { type ReactNode } from 'react';
 import { useMemo } from 'react';
@@ -58,7 +59,7 @@ export const BuiltinDetailProvider = ({ children, identifier }: BuiltinDetailPro
   });
 
   const value: DetailContextValue = {
-    author: 'LobeHub',
+    author: BRANDING_NAME,
     authorUrl: OFFICIAL_SITE,
     config: null as any, // Builtin tools don't have provider config
     description: meta?.description || '',

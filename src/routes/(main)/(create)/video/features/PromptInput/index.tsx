@@ -1,18 +1,20 @@
 'use client';
 
-import { ModelIcon } from '@lobehub/icons';
-import { ActionIcon, Flexbox, InputNumber, SliderWithInput, Text } from '@lobehub/ui';
-import { Switch, Tabs } from '@lobehub/ui/base-ui';
+import { ActionIcon, Flexbox, InputNumber, Text } from '@lobehub/ui';
+import { SliderWithInput, Switch, Tabs } from '@lobehub/ui/base-ui';
 import { Divider } from 'antd';
 import { Clock3, Dices } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import VideoFreeQuotaInfo from '@/business/client/features/VideoFreeQuotaInfo';
+import { getBusinessGenerationSendAreaPrefix } from '@/business/client/hooks/useBusinessChatInputSendAreaPrefix';
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
 import { loginRequired } from '@/components/Error/loginRequiredNotification';
 import Action from '@/features/ChatInput/ActionBar/components/Action';
 import ModelSwitchPanel from '@/features/ModelSwitchPanel';
 import PromptTransformAction from '@/features/PromptTransform/PromptTransformAction';
+import { useEnabledVideoModels } from '@/hooks/useEnabledVideoModels';
 import { useFetchAiVideoConfig } from '@/hooks/useFetchAiVideoConfig';
 import { useIsDark } from '@/hooks/useIsDark';
 import { usePermission } from '@/hooks/usePermission';
@@ -131,6 +133,7 @@ const ResolutionItem = memo(() => {
 });
 
 const DurationItem = memo(() => {
+  const { t } = useTranslation('video');
   const { allowed: canCreate } = usePermission('create_content');
   const { value, setValue, min, max, step, enumValues } = useVideoGenerationConfigParam('duration');
 
@@ -140,10 +143,10 @@ const DurationItem = memo(() => {
         ? enumValues.map((v) => ({
             disabled: !canCreate,
             key: String(v),
-            label: String(v),
+            label: t('config.duration.value', { seconds: v }),
           }))
         : [],
-    [enumValues, canCreate],
+    [enumValues, canCreate, t],
   );
 
   if (options.length > 0) {
@@ -320,7 +323,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
   const setNewGenerationTopicVisibility = useVideoStore((s) => s.setNewGenerationTopicVisibility);
   const currentModel = useVideoStore(videoGenerationConfigSelectors.model);
   const currentProvider = useVideoStore(videoGenerationConfigSelectors.provider);
-  const enabledVideoModelList = useAiInfraStore(aiProviderSelectors.enabledVideoModelList);
+  const enabledVideoModelList = useEnabledVideoModels().list;
   const isModelConfigReady = useAiInfraStore((s) =>
     aiProviderSelectors.isInitAiProviderRuntimeState(s),
   );
@@ -354,7 +357,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
     if (!canCreate) return;
 
     if (!isLogin) {
-      loginRequired.redirect({ timeout: 2000 });
+      loginRequired.redirect();
       return;
     }
 
@@ -558,7 +561,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
                 enabledList={enabledVideoModelList}
                 model={currentModel ?? undefined}
                 openOnHover={false}
-                placement="topLeft"
+                placement="bottomLeft"
                 pricingMode="video"
                 provider={currentProvider ?? undefined}
                 onModelChange={async ({ model, provider }) => {
@@ -568,7 +571,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
                 }}
               >
                 <ActionIcon
-                  icon={<ModelIcon model={currentModel ?? ''} size={22} />}
+                  icon={<BrandedModelIcon model={currentModel ?? ''} size={22} />}
                   size={{
                     blockSize: 36,
                     size: 20,
@@ -595,6 +598,12 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
                       <Flexbox gap={6}>
                         <Text fontSize={12}>{t('config.size.label')}</Text>
                         <SizeItem />
+                      </Flexbox>
+                    )}
+                    {isSupportDuration && (
+                      <Flexbox gap={6}>
+                        <Text fontSize={12}>{t('config.duration.labelWithUnit')}</Text>
+                        <DurationItem />
                       </Flexbox>
                     )}
                     {isSupportSeed && (
@@ -662,6 +671,7 @@ const PromptInput = ({ showTitle = false }: PromptInputProps) => {
                 visibility={displayVisibility}
                 onChange={setNewGenerationTopicVisibility}
               />
+              {getBusinessGenerationSendAreaPrefix()}
             </>
           }
           onGenerate={handleGenerate}

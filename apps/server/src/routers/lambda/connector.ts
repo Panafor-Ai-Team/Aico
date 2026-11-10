@@ -1,4 +1,5 @@
 import { upsertPluginMode } from '@lobechat/types';
+import { OAuthError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
@@ -10,7 +11,7 @@ import { AgentModel } from '@/database/models/agent';
 import { ConnectorModel } from '@/database/models/connector';
 import { ConnectorToolModel } from '@/database/models/connectorTool';
 import { PluginModel } from '@/database/models/plugin';
-import type { OIDCConfig } from '@/database/schemas';
+import type { ConnectorMetadata, OIDCConfig } from '@/database/schemas';
 import {
   ConnectorMcpConnectionType,
   ConnectorSourceType,
@@ -18,6 +19,11 @@ import {
   ConnectorToolPermission,
 } from '@/database/schemas';
 import type { LobeChatDatabase } from '@/database/type';
+import {
+  getComposioClient,
+  isComposioClientAvailable,
+  revokeComposioConnectedAccount,
+} from '@/libs/composio';
 import { inferCrudType } from '@/libs/mcp/utils';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
@@ -26,8 +32,10 @@ import { callConnectorToolById, ConnectorToolCallError } from '@/server/services
 import {
   buildAuthorizationUrl,
   discoverConnectorOAuth,
+  getConnectorClientMetadataUrl,
   getConnectorRedirectUri,
   registerDynamicClient,
+  withOfflineAccessScope,
 } from '@/server/services/connector/oauth';
 import {
   generateConnectorOAuthState,
@@ -201,7 +209,7 @@ export const connectorRouter = router({
    * `agentId` and is enriched with the owning agent's `agentTitle`/`agentAvatar`
    * for attribution badges. Scope-correct via `ConnectorModel.ownership()` (and
    * `AgentModel.ownership()` for the titles) — a workspace context only returns
-   * that workspace's agent connectors (LOBE-11681 / LOBE-11682).
+   * that workspace's agent connectors ( /).
    */
   listAgentBound: connectorProcedure.query(async ({ ctx }) => {
     const connectors = await ctx.connectorModel.queryAllAgentScoped();
@@ -218,7 +226,7 @@ export const connectorRouter = router({
     // plus their own private agents. A `user_connectors` row is scoped only by
     // `workspace_id`, so on its own it would surface connectors owned by another
     // member's PRIVATE agent. Gate on the visible-agent set so private-agent
-    // connector inventory never leaks across members (LOBE-11681).
+    // connector inventory never leaks across members.
     const agentMetas = agentIds.length > 0 ? await agentModel.getAgentAvatarsByIds(agentIds) : [];
     const agentMetaById = new Map(agentMetas.map((m) => [m.id, m]));
 
@@ -235,6 +243,7 @@ export const connectorRouter = router({
           return {
             ...rest,
             agentAvatar: meta?.avatar ?? null,
+            agentName: meta?.name ?? null,
             agentTitle: meta?.title ?? null,
             oidcConfig: safeOidcConfig,
             tools,
@@ -342,10 +351,14 @@ export const connectorRouter = router({
         sourceType: input.sourceType,
         status: ConnectorStatus.disconnected,
       });
-      return { id: existing.id };
+      // `isNew` lets clients tell a fresh row from an updated pre-existing one —
+      // client-side caches can't answer this reliably (the connector list may
+      // not be fetched yet), and rollback-on-sync-failure must never delete a
+      // connector the user already had.
+      return { id: existing.id, isNew: false };
     }
 
-    return ctx.connectorModel.create({
+    const created = await ctx.connectorModel.create({
       ...fields,
       agentId: agentId ?? null,
       identifier: input.identifier,
@@ -353,6 +366,7 @@ export const connectorRouter = router({
       sourceType: input.sourceType,
       status: ConnectorStatus.disconnected,
     });
+    return { id: created.id, isNew: true };
   }),
 
   /**
@@ -539,76 +553,121 @@ export const connectorRouter = router({
       const existing: OIDCConfig = connector.oidcConfig ?? { scheme: 'dcr' };
       const redirectUri = getConnectorRedirectUri();
 
-      // 1. Discover the authorization server backing the MCP resource.
-      const { authorizationServerUrl, metadata } = await discoverConnectorOAuth(
-        connector.mcpServerUrl,
-      );
+      try {
+        // 1. Discover the authorization server backing the MCP resource.
+        const { authorizationServerUrl, metadata, resourceMetadata, wwwAuthenticateScope } =
+          await discoverConnectorOAuth(connector.mcpServerUrl);
 
-      // Default to the scopes advertised by the server when the user did not
-      // specify any — many MCP authorization servers reject (or issue a useless
-      // token for) a scope-less request.
-      const scopes =
-        existing.scopes && existing.scopes.length > 0 ? existing.scopes : metadata.scopes_supported;
+        // Scopes: user-specified → WWW-Authenticate challenge → protected
+        // resource metadata → none. Never the authorization server's full list.
+        // `offline_access` is added on top when the authorization server
+        // supports it, so the connection can refresh instead of expiring.
+        const scopes = withOfflineAccessScope(
+          existing.scopes && existing.scopes.length > 0
+            ? existing.scopes
+            : wwwAuthenticateScope
+              ? wwwAuthenticateScope.split(' ').filter(Boolean)
+              : resourceMetadata?.scopes_supported && resourceMetadata.scopes_supported.length > 0
+                ? resourceMetadata.scopes_supported
+                : undefined,
+          metadata,
+        );
+        const resource = resourceMetadata?.resource
+          ? String(resourceMetadata.resource)
+          : connector.mcpServerUrl;
 
-      // 2. Resolve the OAuth client: pre-registration vs. DCR.
-      let clientId = existing.clientId;
-      let clientSecret = existing.clientSecret;
-      const scheme: OIDCConfig['scheme'] = clientId ? 'pre_registration' : 'dcr';
+        // 2. Resolve the OAuth client: pre-registration → CIMD → stored DCR → DCR.
+        let clientId: string | undefined;
+        let clientSecret: string | undefined;
+        let scheme: OIDCConfig['scheme'];
+        const clientMetadataUrl = getConnectorClientMetadataUrl();
 
-      if (!clientId) {
-        if (!metadata.registration_endpoint) {
+        if (existing.scheme === 'pre_registration' && existing.clientId) {
+          clientId = existing.clientId;
+          clientSecret = existing.clientSecret;
+          scheme = 'pre_registration';
+        } else if (metadata.client_id_metadata_document_supported === true && clientMetadataUrl) {
+          clientId = clientMetadataUrl;
+          clientSecret = undefined;
+          scheme = 'client_id_metadata_document';
+        } else if (
+          existing.scheme === 'dcr' &&
+          existing.clientId &&
+          existing.issuer === authorizationServerUrl &&
+          existing.redirectUri === redirectUri
+        ) {
+          clientId = existing.clientId;
+          clientSecret = existing.clientSecret;
+          scheme = 'dcr';
+        } else if (metadata.registration_endpoint) {
+          const reg = await registerDynamicClient({
+            authorizationServerUrl,
+            metadata,
+            redirectUri,
+            scopes,
+          });
+          clientId = reg.client_id;
+          clientSecret = reg.client_secret ?? undefined;
+          scheme = 'dcr';
+        } else {
           throw new TRPCError({
             code: 'BAD_REQUEST',
             message:
               'This server does not support dynamic registration. Provide an OAuth Client ID in Advanced settings.',
           });
         }
-        const reg = await registerDynamicClient({
+
+        // 3. Persist the resolved config so the callback + refresh can reuse it.
+        const resolvedOidc: OIDCConfig = {
+          ...existing,
+          authorizationEndpoint: metadata.authorization_endpoint,
+          clientId,
+          clientSecret,
+          issuer: authorizationServerUrl,
+          redirectUri,
+          registrationEndpoint: metadata.registration_endpoint,
+          scheme,
+          scopes,
+          tokenEndpoint: metadata.token_endpoint,
+        };
+        await ctx.connectorModel.update(input.id, { oidcConfig: resolvedOidc });
+
+        // 4. Build the authorize URL (with PKCE) and stash the verifier under `state`.
+        const state = generateConnectorOAuthState();
+        const { authorizationUrl, codeVerifier } = await buildAuthorizationUrl({
           authorizationServerUrl,
+          clientInformation: { client_id: clientId, client_secret: clientSecret },
           metadata,
           redirectUri,
+          resource,
           scopes,
+          state,
         });
-        clientId = reg.client_id;
-        clientSecret = reg.client_secret ?? undefined;
+
+        await saveConnectorOAuthState(state, {
+          authorizationServerUrl,
+          codeVerifier,
+          connectorId: input.id,
+          lobeUserId: ctx.userId,
+          resource,
+          returnTo: input.returnTo,
+        });
+
+        return { authorizationUrl };
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        if (
+          err instanceof OAuthError ||
+          (err instanceof Error && /OAuth metadata/.test(err.message))
+        ) {
+          throw new TRPCError({
+            cause: err,
+            code: 'BAD_REQUEST',
+            message: `OAuth setup failed: ${err.message.slice(0, 300)}`,
+          });
+        }
+        throw err;
       }
-
-      // 3. Persist the resolved config so the callback + refresh can reuse it.
-      const resolvedOidc: OIDCConfig = {
-        ...existing,
-        authorizationEndpoint: metadata.authorization_endpoint,
-        clientId,
-        clientSecret,
-        issuer: authorizationServerUrl,
-        redirectUri,
-        registrationEndpoint: metadata.registration_endpoint,
-        scheme,
-        scopes,
-        tokenEndpoint: metadata.token_endpoint,
-      };
-      await ctx.connectorModel.update(input.id, { oidcConfig: resolvedOidc });
-
-      // 4. Build the authorize URL (with PKCE) and stash the verifier under `state`.
-      const state = generateConnectorOAuthState();
-      const { authorizationUrl, codeVerifier } = await buildAuthorizationUrl({
-        authorizationServerUrl,
-        clientInformation: { client_id: clientId, client_secret: clientSecret },
-        metadata,
-        redirectUri,
-        resource: connector.mcpServerUrl,
-        scopes,
-        state,
-      });
-
-      await saveConnectorOAuthState(state, {
-        authorizationServerUrl,
-        codeVerifier,
-        connectorId: input.id,
-        lobeUserId: ctx.userId,
-        returnTo: input.returnTo,
-      });
-
-      return { authorizationUrl };
     }),
 
   update: connectorWriteProcedure
@@ -658,6 +717,22 @@ export const connectorRouter = router({
       // Missing row → keep the delete idempotent, nothing to authorize.
       if (!target) return;
       assertWorkspaceRowManageable(ctx, target.userId, 'connector');
+
+      // A Composio connector's authorization lives in its Composio account, not
+      // in this row. Revoke it first: deleting only the row leaves an ACTIVE
+      // account (and its token) behind, which also blocks reconnecting.
+      const composioAccountId = target.metadata?.composio?.connectedAccountId;
+      if (composioAccountId) {
+        if (isComposioClientAvailable()) {
+          await revokeComposioConnectedAccount(getComposioClient(), composioAccountId);
+        }
+
+        // Personal Composio connections still carry the legacy plugin projection.
+        // Agent-scoped connections never create one, so do not remove a base
+        // plugin that may belong to a separate personal connection.
+        if (!target.agentId) await ctx.pluginModel.delete(target.identifier);
+      }
+
       await ctx.connectorModel.delete(input.id);
 
       // Agent-owned connector: also unpin its tool from the owning agent's
@@ -698,6 +773,7 @@ export const connectorRouter = router({
       try {
         return await syncConnectorToolsById(input.id, ctx);
       } catch (err: any) {
+        if (err instanceof TRPCError && err.code === 'PRECONDITION_FAILED') throw err;
         throw new TRPCError({
           cause: err,
           code: 'INTERNAL_SERVER_ERROR',
@@ -821,6 +897,48 @@ export const connectorRouter = router({
     }),
 
   /**
+   * Sync a client-fetched tool list into an EXISTING connector row. This is the
+   * install/refresh path for connectors the cloud server cannot reach itself:
+   * stdio MCP (the binary lives on the user's machine) and local/private-network
+   * HTTP endpoints. The desktop client connects locally, lists the tools, and
+   * reports them here — the server-side `syncTools` counterpart would otherwise
+   * try (and fail) to connect from the cloud (#16533).
+   *
+   * Also promotes the connector to `connected`, mirroring what
+   * `syncConnectorToolsById` does after a successful server-side sync.
+   */
+  syncToolsFromClientById: connectorWriteProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        tools: z.array(
+          z.object({
+            description: z.string().optional(),
+            inputSchema: z.record(z.string(), z.unknown()).optional(),
+            toolName: z.string(),
+          }),
+        ),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const target = await ctx.connectorModel.findById(input.id);
+      if (!target) throw new TRPCError({ code: 'NOT_FOUND', message: 'Connector not found' });
+      // Same edit-class gate as `syncTools` — rewrites the connector's tool rows.
+      assertWorkspaceRowManageable(ctx, target.userId, 'connector');
+
+      const syncInputs = input.tools.map((t) => ({
+        crudType: inferCrudType(t.toolName),
+        description: t.description,
+        inputSchema: t.inputSchema,
+        toolName: t.toolName,
+      }));
+
+      await ctx.connectorToolModel.upsertMany(input.id, syncInputs);
+      await ctx.connectorModel.updateStatus(input.id, ConnectorStatus.connected);
+      return { toolCount: syncInputs.length };
+    }),
+
+  /**
    * Bootstrap a connector entry for a builtin tool (lobe-creds, lobe-local-system, etc.)
    * by reading its manifest from @lobechat/builtin-tools.
    * Idempotent — safe to call on every open of the detail panel.
@@ -907,6 +1025,7 @@ export const connectorRouter = router({
 
       const { connectorId, writable } = await upsertConnectorEntry(ctx, {
         avatar: plugin.manifest.meta?.avatar,
+        composio: plugin.customParams?.composio,
         description: plugin.manifest.meta?.description,
         identifier: input.identifier,
         name: plugin.manifest.meta?.title || input.identifier,
@@ -948,15 +1067,17 @@ async function upsertConnectorEntry(
   },
   params: {
     avatar?: string;
+    composio?: ConnectorMetadata['composio'];
     description?: string;
     identifier: string;
     name: string;
     sourceType: string;
   },
 ): Promise<{ connectorId: string; writable: boolean }> {
-  const metadata: Record<string, unknown> = {};
+  const metadata: ConnectorMetadata = {};
   if (params.description) metadata.description = params.description;
   if (params.avatar) metadata.avatar = params.avatar;
+  if (params.composio) metadata.composio = params.composio;
 
   // Viewers keep browse access: they resolve existing rows read-only below,
   // but must never create or rewrite connector state. These bootstrap
@@ -979,8 +1100,9 @@ async function upsertConnectorEntry(
     const row = existing[0];
     const writable = canWrite && (!isWorkspaceNonOwner(ctx) || row.userId === ctx.userId);
     if (writable) {
-      // Update metadata with latest description/avatar from manifest
-      await ctx.connectorModel.update(row.id, { metadata });
+      // Preserve runtime-owned metadata (especially Composio account identity)
+      // while refreshing display fields from the latest plugin manifest.
+      await ctx.connectorModel.update(row.id, { metadata: { ...row.metadata, ...metadata } });
     }
     return { connectorId: row.id, writable };
   }

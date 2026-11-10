@@ -1,0 +1,424 @@
+import {
+  isDefaultAutoImageModelId,
+  MANAGED_PROVIDER_ID,
+  MANAGED_PROVIDER_IDS,
+  type ManagedProviderId,
+  OPENROUTER_AUTO_MODEL_ID,
+} from '@lobechat/business-const';
+import { ChatErrorType, type ErrorType } from '@lobechat/types';
+import { eq } from 'drizzle-orm';
+
+import { AicoBillingModel } from '@/database/models/aicoBilling';
+import { OrganizationModel } from '@/database/models/organization';
+import { openrouterModelCatalog } from '@/database/schemas';
+import type { LobeChatDatabase } from '@/database/type';
+import {
+  cycleRemainingMicroUsd,
+  hasValidManagedKeyId,
+  microUsdToDecimalString,
+} from '@/database/utils/aicoMoney';
+import { aicoEnv } from '@/envs/aico';
+import { isManagedKeyCapacityError } from '@/server/services/managedProvider/cheapvibecode';
+
+import { type AicoBillingContext, parseAicoBillingContext } from './billingContext';
+import type { LedgerGate } from './ledger/gate';
+
+/** Optional repair hook — chat path may lazy-provision a missing managed key. */
+export type AicoManagedKeyRepair = {
+  ensureMemberKey: (orgMemberId: string) => Promise<unknown>;
+  /**
+   * Personal-wallet counterpart. Present so the first request after a provider
+   * cutover mints a key on the new gateway instead of failing: the replacement
+   * is sized from the wallet's existing billed balance, so nothing is revalued.
+   */
+  ensureUserKey?: (userId: string) => Promise<unknown>;
+};
+
+export class AicoManagedPolicyError extends Error {
+  errorType: ErrorType;
+  code: string;
+
+  constructor(code: string, errorType: ErrorType = ChatErrorType.InvalidUserKey) {
+    super(code);
+    this.name = 'AicoManagedPolicyError';
+    this.code = code;
+    this.errorType = errorType;
+  }
+}
+
+/**
+ * The key a subject needs is missing and could not be minted. When the upstream
+ * account is out of key slots that is a platform outage, not the user's key, so
+ * it shows as "temporarily unavailable" and logs `:key_limit`.
+ */
+const keyUnavailableError = (repairError: unknown) =>
+  isManagedKeyCapacityError(repairError)
+    ? new AicoManagedPolicyError(
+        'PLATFORM_CAPACITY_EXHAUSTED:key_limit',
+        ChatErrorType.InvalidUserKey,
+      )
+    : new AicoManagedPolicyError('MANAGED_KEY_UNAVAILABLE', ChatErrorType.InvalidUserKey);
+
+export interface ManagedExecutionContext {
+  /** Decrypted OpenRouter key — never log. */
+  apiKey: string;
+  billing: AicoBillingContext;
+  budgetId?: string;
+  modelId?: string;
+  orgId?: string;
+  orgMemberId?: string;
+  /**
+   * A Trial request unit was reserved for this call (AICO-P1-010). If the provider call
+   * never starts, give it back with `AicoBillingModel.releaseTrialRequest`.
+   */
+  trialRequestReserved?: true;
+  userId: string;
+}
+
+/**
+ * Single mandatory policy boundary for every managed OpenRouter/`aico` runtime path.
+ * Default for missing/invalid context: deny.
+ */
+export class AicoManagedPolicy {
+  private readonly orgModel: OrganizationModel;
+  private readonly billingModel: AicoBillingModel;
+
+  constructor(
+    private readonly db: LobeChatDatabase,
+    private readonly decryptKey: (ciphertext: string) => Promise<string | null>,
+    private readonly keyRepair?: AicoManagedKeyRepair,
+    /**
+     * Result of the usage-ledger traffic gate. When authoritative, funds are read
+     * from ledger columns (usage + open holds), not deposits. With a shared
+     * inference key, subjects need no upstream key of their own.
+     */
+    private readonly ledgerGate?: LedgerGate,
+  ) {
+    this.orgModel = new OrganizationModel(db);
+    this.billingModel = new AicoBillingModel(db);
+  }
+
+  /**
+   * Every gateway we mint keys against is managed, not just the live one. A
+   * deployment mid-switch still holds keys minted under the previous provider,
+   * and a request naming it must stay behind this policy rather than fall
+   * through to the BYOK path where the user's own key would be used.
+   */
+  static isManagedProvider(provider: string): boolean {
+    return provider === 'aico' || MANAGED_PROVIDER_IDS.includes(provider as ManagedProviderId);
+  }
+
+  /**
+   * `aico` is the stable, user-facing provider id; which gateway actually serves
+   * it is a deployment decision. Resolving it here is what keeps existing agent
+   * configs and the pinned auto model working across a provider switch.
+   *
+   * Every managed provider id maps onto the active one, not just `aico`. Agent
+   * configs written before the switch carry a literal `openrouter`, and a
+   * browser bundle still resolves `DEFAULT_PROVIDER` to the default because
+   * `AICO_MANAGED_PROVIDER` has no `NEXT_PUBLIC_` twin — so without this, a
+   * cutover would route those requests to the old gateway holding a key minted
+   * on the new one. Unmanaged (BYOK) provider ids pass through untouched.
+   */
+  /**
+   * Whether a stored key was minted by the gateway that is currently active.
+   *
+   * Handing a key from the previous gateway to a runtime is the one failure a
+   * cutover can produce silently: the credential authenticates against nothing,
+   * and every request fails as if the provider were down. A null stamp predates
+   * migration 0154 and can only be OpenRouter.
+   */
+  private static isCurrentProviderKey(stamp: string | null | undefined): boolean {
+    return (stamp ?? 'openrouter') === MANAGED_PROVIDER_ID;
+  }
+
+  static resolveRuntimeProvider(provider: string): string {
+    return AicoManagedPolicy.isManagedProvider(provider) ? MANAGED_PROVIDER_ID : provider;
+  }
+
+  /**
+   * Trial stays disabled in production. The atomic request cap (AICO-P1-010) has shipped
+   * (`authorize` reserves a unit per call); enabling Trial in production is a separate
+   * product decision.
+   * Missing config / unset flags default to disabled.
+   */
+  assertTrialAllowed = async (): Promise<void> => {
+    if (process.env.NODE_ENV === 'production') {
+      throw new AicoManagedPolicyError('TRIAL_DISABLED_IN_PRODUCTION', ChatErrorType.Forbidden);
+    }
+    if (!aicoEnv.AICO_ALLOW_TRIAL) {
+      throw new AicoManagedPolicyError('TRIAL_DISABLED', ChatErrorType.Forbidden);
+    }
+    const config = await this.billingModel.getTrialConfig();
+    if (!config.enabled) {
+      throw new AicoManagedPolicyError('TRIAL_DISABLED', ChatErrorType.Forbidden);
+    }
+  };
+
+  authorize = async (params: {
+    userId: string;
+    billing: unknown;
+    modelId?: string;
+  }): Promise<ManagedExecutionContext> => {
+    let billing: AicoBillingContext;
+    try {
+      billing = parseAicoBillingContext(params.billing);
+    } catch (error) {
+      const code =
+        error instanceof Error && error.message.startsWith('BILLING_CONTEXT_')
+          ? error.message
+          : 'BILLING_CONTEXT_INVALID';
+      throw new AicoManagedPolicyError(code, ChatErrorType.BadRequest);
+    }
+
+    // OR-003: managed keys must always bind to an explicit model — omitting modelId
+    // previously skipped the allow-list while still injecting the member/user key.
+    if (!params.modelId?.trim()) {
+      throw new AicoManagedPolicyError('MODEL_ID_REQUIRED', ChatErrorType.BadRequest);
+    }
+    await this.assertModelAllowed(params.userId, billing, params.modelId);
+
+    const authoritative = Boolean(this.ledgerGate?.authoritative);
+    const sharedKey = this.ledgerGate?.sharedKey ?? null;
+
+    if (billing.source === 'personal') {
+      // Trial uses personal wallet key path but product Trial is disabled in prod.
+      const trialActive = await this.billingModel.isTrialActive(params.userId);
+      if (trialActive) {
+        await this.assertTrialAllowed();
+      }
+
+      let wallet = await this.billingModel.getUserWallet(params.userId);
+      if (!wallet?.isActive) {
+        throw new AicoManagedPolicyError('PERSONAL_WALLET_INACTIVE', ChatErrorType.InvalidUserKey);
+      }
+
+      const walletKeyUsable = (row: typeof wallet) =>
+        Boolean(
+          row?.openrouterKeyCiphertext &&
+          hasValidManagedKeyId(row.openrouterKeyId) &&
+          AicoManagedPolicy.isCurrentProviderKey(row.managedKeyProviderId),
+        );
+
+      // A key from the previous gateway is not a key. Repairing here is what
+      // makes a cutover invisible to a funded user: the first request mints a
+      // replacement on the active gateway. An unfunded wallet mints nothing and
+      // falls through to the checks below.
+      let repairError: unknown;
+      if (!sharedKey && !walletKeyUsable(wallet) && this.keyRepair?.ensureUserKey) {
+        try {
+          await this.keyRepair.ensureUserKey(params.userId);
+          wallet = (await this.billingModel.getUserWallet(params.userId)) ?? wallet;
+        } catch (error) {
+          repairError = error;
+          console.warn('[aico] managed policy failed to repair personal managed key', error);
+        }
+      }
+
+      if (!sharedKey && !walletKeyUsable(wallet)) {
+        throw keyUnavailableError(repairError);
+      }
+      // `balance_micro_usd` counts deposits only; under the ledger the spendable
+      // amount is raw capacity minus settled usage and open holds. Without it,
+      // the last known usage is the floor (W1): deposits alone stay positive
+      // after an admin debit takes everything that was left. The persisted
+      // usage lags real spend, so this can only err towards letting a request
+      // through — the shadow ledger's own funds check uses the same figure.
+      const exhausted = authoritative
+        ? Number(wallet.rawCapacityMicroUsd ?? 0) -
+            Number(wallet.rawUsedMicroUsd ?? 0) -
+            Number(wallet.rawHeldMicroUsd ?? 0) <=
+          0
+        : Number(wallet.balanceMicroUsd ?? 0) -
+            Math.max(0, Number(wallet.settledUsageMicroUsd ?? 0)) <=
+          0;
+      if (exhausted && !trialActive) {
+        throw new AicoManagedPolicyError(
+          'PERSONAL_FUNDS_UNAVAILABLE',
+          ChatErrorType.InvalidUserKey,
+        );
+      }
+
+      // Narrowing only; `walletKeyUsable` above already proved it is present.
+      const apiKey = sharedKey ?? (await this.decryptKey(wallet.openrouterKeyCiphertext ?? ''));
+      if (!apiKey) {
+        throw new AicoManagedPolicyError(
+          'MANAGED_KEY_DECRYPT_FAILED',
+          ChatErrorType.InvalidUserKey,
+        );
+      }
+
+      // Reserved last, after every check that can refuse, so a refusal never spends a
+      // unit. Atomic against the platform cap: concurrent calls cannot overspend it.
+      if (trialActive) {
+        const reserved = await this.billingModel.incrementTrialRequest(params.userId);
+        if (!reserved) {
+          throw new AicoManagedPolicyError(
+            'TRIAL_REQUEST_LIMIT',
+            ChatErrorType.SubscriptionPlanLimit,
+          );
+        }
+      }
+
+      return {
+        apiKey,
+        billing,
+        userId: params.userId,
+        modelId: params.modelId,
+        ...(trialActive && { trialRequestReserved: true as const }),
+      };
+    }
+
+    const org = await this.orgModel.getById(billing.organizationId);
+    if (!org || org.status !== 'active') {
+      throw new AicoManagedPolicyError('ORG_NOT_ACTIVE', ChatErrorType.Forbidden);
+    }
+
+    const me = await this.orgModel.getMemberByUser({
+      orgId: billing.organizationId,
+      userId: params.userId,
+    });
+    if (!me) {
+      throw new AicoManagedPolicyError('ORG_MEMBERSHIP_REQUIRED', ChatErrorType.Forbidden);
+    }
+
+    let budget = await this.orgModel.getMemberBudget(me.id);
+    if (!budget) {
+      throw new AicoManagedPolicyError('MEMBER_BUDGET_NOT_ALLOCATED', ChatErrorType.InvalidUserKey);
+    }
+    // Before `isActive`: a failed renewal also deactivates the budget, and
+    // reporting that as "inactive" hides the fixable cause.
+    if (budget.renewalStatus === 'renewal_pending' || budget.renewalStatus === 'renewal_failed') {
+      throw new AicoManagedPolicyError(
+        'MEMBER_BUDGET_RENEWAL_BLOCKED',
+        ChatErrorType.InvalidUserKey,
+      );
+    }
+    if (!budget.isActive) {
+      throw new AicoManagedPolicyError('MEMBER_BUDGET_INACTIVE', ChatErrorType.InvalidUserKey);
+    }
+    const held = authoritative ? Math.max(0, Number(budget.heldMicroUsd ?? 0)) : 0;
+    if (cycleRemainingMicroUsd(budget) - held <= 0) {
+      throw new AicoManagedPolicyError('MEMBER_BUDGET_UNFUNDED', ChatErrorType.InvalidUserKey);
+    }
+
+    const budgetKeyUsable = (row: typeof budget) =>
+      Boolean(
+        row?.openrouterKeyCiphertext &&
+        hasValidManagedKeyId(row.openrouterKeyId) &&
+        AicoManagedPolicy.isCurrentProviderKey(row.managedKeyProviderId),
+      );
+
+    let repairError: unknown;
+    if (!sharedKey && !budgetKeyUsable(budget) && this.keyRepair) {
+      try {
+        await this.keyRepair.ensureMemberKey(me.id);
+        budget = (await this.orgModel.getMemberBudget(me.id)) ?? budget;
+      } catch (error) {
+        repairError = error;
+        console.warn('[aico] managed policy failed to repair member OpenRouter key', error);
+      }
+    }
+
+    if (!sharedKey && !budgetKeyUsable(budget)) {
+      throw keyUnavailableError(repairError);
+    }
+
+    // Narrowing only; `budgetKeyUsable` above already proved it is present.
+    const apiKey = sharedKey ?? (await this.decryptKey(budget.openrouterKeyCiphertext ?? ''));
+    if (!apiKey) {
+      throw new AicoManagedPolicyError('MANAGED_KEY_DECRYPT_FAILED', ChatErrorType.InvalidUserKey);
+    }
+
+    return {
+      apiKey,
+      billing,
+      budgetId: budget.id,
+      modelId: params.modelId,
+      orgId: org.id,
+      orgMemberId: me.id,
+      userId: params.userId,
+    };
+  };
+
+  private assertModelAllowed = async (
+    userId: string,
+    billing: AicoBillingContext,
+    modelId: string,
+  ) => {
+    // Auto is the product's meta-router, not an admin-grantable team model —
+    // always usable on the org wallet regardless of the team's allow-list.
+    if (modelId === OPENROUTER_AUTO_MODEL_ID) return;
+    // Same reasoning for the product's default image generator: image
+    // generation is a product feature rather than a chat-model grant, and a
+    // team that never listed it would otherwise fail every image request with
+    // MODEL_NOT_ALLOWED. Other image models still need an explicit grant.
+    if (isDefaultAutoImageModelId(modelId)) return;
+    // Platform catalog kill-switch: a model the platform admin disabled is
+    // unusable on every wallet, even when a team allow-list still grants it.
+    // Unknown ids (custom models, non-catalog gateways) keep the previous
+    // allow-list-only behavior.
+    const catalogType = await this.assertCatalogModelEnabled(modelId);
+    // Embeddings are system-internal (memory search, RAG) — not an
+    // admin-grantable chat model. Requiring a team grant would silently break
+    // memory for orgs that never listed the embedder, the same failure mode
+    // the Auto/image carve-outs above prevent. The kill-switch still applies.
+    if (catalogType === 'embedding') return;
+
+    if (billing.source === 'organization') {
+      const me = await this.orgModel.getMemberByUser({
+        orgId: billing.organizationId,
+        userId,
+      });
+      if (!me) {
+        throw new AicoManagedPolicyError('ORG_MEMBERSHIP_REQUIRED', ChatErrorType.Forbidden);
+      }
+      const allowed = await this.orgModel.getAllowedModelsForMember(me.id);
+      if (!allowed || allowed.length === 0 || !allowed.includes(modelId)) {
+        throw new AicoManagedPolicyError(`MODEL_NOT_ALLOWED:${modelId}`, ChatErrorType.BadRequest);
+      }
+      return;
+    }
+
+    // Personal / trial allow-list from trial config when trial active
+    if (await this.billingModel.isTrialActive(userId)) {
+      await this.assertTrialAllowed();
+      const config = await this.billingModel.getTrialConfig();
+      const allowed = JSON.parse(config.allowedModelIds || '[]') as string[];
+      if (allowed.length > 0 && !allowed.includes(modelId)) {
+        throw new AicoManagedPolicyError(
+          `TRIAL_MODEL_NOT_ALLOWED:${modelId}`,
+          ChatErrorType.BadRequest,
+        );
+      }
+    }
+  };
+
+  /**
+   * Platform catalog kill-switch (single indexed PK lookup). The `enabled`
+   * flag on `openrouter_model_catalog` is the platform admin's setting; a
+   * disabled row denies managed execution on every wallet, closing the gap
+   * where a reservation in a team allow-list kept a switched-off model usable.
+   * Returns the cataloged model type (if any) so callers can exempt
+   * system-internal non-chat models such as embeddings.
+   */
+  private assertCatalogModelEnabled = async (modelId: string): Promise<string | undefined> => {
+    const [row] = await this.db
+      .select({ enabled: openrouterModelCatalog.enabled, type: openrouterModelCatalog.type })
+      .from(openrouterModelCatalog)
+      .where(eq(openrouterModelCatalog.id, modelId))
+      .limit(1);
+    if (row && row.enabled === false) {
+      throw new AicoManagedPolicyError(`MODEL_DISABLED:${modelId}`, ChatErrorType.BadRequest);
+    }
+    return row?.type?.toLowerCase();
+  };
+
+  /** Serialize wallet micro amounts for API responses (never return raw bigint). */
+  static moneyFields(micro: number | bigint) {
+    return {
+      balanceMicroUsd: String(micro),
+      balanceUsd: microUsdToDecimalString(micro),
+    };
+  }
+}

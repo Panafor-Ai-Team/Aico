@@ -1,0 +1,194 @@
+'use client';
+
+import { Center, Flexbox, Skeleton, Text } from '@lobehub/ui';
+import { createStaticStyles, cx } from 'antd-style';
+import { CheckIcon, ChevronDownIcon, WalletIcon } from 'lucide-react';
+import { memo, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+
+import { toastAicoError } from '@/business/client/resolveAicoErrorMessage';
+import ActionDropdown from '@/features/ChatInput/ActionBar/components/ActionDropdown';
+import { type LooseTFunction } from '@/types/looseTranslation';
+
+import { BILLING_SOURCE_SWITCHER_PLACEMENT } from './billingSourceSwitcherPlacement';
+import { formatRemainingPi } from './piToken';
+import { PiAmount } from './PiTokenIcon';
+import { type AicoBillingContext, type AicoBillingSource } from './types';
+import { useAicoBillingSources } from './useAicoBillingSources';
+
+const styles = createStaticStyles(({ css, cssVar }) => ({
+  check: css`
+    color: ${cssVar.colorTextSecondary};
+  `,
+  chevron: css`
+    color: ${cssVar.colorTextQuaternary};
+    transition: transform 150ms ${cssVar.motionEaseOut};
+  `,
+  chevronOpen: css`
+    transform: rotate(180deg);
+  `,
+  label: css`
+    overflow: hidden;
+
+    max-width: 110px;
+
+    font-size: 12px;
+    color: ${cssVar.colorTextSecondary};
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  `,
+  remaining: css`
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: ${cssVar.colorText};
+  `,
+  row: css`
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+
+    width: 100%;
+    min-width: 0;
+  `,
+  trigger: css`
+    cursor: pointer;
+    border-radius: 6px;
+
+    :hover {
+      background: ${cssVar.colorFillTertiary};
+    }
+  `,
+  triggerReadonly: css`
+    cursor: default;
+
+    &:hover {
+      background: transparent;
+    }
+  `,
+}));
+
+const sourceLabel = (source: AicoBillingSource, t: LooseTFunction): string => {
+  if (source.source === 'personal') return t('billing.personal');
+  return source.organizationName || t('billing.organization');
+};
+
+const sourceToContext = (source: AicoBillingSource): AicoBillingContext =>
+  source.source === 'personal'
+    ? { source: 'personal' }
+    : { organizationId: source.organizationId, source: 'organization' };
+
+const BillingSourceSwitcher = memo(() => {
+  const { t } = useTranslation('aico');
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const { activeSource, canSwitch, data, isLoading, isSelected, selectSource } =
+    useAicoBillingSources();
+
+  const menuItems = useMemo(() => {
+    if (!data?.sources.length) return [];
+
+    return data.sources.map((source) => {
+      const ctx = sourceToContext(source);
+      const selected = isSelected(ctx);
+      const label = sourceLabel(source, t);
+      const remaining = formatRemainingPi(source.remainingPi);
+
+      return {
+        icon: WalletIcon,
+        key: source.source === 'personal' ? 'personal' : `org:${source.organizationId}`,
+        label: (
+          <div className={styles.row}>
+            <Flexbox gap={2} style={{ minWidth: 0 }}>
+              <Text
+                style={{
+                  fontSize: 13,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {label}
+              </Text>
+              <Text style={{ fontSize: 11 }} type="secondary">
+                {t('billing.remaining', { amount: remaining })}
+              </Text>
+            </Flexbox>
+            {selected ? <CheckIcon className={styles.check} size={14} /> : null}
+          </div>
+        ),
+        onClick: async () => {
+          if (selected || busy) return;
+          setBusy(true);
+          try {
+            await selectSource(ctx);
+          } catch (err) {
+            toastAicoError(err, t, 'billing.switchFailed');
+          } finally {
+            setBusy(false);
+          }
+        },
+      };
+    });
+  }, [busy, data?.sources, isSelected, selectSource, t]);
+
+  // Keep the pill's footprint while wallets load so Send and the model chip do
+  // not shift when it arrives.
+  if (isLoading && !activeSource) {
+    return (
+      <span
+        aria-label={t('billing.preparingWallet')}
+        role="status"
+        title={t('billing.preparingWallet')}
+      >
+        <Skeleton.Button
+          active
+          shape="round"
+          size="small"
+          style={{ height: 28, minWidth: 96, width: 96 }}
+        />
+      </span>
+    );
+  }
+  if (!activeSource) return null;
+
+  const label = sourceLabel(activeSource, t);
+  const remaining = formatRemainingPi(activeSource.remainingPi);
+
+  const trigger = (
+    <Center
+      horizontal
+      aria-label={t('billing.switcherAria', { label, remaining })}
+      className={cx(styles.trigger, !canSwitch && styles.triggerReadonly)}
+      gap={4}
+      height={28}
+      paddingInline={6}
+    >
+      <WalletIcon size={12} style={{ opacity: 0.65 }} />
+      <span className={styles.label}>{label}</span>
+      <PiAmount className={styles.remaining} iconSize={12} value={activeSource.remainingPi} />
+      {canSwitch ? (
+        <ChevronDownIcon className={cx(styles.chevron, open && styles.chevronOpen)} size={12} />
+      ) : null}
+    </Center>
+  );
+
+  if (!canSwitch) return trigger;
+
+  return (
+    <ActionDropdown
+      menu={{ items: menuItems }}
+      minWidth={240}
+      open={open}
+      placement={BILLING_SOURCE_SWITCHER_PLACEMENT}
+      trigger="click"
+      onOpenChange={setOpen}
+    >
+      {trigger}
+    </ActionDropdown>
+  );
+});
+
+BillingSourceSwitcher.displayName = 'BillingSourceSwitcher';
+
+export default BillingSourceSwitcher;

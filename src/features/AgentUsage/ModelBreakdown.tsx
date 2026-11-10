@@ -1,11 +1,15 @@
 'use client';
 
-import { ModelIcon } from '@lobehub/icons';
 import { Block, Flexbox, Text } from '@lobehub/ui';
 import { Table } from 'antd';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import {
+  formatBrandedModelId,
+  formatBrandedProviderId,
+} from '@/components/Branding/brandedModelId';
 import { type AgentUsageModelRow } from '@/types/usage/usageRecord';
 import { formatNumber, formatUsageValue } from '@/utils/format';
 
@@ -23,11 +27,11 @@ const ModelBreakdown = memo<ModelBreakdownProps>(({ rows, isLoading }) => {
       key: 'model',
       render: (model: string, record: AgentUsageModelRow) => (
         <Flexbox horizontal align={'center'} gap={8}>
-          <ModelIcon model={model} size={20} />
+          <BrandedModelIcon model={model} size={20} />
           <Flexbox>
-            <Text ellipsis>{model}</Text>
+            <Text ellipsis>{formatBrandedModelId(model)}</Text>
             <Text fontSize={12} type={'secondary'}>
-              {record.provider}
+              {formatBrandedProviderId(record.provider)}
             </Text>
           </Flexbox>
         </Flexbox>

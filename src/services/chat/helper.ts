@@ -1,19 +1,19 @@
 import type { EnabledAiModel } from 'model-bank';
-import { ModelProvider } from 'model-bank';
+import { ModelProvider } from 'model-bank/modelProvider';
 
 import { getAiInfraStoreState } from '@/store/aiInfra';
-import { aiProviderSelectors } from '@/store/aiInfra/selectors';
+import { aiModelSelectors, aiProviderSelectors } from '@/store/aiInfra/selectors';
 
 export const getEnabledRuntimeModel = (
   model: string,
   provider: string,
 ): EnabledAiModel | undefined => {
   const state = getAiInfraStoreState();
-  const exactModel = state.enabledAiModels?.find(
-    (item) => item.id === model && item.providerId === provider,
-  );
+  // Alias-tolerant like the rest of the capability gates: a stored
+  // `openrouter/<model>` selection keeps resolving after a gateway cutover.
+  const matchedModel = aiModelSelectors.getEnabledModelById(model, provider)(state);
 
-  if (exactModel || provider !== ModelProvider.LobeHub) return exactModel;
+  if (matchedModel || provider !== ModelProvider.LobeHub) return matchedModel;
 
   return state.enabledAiModels?.find((item) => item.id === model);
 };
@@ -71,4 +71,30 @@ export const resolveRuntimeProvider = (provider: string) => {
   const providerConfig = aiProviderSelectors.providerConfigById(provider)(getAiInfraStoreState());
 
   return providerConfig?.settings.sdkType || 'openai';
+};
+
+// Below this the gzip round trip saves less than it costs; chat bodies that
+// carry history and tools are hundreds of KB and shrink ~3–4×.
+export const GZIP_REQUEST_BODY_MIN_BYTES = 32 * 1024;
+
+/**
+ * Gzip a JSON request body before upload when it is large and the browser can
+ * compress. Returns an ArrayBuffer (reusable if the request is retried) and
+ * whether it is gzipped, so the caller sets `Content-Encoding`. Any failure
+ * falls back to the plain string.
+ */
+export const encodeJsonRequestBody = async (
+  json: string,
+): Promise<{ body: ArrayBuffer | string; gzip: boolean }> => {
+  if (typeof CompressionStream === 'undefined') return { body: json, gzip: false };
+
+  const bytes = new TextEncoder().encode(json);
+  if (bytes.byteLength < GZIP_REQUEST_BODY_MIN_BYTES) return { body: json, gzip: false };
+
+  try {
+    const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'));
+    return { body: await new Response(stream).arrayBuffer(), gzip: true };
+  } catch {
+    return { body: json, gzip: false };
+  }
 };

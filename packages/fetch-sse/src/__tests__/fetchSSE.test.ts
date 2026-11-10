@@ -19,9 +19,34 @@ vi.mock('@lobechat/utils/client/fetchEventSource/index', () => ({
 // 在每次测试后清理所有模拟
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe('fetchSSE', () => {
+  it('reports first visible text buffer delay for buffered animation', async () => {
+    const onFirstVisibleText = vi.fn();
+    const onMessageHandle = vi.fn();
+
+    (fetchEventSource as any).mockImplementationOnce(
+      (url: string, options: FetchEventSourceInit) => {
+        options.onopen!({ clone: () => ({ ok: true, headers: new Headers() }) } as any);
+        options.onmessage!({ event: 'text', data: JSON.stringify('Hi') } as any);
+      },
+    );
+
+    await fetchSSE('/', {
+      onFirstVisibleText,
+      onMessageHandle,
+      responseAnimation: 'fadeIn',
+    });
+
+    expect(onFirstVisibleText).toHaveBeenCalledWith({
+      animation: 'buffer',
+      bufferDelayMs: expect.any(Number),
+    });
+    expect(onFirstVisibleText.mock.calls[0][0].bufferDelayMs).toBeGreaterThanOrEqual(0);
+  });
+
   it('should handle text event correctly', async () => {
     const mockOnMessageHandle = vi.fn();
     const mockOnFinish = vi.fn();
@@ -150,6 +175,35 @@ describe('fetchSSE', () => {
       traceId: null,
       type: 'done',
     });
+  });
+
+  it('should smooth-stream Persian without splitting grapheme clusters', async () => {
+    const mockOnMessageHandle = vi.fn();
+    const mockOnFinish = vi.fn();
+    const persian = 'سلام';
+
+    (fetchEventSource as any).mockImplementationOnce(
+      async (url: string, options: FetchEventSourceInit) => {
+        options.onopen!({ clone: () => ({ ok: true, headers: new Headers() }) } as any);
+        options.onmessage!({ event: 'text', data: JSON.stringify(persian) } as any);
+      },
+    );
+
+    await fetchSSE('/', {
+      onMessageHandle: mockOnMessageHandle,
+      onFinish: mockOnFinish,
+      responseAnimation: 'smooth',
+    });
+
+    const allTexts = mockOnMessageHandle.mock.calls
+      .map((call) => call[0])
+      .filter((c) => c.type === 'text')
+      .map((c) => c.text);
+
+    expect(allTexts.join('')).toBe(persian);
+    // Each smooth delta should be a whole grapheme (not a UTF-16 half or empty).
+    expect(allTexts.every((t) => t.length > 0)).toBe(true);
+    expect(mockOnFinish).toHaveBeenCalledWith(persian, expect.objectContaining({ type: 'done' }));
   });
 
   it('should not handle text events', async () => {
@@ -715,6 +769,60 @@ describe('fetchSSE', () => {
         },
         message: 'parse error',
         type: 'StreamChunkError',
+      });
+    });
+  });
+
+  describe('usage accumulation', () => {
+    const fireUsageEvents = (options: FetchEventSourceInit, events: unknown[]) => {
+      options.onopen!({ clone: () => ({ ok: true, headers: new Headers() }) } as any);
+      for (const data of events) {
+        options.onmessage!({ event: 'usage', data: JSON.stringify(data) } as any);
+      }
+    };
+
+    it('does not let a trailing zero-total artifact wipe out real usage', async () => {
+      const mockOnFinish = vi.fn();
+
+      (fetchEventSource as any).mockImplementationOnce(
+        (url: string, options: FetchEventSourceInit) => {
+          fireUsageEvents(options, [
+            { totalInputTokens: 1200, totalOutputTokens: 45, totalTokens: 1245 },
+            // Trailing tool/result chunks can carry zero-total usage payloads.
+            { totalInputTokens: 0, totalOutputTokens: 0, totalTokens: 0 },
+          ]);
+        },
+      );
+
+      await fetchSSE('/', { onFinish: mockOnFinish });
+
+      expect(mockOnFinish).toHaveBeenCalled();
+      expect(mockOnFinish.mock.calls[0][1].usage).toMatchObject({
+        totalInputTokens: 1200,
+        totalOutputTokens: 45,
+        totalTokens: 1245,
+      });
+    });
+
+    it('merges partial usage snapshots monotonically', async () => {
+      const mockOnFinish = vi.fn();
+
+      (fetchEventSource as any).mockImplementationOnce(
+        (url: string, options: FetchEventSourceInit) => {
+          fireUsageEvents(options, [
+            { totalInputTokens: 1200 },
+            { totalInputTokens: 1200, totalOutputTokens: 45, totalTokens: 1245 },
+          ]);
+        },
+      );
+
+      await fetchSSE('/', { onFinish: mockOnFinish });
+
+      expect(mockOnFinish).toHaveBeenCalled();
+      expect(mockOnFinish.mock.calls[0][1].usage).toMatchObject({
+        totalInputTokens: 1200,
+        totalOutputTokens: 45,
+        totalTokens: 1245,
       });
     });
   });

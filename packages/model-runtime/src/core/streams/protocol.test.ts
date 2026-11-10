@@ -720,6 +720,31 @@ describe('createCallbacksTransformer', () => {
     expect(onThinking).toHaveBeenNthCalledWith(2, ' about this');
   });
 
+  it('should not let a trailing zero-total usage event wipe out real usage', async () => {
+    const onCompletion = vi.fn();
+    const transformer = createCallbacksTransformer({ onCompletion });
+
+    const chunks = [
+      'event: usage\n',
+      'data: {"totalInputTokens":1200,"totalOutputTokens":45,"totalTokens":1245}\n\n',
+      // Trailing tool/result chunks can carry zero-total usage payloads.
+      'event: usage\n',
+      'data: {"totalInputTokens":0,"totalOutputTokens":0,"totalTokens":0}\n\n',
+    ];
+
+    await processChunks(transformer, chunks);
+
+    expect(onCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usage: expect.objectContaining({
+          totalInputTokens: 1200,
+          totalOutputTokens: 45,
+          totalTokens: 1245,
+        }),
+      }),
+    );
+  });
+
   it('should preserve reasoning signatures in final callback data', async () => {
     const onCompletion = vi.fn();
     const transformer = createCallbacksTransformer({ onCompletion });
@@ -738,6 +763,169 @@ describe('createCallbacksTransformer', () => {
         reasoning: {
           content: 'Thinking...',
           signature: 'encrypted-signature',
+        },
+      }),
+    );
+  });
+
+  it('should aggregate reasoning response items in stream order', async () => {
+    const onCompletion = vi.fn();
+    const transformer = createCallbacksTransformer({ onCompletion });
+
+    const firstItem = {
+      encrypted_content: 'scoped-encrypted-1',
+      id: 'rs_1',
+      summary: [{ text: 'visible summary', type: 'summary_text' }],
+      type: 'reasoning',
+    };
+    const secondItem = {
+      encrypted_content: 'scoped-encrypted-2',
+      id: 'rs_2',
+      summary: [],
+      type: 'reasoning',
+    };
+
+    const chunks = [
+      'event: reasoning\n',
+      'data: "visible summary"\n\n',
+      'event: reasoning_response_item\n',
+      `data: ${JSON.stringify(firstItem)}\n\n`,
+      'event: reasoning_response_item\n',
+      `data: ${JSON.stringify(secondItem)}\n\n`,
+    ];
+
+    await processChunks(transformer, chunks);
+
+    expect(onCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reasoning: {
+          content: 'visible summary',
+          responseItems: [firstItem, secondItem],
+          signature: undefined,
+        },
+      }),
+    );
+  });
+
+  it('should derive thinking content from item summaries when nothing was streamed', async () => {
+    const onCompletion = vi.fn();
+    const transformer = createCallbacksTransformer({ onCompletion });
+
+    const firstItem = {
+      encrypted_content: 'scoped-encrypted-1',
+      id: 'rs_1',
+      summary: [{ text: 'first summary', type: 'summary_text' }],
+      type: 'reasoning',
+    };
+    const secondItem = {
+      encrypted_content: 'scoped-encrypted-2',
+      id: 'rs_2',
+      summary: [{ text: 'second summary', type: 'summary_text' }],
+      type: 'reasoning',
+    };
+
+    // no `reasoning` delta events — mirrors the non-streaming Responses conversion
+    const chunks = [
+      'event: reasoning_response_item\n',
+      `data: ${JSON.stringify(firstItem)}\n\n`,
+      'event: reasoning_response_item\n',
+      `data: ${JSON.stringify(secondItem)}\n\n`,
+    ];
+
+    await processChunks(transformer, chunks);
+
+    expect(onCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reasoning: {
+          content: 'first summary\nsecond summary',
+          responseItems: [firstItem, secondItem],
+          signature: undefined,
+        },
+        thinking: 'first summary\nsecond summary',
+      }),
+    );
+  });
+
+  it('should keep reasoning items whose summary text contains a data: marker', async () => {
+    const onCompletion = vi.fn();
+    const transformer = createCallbacksTransformer({ onCompletion });
+
+    const firstItem = {
+      encrypted_content: 'scoped-encrypted-1',
+      id: 'rs_1',
+      summary: [{ text: 'Inspect data: sources.', type: 'summary_text' }],
+      type: 'reasoning',
+    };
+    const secondItem = {
+      encrypted_content: 'scoped-encrypted-2',
+      id: 'rs_2',
+      summary: [],
+      type: 'reasoning',
+    };
+
+    const chunks = [
+      'event: reasoning_response_item\n',
+      `data: ${JSON.stringify(firstItem)}\n\n`,
+      'event: reasoning_response_item\n',
+      `data: ${JSON.stringify(secondItem)}\n\n`,
+    ];
+
+    await processChunks(transformer, chunks);
+
+    expect(onCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reasoning: expect.objectContaining({
+          responseItems: [firstItem, secondItem],
+        }),
+      }),
+    );
+  });
+
+  it('should keep reasoning with response items but no visible content', async () => {
+    const onCompletion = vi.fn();
+    const transformer = createCallbacksTransformer({ onCompletion });
+
+    const hiddenItem = {
+      encrypted_content: 'scoped-hidden',
+      id: 'rs_hidden',
+      summary: [],
+      type: 'reasoning',
+    };
+
+    const chunks = ['event: reasoning_response_item\n', `data: ${JSON.stringify(hiddenItem)}\n\n`];
+
+    await processChunks(transformer, chunks);
+
+    expect(onCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reasoning: {
+          content: undefined,
+          responseItems: [hiddenItem],
+          signature: undefined,
+        },
+      }),
+    );
+  });
+
+  it('should ignore non-string payloads on the reasoning_signature event', async () => {
+    const onCompletion = vi.fn();
+    const transformer = createCallbacksTransformer({ onCompletion });
+
+    const chunks = [
+      'event: reasoning\n',
+      'data: "Thinking..."\n\n',
+      'event: reasoning_signature\n',
+      `data: ${JSON.stringify({ id: 'rs_1', type: 'reasoning' })}\n\n`,
+    ];
+
+    await processChunks(transformer, chunks);
+
+    expect(onCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reasoning: {
+          content: 'Thinking...',
+          responseItems: undefined,
+          signature: undefined,
         },
       }),
     );

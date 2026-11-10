@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { BRANDING_NAME } from '@lobechat/const';
 import { type ChatModelCard } from '@lobechat/types';
 import { ModelProvider } from 'model-bank';
 import OpenAI from 'openai';
@@ -18,6 +19,11 @@ import { AgentRuntimeError } from '../../utils/createError';
 import { debugPayload, debugResponse, debugStream } from '../../utils/debugStream';
 import { getModelPricing } from '../../utils/getModelPricing';
 import { StreamingResponse } from '../../utils/response';
+import {
+  createSignatureChannelId,
+  createSignatureScope,
+  type SignatureScopeKind,
+} from '../../utils/signatureScope';
 import { assertToolLimits } from '../../utils/validateToolLimits';
 import { isResponsesAPIModel } from '../openai/modelId';
 
@@ -80,7 +86,7 @@ class CopilotTokenManager {
       headers: {
         'Accept': 'application/json',
         'Authorization': `Token ${githubToken}`,
-        'User-Agent': 'LobeChat/1.0',
+        'User-Agent': `${BRANDING_NAME}/1.0`,
       },
       method: 'GET',
     });
@@ -138,6 +144,7 @@ export interface LobeGithubCopilotAIParams {
 
 export class LobeGithubCopilotAI implements LobeRuntimeAI {
   baseURL = COPILOT_BASE_URL;
+  private accountChannelId?: Promise<string>;
   private cachedBearerToken?: string;
   private githubToken: string;
 
@@ -166,6 +173,28 @@ export class LobeGithubCopilotAI implements LobeRuntimeAI {
     }
   }
 
+  private async getSignatureScope(
+    model: string,
+    kind: SignatureScopeKind,
+    protocol: 'chat_completions' | 'responses',
+  ) {
+    const accountToken = this.githubToken || this.cachedBearerToken;
+    if (!accountToken) return undefined;
+
+    this.accountChannelId ??= createSignatureChannelId('github-copilot-account', accountToken);
+
+    return createSignatureScope({
+      kind,
+      model,
+      protocol,
+      source: {
+        apiType: 'openai',
+        channelId: await this.accountChannelId,
+        provider: ModelProvider.GithubCopilot,
+      },
+    });
+  }
+
   async chat(payload: ChatStreamPayload, options?: ChatMethodOptions) {
     // Pre-flight: abort before dispatching if tools exceed the Copilot 128-tool limit
     if (payload.tools && payload.tools.length > 0) {
@@ -192,8 +221,8 @@ export class LobeGithubCopilotAI implements LobeRuntimeAI {
           defaultHeaders: {
             'Authorization': `Bearer ${bearerToken}`,
             'Copilot-Integration-Id': 'vscode-chat',
-            'Editor-Plugin-Version': 'LobeChat/1.0',
-            'Editor-Version': 'LobeChat/1.0',
+            'Editor-Plugin-Version': `${BRANDING_NAME}/1.0`,
+            'Editor-Version': `${BRANDING_NAME}/1.0`,
             'anthropic-version': '2023-06-01',
           },
         });
@@ -255,8 +284,8 @@ export class LobeGithubCopilotAI implements LobeRuntimeAI {
         baseURL: COPILOT_BASE_URL,
         defaultHeaders: {
           'Copilot-Integration-Id': 'vscode-chat',
-          'Editor-Plugin-Version': 'LobeChat/1.0',
-          'Editor-Version': 'LobeChat/1.0',
+          'Editor-Plugin-Version': `${BRANDING_NAME}/1.0`,
+          'Editor-Version': `${BRANDING_NAME}/1.0`,
         },
       });
 
@@ -281,8 +310,14 @@ export class LobeGithubCopilotAI implements LobeRuntimeAI {
           ...responseRest
         } = rest as any;
 
+        const reasoningSignatureScope = await this.getSignatureScope(
+          model,
+          'reasoning',
+          'responses',
+        );
         const input = await convertOpenAIResponseInputs(messages as any, {
           forceImageBase64: true,
+          reasoningSignatureScope,
           strictToolPairing: true,
         });
 
@@ -328,7 +363,11 @@ export class LobeGithubCopilotAI implements LobeRuntimeAI {
           return StreamingResponse(
             OpenAIResponsesStream(prod, {
               callbacks: options?.callback,
-              payload: { model, provider: ModelProvider.GithubCopilot },
+              payload: {
+                model,
+                provider: ModelProvider.GithubCopilot,
+                reasoningSignatureScope,
+              },
             }),
             { headers: options?.headers },
           );
@@ -344,15 +383,25 @@ export class LobeGithubCopilotAI implements LobeRuntimeAI {
           OpenAIResponsesStream(responseStream, {
             callbacks: options?.callback,
             enableStreaming: false,
-            payload: { model, provider: ModelProvider.GithubCopilot },
+            payload: {
+              model,
+              provider: ModelProvider.GithubCopilot,
+              reasoningSignatureScope,
+            },
           }),
           { headers: options?.headers },
         );
       }
 
       const { apiMode: _, preserveThinking: _pt, ...cleanedRest } = rest as any;
+      const thoughtSignatureScope = await this.getSignatureScope(
+        model,
+        'thought_signature',
+        'chat_completions',
+      );
       const messages = await convertOpenAIMessages(cleanedRest.messages as any, {
         forceImageBase64: true,
+        thoughtSignatureScope,
       });
 
       const chatCompletionPayload = {
@@ -386,7 +435,7 @@ export class LobeGithubCopilotAI implements LobeRuntimeAI {
       return StreamingResponse(
         OpenAIStream(response, {
           callbacks: options?.callback,
-          payload: { model, provider: ModelProvider.GithubCopilot },
+          payload: { model, provider: ModelProvider.GithubCopilot, thoughtSignatureScope },
         }),
         { headers: options?.headers },
       );
@@ -404,8 +453,8 @@ export class LobeGithubCopilotAI implements LobeRuntimeAI {
             'Accept': 'application/json',
             'Authorization': `Bearer ${bearerToken}`,
             'Copilot-Integration-Id': 'vscode-chat',
-            'Editor-Plugin-Version': 'LobeChat/1.0',
-            'Editor-Version': 'LobeChat/1.0',
+            'Editor-Plugin-Version': `${BRANDING_NAME}/1.0`,
+            'Editor-Version': `${BRANDING_NAME}/1.0`,
           },
           method: 'GET',
         });

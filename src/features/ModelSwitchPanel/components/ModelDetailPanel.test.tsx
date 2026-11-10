@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { EnabledProviderWithModels } from '@/types/aiProvider';
 
+import { useModelDetailSectionsStore } from '../hooks/useModelDetailSections';
 import ModelDetailPanel from './ModelDetailPanel';
 
 vi.mock('antd-style', () => ({
@@ -89,7 +90,7 @@ vi.mock('@/business/client/hooks/useBusinessModelRating', () => ({
 
 const globalState = {
   status: {
-    modelDetailPanelExpandedKeys: ['pricing'],
+    modelDetailPanelExpandedKeys: [] as string[],
   },
   updateModelDetailPanelExpandedKeys: vi.fn(),
 };
@@ -107,18 +108,21 @@ vi.mock('@/store/global/selectors', () => ({
 
 const translations: Record<string, string> = {
   'ModelSwitchPanel.detail.context': 'Context Length',
+  'ModelSwitchPanel.detail.contextTokens': '{{amount}} tokens',
   'ModelSwitchPanel.detail.pricing': 'Pricing',
-  'ModelSwitchPanel.detail.pricing.credits.input': 'Input {{amount}} credits/M tokens',
-  'ModelSwitchPanel.detail.pricing.credits.output': 'Output {{amount}} credits/M tokens',
-  'ModelSwitchPanel.detail.pricing.credits.perImage': '~ {{amount}} credits / image',
-  'ModelSwitchPanel.detail.pricing.credits.perVideo': '~ {{amount}} credits / video',
-  'ModelSwitchPanel.detail.pricing.credits.image': 'credits/img',
-  'ModelSwitchPanel.detail.pricing.credits.millionTokens': 'credits/M tokens',
+  'ModelSwitchPanel.detail.pricing.credits.coefficient':
+    'Usage coefficient {{amount}} (same for input and output)',
+  'ModelSwitchPanel.detail.pricing.credits.coefficientLabel': 'Usage coefficient',
+  'ModelSwitchPanel.detail.pricing.credits.image': '/img',
+  'ModelSwitchPanel.detail.pricing.credits.input': 'Input coefficient {{amount}}',
+  'ModelSwitchPanel.detail.pricing.credits.output': 'Output coefficient {{amount}}',
+  'ModelSwitchPanel.detail.pricing.credits.video': '/video',
   'ModelSwitchPanel.detail.pricing.group.image': 'Image',
   'ModelSwitchPanel.detail.pricing.group.text': 'Text',
   'ModelSwitchPanel.detail.pricing.input': 'Input ${{amount}}/M',
   'ModelSwitchPanel.detail.pricing.output': 'Output ${{amount}}/M',
   'ModelSwitchPanel.detail.pricing.perImage': '~ ${{amount}} / image',
+  'ModelSwitchPanel.detail.pricing.perMillionTokens': '/M tokens',
   'ModelSwitchPanel.detail.pricing.perVideo': '~ ${{amount}} / video',
   'ModelSwitchPanel.detail.pricing.unit.imageGeneration': 'Image Generation',
   'ModelSwitchPanel.detail.pricing.unit.textInput': 'Input',
@@ -130,15 +134,35 @@ const translations: Record<string, string> = {
   'ModelSwitchPanel.detail.rating.dimension.price': 'Price',
   'ModelSwitchPanel.detail.rating.dimension.speed': 'Speed',
   'ModelSwitchPanel.detail.rating.dimension.writing': 'Writing',
+  'lobehub.gemini-3-pro-image-preview:image.description':
+    'Localized LobeHub colon-id model description.',
+  'lobehub.test-model.description': 'Localized LobeHub model description.',
   'test-model.description': 'Localized model description.',
 };
 
+let mockLanguage = 'en-US';
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, options?: Record<string, string>) => {
+    i18n: { language: mockLanguage },
+    t: (
+      key: string,
+      options?: Record<string, string | boolean> & {
+        defaultValue?: string;
+        keySeparator?: boolean | string;
+        nsSeparator?: boolean | string;
+      },
+    ) => {
+      // Mirror the real call-site: colon model ids require nsSeparator disabled.
+      if (key.includes(':') && options?.nsSeparator !== false) {
+        return options?.defaultValue ?? key;
+      }
+
       const template = translations[key] ?? options?.defaultValue ?? key;
 
-      return template.replaceAll(/\{\{(\w+)\}\}/g, (_, name) => options?.[name] ?? '');
+      return String(template).replaceAll(/\{\{(\w+)\}\}/g, (_, name) =>
+        String(options?.[name] ?? ''),
+      );
     },
   }),
 }));
@@ -200,8 +224,13 @@ const createEnabledList = (
   },
 ];
 
+// abilities / pricing start collapsed; these tests read the pricing rows, so open them first
+beforeEach(() => {
+  useModelDetailSectionsStore.setState({ openKeys: ['pricing'] });
+});
+
 describe('ModelDetailPanel pricing', () => {
-  it('renders the localized model description when provided', () => {
+  it('renders the LobeHub-scoped localized description for the LobeHub provider', () => {
     const { container } = render(
       <ModelDetailPanel
         model="test-model"
@@ -213,41 +242,168 @@ describe('ModelDetailPanel pricing', () => {
     );
 
     expect(container.querySelector('.description')).toHaveTextContent(
+      'Localized LobeHub model description.',
+    );
+  });
+
+  it('renders the bare model-id description key for non-LobeHub providers', () => {
+    const { container } = render(
+      <ModelDetailPanel
+        model="test-model"
+        provider="openai"
+        enabledList={createEnabledList('openai', textPricing, {
+          description: 'Fallback model description.',
+        })}
+      />,
+    );
+
+    expect(container.querySelector('.description')).toHaveTextContent(
       'Localized model description.',
     );
   });
 
-  it('renders branding provider token pricing in credits', () => {
+  it('falls back to the model card description when no locale key exists', () => {
     const { container } = render(
       <ModelDetailPanel
-        enabledList={createEnabledList('lobehub', textPricing)}
-        model="test-model"
+        model="missing-locale-model"
         provider="lobehub"
+        enabledList={createEnabledList('lobehub', textPricing, {
+          description: 'Fallback model description.',
+          id: 'missing-locale-model',
+        })}
       />,
     );
 
-    expect(screen.getByText('5M credits/M tokens')).toBeInTheDocument();
-    expect(screen.getByText('25M credits/M tokens')).toBeInTheDocument();
+    expect(container.querySelector('.description')).toHaveTextContent(
+      'Fallback model description.',
+    );
+  });
+
+  it('resolves LobeHub descriptions when the model id contains a colon', () => {
+    const { container } = render(
+      <ModelDetailPanel
+        model="gemini-3-pro-image-preview:image"
+        provider="lobehub"
+        enabledList={createEnabledList('lobehub', textPricing, {
+          description: 'Fallback image model description.',
+          id: 'gemini-3-pro-image-preview:image',
+        })}
+      />,
+    );
+
+    expect(container.querySelector('.description')).toHaveTextContent(
+      'Localized LobeHub colon-id model description.',
+    );
+  });
+
+  it.each([
+    ['fa-IR', 'rtl'],
+    ['en-US', 'ltr'],
+    ['fr-FR', 'ltr'],
+  ])(
+    'lays the panel out %s as %s so titles and rows start from the right in Persian',
+    (lang, dir) => {
+      mockLanguage = lang;
+      const { container } = render(
+        <ModelDetailPanel
+          enabledList={createEnabledList('lobehub', textPricing)}
+          model="test-model"
+          provider="lobehub"
+        />,
+      );
+
+      expect(container.querySelector('.container')).toHaveAttribute('dir', dir);
+      mockLanguage = 'en-US';
+    },
+  );
+
+  it('lets the description pick its own direction inside the LTR popup', () => {
+    const { container } = render(
+      <ModelDetailPanel
+        model="test-model"
+        provider="lobehub"
+        enabledList={createEnabledList('lobehub', textPricing, {
+          description: 'Fallback model description.',
+        })}
+      />,
+    );
+
+    expect(container.querySelector('.description')).toHaveAttribute('dir', 'auto');
+  });
+
+  it('renders managed provider token pricing as a coefficient only', () => {
+    const { container } = render(
+      <ModelDetailPanel
+        enabledList={createEnabledList('openrouter', textPricing)}
+        model="test-model"
+        provider="openrouter"
+      />,
+    );
+
+    expect(screen.getByText('125×')).toBeInTheDocument();
+    expect(screen.getByText('625×')).toBeInTheDocument();
+    expect(container).not.toHaveTextContent('125,000');
+    expect(container).toHaveTextContent('PricingInput125×Output625×');
     expect(container).not.toHaveTextContent('$5.00');
+    expect(container.querySelector('img[alt="π"]')).not.toBeInTheDocument();
   });
 
-  it('renders the original branding price without repeating the unit suffix', () => {
+  it('renders the original managed coefficient next to the discounted one', () => {
     const { container } = render(
       <ModelDetailPanel
-        enabledList={createEnabledList('lobehub', discountedTextPricing)}
+        enabledList={createEnabledList('openrouter', discountedTextPricing)}
         model="test-model"
-        provider="lobehub"
+        provider="openrouter"
       />,
     );
 
-    const originalPrice = container.querySelector('.originalPriceText');
-
-    expect(originalPrice).toHaveTextContent('5M');
-    expect(originalPrice).not.toHaveTextContent('credits/M tokens');
-    expect(container).toHaveTextContent('2.5M credits/M tokens');
+    expect(container.querySelector('.originalPriceText')).toHaveTextContent('125×');
+    expect(container).toHaveTextContent('62.5×');
+    expect(container).not.toHaveTextContent('62,500');
   });
 
-  it('keeps dollar pricing for non-branding providers', () => {
+  it('merges equal managed input and output rates into one usage coefficient', () => {
+    const equalPricing = {
+      currency: 'USD',
+      units: [
+        { name: 'textInput', rate: 0.16, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 0.16, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    };
+
+    const expanded = render(
+      <ModelDetailPanel
+        enabledList={createEnabledList('openrouter', equalPricing)}
+        model="test-model"
+        provider="openrouter"
+      />,
+    );
+
+    expect(expanded.container).toHaveTextContent('Usage coefficient');
+    expect(expanded.container).toHaveTextContent('4×');
+    expect(expanded.container).not.toHaveTextContent('Output');
+    expanded.unmount();
+
+    useModelDetailSectionsStore.setState({ openKeys: [] });
+    try {
+      const collapsed = render(
+        <ModelDetailPanel
+          enabledList={createEnabledList('openrouter', equalPricing)}
+          model="test-model"
+          provider="openrouter"
+        />,
+      );
+
+      expect(collapsed.container).toHaveTextContent(
+        'Usage coefficient 4× (same for input and output)',
+      );
+      expect(collapsed.container).not.toHaveTextContent('Output coefficient');
+    } finally {
+      useModelDetailSectionsStore.setState({ openKeys: ['pricing'] });
+    }
+  });
+
+  it('keeps dollar pricing for non-managed providers', () => {
     const { container } = render(
       <ModelDetailPanel
         enabledList={createEnabledList('openai', textPricing)}
@@ -258,49 +414,51 @@ describe('ModelDetailPanel pricing', () => {
 
     expect(container).toHaveTextContent('$5.00/M tokens');
     expect(container).toHaveTextContent('$25.00/M tokens');
-    expect(container).not.toHaveTextContent('credits/M tokens');
+    expect(container).not.toHaveTextContent('×');
   });
 
-  it('renders branding provider image and video pricing in credits', () => {
+  it('renders managed provider image and video pricing as π amounts with the coin', () => {
     const imageResult = render(
       <ModelDetailPanel
-        enabledList={createEnabledList('lobehub', imagePricing)}
+        enabledList={createEnabledList('openrouter', imagePricing)}
         model="test-model"
         pricingMode="image"
-        provider="lobehub"
+        provider="openrouter"
       />,
     );
 
-    expect(imageResult.container).toHaveTextContent('~ 40.0K credits / image');
-    expect(imageResult.container).toHaveTextContent('40.0K credits/img');
+    expect(imageResult.container).toHaveTextContent('~ 1,000/img');
+    expect(imageResult.container).toHaveTextContent('Image Generation1,000/img');
+    expect(imageResult.container.querySelectorAll('img[alt="π"]').length).toBeGreaterThan(0);
     expect(imageResult.container).not.toHaveTextContent('$0.04');
 
     imageResult.unmount();
 
     const videoResult = render(
       <ModelDetailPanel
-        enabledList={createEnabledList('lobehub', imagePricing)}
+        enabledList={createEnabledList('openrouter', imagePricing)}
         model="test-model"
         pricingMode="video"
-        provider="lobehub"
+        provider="openrouter"
       />,
     );
 
-    expect(videoResult.container).toHaveTextContent('~ 800.0K credits / video');
+    expect(videoResult.container).toHaveTextContent('~ 20,000/video');
     expect(videoResult.container).not.toHaveTextContent('$0.80');
   });
 
   it('renders a placeholder for empty lookup pricing tables', () => {
     const { container } = render(
       <ModelDetailPanel
-        enabledList={createEnabledList('lobehub', emptyLookupPricing)}
+        enabledList={createEnabledList('openrouter', emptyLookupPricing)}
         model="test-model"
-        provider="lobehub"
+        provider="openrouter"
       />,
     );
 
     expect(container).toHaveTextContent('Image Generation');
-    expect(container).toHaveTextContent('- credits/img');
+    expect(container).toHaveTextContent('-/img');
+    expect(container.querySelector('img[alt="π"]')).not.toBeInTheDocument();
   });
 });
 

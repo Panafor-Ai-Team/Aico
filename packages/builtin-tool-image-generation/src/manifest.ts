@@ -1,5 +1,6 @@
 import type { BuiltinToolManifest } from '@lobechat/types';
 
+import { IMAGE_GENERATION_CONFIRM_AUDIT } from './confirmation';
 import { systemPrompt } from './systemRole';
 import { ImageGenerationApiName, ImageGenerationIdentifier } from './types';
 
@@ -53,6 +54,14 @@ export const ImageGenerationManifest: BuiltinToolManifest = {
       defaultTimeoutMs: 180_000,
       description:
         'Generate images and wait by default until final image URLs are available. Only use getImageGenerationStatus if this returns a still-processing result or if waitUntilComplete is false.',
+      /**
+       * Interactive chats confirm every generation on a card where the user picks
+       * the model, quality and size (see `imageGenerationModelConfirmAudit`);
+       * headless runs skip it. `always` so auto-run users still get the card.
+       */
+      humanIntervention: {
+        dynamic: { default: 'never', policy: 'always', type: IMAGE_GENERATION_CONFIRM_AUDIT },
+      },
       name: ImageGenerationApiName.generateImage,
       parameters: {
         additionalProperties: false,
@@ -65,12 +74,12 @@ export const ImageGenerationManifest: BuiltinToolManifest = {
           },
           imageUrl: {
             description:
-              'Single accessible reference image URL for image-to-image models. Omit for text-to-image.',
+              'Single accessible reference image URL for image-to-image. Use a user-attached URL, a user-supplied URL, or a URL from a previous generateImage result when editing that image. Omit for fresh text-to-image.',
             type: ['string', 'null'],
           },
           imageUrls: {
             description:
-              'Multiple accessible reference image URLs for models that support multiple references.',
+              'Multiple accessible reference image URLs for models that support multiple references. Same sources as imageUrl (attachments, user URLs, or prior generateImage results for edits).',
             items: { type: 'string' },
             type: 'array',
           },
@@ -143,8 +152,8 @@ export const ImageGenerationManifest: BuiltinToolManifest = {
   meta: {
     avatar: '🎨',
     description:
-      'Generate images from chat through LobeHub image generation models, including models that are not native image-output chat models.',
-    title: 'Image Generation',
+      'Generate images from chat through the built-in image pipeline, including models that are not native image-output chat models. Defaults to gpt-image-2 at medium quality.',
+    title: 'Image Generation Assistant',
   },
   systemRole: systemPrompt,
   type: 'builtin',

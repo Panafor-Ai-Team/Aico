@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { PROMPT_CONTENT_BUDGET } from './contentBudget';
 import { formatPageContentContext } from './pageContentContext';
 
 describe('formatPageContentContext', () => {
@@ -50,5 +51,18 @@ describe('formatPageContentContext', () => {
     });
 
     expect(result).toMatchSnapshot();
+  });
+
+  it('truncates huge page markdown and xml with a note', () => {
+    const big = 'x'.repeat(PROMPT_CONTENT_BUDGET + 100);
+    const result = formatPageContentContext({
+      markdown: `${big}TAIL-MD`,
+      metadata: { title: 'Huge CSV' },
+      xml: `${big}TAIL-XML`,
+    });
+
+    expect(result).not.toContain('TAIL-MD');
+    expect(result).not.toContain('TAIL-XML');
+    expect(result).toContain('[truncated:');
   });
 });

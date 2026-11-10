@@ -73,6 +73,8 @@ describe('aiModelSelectors', () => {
     aiProviderRuntimeConfig: {},
     initAiProviderList: false,
     isInitAiProviderRuntimeState: false,
+    modelReasoningConfigMap: {},
+    modelReasoningConfigUpdatingKeys: [],
   };
 
   describe('aiProviderChatModelListIds', () => {
@@ -322,6 +324,65 @@ describe('aiModelSelectors', () => {
     it('should return undefined if model is not found in either list', () => {
       const result = aiModelSelectors.getModelCard('non-existent', 'provider-a')(mockState);
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe('getEnabledModelById managed-provider aliases', () => {
+    const aliasState: AIProviderStoreState = {
+      ...mockState,
+      enabledAiModels: [
+        {
+          abilities: { functionCall: true },
+          id: 'openrouter/auto',
+          providerId: 'cheapvibecode',
+          type: 'chat',
+        },
+      ],
+    };
+
+    it('should prefer the exact provider match', () => {
+      const state: AIProviderStoreState = {
+        ...mockState,
+        enabledAiModels: [
+          { abilities: { functionCall: false }, id: 'm', providerId: 'openrouter', type: 'chat' },
+          { abilities: { functionCall: true }, id: 'm', providerId: 'cheapvibecode', type: 'chat' },
+        ],
+      };
+      expect(aiModelSelectors.getEnabledModelById('m', 'openrouter')(state)?.abilities).toEqual({
+        functionCall: false,
+      });
+    });
+
+    it('should resolve the same model id under a sibling managed provider', () => {
+      const result = aiModelSelectors.getEnabledModelById(
+        'openrouter/auto',
+        'openrouter',
+      )(aliasState);
+      expect(result?.providerId).toBe('cheapvibecode');
+      expect(
+        aiModelSelectors.isModelSupportToolUse('openrouter/auto', 'openrouter')(aliasState),
+      ).toBe(true);
+    });
+
+    it('should not cross-match for non-managed providers', () => {
+      const state: AIProviderStoreState = {
+        ...mockState,
+        enabledAiModels: [
+          { abilities: { functionCall: true }, id: 'm', providerId: 'byok-cloud', type: 'chat' },
+        ],
+      };
+      expect(aiModelSelectors.getEnabledModelById('m', 'other-byok')(state)).toBeUndefined();
+      expect(aiModelSelectors.isModelSupportToolUse('m', 'other-byok')(state)).toBe(false);
+    });
+
+    it('should not resolve a managed lookup from a non-managed entry', () => {
+      const state: AIProviderStoreState = {
+        ...mockState,
+        enabledAiModels: [
+          { abilities: { functionCall: true }, id: 'm', providerId: 'byok-cloud', type: 'chat' },
+        ],
+      };
+      expect(aiModelSelectors.getEnabledModelById('m', 'openrouter')(state)).toBeUndefined();
     });
   });
 });

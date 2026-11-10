@@ -5,7 +5,7 @@ import { produce } from 'immer';
 import { type ChatStore } from '@/store/chat/store';
 import { type MessageMapKeyInput } from '@/store/chat/utils/messageMapKey';
 import { messageMapKey } from '@/store/chat/utils/messageMapKey';
-import { topicMapKey } from '@/store/chat/utils/topicMapKey';
+import { topicMapKey, type TopicMapScope } from '@/store/chat/utils/topicMapKey';
 import { getHomeStoreState } from '@/store/home';
 import { type StoreSetter } from '@/store/types';
 import { setNamespace } from '@/utils/storeDebug';
@@ -47,9 +47,14 @@ export class OperationActionsImpl {
     this.#get = get;
   }
 
-  internal_getConversationContext = (context?: { operationId?: string }): MessageMapKeyInput => {
-    if (context?.operationId) {
-      const operation = this.#get().operations[context.operationId];
+  internal_getConversationContext = (reference?: {
+    context?: MessageMapKeyInput;
+    operationId?: string;
+  }): MessageMapKeyInput => {
+    if (reference?.context) return reference.context;
+
+    if (reference?.operationId) {
+      const operation = this.#get().operations[reference.operationId];
       if (!operation) {
         // The op was already cleaned up (e.g. completed CC turn whose
         // runtime_end fired and was GC'd 30s later), but a late caller
@@ -59,17 +64,17 @@ export class OperationActionsImpl {
         // degrade to the global-state fallback and log loudly.
         log(
           '[internal_getConversationContext] WARNING: Operation not found, falling back to global state: %s',
-          context.operationId,
+          reference.operationId,
         );
         console.warn(
           '[internal_getConversationContext] operation not found, using global state:',
-          context.operationId,
+          reference.operationId,
         );
       } else {
-        const { agentId, topicId, threadId, scope, isNew, groupId, documentId } = operation.context;
+        const { agentId, topicId, threadId, scope, groupId, documentId } = operation.context;
         log(
           '[internal_getConversationContext] get from operation %s: agentId=%s, topicId=%s, threadId=%s, scope=%s, groupId=%s, documentId=%s',
-          context.operationId,
+          reference.operationId,
           agentId,
           topicId,
           threadId,
@@ -231,6 +236,10 @@ export class OperationActionsImpl {
       false,
       n(`updateOperationMetadata/${operationId}`),
     );
+
+    if (metadata.visibleLoadingDone) {
+      this.completeRunningReasoningChildren(operationId);
+    }
   };
 
   updateOperationStatus = (
@@ -310,6 +319,23 @@ export class OperationActionsImpl {
       false,
       n(`completeOperation/${operationId}`),
     );
+
+    this.completeRunningReasoningChildren(operationId);
+  };
+
+  /**
+   * Reasoning child ops do not inherit `visibleLoadingDone` from the parent runtime.
+   * Complete them when the parent finishes so the Thinking accordion / tray cannot stick.
+   */
+  completeRunningReasoningChildren = (operationId: string): void => {
+    const parent = this.#get().operations[operationId];
+    const childIds = parent?.childOperationIds ?? [];
+    for (const childId of childIds) {
+      const child = this.#get().operations[childId];
+      if (child?.type === 'reasoning' && child.status === 'running') {
+        this.completeOperation(childId);
+      }
+    }
   };
 
   getOperationAbortSignal = (operationId: string): AbortSignal => {
@@ -494,8 +520,31 @@ export class OperationActionsImpl {
     );
   };
 
+  /**
+   * Operations attributed to a conversation bucket.
+   *
+   * Mirrors `operationSelectors.getOperationsByContext` — same `messageMapKey`
+   * bucket, same threadId refinement — so what the input counts as "running" and
+   * what Stop cancels are resolved the same way. Kept here rather than imported
+   * to avoid an actions → selectors cycle.
+   */
+  #getOperationsInContext = (context: MessageMapKeyInput): Operation[] => {
+    const state = this.#get();
+    const operationIds = state.operationsByContext[messageMapKey(context)] || [];
+    const contextThreadId = context.threadId ?? null;
+
+    return operationIds
+      .map((id) => state.operations[id])
+      .filter((op): op is Operation => !!op && (op.context.threadId ?? null) === contextThreadId);
+  };
+
   cancelOperations = (filter: OperationFilter, reason: string = 'Batch cancelled'): string[] => {
-    const operations = Object.values(this.#get().operations);
+    // Bucket mode: match exactly the operations the loading selectors attribute
+    // to this conversation, so a visible Stop button can never target an empty
+    // set. See `OperationFilter.context` for why field-by-field matching drifts.
+    const byContext = filter.context ? this.#getOperationsInContext(filter.context) : undefined;
+
+    const operations = byContext ?? Object.values(this.#get().operations);
     const matchedIds: string[] = [];
 
     operations.forEach((op) => {
@@ -515,24 +564,31 @@ export class OperationActionsImpl {
         matches = matches && statuses.includes(op.status);
       }
 
-      // Context filters
-      if (filter.agentId !== undefined) {
-        matches = matches && op.context.agentId === filter.agentId;
-      }
-      if (filter.topicId !== undefined) {
-        matches = matches && isSameNullableContextValue(op.context.topicId, filter.topicId);
-      }
+      // messageId is orthogonal to the conversation bucket, so it applies in both modes.
       if (filter.messageId !== undefined) {
         matches = matches && op.context.messageId === filter.messageId;
       }
-      if (filter.threadId !== undefined) {
-        matches = matches && isSameNullableContextValue(op.context.threadId, filter.threadId);
-      }
-      if (filter.groupId !== undefined) {
-        matches = matches && op.context.groupId === filter.groupId;
-      }
-      if (filter.agentId !== undefined) {
-        matches = matches && op.context.agentId === filter.agentId;
+
+      // The remaining context filters are already satisfied by the bucket lookup.
+      if (!byContext) {
+        if (filter.agentId !== undefined) {
+          matches = matches && op.context.agentId === filter.agentId;
+        }
+        if (filter.topicId !== undefined) {
+          matches = matches && isSameNullableContextValue(op.context.topicId, filter.topicId);
+        }
+        if (filter.threadId !== undefined) {
+          matches = matches && isSameNullableContextValue(op.context.threadId, filter.threadId);
+        }
+        if (filter.groupId !== undefined) {
+          matches = matches && op.context.groupId === filter.groupId;
+        }
+        if (filter.scope !== undefined) {
+          matches = matches && op.context.scope === filter.scope;
+        }
+        if (filter.isNew !== undefined) {
+          matches = matches && op.context.isNew === filter.isNew;
+        }
       }
 
       if (matches) {
@@ -672,14 +728,22 @@ export class OperationActionsImpl {
    * agent) and persists fire-and-forget. After it persists we refresh the home
    * sidebar list so the cross-agent unread badge updates even for agents whose
    * topics aren't loaded on this client.
+   *
+   * `scope` must be carried through for group runs, exactly like the run's own
+   * status writes do. Without it `updateTopicStatus` auto-derives `group_agent`
+   * from agentId+groupId, so the optimistic patch lands in a bucket the sidebar
+   * never reads — leaving the VISIBLE group topic stuck on the run-start
+   * 'running' (spinner still turning on a finished chat) until the next refetch.
    */
   markTopicUnread = ({
     agentId,
     groupId,
+    scope,
     topicId,
   }: {
     agentId?: string;
     groupId?: string | null;
+    scope?: TopicMapScope;
     topicId?: string | null;
   }): void => {
     if (!topicId) return;
@@ -689,6 +753,7 @@ export class OperationActionsImpl {
       .updateTopicStatus?.({
         agentId,
         groupId: groupId ?? undefined,
+        ...(scope ? { scope } : {}),
         status: 'unread',
         topicId,
       })

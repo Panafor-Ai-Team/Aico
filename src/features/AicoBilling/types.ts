@@ -1,0 +1,161 @@
+export type AicoBillingContext =
+  { source: 'personal' } | { source: 'organization'; organizationId: string };
+
+/**
+ * Why a funded source still has no managed key. Surfaced instead of the
+ * eternal "key will be created" pending state when provisioning was
+ * attempted and failed (allocate-time mint or wallet lazy repair).
+ */
+export type AicoKeyProvisionError = 'PROVIDER_CAPACITY' | 'PROVIDER_UNAVAILABLE';
+
+export type AicoPersonalBillingSource = {
+  hasManagedKey: boolean;
+  isActive: boolean;
+  remainingMicroUsd: string;
+  /** Spendable balance in π tokens (derived from raw capacity). */
+  remainingPi: string;
+  /** FIN-016: toman still spendable, pro-rated from what was paid in. */
+  remainingToman: string;
+  remainingUsd: string;
+  source: 'personal';
+  /**
+   * FIN-018: false when the remaining figures are the last trusted reading
+   * rather than a live one. Render an explicit stale state — never pass a held
+   * figure off as current.
+   */
+  usageKnown: boolean;
+};
+
+export type AicoOrganizationBillingSource = {
+  /**
+   * False when the member has never received an org allocation (distinct from
+   * an allocated budget that was later deactivated / reclaimed).
+   */
+  budgetAllocated: boolean;
+  hasManagedKey: boolean;
+  isActive: boolean;
+  /**
+   * Set when a funded budget has no key because provisioning failed.
+   * Optional so older cached responses keep typechecking; absent means null.
+   */
+  keyProvisionError?: AicoKeyProvisionError | null;
+  organizationId: string;
+  organizationName: string;
+  remainingMicroUsd: string;
+  remainingPi: string;
+  remainingUsd: string;
+  renewalBlocked: boolean;
+  source: 'organization';
+};
+
+export type AicoBillingSource = AicoPersonalBillingSource | AicoOrganizationBillingSource;
+
+export type AicoBillingSourcesResponse = {
+  /** Server `AICO_CVC_TOKENS_PER_USD`; absent in responses cached by older builds. */
+  cvcTokensPerUsd?: number;
+  preferredBillingSource: 'personal' | 'organization';
+  preferredOrganizationId: string | null;
+  sources: AicoBillingSource[];
+  /**
+   * Personal-path trial is currently usable for chat (env + config + active row).
+   * Org budgets never inherit trial.
+   */
+  trialActive: boolean;
+  /** Trial can be activated from the wallet UI (enabled and not already used). */
+  trialAvailable: boolean;
+};
+
+/** Why managed chat is blocked for the selected billing source (Aico error codes). */
+export type AicoBillingChatBlockReason =
+  | 'MANAGED_KEY_UNAVAILABLE'
+  | 'MEMBER_BUDGET_RENEWAL_BLOCKED'
+  | 'MEMBER_BUDGET_UNFUNDED'
+  | 'PERSONAL_FUNDS_UNAVAILABLE'
+  | 'PERSONAL_WALLET_INACTIVE'
+  | 'MEMBER_BUDGET_INACTIVE'
+  | 'MEMBER_BUDGET_NOT_ALLOCATED';
+
+/**
+ * Selected source with $0 (or no key) cannot chat, unless personal + active trial.
+ * Mirrors server `AicoManagedPolicy.authorize` personal/org funds checks.
+ */
+export const getBillingChatBlockReason = (
+  source: AicoBillingSource | undefined,
+  options: { trialActive: boolean },
+): AicoBillingChatBlockReason | null => {
+  if (!source) return 'PERSONAL_FUNDS_UNAVAILABLE';
+
+  if (source.source === 'organization' && !source.budgetAllocated) {
+    return 'MEMBER_BUDGET_NOT_ALLOCATED';
+  }
+
+  if (source.source === 'organization' && source.renewalBlocked) {
+    return 'MEMBER_BUDGET_RENEWAL_BLOCKED';
+  }
+
+  if (!source.isActive) {
+    return source.source === 'personal' ? 'PERSONAL_WALLET_INACTIVE' : 'MEMBER_BUDGET_INACTIVE';
+  }
+
+  if (!source.hasManagedKey) {
+    return 'MANAGED_KEY_UNAVAILABLE';
+  }
+
+  const remaining = Number(source.remainingMicroUsd ?? 0);
+  if (Number.isFinite(remaining) && remaining > 0) return null;
+
+  if (source.source === 'personal' && options.trialActive) return null;
+
+  return source.source === 'personal' ? 'PERSONAL_FUNDS_UNAVAILABLE' : 'MEMBER_BUDGET_UNFUNDED';
+};
+
+export const canChatWithBillingSource = (
+  source: AicoBillingSource | undefined,
+  options: { trialActive: boolean },
+): boolean => getBillingChatBlockReason(source, options) === null;
+
+export const billingContextKey = (ctx: AicoBillingContext): string =>
+  ctx.source === 'personal' ? 'personal' : `organization:${ctx.organizationId}`;
+
+export const isSameBillingContext = (a: AicoBillingContext, b: AicoBillingContext): boolean =>
+  billingContextKey(a) === billingContextKey(b);
+
+export const preferenceToBillingContext = (params: {
+  preferredBillingSource: 'personal' | 'organization';
+  preferredOrganizationId: string | null | undefined;
+  sources: AicoBillingSource[];
+}): AicoBillingContext => {
+  if (params.preferredBillingSource === 'organization' && params.preferredOrganizationId) {
+    const match = params.sources.find(
+      (s) => s.source === 'organization' && s.organizationId === params.preferredOrganizationId,
+    );
+    if (match?.source === 'organization') {
+      return { organizationId: match.organizationId, source: 'organization' };
+    }
+  }
+
+  const firstOrg = params.sources.find((s) => s.source === 'organization');
+  if (params.preferredBillingSource === 'organization' && firstOrg?.source === 'organization') {
+    return { organizationId: firstOrg.organizationId, source: 'organization' };
+  }
+
+  return { source: 'personal' };
+};
+
+export const findBillingSource = (
+  sources: AicoBillingSource[],
+  ctx: AicoBillingContext,
+): AicoBillingSource | undefined => {
+  if (ctx.source === 'personal') {
+    return sources.find((s) => s.source === 'personal');
+  }
+  return sources.find(
+    (s) => s.source === 'organization' && s.organizationId === ctx.organizationId,
+  );
+};
+
+export const formatRemainingUsd = (remainingUsd: string | undefined): string => {
+  const n = Number(remainingUsd ?? 0);
+  if (!Number.isFinite(n)) return '$0.00';
+  return `$${n.toFixed(2)}`;
+};

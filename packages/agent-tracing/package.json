@@ -4,6 +4,7 @@
   "private": true,
   "exports": {
     ".": "./src/index.ts",
+    "./file-store": "./src/store/file-store.ts",
     "./store": "./src/store/types.ts",
     "./recorder": "./src/recorder/index.ts"
   },
@@ -17,7 +18,8 @@
   },
   "dependencies": {
     "commander": "^13.1.0",
-    "gpt-tokenizer": "^3.4.0"
+    "gpt-tokenizer": "^3.4.0",
+    "model-bank": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.6"

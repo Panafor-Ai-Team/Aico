@@ -81,10 +81,10 @@ vi.mock('@/business/server/workspaceApiKey', () => ({
   canUseWorkspaceApiKeys: mockCanUseWorkspaceApiKeys,
 }));
 
-const mockHasWorkspaceAdminAccess = vi.hoisted(() => vi.fn(async () => true));
+const mockHasActiveWorkspaceMembership = vi.hoisted(() => vi.fn(async () => true));
 
 vi.mock('@/database/models/workspace', () => ({
-  hasWorkspaceAdminAccess: mockHasWorkspaceAdminAccess,
+  hasActiveWorkspaceMembership: mockHasActiveWorkspaceMembership,
 }));
 
 describe('createContextInner', () => {
@@ -240,6 +240,7 @@ describe('createLambdaContext', () => {
       keyHash: 'hashed-key',
       lastUsedAt: null,
       name: 'Test API Key',
+      scopes: null,
       updatedAt: new Date(),
       userId: 'api-user',
       workspaceId: null,
@@ -271,6 +272,7 @@ describe('createLambdaContext', () => {
       keyHash: 'hashed-key',
       lastUsedAt: null,
       name: 'Test API Key',
+      scopes: null,
       updatedAt: new Date(),
       userId: 'api-user',
       workspaceId,
@@ -324,9 +326,9 @@ describe('createLambdaContext', () => {
     expect(context.workspaceId).toBe('ws-1');
   });
 
-  it('should reject a workspace API key whose issuer is no longer an admin', async () => {
+  it('should reject a workspace API key whose issuer is no longer an active member', async () => {
     vi.mocked(ApiKeyModel.findByKey).mockResolvedValue(makeApiKeyRecord('ws-1'));
-    mockHasWorkspaceAdminAccess.mockResolvedValueOnce(false);
+    mockHasActiveWorkspaceMembership.mockResolvedValueOnce(false);
 
     const request = new NextRequest('https://example.com/trpc/lambda', {
       headers: {
@@ -339,7 +341,7 @@ describe('createLambdaContext', () => {
 
     expect(context.userId).toBeNull();
     expect(context.workspaceId).toBeUndefined();
-    expect(mockHasWorkspaceAdminAccess).toHaveBeenCalledWith(expect.anything(), {
+    expect(mockHasActiveWorkspaceMembership).toHaveBeenCalledWith(expect.anything(), {
       userId: 'api-user',
       workspaceId: 'ws-1',
     });
@@ -403,6 +405,10 @@ describe('createLambdaContext', () => {
 
     expect(context.userId).toBe('session-user');
     expect(mockGetSession).toHaveBeenCalledOnce();
+    expect(mockGetSession).toHaveBeenCalledWith({
+      headers: request.headers,
+      query: { disableCookieCache: true },
+    });
   });
 
   it('should authenticate with active OIDC auth and skip session fallback', async () => {
@@ -459,5 +465,41 @@ describe('createLambdaContext', () => {
     expect(context.oidcAuth).toBeUndefined();
     expect(mockValidateOIDCJWT).toHaveBeenCalledWith('oidc-token');
     expect(mockGetSession).not.toHaveBeenCalled();
+  });
+
+  it('should not apply mock-dev auth bypass on the control plane', async () => {
+    const prev = {
+      allow: process.env.AICO_ALLOW_CONTROL_PLANE_MOCK_AUTH,
+      isCp: process.env.AICO_IS_CONTROL_PLANE,
+      mock: process.env.ENABLE_MOCK_DEV_USER,
+      mockId: process.env.MOCK_DEV_USER_ID,
+      nodeEnv: process.env.NODE_ENV,
+    };
+    // NODE_ENV is readonly in the ambient types; the write works at runtime.
+    (process.env as { NODE_ENV?: string }).NODE_ENV = 'development';
+    process.env.AICO_IS_CONTROL_PLANE = '1';
+    process.env.ENABLE_MOCK_DEV_USER = '1';
+    process.env.MOCK_DEV_USER_ID = 'user_mock_admin';
+    delete process.env.AICO_ALLOW_CONTROL_PLANE_MOCK_AUTH;
+
+    try {
+      const request = new NextRequest('https://example.com/trpc/lambda', {
+        headers: { 'lobe-auth-dev-backend-api': '1' },
+      });
+      const context = await createLambdaContext(request);
+      expect(context.userId).toBeNull();
+      expect(context.adminId).toBeNull();
+      expect(mockGetSession).not.toHaveBeenCalled();
+    } finally {
+      (process.env as { NODE_ENV?: string }).NODE_ENV = prev.nodeEnv;
+      if (prev.isCp === undefined) delete process.env.AICO_IS_CONTROL_PLANE;
+      else process.env.AICO_IS_CONTROL_PLANE = prev.isCp;
+      if (prev.mock === undefined) delete process.env.ENABLE_MOCK_DEV_USER;
+      else process.env.ENABLE_MOCK_DEV_USER = prev.mock;
+      if (prev.mockId === undefined) delete process.env.MOCK_DEV_USER_ID;
+      else process.env.MOCK_DEV_USER_ID = prev.mockId;
+      if (prev.allow === undefined) delete process.env.AICO_ALLOW_CONTROL_PLANE_MOCK_AUTH;
+      else process.env.AICO_ALLOW_CONTROL_PLANE_MOCK_AUTH = prev.allow;
+    }
   });
 });

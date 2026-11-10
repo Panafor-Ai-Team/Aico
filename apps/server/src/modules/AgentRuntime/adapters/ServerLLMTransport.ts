@@ -13,7 +13,7 @@ import type {
   LLMTransport,
 } from '@lobechat/agent-runtime';
 import { resolveLLMMaxAttempts, resolveLLMRetryBudget } from '@lobechat/agent-runtime';
-import { BRANDING_PROVIDER } from '@lobechat/business-const';
+import { BRANDING_PROVIDER, toLiveManagedModelId } from '@lobechat/business-const';
 import {
   type ChatStreamPayload,
   consumeStreamUntilDone,
@@ -29,10 +29,15 @@ import {
   buildChatRequestAttributes,
   buildChatResponseAttributes,
   chatSpanName,
+  recordChatTtftPhase,
   tracer as agentRuntimeTracer,
 } from '@lobechat/observability-otel/modules/agent-runtime';
 
+import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import type { AicoBillingContext } from '@/server/services/aico/billingContext';
+import { resolvePreferredGenerationBilling } from '@/server/services/aico/generationBilling';
+import { AicoManagedPolicy } from '@/server/services/aico/managedPolicy';
 
 import type { RuntimeExecutorContext } from '../context';
 import { log, sleep } from '../executorHelpers';
@@ -53,7 +58,27 @@ const SERVER_LLM_RETRY_POLICY = {
   noRetryProviders: [BRANDING_PROVIDER],
 };
 
+// Bound for time-to-first-chunk of one LLM attempt. Attempts that produce no
+// chunk at all (tool-call-only turns, fast failures) settle on their own; a
+// hung upstream that sends nothing fails here instead of riding the OpenAI
+// SDK default (10 min) and multiplying across the 6-attempt retry policy.
+// The message carries "timed out" so the retry classifier keeps it retryable.
+const LLM_FIRST_BYTE_TIMEOUT_MS = 60_000;
+
+// Cumulative first-byte budget for one call_llm step across its attempts.
+// Per-attempt caps alone still sum to minutes during a full outage; once the
+// budget is spent, remaining attempts fail immediately so the run ends fast.
+// Healthy and flapping upstreams finish inside the budget and never notice it.
+const LLM_FIRST_BYTE_BUDGET_MS = 120_000;
+
+// Marks our own stall-guard timeouts. Neutral to the error classifier (keeps
+// them retryable via "timed out") but lets the retry policy skip backoff
+// sleeps: spacing retries helps rate limits, which fail fast — not hangs.
+const STALL_GUARD_MARKER = '[stall-guard]';
+
 class ServerLLMRetryPolicy implements LLMRetryPolicy {
+  private lastFailureWasStall = false;
+
   constructor(private readonly ctx: RuntimeExecutorContext) {}
 
   classifyError(error: unknown) {
@@ -81,13 +106,20 @@ class ServerLLMRetryPolicy implements LLMRetryPolicy {
       maxAttempts,
       delayMs,
     );
+    this.lastFailureWasStall = error.message?.includes(STALL_GUARD_MARKER) ?? false;
   }
 
-  resolveRetryBudget(provider: string) {
-    return resolveLLMRetryBudget(provider, SERVER_LLM_RETRY_POLICY);
+  resolveRetryBudget(provider: string, error?: unknown) {
+    return resolveLLMRetryBudget(provider, SERVER_LLM_RETRY_POLICY, error);
   }
 
   async waitForRetry(delayMs: number): Promise<void> {
+    // A hung gateway will not recover during backoff; retry at once instead
+    // of adding up to a minute of dead sleep across attempts.
+    if (this.lastFailureWasStall) {
+      this.lastFailureWasStall = false;
+      return;
+    }
     await sleep(delayMs);
   }
 }
@@ -138,6 +170,7 @@ class ServerLLMTrace implements LLMTrace {
   onFirstChunk() {
     if (this.firstChunkAt === undefined) {
       this.firstChunkAt = Date.now() - this.llmStartTime;
+      recordChatTtftPhase('provider_ttft', this.firstChunkAt);
     }
   }
 
@@ -169,10 +202,19 @@ class ServerLLMTrace implements LLMTrace {
 export class ServerLLMTransport implements LLMTransport {
   readonly retryPolicy: LLMRetryPolicy;
 
+  /** Keyed by provider + model: a managed runtime is authorized for one model. */
   private readonly modelRuntimePromises = new Map<
     string,
     ReturnType<ServerLLMTransport['createModelRuntime']>
   >();
+
+  private billingContextPromise?: Promise<AicoBillingContext>;
+
+  // Cumulative first-byte budget tracking for the current call_llm step.
+  // Attempt numbers restart at 1 on every step, which is the reset signal.
+  private firstByteBudgetKey?: string;
+  private firstByteBudgetStartedAt = 0;
+  private lastAttemptNumber = 0;
 
   constructor(
     private readonly ctx: RuntimeExecutorContext,
@@ -186,7 +228,7 @@ export class ServerLLMTransport implements LLMTransport {
   }
 
   async runAttempt(input: LLMAttemptInput): Promise<LLMAttemptExecution> {
-    const modelRuntime = await this.getModelRuntime(input.provider);
+    const modelRuntime = await this.getModelRuntime(input.provider, input.model);
     return this.runAttemptWithRuntime(input, modelRuntime);
   }
 
@@ -194,7 +236,7 @@ export class ServerLLMTransport implements LLMTransport {
     payload: LLMStreamPayload,
     handlers?: Parameters<LLMTransport['stream']>[1],
   ): Promise<LLMStreamResult> {
-    const runtime = await this.createModelRuntime(payload.provider);
+    const runtime = await this.createModelRuntime(payload.provider, payload.model);
     const { provider: _provider, ...runtimePayload } = payload;
     let content = '';
     let usage: LLMStreamResult['usage'];
@@ -228,20 +270,48 @@ export class ServerLLMTransport implements LLMTransport {
     return result;
   }
 
-  private createModelRuntime(provider: string) {
-    return initModelRuntimeFromDB(
-      this.ctx.serverDB,
-      this.ctx.userId!,
-      provider,
-      this.ctx.workspaceId,
-    );
+  /**
+   * Aico: a managed provider refuses any call without an explicit billing
+   * context and model (`BILLING_CONTEXT_REQUIRED` / `MODEL_ID_REQUIRED`). Server
+   * runs — task runs, scheduled ticks — have no browser request to carry one,
+   * so bill the user's preferred source, as background generation and memory
+   * work already do.
+   */
+  private async createModelRuntime(provider: string, model: string) {
+    const { serverDB, workspaceId } = this.ctx;
+    const userId = this.ctx.userId!;
+
+    if (!AicoManagedPolicy.isManagedProvider(provider)) {
+      return initModelRuntimeFromDB(serverDB, userId, provider, workspaceId);
+    }
+
+    return initModelRuntimeFromDB(serverDB, userId, provider, workspaceId, {
+      billingContext: await this.getBillingContext(),
+      modelId: toLiveManagedModelId(model),
+    });
   }
 
-  private getModelRuntime(provider: string) {
-    let promise = this.modelRuntimePromises.get(provider);
+  private getBillingContext() {
+    if (!this.billingContextPromise) {
+      const billingModel = new AicoBillingModel(this.ctx.serverDB);
+      this.billingContextPromise = resolvePreferredGenerationBilling(
+        async (uid) => (await billingModel.getUserWallet(uid)) ?? null,
+        this.ctx.userId!,
+      );
+      // Don't cache a failed lookup: the next attempt should retry it.
+      this.billingContextPromise.catch(() => {
+        this.billingContextPromise = undefined;
+      });
+    }
+    return this.billingContextPromise;
+  }
+
+  private getModelRuntime(provider: string, model: string) {
+    const key = `${provider}\u0000${model}`;
+    let promise = this.modelRuntimePromises.get(key);
     if (!promise) {
-      promise = this.createModelRuntime(provider);
-      this.modelRuntimePromises.set(provider, promise);
+      promise = this.createModelRuntime(provider, model);
+      this.modelRuntimePromises.set(key, promise);
     }
     return promise;
   }
@@ -256,7 +326,8 @@ export class ServerLLMTransport implements LLMTransport {
     const tools = resolved.tools.length > 0 ? resolved.tools : undefined;
     const chatPayload = {
       messages: input.context.messages as ChatStreamPayload['messages'],
-      model: input.model,
+      // Agent configs and sub-agent overrides may carry another gateway's default id.
+      model: toLiveManagedModelId(input.model),
       stream: this.ctx.stream ?? true,
       tools,
       ...(input.context.modelParameters as Partial<ChatStreamPayload>),
@@ -265,6 +336,43 @@ export class ServerLLMTransport implements LLMTransport {
       }),
     };
     const operationLogId = `${this.ctx.operationId}:${this.ctx.stepIndex}`;
+    // New step (attempts restart at 1) or new operation: restart the budget.
+    if (this.firstByteBudgetKey !== operationLogId || input.attempt <= this.lastAttemptNumber) {
+      this.firstByteBudgetKey = operationLogId;
+      this.firstByteBudgetStartedAt = Date.now();
+    }
+    this.lastAttemptNumber = input.attempt;
+    const firstByteCapMs = Math.max(
+      0,
+      Math.min(
+        LLM_FIRST_BYTE_TIMEOUT_MS,
+        LLM_FIRST_BYTE_BUDGET_MS - (Date.now() - this.firstByteBudgetStartedAt),
+      ),
+    );
+    let notifyFirstChunk!: () => void;
+    const firstChunkPromise = new Promise<void>((resolve) => {
+      notifyFirstChunk = resolve;
+    });
+    let firstByteTimer: ReturnType<typeof setTimeout> | undefined;
+    const firstByteTimeout = new Promise<never>((_, reject) => {
+      if (firstByteCapMs <= 0) {
+        // Budget spent by earlier attempts: fail at once so the remaining
+        // attempts exhaust immediately instead of burning another minute each.
+        reject(
+          new Error(
+            `LLM attempt timed out: first-byte budget of ${LLM_FIRST_BYTE_BUDGET_MS}ms spent (model ${input.model}) ${STALL_GUARD_MARKER}`,
+          ),
+        );
+        return;
+      }
+      firstByteTimer = setTimeout(() => {
+        reject(
+          new Error(
+            `LLM attempt timed out: no chunk within ${firstByteCapMs}ms (model ${input.model}) ${STALL_GUARD_MARKER}`,
+          ),
+        );
+      }, firstByteCapMs);
+    });
     const attempt = createServerCallLlmAttempt({
       attempt: input.attempt,
       blobStore: this.blobStore,
@@ -275,7 +383,10 @@ export class ServerLLMTransport implements LLMTransport {
       messageCount: chatPayload.messages.length,
       model: input.model,
       modelRuntime,
-      onFirstChunk: input.onFirstChunk ?? (() => {}),
+      onFirstChunk: () => {
+        notifyFirstChunk();
+        input.onFirstChunk?.();
+      },
       operationLogId,
       provider: input.provider,
       resolved,
@@ -288,12 +399,32 @@ export class ServerLLMTransport implements LLMTransport {
       userAgent: input.state.metadata?.userAgent,
     });
 
+    // A hung upstream loses at the first-byte cap; an attempt that settles on
+    // its own (fast failure, tool-call-only turn with no text chunks) resolves
+    // through `executing`; once the first chunk lands the cap is disarmed and
+    // the remainder streams unbounded so long generations are never cut.
+    const executing = attempt.execute();
     try {
-      await attempt.execute();
+      const firstByteOrSettled = await Promise.race([
+        firstByteTimeout,
+        executing.then(
+          () => 'settled' as const,
+          (error: unknown) => {
+            throw error;
+          },
+        ),
+        firstChunkPromise.then(() => 'first-byte' as const),
+      ]);
+      if (firstByteOrSettled === 'first-byte') {
+        clearTimeout(firstByteTimer);
+        await executing;
+      }
       return { ok: true, output: attempt.snapshot() };
     } catch (error) {
       attempt.clearBuffers();
       return { error, ok: false, output: attempt.snapshot() };
+    } finally {
+      clearTimeout(firstByteTimer);
     }
   }
 }

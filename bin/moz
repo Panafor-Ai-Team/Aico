@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Short deploy command for local Aico Docker (product + control plane).
+#
+# Install once:
+#   ln -sf "$HOME/Aico/bin/moz" ~/.local/bin/moz
+#
+# Usage:
+#   moz             # start if not running
+#   moz -u          # build + deploy (auto pre-deploy backup)
+#   moz -d          # force redeploy (auto pre-deploy backup)
+#   moz -b          # build only (app image + control-plane dist)
+#   moz -B          # backup DB + uploads now
+#   moz --restore F # restore SQL dump into running Postgres
+#   moz -r          # restart
+#   moz -i          # info
+#   moz -k          # kill (stop)
+#
+# Control plane: http://127.0.0.1:3020  (SPA + API on one port; management key stays off product)
+set -euo pipefail
+
+resolve_script_path() {
+  local source="${BASH_SOURCE[0]}"
+  while [[ -L "$source" ]]; do
+    local dir
+    dir="$(cd -P "$(dirname "$source")" && pwd)"
+    source="$(readlink "$source")"
+    [[ "$source" != /* ]] && source="$dir/$source"
+  done
+  cd -P "$(dirname "$source")" && pwd
+}
+
+ROOT="$(resolve_script_path)/.."
+ROOT="$(cd "$ROOT" && pwd)"
+exec "$ROOT/scripts/deploy-local.sh" "$@"

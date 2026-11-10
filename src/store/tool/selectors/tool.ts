@@ -1,5 +1,9 @@
 import { getBuiltinRenderDisplayControl } from '@lobechat/builtin-tools/displayControls';
-import { getComposioAppByIdentifier, getLobehubSkillProviderById } from '@lobechat/const';
+import {
+  describeConnectedComposioApp,
+  getComposioAppByIdentifier,
+  getLobehubSkillProviderById,
+} from '@lobechat/const';
 import { type RenderDisplayControl, type ToolManifest } from '@lobechat/types';
 
 import {
@@ -67,10 +71,14 @@ const getManifestLoadingStatus = (id: string) => (s: ToolStoreState) => {
 
   if (s.pluginInstallLoading[id]) return 'loading';
 
+  if (s.pluginInstallErrors[id]) return 'error';
+
   if (!manifest) return 'error';
 
   if (!!manifest) return 'success';
 };
+
+const getPluginInstallError = (id: string) => (s: ToolStoreState) => s.pluginInstallErrors[id];
 
 const isToolHasUI = (id: string) => (s: ToolStoreState) => {
   const manifest = getManifestById(id)(s);
@@ -165,10 +173,11 @@ const availableToolsForDiscovery = (s: ToolStoreState): AvailableToolForDiscover
     .filter((server) => server.status === ComposioServerStatus.ACTIVE && server.tools?.length)
     .map((server) => {
       const config = getComposioAppByIdentifier(server.identifier);
+      const name = config?.label || server.label;
       return {
-        description: config?.description || '',
+        description: describeConnectedComposioApp(name),
         identifier: server.identifier,
-        name: config?.label || server.label,
+        name,
       };
     });
 
@@ -184,7 +193,31 @@ const availableToolsForDiscovery = (s: ToolStoreState): AvailableToolForDiscover
       };
     });
 
-  return [...builtinItems, ...pluginItems, ...composioItems, ...lobehubSkillItems];
+  // 5. Custom MCP connectors (enabled, connected, with synced tools). Their
+  //    tools run server-side with the stored credentials, so a connected one is
+  //    as usable as a connected Composio app and must be activatable on demand.
+  const takenIds = new Set(
+    [...builtinItems, ...pluginItems, ...composioItems, ...lobehubSkillItems].map(
+      (item) => item.identifier,
+    ),
+  );
+  const connectorItems = (s.connectors ?? [])
+    .filter((c) => c.sourceType === 'custom')
+    .filter((c) => c.isEnabled && c.status === 'connected' && (c.tools?.length ?? 0) > 0)
+    .filter((c) => !takenIds.has(c.identifier))
+    .map((c) => ({
+      description: describeConnectedComposioApp(c.name),
+      identifier: c.identifier,
+      name: c.name,
+    }));
+
+  return [
+    ...builtinItems,
+    ...pluginItems,
+    ...composioItems,
+    ...lobehubSkillItems,
+    ...connectorItems,
+  ];
 };
 
 export const toolSelectors = {
@@ -192,6 +225,7 @@ export const toolSelectors = {
   discoverableMetaList,
   getManifestById,
   getManifestLoadingStatus,
+  getPluginInstallError,
   getMetaById,
   getRenderDisplayControl,
   isToolHasUI,

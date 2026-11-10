@@ -5,6 +5,11 @@ import * as ModelRuntimeModule from '@/server/modules/ModelRuntime';
 
 import { AiGenerationService } from './index';
 
+const getUserWallet = vi.hoisted(() => vi.fn());
+vi.mock('@/database/models/aicoBilling', () => ({
+  AicoBillingModel: vi.fn().mockImplementation(() => ({ getUserWallet })),
+}));
+
 describe('AiGenerationService.generateObject', () => {
   const generateObject = vi.fn();
   const initSpy = vi.spyOn(ModelRuntimeModule, 'initModelRuntimeFromDB');
@@ -23,7 +28,24 @@ describe('AiGenerationService.generateObject', () => {
       model: 'gpt-4o',
       provider: 'openai',
     });
-    expect(initSpy).toHaveBeenCalledWith({}, 'user-1', 'openai');
+    expect(initSpy).toHaveBeenCalledWith({}, 'user-1', 'openai', undefined);
+  });
+
+  // A managed provider refuses a call without these (BILLING_CONTEXT_REQUIRED / MODEL_ID_REQUIRED).
+  it('bills a managed provider with the user preferred source and the model id', async () => {
+    generateObject.mockResolvedValue({ ok: true });
+    getUserWallet.mockResolvedValue(null);
+    const ai = new AiGenerationService({} as any, 'user-1', 'ws-1');
+    await ai.generateObject({
+      messages: [{ content: 'hi', role: 'user' }],
+      model: 'synthetic/managed-model',
+      provider: 'aico',
+    });
+    expect(initSpy).toHaveBeenCalledWith({}, 'user-1', 'aico', 'ws-1', {
+      billingContext: { source: 'personal' },
+      modelId: 'synthetic/managed-model',
+    });
+    expect(generateObject.mock.calls[0][0].model).toBe('synthetic/managed-model');
   });
 
   it('forwards messages / model / schema / tools / thinking verbatim to the runtime', async () => {

@@ -1,3 +1,4 @@
+import { BRANDING_NAME } from '@lobechat/business-const';
 import { type LobeToolManifest } from '@lobechat/context-engine';
 import { type LobeChatDatabase } from '@lobechat/database';
 import { MarketSDK, type OrgRef, orgRefToPathSegment } from '@lobehub/market-sdk';
@@ -561,7 +562,9 @@ export class MarketService {
     try {
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeout = setTimeout(() => {
-          const error = new Error(`LobeHub Skill execution timed out after ${timeoutMs}ms`);
+          const error = new Error(
+            `${BRANDING_NAME} Skill execution timed out after ${timeoutMs}ms`,
+          );
           error.name = 'TimeoutError';
           reject(error);
           abortController.abort(error);
@@ -593,7 +596,8 @@ export class MarketService {
           dataMessage = JSON.stringify(response.data);
         }
 
-        const message = responseError?.message || dataMessage || 'LobeHub Skill call failed';
+        const message =
+          responseError?.message || dataMessage || `${BRANDING_NAME} Skill call failed`;
 
         return {
           content: message,
@@ -684,7 +688,7 @@ export class MarketService {
             microsoft: 'Outlook Calendar',
             notion: 'Notion',
             posthog: 'PostHog',
-            twitter: 'X (Twitter)',
+            twitter: 'X',
             vercel: 'Vercel',
           };
           const providerLabel = PROVIDER_LABELS[providerId] || providerId;
@@ -701,7 +705,7 @@ export class MarketService {
             identifier: providerId,
             meta: {
               avatar: icon || '🔗',
-              description: `LobeHub Skill: ${providerLabel}`,
+              description: `${BRANDING_NAME} Skill: ${providerLabel}`,
               tags: ['lobehub-skill', providerId],
               title: providerLabel,
             },

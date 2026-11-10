@@ -33,12 +33,20 @@ import { appEnv } from '@/envs/app';
 import { authedProcedure, router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import {
+  managedPolicyErrorToTrpc,
+  resolveManagedGenerationBilling,
+  toManagedGenerationModelId,
+} from '@/server/services/aico/generationBilling';
+import { AicoManagedPolicyError } from '@/server/services/aico/managedPolicy';
+import { resolveManagedPricingContext } from '@/server/services/aico/usageMultiplier';
 import { FileService } from '@/server/services/file';
 import { processBackgroundVideoPolling } from '@/server/services/generation/videoBackgroundPolling';
 import { after } from '@/server/utils/scheduleAfterResponse';
 import { AsyncTaskStatus, AsyncTaskType } from '@/types/asyncTask';
 
 import { createVideoTaskSubmitError } from './error';
+import { acceptsInlineVideoImages, inlineOwnedImage } from './inlineImage';
 
 const log = debug('lobe-video:lambda');
 
@@ -57,7 +65,13 @@ const videoProcedure = wsCompatProcedure.use(serverDatabase).use(async (opts) =>
 
 const videoCreateProcedure = videoProcedure.use(withScopedPermission('file:upload'));
 
+const aicoBillingSchema = z.union([
+  z.object({ source: z.literal('personal') }),
+  z.object({ organizationId: z.string().min(1), source: z.literal('organization') }),
+]);
+
 const createVideoInputSchema = z.object({
+  aicoBilling: aicoBillingSchema.optional(),
   generationTopicId: z.string(),
   model: z.string(),
   params: z
@@ -83,7 +97,17 @@ export const videoRouter = router({
     .mutation(async ({ input, ctx }) => {
       const { userId, serverDB, asyncTaskModel, fileService, generationTopicModel } = ctx;
       const wsId = ctx.workspaceId ?? undefined;
-      const { generationTopicId, provider, model, params } = input;
+      const { generationTopicId, provider, model, params, aicoBilling } = input;
+
+      let billingContext;
+      try {
+        billingContext = resolveManagedGenerationBilling({ aicoBilling, provider });
+      } catch (error) {
+        if (error instanceof AicoManagedPolicyError) {
+          throw new TRPCError(managedPolicyErrorToTrpc(error));
+        }
+        throw error;
+      }
 
       const { resolvedModelId } = await resolveBusinessModelMapping(provider, model);
 
@@ -164,6 +188,29 @@ export const videoRouter = router({
         }
       }
 
+      if (acceptsInlineVideoImages(provider)) {
+        const inlineContext = { db: serverDB, fileService, userId, workspaceId: wsId };
+        const inlined: Record<string, unknown> = {};
+        for (const field of ['imageUrl', 'endImageUrl'] as const) {
+          const url = params[field];
+          if (typeof url !== 'string' || !url) continue;
+          const dataUrl = await inlineOwnedImage(url, inlineContext);
+          if (dataUrl) inlined[field] = dataUrl;
+        }
+        if (Array.isArray(params.imageUrls)) {
+          inlined.imageUrls = await Promise.all(
+            params.imageUrls.map(async (url: unknown) =>
+              typeof url === 'string' && url
+                ? ((await inlineOwnedImage(url, inlineContext)) ?? url)
+                : url,
+            ),
+          );
+        }
+        if (Object.keys(inlined).length > 0) {
+          generationParams = { ...generationParams, ...inlined };
+        }
+      }
+
       // Step 0: Pre-charge (atomic budget deduction to prevent concurrent abuse)
       const generationTopic = await generationTopicModel.findById(generationTopicId);
       if (!generationTopic) {
@@ -221,6 +268,7 @@ export const videoRouter = router({
           .insert(asyncTasks)
           .values({
             metadata: {
+              aicoBilling: billingContext,
               ...(prechargeResult ? { precharge: prechargeResult } : {}),
               webhookToken,
             },
@@ -250,7 +298,10 @@ export const videoRouter = router({
 
       // Step 2: Call model runtime to submit video generation task
       try {
-        const modelRuntime = await initModelRuntimeFromDB(serverDB, userId, provider, wsId);
+        const modelRuntime = await initModelRuntimeFromDB(serverDB, userId, provider, wsId, {
+          billingContext,
+          modelId: toManagedGenerationModelId(resolvedModelId),
+        });
 
         const callbackBaseUrl = process.env.WEBHOOK_PROXY_URL || appEnv.APP_URL;
         const callbackUrl = `${callbackBaseUrl}/api/webhooks/video/${provider}?token=${webhookToken}`;
@@ -262,7 +313,11 @@ export const videoRouter = router({
             model: resolvedModelId,
             params: generationParams,
           },
-          { metadata: { trigger: RequestTrigger.Video } },
+          {
+            metadata: { trigger: RequestTrigger.Video },
+            // Per-second video rates carry the platform multiplier too.
+            pricingContext: await resolveManagedPricingContext(serverDB),
+          },
         );
 
         log('Video task submitted successfully, inferenceId: %s', response?.inferenceId);
@@ -296,6 +351,7 @@ export const videoRouter = router({
               const db = await getServerDB();
 
               await processBackgroundVideoPolling(db, {
+                aicoBilling: billingContext,
                 asyncTaskCreatedAt,
                 asyncTaskId,
                 generationBatchId: createdBatch.id,

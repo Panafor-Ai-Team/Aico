@@ -1,10 +1,11 @@
 'use client';
 
-import { Alert } from '@lobehub/ui';
+import { Alert } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cx } from 'antd-style';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useAutoSwitchUnavailableModel } from './useAutoSwitchUnavailableModel';
 import { useChatInputNotice } from './useChatInputNotice';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
@@ -53,6 +54,10 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 const ChatInputNotice = memo(() => {
   const { t } = useTranslation('chat');
   const notice = useChatInputNotice();
+  // Auto-switches the agent model once its current model drops out of the
+  // enabled list (wallet switch, admin revocation, deletion). Mounted here
+  // so it covers every chatbox that renders the notice (desktop + mobile).
+  useAutoSwitchUnavailableModel();
 
   if (!notice) return null;
 

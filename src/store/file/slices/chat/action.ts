@@ -1,10 +1,9 @@
-import { type ChatContextContent } from '@lobechat/types';
+import { type ChatContextContent, type FileItem } from '@lobechat/types';
 import { COMPRESSIBLE_IMAGE_TYPES, compressImageFile } from '@lobechat/utils/compressImage';
 import { toast } from '@lobehub/ui/base-ui';
 import { Buffer } from 'buffer.js';
 import { t } from 'i18next';
 
-import { notification } from '@/components/AntdStaticMethods';
 import { FILE_UPLOAD_BLACKLIST } from '@/const/file';
 import { fileService } from '@/services/file';
 import { ragService } from '@/services/rag';
@@ -21,6 +20,7 @@ import { sleep } from '@/utils/sleep';
 import { setNamespace } from '@/utils/storeDebug';
 
 import { type FileStore } from '../../store';
+import { resolvePersistedFileMime } from './persistedFile';
 import { filterSupportedChatUploadFiles } from './uploadGuard';
 
 const n = setNamespace('chat');
@@ -70,19 +70,78 @@ export class FileActionImpl {
     this.#get = get;
   }
 
-  addChatContextSelection = (context: ChatContextContent): void => {
-    const current = this.#get().chatContextSelections;
-    const next = [context, ...current.filter((item) => item.id !== context.id)];
+  addChatContextSelection = ({
+    contextKey,
+    selection,
+  }: {
+    contextKey: string;
+    selection: ChatContextContent;
+  }): void => {
+    const currentMap = this.#get().chatContextSelectionsByContext;
+    const current = currentMap[contextKey] ?? [];
+    const next = [selection, ...current.filter((item) => item.id !== selection.id)];
 
-    this.#set({ chatContextSelections: next }, false, n('addChatContextSelection'));
+    this.#set(
+      { chatContextSelectionsByContext: { ...currentMap, [contextKey]: next } },
+      false,
+      n('addChatContextSelection'),
+    );
   };
 
-  clearChatContextSelections = (): void => {
-    this.#set({ chatContextSelections: [] }, false, n('clearChatContextSelections'));
+  /**
+   * Attach an already-persisted file (e.g. one picked from the agent's earlier uploads)
+   * to the draft, so the chip row shows it and the send path includes it.
+   * `skipRemoveFile` keeps the stored file safe when the chip is removed.
+   *
+   * The agent config returns raw `files` rows, whose mime column is `fileType` (the
+   * `FileItem.type` typing does not hold there), and whose `url` is the stored key,
+   * not a loadable URL — so accept both mime fields and preview through `/f/:id`.
+   */
+  attachChatFile = (
+    file: Pick<FileItem, 'id' | 'name'> & {
+      fileType?: string | null;
+      size?: number | null;
+      type?: string | null;
+    },
+  ): void => {
+    if (this.#get().chatUploadFileList.some((item) => item.id === file.id)) return;
+
+    const url = `/f/${file.id}`;
+
+    this.#get().dispatchChatUploadFileList({
+      files: [
+        {
+          file: {
+            name: file.name,
+            size: file.size ?? 0,
+            type: resolvePersistedFileMime(file),
+          } as File,
+          fileUrl: url,
+          id: file.id,
+          previewUrl: url,
+          skipRemoveFile: true,
+          status: 'success',
+        },
+      ],
+      type: 'addFiles',
+    });
+  };
+
+  clearChatContextSelections = (contextKey: string): void => {
+    const currentMap = this.#get().chatContextSelectionsByContext;
+    if (!(contextKey in currentMap)) return;
+
+    const { [contextKey]: _removed, ...nextMap } = currentMap;
+    this.#set({ chatContextSelectionsByContext: nextMap }, false, n('clearChatContextSelections'));
   };
 
   clearChatUploadFileList = (): void => {
     this.#set({ chatUploadFileList: [] }, false, n('clearChatUploadFileList'));
+  };
+
+  /** Drop a file from the draft only — never deletes the stored file. */
+  detachChatFile = (id: string): void => {
+    this.#get().dispatchChatUploadFileList({ id, type: 'removeFile' });
   };
 
   dispatchChatUploadFileList = (payload: UploadFileListDispatch): void => {
@@ -92,9 +151,61 @@ export class FileActionImpl {
     this.#set({ chatUploadFileList: nextValue }, false, `dispatchChatFileList/${payload.type}`);
   };
 
-  removeChatContextSelection = (id: string): void => {
-    const next = this.#get().chatContextSelections.filter((item) => item.id !== id);
-    this.#set({ chatContextSelections: next }, false, n('removeChatContextSelection'));
+  moveChatContextSelections = (fromContextKey: string, toContextKey: string): void => {
+    if (fromContextKey === toContextKey) return;
+
+    const currentMap = this.#get().chatContextSelectionsByContext;
+    const source = currentMap[fromContextKey];
+    if (!source || source.length === 0) return;
+
+    const sourceIds = new Set(source.map((item) => item.id));
+    const target = currentMap[toContextKey] ?? [];
+    const nextTarget = [...source, ...target.filter((item) => !sourceIds.has(item.id))];
+    const { [fromContextKey]: _removed, ...nextMap } = currentMap;
+
+    this.#set(
+      { chatContextSelectionsByContext: { ...nextMap, [toContextKey]: nextTarget } },
+      false,
+      n('moveChatContextSelections'),
+    );
+  };
+
+  removeChatContextSelection = ({ contextKey, id }: { contextKey: string; id: string }): void => {
+    const currentMap = this.#get().chatContextSelectionsByContext;
+    const current = currentMap[contextKey];
+    if (!current) return;
+
+    const next = current.filter((item) => item.id !== id);
+    if (next.length === 0) {
+      const { [contextKey]: _removed, ...nextMap } = currentMap;
+      this.#set(
+        { chatContextSelectionsByContext: nextMap },
+        false,
+        n('removeChatContextSelection'),
+      );
+      return;
+    }
+
+    this.#set(
+      { chatContextSelectionsByContext: { ...currentMap, [contextKey]: next } },
+      false,
+      n('removeChatContextSelection'),
+    );
+  };
+
+  restoreChatContextSelections = (contextKey: string, selections: ChatContextContent[]): void => {
+    if (selections.length === 0) return;
+
+    const currentMap = this.#get().chatContextSelectionsByContext;
+    const restoredIds = new Set(selections.map((item) => item.id));
+    const current = currentMap[contextKey] ?? [];
+    const next = [...selections, ...current.filter((item) => !restoredIds.has(item.id))];
+
+    this.#set(
+      { chatContextSelectionsByContext: { ...currentMap, [contextKey]: next } },
+      false,
+      n('restoreChatContextSelections'),
+    );
   };
 
   removeChatUploadFile = async (id: string): Promise<void> => {
@@ -109,6 +220,15 @@ export class FileActionImpl {
     if (skipRemoveFile) return;
 
     await fileService.removeFile(id);
+  };
+
+  retryChatUploadFile = async (id: string): Promise<void> => {
+    const { chatUploadFileList, dispatchChatUploadFileList } = this.#get();
+    const item = chatUploadFileList.find((file) => file.id === id);
+    if (!item?.agentId) return;
+
+    dispatchChatUploadFileList({ id, type: 'removeFile' });
+    await this.uploadChatFiles([item.file], item.agentId);
   };
 
   startAsyncTask = async (
@@ -202,7 +322,14 @@ export class FileActionImpl {
           base64Url = `data:${file.type};base64,${base64}`;
         }
 
-        return { base64Url, file, id: file.name, previewUrl, status: 'pending' } as UploadFileItem;
+        return {
+          agentId,
+          base64Url,
+          file,
+          id: file.name,
+          previewUrl,
+          status: 'pending',
+        } as UploadFileItem;
       }),
     );
 
@@ -218,14 +345,19 @@ export class FileActionImpl {
           onStatusUpdate: dispatchChatUploadFileList,
         });
       } catch (error) {
-        // skip `UNAUTHORIZED` error
-        if (getErrorMessage(error) !== 'UNAUTHORIZED')
-          notification.error({
-            description: getUploadErrorDescription(error),
-            message: t('upload.uploadFailed', { ns: 'error' }),
+        if (getErrorMessage(error) === 'UNAUTHORIZED') {
+          dispatchChatUploadFileList({ id: file.name, type: 'removeFile' });
+        } else {
+          dispatchChatUploadFileList({
+            id: file.name,
+            type: 'updateFile',
+            value: {
+              error: getUploadErrorDescription(error),
+              status: 'error',
+              uploadState: undefined,
+            },
           });
-
-        dispatchChatUploadFileList({ id: file.name, type: 'removeFile' });
+        }
       }
 
       if (!fileResult) return;

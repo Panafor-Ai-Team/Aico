@@ -1,15 +1,17 @@
 import { isDesktop } from '@lobechat/const';
 import { TITLE_BAR_HEIGHT } from '@lobechat/desktop-bridge';
 import { type LobeToolCustomPlugin } from '@lobechat/types';
-import { Drawer, Flexbox } from '@lobehub/ui';
-import { Button } from '@lobehub/ui/base-ui';
-import { App, Form, Popconfirm } from 'antd';
+import { Flexbox } from '@lobehub/ui';
+import { Button, Drawer, toast } from '@lobehub/ui/base-ui';
+import { Form, Popconfirm } from 'antd';
 import { useResponsive } from 'antd-style';
 import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import MCPManifestForm from './MCPManifestForm';
+import { shouldRunMcpOAuthFlow } from './MCPManifestForm/utils';
 import PluginPreview from './PluginPreview';
+import { getSaveErrorMessage } from './saveError';
 
 interface DevModalProps {
   /** Enable the connector-backed OAuth auth type in the MCP form (see MCPManifestForm). */
@@ -39,13 +41,13 @@ const DevModal = memo<DevModalProps>(
   }) => {
     const isEditMode = mode === 'edit';
     const { t } = useTranslation('plugin');
-    const { message } = App.useApp();
 
     const [submitting, setSubmitting] = useState(false);
 
     const { mobile } = useResponsive();
     const [form] = Form.useForm();
     const authType = Form.useWatch(['customParams', 'mcp', 'auth', 'type'], form);
+    const mcpType = Form.useWatch(['customParams', 'mcp', 'type'], form);
 
     // Seed the form once per modal open, waiting for `value` to arrive (it may
     // be undefined initially while edit-mode credentials are being fetched).
@@ -63,26 +65,18 @@ const DevModal = memo<DevModalProps>(
 
     const doSave = async (values: LobeToolCustomPlugin, ctx?: { oauthPopup?: Window | null }) => {
       if (!onSave) {
-        message.success(t(isEditMode ? 'dev.updateSuccess' : 'dev.saveSuccess'));
+        toast.success(t(isEditMode ? 'dev.updateSuccess' : 'dev.saveSuccess'));
         onOpenChange(false);
         return;
       }
       setSubmitting(true);
       try {
         await onSave(values, ctx);
-        message.success(t(isEditMode ? 'dev.updateSuccess' : 'dev.saveSuccess'));
+        toast.success(t(isEditMode ? 'dev.updateSuccess' : 'dev.saveSuccess'));
         onOpenChange(false);
       } catch (error) {
         console.error('[DevModal] Install failed:', error);
-        const httpStatus = (error as { data?: { httpStatus?: number } })?.data?.httpStatus;
-        message.error(
-          httpStatus === 403
-            ? t(
-                'dev.permissionDenied',
-                'You are not allowed to modify this connector — only the creator or a workspace owner can',
-              )
-            : t('dev.saveError'),
-        );
+        toast.error(getSaveErrorMessage(error, t as never));
       } finally {
         setSubmitting(false);
       }
@@ -103,7 +97,7 @@ const DevModal = memo<DevModalProps>(
     };
 
     const handlePrimaryClick = () => {
-      if (enableOAuth && authType === 'oauth2') return runOAuthFlow();
+      if (shouldRunMcpOAuthFlow({ authType, enableOAuth, mcpType })) return runOAuthFlow();
       form.submit();
     };
 
@@ -128,7 +122,7 @@ const DevModal = memo<DevModalProps>(
             }}
             onConfirm={() => {
               onDelete?.();
-              message.success(t('dev.deleteSuccess'));
+              toast.success(t('dev.deleteSuccess'));
             }}
           >
             <Button danger style={buttonStyle}>
@@ -169,7 +163,6 @@ const DevModal = memo<DevModalProps>(
         }}
       >
         <Drawer
-          destroyOnHidden
           containerMaxWidth={'auto'}
           footer={footer}
           height={isDesktop ? `calc(100vh - ${TITLE_BAR_HEIGHT}px)` : '100vh'}
@@ -178,21 +171,13 @@ const DevModal = memo<DevModalProps>(
           push={false}
           title={t(isEditMode ? 'dev.title.skillSettings' : 'dev.title.create')}
           width={mobile ? '100%' : 800}
-          // Sit above @lobehub/ui's base-ui floating layer (Popover/Dropdown/Tooltip = 1100).
-          // antd Drawer defaults to ~1000, so a config panel opened from the Tools skill
-          // popover would otherwise mount *behind* the still-open popover and look like it
-          // "didn't open". 1200 = the base-ui modal tier.
-          zIndex={1200}
           styles={{
-            body: {
-              padding: 0,
-            },
             bodyContent: {
               height: '100%',
+              padding: 0,
             },
           }}
-          onClose={(e) => {
-            e.stopPropagation();
+          onClose={() => {
             onOpenChange(false);
           }}
         >

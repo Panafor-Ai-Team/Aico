@@ -15,10 +15,12 @@ import { SearchRepo } from '@/database/repositories/search';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { getServerDefaultFilesConfig } from '@/server/globalConfig';
-import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import { initEmbeddingRuntimeFromDB } from '@/server/modules/ModelRuntime';
 import { ChunkService } from '@/server/services/chunk';
 import { DocumentService } from '@/server/services/document';
 import { KnowledgeBaseSearchService } from '@/server/services/knowledgeBase';
+
+import { assertFileNotInRestrictedKnowledgeBase } from './_helpers/knowledgeBaseAccess';
 
 const chunkProcedure = wsCompatProcedure.use(serverDatabase).use(async (opts) => {
   const { ctx } = opts;
@@ -76,6 +78,8 @@ export const chunkRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
+      await assertFileNotInRestrictedKnowledgeBase(ctx, input.id);
+
       return {
         items: await ctx.chunkModel.findByFileId(input.id, input.cursor || 0),
         nextCursor: input.cursor ? input.cursor + 1 : 1,
@@ -128,7 +132,7 @@ export const chunkRouter = router({
       const { model, provider } =
         getServerDefaultFilesConfig().embeddingModel || DEFAULT_FILE_EMBEDDING_MODEL_ITEM;
       // Read user's provider config from database
-      const agentRuntime = await initModelRuntimeFromDB(
+      const agentRuntime = await initEmbeddingRuntimeFromDB(
         ctx.serverDB,
         ctx.userId,
         provider,

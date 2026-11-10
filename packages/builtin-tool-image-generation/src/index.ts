@@ -1,7 +1,30 @@
 export {
-  ImageGenerationExecutionRuntime,
-  type ImageGenerationRuntimeService,
-} from './ExecutionRuntime';
+  clearConfirmedImageModels,
+  getConfirmedImageModel,
+  IMAGE_GENERATION_CONFIRM_AUDIT,
+  type ImageGenerationModelChoice,
+  imageGenerationModelConfirmAudit,
+  setConfirmedImageModel,
+} from './confirmation';
+export type { ImageGenerationRuntimeService } from './ExecutionRuntime';
+export {
+  buildDirectGenerateImageToolCall,
+  didPreviousTurnGenerateImage,
+  extractPlainMessageText,
+  findLatestGeneratedImageUrls,
+  findLatestUserMessageText,
+  findPendingUserMessage,
+  findPendingUserMessageText,
+  hasPreviousImageGeneration,
+  IMAGE_GENERATION_TOOL_FUNCTION_NAME,
+  isAnaphoricImageEditIntent,
+  isAnotherImageAskIntent,
+  isImageEditContinuationIntent,
+  isImageGenerationUserIntent,
+  resolveDirectImageGenerationToolCall,
+  resolveForcedImageGenerationToolChoice,
+  stripInjectedUserContext,
+} from './imageGenerationIntent';
 export { ImageGenerationManifest } from './manifest';
 export { systemPrompt } from './systemRole';
 export {

@@ -41,7 +41,7 @@ export class Manifest {
       cache_busting_mode: 'all',
       categories: ['productivity', 'design', 'development', 'education'],
       description,
-      display: 'standalone',
+      display: 'standalone' as const,
       display_override: ['tabbed'],
       edge_side_panel: {
         preferred_width: 480,

@@ -26,13 +26,54 @@ vi.mock('@/auth', () => ({
   },
 }));
 
-// 模拟请求和响应
+// `vi.mock` factories run at import time, before top-level consts initialise,
+// so the spies have to be hoisted alongside them.
+const { getUserRemaining, recordUsage, syncMemberCycleUsage } = vi.hoisted(() => ({
+  getUserRemaining: vi.fn(),
+  recordUsage: vi.fn(),
+  syncMemberCycleUsage: vi.fn(),
+}));
+
+vi.mock('@/database/models/aicoBilling', () => ({
+  AicoBillingModel: vi.fn(() => ({ recordUsage })),
+}));
+
+vi.mock('@/server/services/openrouter/keyService', () => ({
+  AicoOpenRouterKeyService: vi.fn(() => ({ getUserRemaining, syncMemberCycleUsage })),
+}));
+
+// Hits the database for the platform multiplier; irrelevant to this route's logic.
+vi.mock('@/server/services/aico/usageMultiplier', () => ({
+  resolveManagedPricingContext: vi
+    .fn()
+    .mockResolvedValue({ costMultiplierBp: 10_000, plan: 'aico', scope: 'personal' }),
+}));
+
+const ledger = vi.hoisted(() => ({ mode: 'off' as 'enforce' | 'off' | 'shadow' }));
+
+vi.mock('@/server/services/aico/ledger/config', () => ({
+  getLedgerConfig: () => ({ mode: ledger.mode }),
+}));
+
+const billing = { source: 'personal' as const };
+
+const makeRequest = (body: Record<string, unknown>) =>
+  new Request(new URL('https://test.com'), {
+    method: 'POST',
+    body: JSON.stringify({ aicoBilling: billing, ...body }),
+  });
+
+// Mock request and response
 let request: Request;
 beforeEach(() => {
-  request = new Request(new URL('https://test.com'), {
-    method: 'POST',
-    body: JSON.stringify({ model: 'test-model' }),
+  request = makeRequest({ model: 'test-model' });
+
+  getUserRemaining.mockResolvedValue({
+    remainingMicroUsd: 0,
+    usageKnown: true,
+    usageMicroUsd: 0,
   });
+  syncMemberCycleUsage.mockResolvedValue(undefined);
 
   // Default: valid session
   vi.mocked(auth.api.getSession).mockResolvedValue({
@@ -42,13 +83,14 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 
 describe('POST handler', () => {
   describe('init chat model', () => {
     it('should initialize ModelRuntime correctly with valid session', async () => {
-      const mockParams = Promise.resolve({ provider: 'test-provider' });
+      const mockParams = Promise.resolve({ provider: 'openrouter' });
 
       const mockChatResponse = new Response(JSON.stringify({ success: true }), {
         headers: { 'Content-Type': 'application/json' },
@@ -65,15 +107,28 @@ describe('POST handler', () => {
       expect(initModelRuntimeFromDB).toHaveBeenCalledWith(
         expect.anything(),
         'test-user-id',
-        'test-provider',
+        'openrouter',
         undefined,
+        { billingContext: billing, modelId: 'test-model' },
       );
+    });
+
+    it('rejects direct (BYOK) providers', async () => {
+      const mockParams = Promise.resolve({ provider: 'openai' });
+
+      const response = await POST(request, { params: mockParams });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        body: { error: 'DIRECT_PROVIDER_NOT_ALLOWED', provider: 'openai' },
+      });
+      expect(initModelRuntimeFromDB).not.toHaveBeenCalled();
     });
 
     it('should return Unauthorized error when no session exists', async () => {
       vi.mocked(auth.api.getSession).mockResolvedValue(null);
 
-      const mockParams = Promise.resolve({ provider: 'test-provider' });
+      const mockParams = Promise.resolve({ provider: 'openrouter' });
 
       const response = await POST(request, { params: mockParams });
 
@@ -83,12 +138,9 @@ describe('POST handler', () => {
 
   describe('chat', () => {
     it('should correctly handle chat completion with valid payload', async () => {
-      const mockParams = Promise.resolve({ provider: 'test-provider' });
+      const mockParams = Promise.resolve({ provider: 'openrouter' });
       const mockChatPayload = { message: 'Hello, world!' };
-      request = new Request(new URL('https://test.com'), {
-        method: 'POST',
-        body: JSON.stringify(mockChatPayload),
-      });
+      request = makeRequest(mockChatPayload);
 
       const mockChatResponse: any = { success: true, message: 'Reply from agent' };
       const mockRuntime: LobeRuntimeAI = {
@@ -101,19 +153,78 @@ describe('POST handler', () => {
       const response = await POST(request as unknown as Request, { params: mockParams });
 
       expect(response).toEqual(mockChatResponse);
+      // `aicoBilling` only tells this route who pays. Forwarding it upstream
+      // fails strict APIs: OpenAI-style Responses rejects it as an unsupported
+      // parameter, which broke every GPT-5.x model behind CheapVibeCode.
       expect(mockRuntime.chat).toHaveBeenCalledWith(mockChatPayload, {
+        // Managed traffic uses identity cost multiplier — margin is at top-up (π yield).
+        pricingContext: { costMultiplierBp: 10_000, plan: 'aico', scope: 'personal' },
         user: 'test-user-id',
         signal: expect.anything(),
       });
     });
 
-    it('should return an error response when chat completion fails', async () => {
-      const mockParams = Promise.resolve({ provider: 'test-provider' });
-      const mockChatPayload = { message: 'Hello, world!' };
+    it('accepts a gzip-encoded body', async () => {
+      const mockParams = Promise.resolve({ provider: 'openrouter' });
+      const mockChatPayload = { message: 'سلام '.repeat(10_000), model: 'test-model' };
+      const json = JSON.stringify({ aicoBilling: billing, ...mockChatPayload });
+      const gzipped = await new Response(
+        new Blob([json]).stream().pipeThrough(new CompressionStream('gzip')),
+      ).arrayBuffer();
       request = new Request(new URL('https://test.com'), {
+        body: gzipped,
+        headers: { 'Content-Encoding': 'gzip', 'Content-Type': 'application/json' },
         method: 'POST',
-        body: JSON.stringify(mockChatPayload),
       });
+
+      const mockRuntime: LobeRuntimeAI = {
+        baseURL: 'abc',
+        chat: vi.fn().mockResolvedValue({ success: true }),
+      };
+      vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+      await POST(request, { params: mockParams });
+
+      expect(mockRuntime.chat).toHaveBeenCalledWith(mockChatPayload, expect.anything());
+    });
+
+    it('rejects a gzip body that decodes past the size cap', async () => {
+      // 26 MB of zeros compresses to a few KB: a small upload must not be
+      // allowed to expand into an unbounded buffer.
+      const gzipped = await new Response(
+        new Blob([new Uint8Array(26 * 1024 * 1024)])
+          .stream()
+          .pipeThrough(new CompressionStream('gzip')),
+      ).arrayBuffer();
+      request = new Request(new URL('https://test.com'), {
+        body: gzipped,
+        headers: { 'Content-Encoding': 'gzip' },
+        method: 'POST',
+      });
+
+      const response = await POST(request, { params: Promise.resolve({ provider: 'openrouter' }) });
+
+      expect(response.status).toBe(400);
+      expect(initModelRuntimeFromDB).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unsupported Content-Encoding', async () => {
+      request = new Request(new URL('https://test.com'), {
+        body: 'not-brotli',
+        headers: { 'Content-Encoding': 'br' },
+        method: 'POST',
+      });
+
+      const response = await POST(request, { params: Promise.resolve({ provider: 'openrouter' }) });
+
+      expect(response.status).toBe(400);
+      expect(initModelRuntimeFromDB).not.toHaveBeenCalled();
+    });
+
+    it('should return an error response when chat completion fails', async () => {
+      const mockParams = Promise.resolve({ provider: 'openrouter' });
+      const mockChatPayload = { message: 'Hello, world!' };
+      request = makeRequest(mockChatPayload);
 
       const mockErrorResponse = {
         errorType: ChatErrorType.InternalServerError,
@@ -138,10 +249,229 @@ describe('POST handler', () => {
             errorMessage: 'Something went wrong',
             errorType: 500,
           },
-          provider: 'test-provider',
+          // Managed gateway ids never leak to the client: errors say `aico`.
+          provider: 'aico',
         },
         errorType: 500,
       });
+    });
+  });
+
+  describe('personal usage settlement', () => {
+    it('persists the settled figure after the response, not only on a billing-page visit', async () => {
+      const mockParams = Promise.resolve({ provider: 'openrouter' });
+      const mockRuntime: LobeRuntimeAI = {
+        baseURL: 'abc',
+        chat: vi.fn().mockResolvedValue(new Response('ok')),
+      };
+      vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+      await POST(makeRequest({ model: 'test-model' }), { params: mockParams });
+      // recordManagedUsage is fired with `void`; let its microtasks drain.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      // Without `persist` the wallet only falls when the user opens billing,
+      // so spend would look free until then.
+      expect(getUserRemaining).toHaveBeenCalledWith('test-user-id', { persist: true });
+    });
+
+    it('leaves usage to the hold settle under ledger enforce', async () => {
+      ledger.mode = 'enforce';
+      try {
+        const mockRuntime: LobeRuntimeAI = {
+          baseURL: 'abc',
+          chat: vi.fn().mockResolvedValue(new Response('ok')),
+        };
+        vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+        await POST(makeRequest({ model: 'test-model' }), {
+          params: Promise.resolve({ provider: 'openrouter' }),
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(getUserRemaining).not.toHaveBeenCalled();
+      } finally {
+        ledger.mode = 'off';
+      }
+    });
+
+    it('logs a placeholder row only while the ledger is off', async () => {
+      const mockRuntime: LobeRuntimeAI = {
+        baseURL: 'abc',
+        chat: vi.fn().mockResolvedValue(new Response('ok')),
+      };
+      vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+      await POST(makeRequest({ model: 'test-model' }), {
+        params: Promise.resolve({ provider: 'openrouter' }),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(recordUsage).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails fast instead of hanging when runtime init stalls', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(initModelRuntimeFromDB).mockReturnValue(new Promise(() => {}));
+        const pending = POST(makeRequest({ model: 'test-model' }), {
+          params: Promise.resolve({ provider: 'openrouter' }),
+        });
+        await vi.advanceTimersByTimeAsync(20_000);
+        const response = await pending;
+        expect(response.status).toBe(500);
+        // Managed gateway ids never leak to the client: errors say `aico`.
+        expect(await response.json()).toMatchObject({
+          body: expect.objectContaining({
+            error: { message: 'Chat setup timed out: init-runtime' },
+            provider: 'aico',
+          }),
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('fails fast instead of hanging when upstream sends no headers', async () => {
+      vi.useFakeTimers();
+      try {
+        const mockRuntime: LobeRuntimeAI = {
+          baseURL: 'abc',
+          chat: vi.fn().mockReturnValue(new Promise(() => {})),
+        };
+        vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+        const pending = POST(makeRequest({ model: 'test-model' }), {
+          params: Promise.resolve({ provider: 'openrouter' }),
+        });
+        await vi.advanceTimersByTimeAsync(60_000);
+        const response = await pending;
+        expect(response.status).toBe(500);
+        // The client caps retries for this failure by its message, so the
+        // message must survive JSON serialization.
+        expect(await response.json()).toMatchObject({
+          body: { error: { message: 'Chat start timed out: upstream-headers' } },
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('errors a stalled mid-stream response instead of holding the run open', async () => {
+      vi.useFakeTimers();
+      try {
+        const hanging = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"x":1}\n\n'));
+            // Never closes: upstream stalled mid-stream.
+          },
+        });
+        const mockRuntime: LobeRuntimeAI = {
+          baseURL: 'abc',
+          chat: vi
+            .fn()
+            .mockResolvedValue(
+              new Response(hanging, { headers: { 'Content-Type': 'text/event-stream' } }),
+            ),
+        };
+        vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+        const response = await POST(makeRequest({ model: 'test-model' }), {
+          params: Promise.resolve({ provider: 'openrouter' }),
+        });
+
+        expect(response.headers.get('Content-Type')).toContain('text/event-stream');
+        const reader = response.body!.getReader();
+        const first = await reader.read();
+        expect(first.done).toBe(false);
+
+        const stalled = reader.read();
+        // Attach before advancing timers so the stream error is never unhandled.
+        const assertion = expect(stalled).rejects.toThrow(/stalled/);
+        await vi.advanceTimersByTimeAsync(60_000);
+        await assertion;
+        reader.releaseLock();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('ignores SSE keep-alives when watching for stream activity', async () => {
+      vi.useFakeTimers();
+      try {
+        const encoder = new TextEncoder();
+        let controller!: ReadableStreamDefaultController<Uint8Array>;
+        const keepAliveStream = new ReadableStream<Uint8Array>({
+          start(c) {
+            controller = c;
+            controller.enqueue(encoder.encode('data: {"x":1}\n\n'));
+          },
+        });
+        const mockRuntime: LobeRuntimeAI = {
+          baseURL: 'abc',
+          chat: vi.fn().mockResolvedValue(
+            new Response(keepAliveStream, {
+              headers: { 'Content-Type': 'text/event-stream' },
+            }),
+          ),
+        };
+        vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+        const response = await POST(makeRequest({ model: 'test-model' }), {
+          params: Promise.resolve({ provider: 'openrouter' }),
+        });
+
+        const reader = response.body!.getReader();
+        await reader.read();
+
+        // Gateway keep-alives carry bytes but no progress: they must not
+        // reset the watchdog or a stalled run would look alive forever.
+        await vi.advanceTimersByTimeAsync(20_000);
+        controller.enqueue(encoder.encode(': ping\n\n'));
+        await vi.advanceTimersByTimeAsync(20_000);
+        controller.enqueue(encoder.encode(': ping\n\n'));
+
+        // Drain whatever the gateway sent; the stream must terminate in the
+        // stall error. Reads are attached before advancing timers so the
+        // stream error is never unhandled.
+        const assertion = (async () => {
+          for (;;) {
+            try {
+              const next = await reader.read();
+              if (next.done) throw new Error('stream closed without stall error');
+            } catch (error) {
+              expect(String((error as Error)?.message ?? error)).toMatch(/stalled/);
+              return;
+            }
+          }
+        })();
+        await vi.advanceTimersByTimeAsync(25_000);
+        await assertion;
+        reader.releaseLock();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps settling spend but leaves the priced row to the shadow hold', async () => {
+      ledger.mode = 'shadow';
+      try {
+        const mockRuntime: LobeRuntimeAI = {
+          baseURL: 'abc',
+          chat: vi.fn().mockResolvedValue(new Response('ok')),
+        };
+        vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+        await POST(makeRequest({ model: 'test-model' }), {
+          params: Promise.resolve({ provider: 'openrouter' }),
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        // Regression: shadow wrote a zero-cost row beside the hold's priced one.
+        expect(getUserRemaining).toHaveBeenCalledWith('test-user-id', { persist: true });
+        expect(recordUsage).not.toHaveBeenCalled();
+      } finally {
+        ledger.mode = 'off';
+      }
     });
   });
 });

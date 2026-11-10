@@ -78,6 +78,14 @@ import { parseMemoryExtractionConfig } from '@/server/globalConfig/parseMemoryEx
 import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
 import { S3 } from '@/server/modules/S3';
 import {
+  findMemoryFundsError,
+  initBilledMemoryRuntime,
+  isManagedMemoryProvider,
+  isMemoryFundsError,
+  resolveMemoryBillingContext,
+} from '@/server/services/aico/memoryBilling';
+import { getUserScopedAiProviderRuntimeState } from '@/server/services/aiProviderAccess';
+import {
   AsyncTaskError,
   type AsyncTaskErrorBody,
   AsyncTaskErrorType,
@@ -461,12 +469,18 @@ const normalizeActivityAssociationList = (value: unknown) => {
 };
 
 const normalizeActivityMemoryCandidate = (item: unknown) => {
-  if (!item || typeof item !== 'object' || !('withActivity' in item)) return item;
-  const withActivity = item.withActivity as WithActivity | undefined;
-  if (!withActivity || typeof withActivity !== 'object') return item;
+  if (!item || typeof item !== 'object') return item;
+  const record = item as Record<string, unknown>;
+  // The schema asks for '' when there is no extra detail, but the gateway does not
+  // enforce the JSON schema and some models send null. One such memory failed the
+  // topic, and with it the whole analysis run.
+  const details = record.details === null || record.details === undefined ? '' : record.details;
+  const withActivity = record.withActivity as WithActivity | undefined;
+  if (!withActivity || typeof withActivity !== 'object') return { ...record, details };
 
   return {
-    ...item,
+    ...record,
+    details,
     withActivity: {
       ...withActivity,
       associatedLocations: normalizeActivityAssociationList(withActivity.associatedLocations),
@@ -649,6 +663,12 @@ export interface TopicExtractionJob {
   from?: Date;
   layers: LayersEnum[];
   reportProgress?: boolean;
+  /**
+   * Run even when the topic is already marked extracted. Only for the identity pass
+   * of the same run: the first (CEPA) pass marks the topic completed, which would
+   * otherwise make the identity pass skip every topic.
+   */
+  skipExtractedCheck?: boolean;
   source: MemorySourceType;
   to?: Date;
   topicId: string;
@@ -1556,7 +1576,12 @@ export class MemoryExtractionExecutor {
               traceId: span.spanContext().traceId,
             };
           }
-          if (!job.forceAll && !job.forceTopics && isTopicExtracted(topic.metadata)) {
+          if (
+            !job.forceAll &&
+            !job.forceTopics &&
+            !job.skipExtractedCheck &&
+            isTopicExtracted(topic.metadata)
+          ) {
             span.setStatus({ code: SpanStatusCode.OK, message: 'already_extracted' });
             topicProcessed = true;
             return {
@@ -1590,7 +1615,12 @@ export class MemoryExtractionExecutor {
           );
           const language = userState.settings?.general?.responseLanguage;
 
-          const runtimes = await this.getRuntime(job.userId, memoryServiceConfig, keyVaults);
+          const runtimes = await this.getRuntime(
+            job.userId,
+            memoryServiceConfig,
+            keyVaults,
+            job.workspaceId,
+          );
 
           const conversations = await this.listConversationsForTopic(
             job.userId,
@@ -1672,6 +1702,7 @@ export class MemoryExtractionExecutor {
               embeddingContextLimit,
             );
           } catch (error) {
+            if (isMemoryFundsError(error)) throw error;
             retrievalErrors.push(
               makeTaskErrorItem('retrieval', error, {
                 preview: embeddingConversations.map((item) => item.content).join('\n\n'),
@@ -1817,6 +1848,10 @@ export class MemoryExtractionExecutor {
             username:
               userState.fullName || `${userState.firstName} ${userState.lastName}`.trim() || 'User',
           });
+          // Layer extractors swallow their errors; a funds refusal must not let the
+          // topic be marked completed with layers missing.
+          const fundsError = findMemoryFundsError(extraction?.outputs);
+          if (fundsError) throw fundsError;
           if (!extraction) {
             this.recordJobMetrics(extractionJob, 'completed', Date.now() - startTime);
             span.setStatus({ code: SpanStatusCode.OK, message: 'no_extraction' });
@@ -1862,6 +1897,21 @@ export class MemoryExtractionExecutor {
             traceId: span.spanContext().traceId,
           };
         } catch (error) {
+          // Unfunded wallet / budget: defer quietly. The topic is not marked
+          // completed, so the first run after a top-up processes it.
+          if (isMemoryFundsError(error) && !job.userInitiated) {
+            span.setStatus({
+              code: SpanStatusCode.OK,
+              message: `deferred_insufficient_funds:${error.code}`,
+            });
+            return {
+              deferred: true,
+              extracted: false,
+              layers: {},
+              memoryIds: [],
+              traceId: span.spanContext().traceId,
+            };
+          }
           if (extraction && extractionJob && resultRecorder) {
             await resultRecorder.recordFail?.(extractionJob, error as Error);
           }
@@ -2006,6 +2056,8 @@ export class MemoryExtractionExecutor {
           });
 
           results.push({ ...extracted, topicId, userId });
+          // Out of funds: the rest of this user's topics would be refused too.
+          if ('deferred' in extracted && extracted.deferred) break;
         }
       }
     }
@@ -2107,6 +2159,34 @@ export class MemoryExtractionExecutor {
       cursor: nextCursor,
       ids: rows.map((row) => row.id),
     };
+  }
+
+  /**
+   * Aico: whether the user's preferred billing source can pay for extraction.
+   * Building the runtimes runs the managed policy's funds check without making
+   * a model call, so the check itself costs nothing.
+   */
+  async canAffordExtraction(userId: string, workspaceId?: string): Promise<boolean> {
+    const db = await this.db;
+    const [userState, aiProviderRuntimeState] = await Promise.all([
+      new UserModel(db, userId).getUserState(KeyVaultsGateKeeper.getUserKeyVaults),
+      this.getAiProviderRuntimeState(userId, workspaceId),
+    ]);
+    const memoryServiceConfig = this.resolveUserMemoryServiceConfig(
+      userState.settings?.systemAgent as Partial<UserServiceModelConfig> | undefined,
+    );
+    const keyVaults = await this.resolveRuntimeKeyVaults(
+      aiProviderRuntimeState,
+      memoryServiceConfig,
+    );
+
+    try {
+      await this.getRuntime(userId, memoryServiceConfig, keyVaults, workspaceId);
+      return true;
+    } catch (error) {
+      if (isMemoryFundsError(error)) return false;
+      throw error;
+    }
   }
 
   async getUsersForHourlyExtraction(
@@ -2376,7 +2456,11 @@ export class MemoryExtractionExecutor {
     const db = await this.db;
     const aiInfraRepos = new AiInfraRepos(db, userId, this.aiProviderConfig, workspaceId);
 
-    return aiInfraRepos.getAiProviderRuntimeState(KeyVaultsGateKeeper.getUserKeyVaults);
+    return getUserScopedAiProviderRuntimeState(
+      userId,
+      () => aiInfraRepos.getAiProviderRuntimeState(KeyVaultsGateKeeper.getUserKeyVaults),
+      { throwOnUnresolvedAccess: true },
+    );
   }
 
   private async resolveRuntimeKeyVaults(
@@ -2450,6 +2534,7 @@ export class MemoryExtractionExecutor {
     userId: string,
     memoryServiceConfig: ResolvedMemoryServiceConfig,
     keyVaults?: ProviderKeyVaultMap,
+    workspaceId?: string,
   ): Promise<RuntimeBundle> {
     // TODO: implement a better cache eviction strategy
     // TODO: make cache size configurable
@@ -2459,6 +2544,7 @@ export class MemoryExtractionExecutor {
 
     const cacheKey = [
       userId,
+      workspaceId ?? '',
       memoryServiceConfig.agents.embedding.provider,
       memoryServiceConfig.agents.gatekeeper.provider,
       memoryServiceConfig.agents.layerExtractor.provider,
@@ -2506,25 +2592,53 @@ export class MemoryExtractionExecutor {
     };
 
     const hooks = getBusinessModelRuntimeHooks(userId, 'lobehub');
+    const { agents, modelConfig } = memoryServiceConfig;
+
+    // Aico: managed providers bill the user's preferred source; BYOK / custom
+    // providers keep the upstream resolution (the cost is already the user's).
+    const db = await this.db;
+    let billingContext: Awaited<ReturnType<typeof resolveMemoryBillingContext>> | undefined;
+    const buildRuntime = async (
+      agent: MemoryAgentConfig,
+      options: RuntimeResolveOptions,
+      kind: 'embedding' | 'generation',
+      modelId: string,
+    ) => {
+      if (!isManagedMemoryProvider(agent.provider)) {
+        return resolveRuntimeAgentConfig(agent, keyVaults, options, hooks);
+      }
+      billingContext ??= await resolveMemoryBillingContext(db, userId);
+      return initBilledMemoryRuntime({
+        billingContext,
+        db,
+        kind,
+        modelId,
+        provider: agent.provider!,
+        userId,
+        workspaceId,
+      });
+    };
 
     const runtimes: RuntimeBundle = {
-      embeddings: await resolveRuntimeAgentConfig(
-        memoryServiceConfig.agents.embedding,
-        keyVaults,
+      embeddings: await buildRuntime(
+        agents.embedding,
         embeddingOptions,
-        hooks,
+        'embedding',
+        modelConfig.embeddingsModel,
       ),
-      gatekeeper: await resolveRuntimeAgentConfig(
-        memoryServiceConfig.agents.gatekeeper,
-        keyVaults,
+      gatekeeper: await buildRuntime(
+        agents.gatekeeper,
         gatekeeperOptions,
-        hooks,
+        'generation',
+        modelConfig.gateModel,
       ),
-      layerExtractor: await resolveRuntimeAgentConfig(
-        memoryServiceConfig.agents.layerExtractor,
-        keyVaults,
+      layerExtractor: await buildRuntime(
+        agents.layerExtractor,
         layerExtractorOptions,
-        hooks,
+        'generation',
+        agents.layerExtractor.model ||
+          Object.values(modelConfig.layerModels).find(Boolean) ||
+          modelConfig.gateModel,
       ),
     };
 

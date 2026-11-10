@@ -1,4 +1,6 @@
 import type { ModelParamsSchema } from '../standard-parameters';
+import type { Pricing } from '../types/aiModel';
+import { cheapVibeCodeTokensToUsd } from './videoParameters';
 
 const NANO_BANANA_ASPECT_RATIOS = [
   'auto',
@@ -28,6 +30,7 @@ export const gptImage1Schema: ModelParamsSchema = {
 export const gptImage2Schema: ModelParamsSchema = {
   imageUrls: { default: [], maxCount: 1, maxFileSize: 5 * 1024 * 1024 },
   prompt: { default: '' },
+  quality: { default: 'medium', enum: ['low', 'medium', 'high', 'auto'] },
   size: {
     default: 'auto',
     enum: [
@@ -96,4 +99,152 @@ export const nanoBanana2Parameters: ModelParamsSchema = {
     // See https://ai.google.dev/gemini-api/docs/image-generation
     enum: ['512', '1K', '2K', '4K'],
   },
+};
+
+export const grokImagineImageParameters: ModelParamsSchema = {
+  aspectRatio: {
+    default: 'auto',
+    enum: [
+      'auto',
+      '1:1',
+      '3:4',
+      '4:3',
+      '9:16',
+      '16:9',
+      '2:3',
+      '3:2',
+      '9:19.5',
+      '19.5:9',
+      '9:20',
+      '20:9',
+      '1:2',
+      '2:1',
+    ],
+  },
+  imageUrls: { default: [] },
+  prompt: { default: '' },
+  resolution: {
+    default: '1k',
+    enum: ['1k', '2k'],
+  },
+};
+
+/**
+ * Prompt-only schema for image models behind CheapVibeCode's OpenAI-shaped
+ * `/v1/images/generations` when no size / aspect / quality surface is known.
+ */
+export const cheapVibeCodePromptOnlyImageParameters: ModelParamsSchema = {
+  prompt: { default: '' },
+};
+
+/**
+ * Nano Banana 2 behind CheapVibeCode. Same aspect / resolution surface as
+ * {@link nanoBanana2Parameters}, plus OpenAI-shaped thinking level
+ * (`reasoning_effort` on the wire). Aspect and resolution use the same
+ * `aspect_ratio` / `resolution` field names CheapVibeCode already accepts on
+ * video (and xAI uses for Grok Imagine Image).
+ */
+export const cheapVibeCodeNanoBanana2Parameters: ModelParamsSchema = {
+  ...nanoBanana2Parameters,
+  reasoningEffort: {
+    default: 'medium',
+    enum: ['low', 'medium', 'high'],
+  },
+};
+
+/**
+ * Grok Imagine Image behind CheapVibeCode. Same options as
+ * {@link grokImagineImageParameters}; wire fields match xAI / CVC video
+ * (`aspect_ratio`, `resolution`).
+ */
+export const cheapVibeCodeGrokImagineImageParameters: ModelParamsSchema = {
+  ...grokImagineImageParameters,
+};
+
+/**
+ * GPT Image 2 behind CheapVibeCode. Same options as {@link gptImage2Schema}, but
+ * reference images are capped at OpenAI's `/images/edits` limit of 16 rather
+ * than one.
+ */
+export const cheapVibeCodeGptImage2Parameters: ModelParamsSchema = {
+  ...gptImage2Schema,
+  imageUrls: { default: [], maxCount: 16, maxFileSize: 5 * 1024 * 1024 },
+};
+
+/**
+ * GPT Image 2.5 Sunburst / Flare behind CheapVibeCode. Same Images API surface
+ * as {@link cheapVibeCodeGptImage2Parameters} (quality, size through 4K, up to
+ * 16 reference images on `/v1/images/edits`). CVC charges a fixed token fee by
+ * quality tier, independent of size.
+ */
+export const cheapVibeCodeGptImage25Parameters: ModelParamsSchema = {
+  ...cheapVibeCodeGptImage2Parameters,
+};
+
+/**
+ * Fixed per-image CheapVibeCode token charge for Nano Banana 2: a single
+ * 100K tier regardless of resolution. Converted at {@link cheapVibeCodeTokensToUsd}.
+ */
+export const cheapVibeCodeNanoBanana2Pricing: Pricing = {
+  approximatePricePerImage: cheapVibeCodeTokensToUsd(100_000),
+  units: [
+    {
+      name: 'imageGeneration',
+      rate: cheapVibeCodeTokensToUsd(100_000),
+      strategy: 'fixed',
+      unit: 'image',
+    },
+  ],
+};
+
+/**
+ * Fixed per-image CheapVibeCode token charge for Grok Imagine Image by
+ * quality tier: low 100K · medium 250K · high 350K. `auto` quality is billed
+ * as medium. The schema exposes no quality control, so exact costing falls
+ * back to the medium approximate until one exists.
+ */
+export const cheapVibeCodeGrokImagineImagePricing: Pricing = {
+  approximatePricePerImage: cheapVibeCodeTokensToUsd(250_000),
+  units: [
+    {
+      lookup: {
+        prices: {
+          auto: cheapVibeCodeTokensToUsd(250_000),
+          high: cheapVibeCodeTokensToUsd(350_000),
+          low: cheapVibeCodeTokensToUsd(100_000),
+          medium: cheapVibeCodeTokensToUsd(250_000),
+        },
+        pricingParams: ['quality'],
+      },
+      name: 'imageGeneration',
+      strategy: 'lookup',
+      unit: 'image',
+    },
+  ],
+};
+
+/**
+ * Fixed per-image CheapVibeCode token charge for GPT Image 2.5 Sunburst / Flare:
+ * low 50K · medium 100K · high 150K. `auto` quality is billed as medium until
+ * CVC documents otherwise. Converted at {@link cheapVibeCodeTokensToUsd}.
+ */
+export const cheapVibeCodeGptImage25Pricing: Pricing = {
+  approximatePricePerImage: cheapVibeCodeTokensToUsd(100_000),
+  units: [
+    {
+      lookup: {
+        prices: {
+          // CVC docs: `quality=auto` is served and charged as `low`.
+          auto: cheapVibeCodeTokensToUsd(50_000),
+          high: cheapVibeCodeTokensToUsd(150_000),
+          low: cheapVibeCodeTokensToUsd(50_000),
+          medium: cheapVibeCodeTokensToUsd(100_000),
+        },
+        pricingParams: ['quality'],
+      },
+      name: 'imageGeneration',
+      strategy: 'lookup',
+      unit: 'image',
+    },
+  ],
 };

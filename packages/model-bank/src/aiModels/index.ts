@@ -16,6 +16,7 @@ import { default as bedrock } from './bedrock';
 import { default as bfl } from './bfl';
 import { default as cerebras } from './cerebras';
 import { default as chatgpt } from './chatGPT';
+import { default as cheapvibecode } from './cheapvibecode';
 import { default as cloudflare } from './cloudflare';
 import { default as cohere } from './cohere';
 import { default as cometapi } from './cometapi';
@@ -126,6 +127,7 @@ const staticModelMap: ModelsMap = {
   bfl,
   cerebras,
   chatgpt,
+  cheapvibecode,
   cloudflare,
   cohere,
   cometapi,
@@ -242,6 +244,7 @@ export { default as bedrock } from './bedrock';
 export { default as bfl } from './bfl';
 export { default as cerebras } from './cerebras';
 export { default as chatgpt } from './chatGPT';
+export { default as cheapvibecode } from './cheapvibecode';
 export { default as cloudflare } from './cloudflare';
 export { default as cohere } from './cohere';
 export { default as cometapi } from './cometapi';

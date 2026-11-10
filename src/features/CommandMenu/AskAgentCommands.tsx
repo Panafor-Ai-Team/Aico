@@ -1,4 +1,6 @@
+import { getLocalizedBrandingInboxName } from '@lobechat/business-const';
 import { DEFAULT_AVATAR, DEFAULT_INBOX_AVATAR } from '@lobechat/const';
+import { agentDisplayName } from '@lobechat/types';
 import { Avatar, preventDefault } from '@lobehub/ui';
 import { Command } from 'cmdk';
 import { memo, useMemo } from 'react';
@@ -13,7 +15,8 @@ import { useCommandMenuContext } from './CommandMenuContext';
 import { styles } from './styles';
 
 const AskAgentCommands = memo(() => {
-  const { t } = useTranslation('common');
+  const { t, i18n } = useTranslation('common');
+  const inboxName = getLocalizedBrandingInboxName(i18n.language);
   const { search, setSearch, setSelectedAgent } = useCommandMenuContext();
 
   const inboxAgentId = useAgentStore(builtinAgentSelectors.inboxAgentId);
@@ -36,7 +39,7 @@ const AskAgentCommands = memo(() => {
     }
     return agents
       .filter((agent) => {
-        const title = (agent.title || '').toLowerCase();
+        const title = (agentDisplayName(agent) ?? '').toLowerCase();
         return title.includes(mentionQuery);
       })
       .slice(0, 10);
@@ -54,21 +57,21 @@ const AskAgentCommands = memo(() => {
   // Only show when user types "@"
   if (!isAtMention) return null;
 
-  // Check if Lobe AI matches the query
-  const showLobeAI = !mentionQuery || 'lobe ai'.includes(mentionQuery);
+  // Check if the default assistant matches the query
+  const showLobeAI = !mentionQuery || inboxName.toLowerCase().includes(mentionQuery.toLowerCase());
 
   return (
     <Command.Group heading={t('cmdk.mentionAgent')}>
-      {/* @Lobe AI option */}
+      {/* @default assistant option */}
       {showLobeAI && (
         <Command.Item
           value="@lobe-ai"
           onMouseDown={preventDefault}
-          onSelect={() => handleAgentSelect(inboxAgentId, 'Lobe AI', DEFAULT_INBOX_AVATAR)}
+          onSelect={() => handleAgentSelect(inboxAgentId, inboxName, DEFAULT_INBOX_AVATAR)}
         >
           <Avatar emojiScaleWithBackground avatar={DEFAULT_INBOX_AVATAR} shape="square" size={18} />
           <div className={styles.itemContent}>
-            <div className={styles.itemLabel}>@Lobe AI</div>
+            <div className={styles.itemLabel}>@{inboxName}</div>
           </div>
         </Command.Item>
       )}
@@ -77,12 +80,12 @@ const AskAgentCommands = memo(() => {
       {filteredAgents.map((agent) => (
         <Command.Item
           key={agent.id}
-          value={`@${agent.title || 'agent'}-${agent.id}`}
+          value={`@${agentDisplayName(agent, 'agent')}-${agent.id}`}
           onMouseDown={preventDefault}
           onSelect={() =>
             handleAgentSelect(
               agent.id,
-              agent.title || t('defaultAgent'),
+              agentDisplayName(agent, t('defaultAgent')),
               typeof agent.avatar === 'string' ? agent.avatar : DEFAULT_AVATAR,
             )
           }
@@ -94,7 +97,7 @@ const AskAgentCommands = memo(() => {
             size={18}
           />
           <div className={styles.itemContent}>
-            <div className={styles.itemLabel}>@{agent.title || t('defaultAgent')}</div>
+            <div className={styles.itemLabel}>@{agentDisplayName(agent, t('defaultAgent'))}</div>
           </div>
         </Command.Item>
       ))}

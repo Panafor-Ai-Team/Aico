@@ -126,6 +126,12 @@ export interface ComposioConnectorMetadata {
   redirectUrl?: string;
   /** 'PENDING' | 'ACTIVE' | 'FAILED' — Composio-side connection status */
   status: string;
+  /**
+   * Version of the curated tool set saved in `user_connector_tools` (see
+   * COMPOSIO_TOOLS_VERSION). Absent on connectors synced before it existed;
+   * the runtime re-syncs ACTIVE connectors whose version is behind.
+   */
+  toolsVersion?: number;
 }
 
 /**

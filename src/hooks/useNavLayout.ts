@@ -26,6 +26,11 @@ export interface NavLayout {
     showEvalEntry: boolean;
     showSettingsEntry: boolean;
   };
+  /**
+   * When false, hide Downloads / Get App entry points and treat `/downloads`
+   * as unavailable in product surfaces (route still redirects separately).
+   */
+  showDownloads: boolean;
   topNavItems: NavItem[];
   userPanel: {
     showDataImporter: boolean;
@@ -61,10 +66,10 @@ export const useNavLayout = (): NavLayout => {
           url: '/tasks',
         },
         {
-          icon: getRouteById('page')!.icon,
-          key: SidebarTabKey.Pages,
-          title: t('tab.pages'),
-          url: '/page',
+          icon: getRouteById('resource')!.icon,
+          key: SidebarTabKey.Resource,
+          title: t('tab.resource'),
+          url: '/resource',
         },
       ] as NavItem[],
     [t, toggleCommandMenu],
@@ -87,10 +92,10 @@ export const useNavLayout = (): NavLayout => {
           url: '/community',
         },
         {
-          icon: getRouteById('resource')!.icon,
-          key: SidebarTabKey.Resource,
-          title: t('tab.resource'),
-          url: '/resource',
+          icon: getRouteById('page')!.icon,
+          key: SidebarTabKey.Pages,
+          title: t('tab.pages'),
+          url: '/page',
         },
         {
           hidden: !!activeWorkspaceSlug,
@@ -123,5 +128,12 @@ export const useNavLayout = (): NavLayout => {
     [],
   );
 
-  return { bottomMenuItems, footer, topNavItems, userPanel };
+  return {
+    bottomMenuItems,
+    footer,
+    // Temporarily hide Downloads / Get App for Aico until the surface is ready.
+    showDownloads: false,
+    topNavItems,
+    userPanel,
+  };
 };

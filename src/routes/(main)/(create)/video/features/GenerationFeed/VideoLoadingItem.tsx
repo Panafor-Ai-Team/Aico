@@ -5,7 +5,7 @@ import { Block, Center } from '@lobehub/ui';
 import { Progress, Spin } from 'antd';
 import { memo, useEffect, useState } from 'react';
 
-import { ElapsedTime } from '@/routes/(main)/(create)/image/features/GenerationFeed/GenerationItem/ElapsedTime';
+import { GenerationElapsedTime } from '@/components/GenerationElapsedTime';
 import { AsyncTaskStatus } from '@/types/asyncTask';
 import type { Generation } from '@/types/generation';
 
@@ -78,7 +78,9 @@ const VideoLoadingItem = memo<VideoLoadingItemProps>(
           ) : (
             <Spin indicator={<LoadingOutlined spin />} />
           )}
-          {progress === 99 && <ElapsedTime generationId={generation.id} isActive={isGenerating} />}
+          {progress === 99 && (
+            <GenerationElapsedTime isActive={isGenerating} timerKey={generation.id} />
+          )}
         </Center>
       </Block>
     );

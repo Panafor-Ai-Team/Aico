@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     isAuthenticated: false,
     signIn: vi.fn(),
   },
+  serverConfig: undefined as any,
   toolState: {
     checkLobehubSkillStatus: vi.fn(),
     composioServers: [],
@@ -23,6 +24,10 @@ const mocks = vi.hoisted(() => ({
     lobehubSkillServers: [],
     refreshComposioConnectionStatus: vi.fn(),
   },
+}));
+
+vi.mock('@/store/serverConfig', () => ({
+  getServerConfigStoreState: () => mocks.serverConfig,
 }));
 
 vi.mock('@/layout/AuthProvider/MarketAuth', () => ({
@@ -46,6 +51,7 @@ describe('useConnectorConnection', () => {
     vi.clearAllMocks();
     mocks.marketAuth.isAuthenticated = false;
     mocks.marketAuth.signIn.mockResolvedValue(null);
+    mocks.serverConfig = undefined;
     mocks.toolState.composioServers = [];
     mocks.toolState.lobehubSkillServers = [];
     mocks.toolState.getLobehubSkillAuthorizeUrl.mockResolvedValue({
@@ -120,5 +126,48 @@ describe('useConnectorConnection', () => {
 
     expect(error).toBeInstanceOf(ConnectorConnectionMarketAuthRequiredError);
     expect(window.open).not.toHaveBeenCalled();
+  });
+
+  it('connects GitHub through Composio when Market auth is unavailable', async () => {
+    mocks.serverConfig = {
+      serverConfig: { enableComposio: true, enableLobehubSkill: false },
+    };
+    mocks.toolState.createComposioConnection.mockResolvedValue({
+      identifier: 'github',
+      redirectUrl: 'https://connect.composio.dev/link/abc',
+      status: 'pending_auth',
+    });
+    const githubSpec: TaskTemplateConnectorReference = { identifier: 'github', source: 'lobehub' };
+    const { result, unmount } = renderHook(() => useConnectorConnection([githubSpec]));
+
+    await act(async () => {
+      await result.current.connect();
+    });
+
+    expect(mocks.marketAuth.signIn).not.toHaveBeenCalled();
+    expect(mocks.toolState.createComposioConnection).toHaveBeenCalledWith({
+      appSlug: 'GITHUB',
+      identifier: 'github',
+      label: 'GitHub',
+    });
+    expect(window.open).toHaveBeenCalledWith(
+      'https://connect.composio.dev/link/abc',
+      '_blank',
+      'width=600,height=700',
+    );
+
+    unmount();
+  });
+
+  it('counts an ACTIVE Composio account as connected for a lobehub-tagged GitHub spec', () => {
+    mocks.serverConfig = {
+      serverConfig: { enableComposio: true, enableLobehubSkill: false },
+    };
+    mocks.toolState.composioServers = [{ identifier: 'github', status: 'active' }] as any;
+    const githubSpec: TaskTemplateConnectorReference = { identifier: 'github', source: 'lobehub' };
+    const { result } = renderHook(() => useConnectorConnection([githubSpec]));
+
+    expect(result.current.isAllConnected).toBe(true);
+    expect(result.current.needsConnect).toBe(false);
   });
 });

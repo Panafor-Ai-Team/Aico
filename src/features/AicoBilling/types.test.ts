@@ -1,0 +1,218 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  type AicoBillingSource,
+  billingContextKey,
+  canChatWithBillingSource,
+  findBillingSource,
+  formatRemainingUsd,
+  getBillingChatBlockReason,
+  isSameBillingContext,
+  preferenceToBillingContext,
+} from './types';
+
+const sources: AicoBillingSource[] = [
+  {
+    hasManagedKey: true,
+    isActive: true,
+    remainingMicroUsd: '1500000',
+    remainingPi: '30000',
+    remainingToman: '75000',
+    remainingUsd: '1.500000',
+    source: 'personal',
+    usageKnown: true,
+  },
+  {
+    budgetAllocated: true,
+    hasManagedKey: true,
+    isActive: true,
+    organizationId: 'org-1',
+    organizationName: 'Acme',
+    remainingMicroUsd: '50000000',
+    remainingPi: '1000000',
+    remainingUsd: '50.000000',
+    renewalBlocked: false,
+    source: 'organization',
+  },
+  {
+    budgetAllocated: true,
+    hasManagedKey: false,
+    isActive: true,
+    organizationId: 'org-2',
+    organizationName: 'Beta',
+    remainingMicroUsd: '0',
+    remainingPi: '0',
+    remainingUsd: '0.000000',
+    renewalBlocked: false,
+    source: 'organization',
+  },
+];
+
+describe('AicoBilling types helpers', () => {
+  it('preferenceToBillingContext prefers matching org when selected', () => {
+    expect(
+      preferenceToBillingContext({
+        preferredBillingSource: 'organization',
+        preferredOrganizationId: 'org-2',
+        sources,
+      }),
+    ).toEqual({ organizationId: 'org-2', source: 'organization' });
+  });
+
+  it('preferenceToBillingContext falls back to personal', () => {
+    expect(
+      preferenceToBillingContext({
+        preferredBillingSource: 'personal',
+        preferredOrganizationId: null,
+        sources,
+      }),
+    ).toEqual({ source: 'personal' });
+  });
+
+  it('preferenceToBillingContext falls back to first org when preferred org is missing', () => {
+    expect(
+      preferenceToBillingContext({
+        preferredBillingSource: 'organization',
+        preferredOrganizationId: 'missing',
+        sources,
+      }),
+    ).toEqual({ organizationId: 'org-1', source: 'organization' });
+  });
+
+  it('findBillingSource keeps personal and org credits separate', () => {
+    expect(findBillingSource(sources, { source: 'personal' })?.remainingUsd).toBe('1.500000');
+    expect(
+      findBillingSource(sources, { organizationId: 'org-1', source: 'organization' })?.remainingUsd,
+    ).toBe('50.000000');
+  });
+
+  it('isSameBillingContext / billingContextKey distinguish org ids', () => {
+    expect(
+      isSameBillingContext(
+        { organizationId: 'org-1', source: 'organization' },
+        { organizationId: 'org-1', source: 'organization' },
+      ),
+    ).toBe(true);
+    expect(
+      isSameBillingContext(
+        { organizationId: 'org-1', source: 'organization' },
+        { organizationId: 'org-2', source: 'organization' },
+      ),
+    ).toBe(false);
+    expect(billingContextKey({ source: 'personal' })).toBe('personal');
+  });
+
+  it('formatRemainingUsd formats decimal strings', () => {
+    expect(formatRemainingUsd('12.5')).toBe('$12.50');
+    expect(formatRemainingUsd(undefined)).toBe('$0.00');
+  });
+
+  describe('getBillingChatBlockReason / canChatWithBillingSource', () => {
+    const emptyPersonal: AicoBillingSource = {
+      hasManagedKey: true,
+      isActive: true,
+      remainingMicroUsd: '0',
+      remainingPi: '0',
+      remainingToman: '0',
+      remainingUsd: '0.000000',
+      source: 'personal',
+      usageKnown: true,
+    };
+
+    it('blocks personal $0 without trial', () => {
+      expect(getBillingChatBlockReason(emptyPersonal, { trialActive: false })).toBe(
+        'PERSONAL_FUNDS_UNAVAILABLE',
+      );
+      expect(canChatWithBillingSource(emptyPersonal, { trialActive: false })).toBe(false);
+    });
+
+    it('allows personal $0 when trial is active and key exists', () => {
+      expect(getBillingChatBlockReason(emptyPersonal, { trialActive: true })).toBeNull();
+      expect(canChatWithBillingSource(emptyPersonal, { trialActive: true })).toBe(true);
+    });
+
+    it('blocks personal $0 trial without managed key', () => {
+      const noKey = { ...emptyPersonal, hasManagedKey: false };
+      expect(getBillingChatBlockReason(noKey, { trialActive: true })).toBe(
+        'MANAGED_KEY_UNAVAILABLE',
+      );
+    });
+
+    it('blocks org $0 even when trial is active', () => {
+      const emptyOrg: AicoBillingSource = {
+        budgetAllocated: true,
+        hasManagedKey: true,
+        isActive: true,
+        organizationId: 'org-1',
+        organizationName: 'Acme',
+        remainingMicroUsd: '0',
+        remainingPi: '0',
+        remainingUsd: '0.000000',
+        renewalBlocked: false,
+        source: 'organization',
+      };
+      expect(getBillingChatBlockReason(emptyOrg, { trialActive: true })).toBe(
+        'MEMBER_BUDGET_UNFUNDED',
+      );
+    });
+
+    it('blocks org sources with no member allocation (not “inactive”)', () => {
+      const unallocated: AicoBillingSource = {
+        budgetAllocated: false,
+        hasManagedKey: false,
+        isActive: false,
+        organizationId: 'org-1',
+        organizationName: 'Acme',
+        remainingMicroUsd: '0',
+        remainingPi: '0',
+        remainingUsd: '0.000000',
+        renewalBlocked: false,
+        source: 'organization',
+      };
+      expect(getBillingChatBlockReason(unallocated, { trialActive: false })).toBe(
+        'MEMBER_BUDGET_NOT_ALLOCATED',
+      );
+    });
+
+    it('blocks deactivated member budgets separately from missing allocation', () => {
+      const inactive: AicoBillingSource = {
+        budgetAllocated: true,
+        hasManagedKey: false,
+        isActive: false,
+        organizationId: 'org-1',
+        organizationName: 'Acme',
+        remainingMicroUsd: '0',
+        remainingPi: '0',
+        remainingUsd: '0.000000',
+        renewalBlocked: false,
+        source: 'organization',
+      };
+      expect(getBillingChatBlockReason(inactive, { trialActive: false })).toBe(
+        'MEMBER_BUDGET_INACTIVE',
+      );
+    });
+
+    it('reports a failed renewal as a renewal block, not a disabled budget', () => {
+      const renewalFailed: AicoBillingSource = {
+        budgetAllocated: true,
+        hasManagedKey: true,
+        isActive: false,
+        organizationId: 'org-1',
+        organizationName: 'Acme',
+        remainingMicroUsd: '0',
+        remainingPi: '0',
+        remainingUsd: '0.000000',
+        renewalBlocked: true,
+        source: 'organization',
+      };
+      expect(getBillingChatBlockReason(renewalFailed, { trialActive: false })).toBe(
+        'MEMBER_BUDGET_RENEWAL_BLOCKED',
+      );
+    });
+
+    it('allows funded sources', () => {
+      expect(canChatWithBillingSource(sources[0], { trialActive: false })).toBe(true);
+      expect(canChatWithBillingSource(sources[1], { trialActive: false })).toBe(true);
+    });
+  });
+});

@@ -1,0 +1,137 @@
+import { ActionIcon, Flexbox } from '@lobehub/ui';
+import { PlusIcon } from 'lucide-react';
+import { memo, type ReactNode, useMemo } from 'react';
+
+import {
+  getBusinessChatInputSendAreaPrefix,
+  useBusinessChatInputAlerts,
+  useBusinessChatInputSendDisabled,
+} from '@/business/client/hooks/useBusinessChatInputSendAreaPrefix';
+import { useFundsBlockedComposerCue } from '@/features/AicoBilling';
+import {
+  type ActionKeys,
+  ChatInputProvider,
+  DesktopChatInput,
+  type SendButtonHandler,
+} from '@/features/ChatInput';
+import ActionBar from '@/features/ChatInput/ActionBar';
+import FileUpload from '@/features/ChatInput/ActionBar/Upload';
+import { useChatStore } from '@/store/chat';
+
+import type { HomeMode } from '../types';
+import { HOME_INPUT_BODY_HEIGHT } from './constants';
+import ModeSelect from './ModeSelect';
+
+const leftActions: ActionKeys[] = ['plus'];
+const rightActions: ActionKeys[] = ['modelLabel', 'reasoningEffort'];
+
+const CONTAINER_RADIUS = 20;
+/** Clearance from the container edge to the round controls sitting in its corners. */
+const ACTION_BAR_INSET = 8;
+
+export interface HomeEditorInputProps {
+  agentId?: string;
+  contextSelectionKey: string;
+  initialValue: string;
+  isAgentConfigLoading: boolean;
+  loading: boolean;
+  mode: HomeMode;
+  onModeChange: (mode: HomeMode) => void;
+  onValueChange: (value: string) => void;
+  placeholder?: ReactNode;
+  send: SendButtonHandler;
+}
+
+const HomeEditorInput = memo<HomeEditorInputProps>(
+  ({
+    agentId,
+    contextSelectionKey,
+    initialValue,
+    isAgentConfigLoading,
+    loading,
+    mode,
+    onModeChange,
+    onValueChange,
+    placeholder,
+    send,
+  }) => {
+    const billingSendDisabled = useBusinessChatInputSendDisabled();
+    const businessAlerts = useBusinessChatInputAlerts();
+    const { onMarkdownContentChange: withFundsBlockedCue } = useFundsBlockedComposerCue();
+    const handleMarkdownContentChange = useMemo(
+      () => withFundsBlockedCue(onValueChange),
+      [onValueChange, withFundsBlockedCue],
+    );
+    const inputContainerProps = useMemo(
+      () => ({
+        minHeight: HOME_INPUT_BODY_HEIGHT,
+        resize: false,
+        style: {
+          borderRadius: CONTAINER_RADIUS,
+          boxShadow: '0 1px 2px rgba(0,0,0,.03), 0 12px 32px rgba(0,0,0,.04)',
+        },
+      }),
+      [],
+    );
+
+    const actionBarStyle = useMemo(
+      () => ({
+        paddingBlockEnd: ACTION_BAR_INSET,
+        paddingInline: ACTION_BAR_INSET,
+      }),
+      [],
+    );
+
+    return (
+      <ChatInputProvider
+        agentId={agentId}
+        allowExpand={false}
+        contextSelectionKey={contextSelectionKey}
+        leftActions={leftActions}
+        rightActions={rightActions}
+        slashPlacement="bottom"
+        chatInputEditorRef={(instance) => {
+          if (!instance) return;
+          useChatStore.setState({ mainInputEditor: instance });
+        }}
+        sendButtonProps={{
+          disabled: loading || isAgentConfigLoading || billingSendDisabled,
+          generating: loading,
+          onStop: () => {},
+          shape: 'round',
+        }}
+        onMarkdownContentChange={handleMarkdownContentChange}
+        onSend={send}
+      >
+        <Flexbox gap={0}>
+          {businessAlerts}
+          <DesktopChatInput
+            actionBarStyle={actionBarStyle}
+            dropdownPlacement="bottomLeft"
+            initialContent={initialValue}
+            inputContainerProps={inputContainerProps}
+            placeholder={placeholder}
+            sendAreaPrefix={getBusinessChatInputSendAreaPrefix()}
+            showControlBar={false}
+            leftContent={
+              <Flexbox horizontal align={'center'} gap={2}>
+                <ModeSelect value={mode} onChange={onModeChange} />
+                {isAgentConfigLoading ? (
+                  <ActionIcon disabled icon={PlusIcon} size={'small'} />
+                ) : mode === 'task' ? (
+                  <FileUpload includeKnowledge={false} />
+                ) : (
+                  <ActionBar disableCollapse dropdownPlacement="bottomLeft" />
+                )}
+              </Flexbox>
+            }
+          />
+        </Flexbox>
+      </ChatInputProvider>
+    );
+  },
+);
+
+HomeEditorInput.displayName = 'HomeEditorInput';
+
+export default HomeEditorInput;

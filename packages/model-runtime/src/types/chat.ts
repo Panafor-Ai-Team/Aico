@@ -6,6 +6,7 @@ import type {
 } from '@lobechat/types';
 
 import type { ModelPricingContext } from './pricing';
+import type { ModelRuntimeDiagnostics } from './providerDiagnostics';
 import type { MessageToolCall, MessageToolCallChunk } from './toolsCalling';
 
 export type LLMRoleType = 'user' | 'system' | 'assistant' | 'function' | 'tool';
@@ -44,7 +45,12 @@ interface UserMessageContentPartVideo {
   video_url: { url: string };
 }
 interface UserMessageContentPartAudio {
-  audio_url: { url: string };
+  audio_url: {
+    codec?: string;
+    durationMs?: number;
+    mimeType?: string;
+    url: string;
+  };
   type: 'audio_url';
 }
 
@@ -60,11 +66,7 @@ export interface OpenAIChatMessage {
   model?: string;
   name?: string;
   provider?: string;
-  reasoning?: {
-    content?: string;
-    duration?: number;
-    signature?: string;
-  };
+  reasoning?: ModelReasoning;
   reasoning_content?: string;
   role: LLMRoleType;
   tool_call_id?: string;
@@ -200,6 +202,12 @@ export interface ChatStreamPayload {
 export interface ChatMethodOptions {
   callback?: ChatStreamCallbacks;
   /**
+   * Request-scoped provider-boundary evidence retained by the caller.
+   * Keep this separate from metadata because routing hooks may retain metadata
+   * after the provider returns, while diagnostics can contain a large payload.
+   */
+  diagnostics?: ModelRuntimeDiagnostics;
+  /**
    * response headers
    */
   headers?: Record<string, any>;
@@ -261,6 +269,12 @@ export interface OnFinishData {
   finishReason?: string;
   grounding?: any;
   reasoning?: ModelReasoning;
+  /**
+   * The model a router alias actually dispatched to, when the request targeted
+   * one (e.g. `openrouter/auto` → `openai/gpt-4o`). Undefined for direct model
+   * requests, where the requested id already names what ran.
+   */
+  resolvedModel?: string;
   speed?: ModelPerformance;
   text: string;
   thinking?: string;

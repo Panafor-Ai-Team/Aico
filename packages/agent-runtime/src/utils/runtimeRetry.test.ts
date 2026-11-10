@@ -18,6 +18,30 @@ describe('runtimeRetry', () => {
     expect(resolveLLMMaxAttempts('lobehub', options)).toBe(1);
   });
 
+  it('caps retries after a chat start timeout but not after other errors', () => {
+    const timeout = new Error('Chat start timed out: upstream-headers');
+
+    expect(resolveLLMRetryBudget('openai', {}, timeout)).toBe(1);
+    expect(resolveLLMRetryBudget('openai', {}, new Error('boom'))).toBe(5);
+    expect(resolveLLMRetryBudget('lobehub', { noRetryProviders: ['lobehub'] }, timeout)).toBe(0);
+  });
+
+  it('caps retries for a start timeout received over HTTP', () => {
+    // Shape the client builds from the route's 500 response: the message is
+    // translated UI text and the route's message is only in the body.
+    const timeout = Object.assign(new Error('translated server error text'), {
+      body: { error: { message: 'Chat start timed out: upstream-headers' }, provider: 'aico' },
+      type: 500,
+    });
+    const otherServerError = Object.assign(new Error('translated server error text'), {
+      body: { error: { message: 'boom' }, provider: 'aico' },
+      type: 500,
+    });
+
+    expect(resolveLLMRetryBudget('openai', {}, timeout)).toBe(1);
+    expect(resolveLLMRetryBudget('openai', {}, otherServerError)).toBe(5);
+  });
+
   it('calculates exponential LLM retry delay with a cap', () => {
     expect(getLLMRetryDelayMs(1)).toBe(1000);
     expect(getLLMRetryDelayMs(2)).toBe(2000);

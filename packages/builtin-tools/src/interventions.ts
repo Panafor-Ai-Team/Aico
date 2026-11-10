@@ -18,6 +18,25 @@ export const registerBuiltinInterventions = (
   }
 };
 
+/**
+ * APIs whose approval footer is just Cancel + Confirm buttons: no reject reason
+ * or "don't ask again" choices, because the card itself is where the user sets
+ * the call up.
+ */
+const confirmCancelInterventions = new Set<string>();
+
+const interventionKey = (identifier: string, apiName: string) => `${identifier}/${apiName}`;
+
+export const registerConfirmCancelInterventions = (entries: Record<string, string[]>): void => {
+  for (const [identifier, apiNames] of Object.entries(entries)) {
+    for (const apiName of apiNames)
+      confirmCancelInterventions.add(interventionKey(identifier, apiName));
+  }
+};
+
+export const isConfirmCancelIntervention = (identifier?: string, apiName?: string): boolean =>
+  !!identifier && !!apiName && confirmCancelInterventions.has(interventionKey(identifier, apiName));
+
 export interface BuiltinInterventionRegistryEntry {
   apiName: string;
   identifier: string;

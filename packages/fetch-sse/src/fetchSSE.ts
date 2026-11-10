@@ -1,5 +1,5 @@
 import { LOBE_CHAT_OBSERVATION_ID, LOBE_CHAT_TRACE_ID, MESSAGE_CANCEL_FLAT } from '@lobechat/const';
-import { parseToolCalls } from '@lobechat/model-runtime';
+import { parseToolCalls } from '@lobechat/model-runtime/helpers/parseToolCalls';
 import type {
   ChatImageChunk,
   ChatMessageError,
@@ -7,12 +7,14 @@ import type {
   MessageToolCall,
   ModelPerformance,
   ModelReasoning,
+  ModelReasoningResponseItem,
   ModelUsage,
   ResponseAnimation,
   ResponseAnimationStyle,
 } from '@lobechat/types';
 import { ChatErrorType } from '@lobechat/types';
 import { fetchEventSource } from '@lobechat/utils/client/fetchEventSource/index';
+import { mergeStreamUsage } from '@lobechat/utils/mergeStreamUsage';
 import { nanoid } from '@lobechat/utils/uuid';
 
 import { getMessageError } from './parseError';
@@ -26,6 +28,8 @@ export type OnFinishHandler = (
     images?: ChatImageChunk[];
     observationId?: string | null;
     reasoning?: ModelReasoning;
+    /** Model a router alias (e.g. `openrouter/auto`) actually dispatched to. */
+    resolvedModel?: string;
     speed?: ModelPerformance;
     toolCalls?: MessageToolCall[];
     traceId?: string | null;
@@ -105,6 +109,15 @@ export interface FetchSSEOptions {
   onAbort?: (text: string) => Promise<void>;
   onErrorHandle?: (error: ChatMessageError) => void;
   onFinish?: OnFinishHandler;
+  /**
+   * Fired once when the first text/reasoning chunk is delivered to
+   * `onMessageHandle`. `bufferDelayMs` is time since the first raw SSE text
+   * arrived (animation/buffer delay before paint).
+   */
+  onFirstVisibleText?: (info: {
+    animation: 'none' | 'smooth' | 'buffer';
+    bufferDelayMs: number;
+  }) => void;
   onMessageHandle?: (
     chunk:
       | MessageTextChunk
@@ -215,7 +228,16 @@ const createSmoothMessage = (params: {
   };
 
   const pushToQueue = (text: string) => {
-    outputQueue.push(...text.split(''));
+    // Grapheme-safe enqueue so Persian/emoji/combining marks are not split mid-cluster.
+    // (Cursive joining itself is preserved by contiguous string buffers; char-based
+    // DOM wraps are handled separately via streamAnimationGranularity: 'word'.)
+    if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+      for (const part of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)) {
+        outputQueue.push(part.segment);
+      }
+      return;
+    }
+    outputQueue.push(...Array.from(text));
   };
 
   const flushQueue = () => {
@@ -258,16 +280,33 @@ export const fetchSSE = async (url: string, options: RequestInit & FetchSSEOptio
   );
   const shouldSkipTextProcessing = text === 'none';
   const textSmoothing = text === 'smooth';
+  const animationMode = shouldSkipTextProcessing ? 'none' : textSmoothing ? 'smooth' : 'buffer';
 
   // Add text buffer and timer related variables
   let textBuffer = '';
   let bufferTimer: ReturnType<typeof setTimeout> | null = null;
   const BUFFER_INTERVAL = 300; // 300ms
+  let firstRawTextAt: number | undefined;
+  let firstVisibleTextReported = false;
+
+  const markRawText = () => {
+    if (firstRawTextAt === undefined) firstRawTextAt = Date.now();
+  };
+
+  const reportFirstVisibleText = () => {
+    if (firstVisibleTextReported || firstRawTextAt === undefined) return;
+    firstVisibleTextReported = true;
+    options.onFirstVisibleText?.({
+      animation: animationMode,
+      bufferDelayMs: Date.now() - firstRawTextAt,
+    });
+  };
 
   const flushTextBuffer = () => {
     if (textBuffer) {
       options.onMessageHandle?.({ text: textBuffer, type: 'text' });
       textBuffer = '';
+      reportFirstVisibleText();
     }
   };
 
@@ -276,12 +315,14 @@ export const fetchSSE = async (url: string, options: RequestInit & FetchSSEOptio
     onTextUpdate: (delta, text) => {
       output = text;
       options.onMessageHandle?.({ text: delta, type: 'text' });
+      reportFirstVisibleText();
     },
     startSpeed: smoothingSpeed,
   });
 
   let thinking = '';
   let thinkingSignature: string | undefined;
+  const reasoningResponseItems: ModelReasoningResponseItem[] = [];
 
   const thinkingController = createSmoothMessage({
     onTextUpdate: (delta, text) => {
@@ -306,6 +347,7 @@ export const fetchSSE = async (url: string, options: RequestInit & FetchSSEOptio
   let usage: ModelUsage | undefined = undefined;
   const images: ChatImageChunk[] = [];
   let speed: ModelPerformance | undefined = undefined;
+  let resolvedModel: string | undefined = undefined;
 
   await fetchEventSource(url, {
     body: options.body,
@@ -388,9 +430,12 @@ export const fetchSSE = async (url: string, options: RequestInit & FetchSSEOptio
           // skip empty text
           if (!data) break;
 
+          markRawText();
+
           if (shouldSkipTextProcessing) {
             output += data;
             options.onMessageHandle?.({ text: data, type: 'text' });
+            reportFirstVisibleText();
           } else if (textSmoothing) {
             textController.pushToQueue(data);
 
@@ -414,7 +459,11 @@ export const fetchSSE = async (url: string, options: RequestInit & FetchSSEOptio
         }
 
         case 'usage': {
-          usage = data;
+          // A stream can carry several usage events (final chunk, trailing
+          // tool/result chunks, usage-only chunks); merge monotonically so a
+          // trailing zero-total artifact can never wipe out the real totals
+          // and make the token counter jump backward.
+          usage = mergeStreamUsage(usage, data);
           options.onMessageHandle?.({ type: 'usage', usage: data });
           break;
         }
@@ -425,6 +474,11 @@ export const fetchSSE = async (url: string, options: RequestInit & FetchSSEOptio
           break;
         }
 
+        case 'resolved_model': {
+          if (typeof data === 'string' && data) resolvedModel = data;
+          break;
+        }
+
         case 'grounding': {
           grounding = data;
           options.onMessageHandle?.({ grounding: data, type: 'grounding' });
@@ -432,7 +486,14 @@ export const fetchSSE = async (url: string, options: RequestInit & FetchSSEOptio
         }
 
         case 'reasoning_signature': {
-          thinkingSignature = data;
+          // Server guarantees string payloads on this event; guard against object
+          // payloads so a malformed stream can't corrupt the persisted signature.
+          if (typeof data === 'string') thinkingSignature = data;
+          break;
+        }
+
+        case 'reasoning_response_item': {
+          reasoningResponseItems.push(data as ModelReasoningResponseItem);
           break;
         }
 
@@ -548,10 +609,29 @@ export const fetchSSE = async (url: string, options: RequestInit & FetchSSEOptio
         grounding,
         images: images.length > 0 ? images : undefined,
         observationId,
-        reasoning:
-          thinking || thinkingSignature
-            ? { content: thinking || undefined, signature: thinkingSignature }
-            : undefined,
+        reasoning: (() => {
+          /**
+           * Non-streaming Responses conversion emits reasoning items without summary
+           * deltas; derive visible thinking text from item summaries when nothing was
+           * streamed so the summary renders instead of being replay-only state.
+           */
+          const responseItemsThinking = reasoningResponseItems
+            .flatMap(({ summary }) => summary ?? [])
+            .map(({ text }) => text)
+            .filter(Boolean)
+            .join('\n');
+          const reasoningContent = thinking || responseItemsThinking || undefined;
+
+          return reasoningContent || thinkingSignature || reasoningResponseItems.length > 0
+            ? {
+                content: reasoningContent,
+                responseItems:
+                  reasoningResponseItems.length > 0 ? reasoningResponseItems : undefined,
+                signature: thinkingSignature,
+              }
+            : undefined;
+        })(),
+        resolvedModel,
         speed,
         toolCalls,
         traceId,

@@ -1,5 +1,6 @@
 import agent from './agent';
 import agentGroup from './agentGroup';
+import aico from './aico';
 import auth from './auth';
 import authError from './authError';
 import changelog from './changelog';
@@ -36,6 +37,7 @@ import opStatusTray from './opStatusTray';
 import pageShare from './pageShare';
 import plugin from './plugin';
 import portal from './portal';
+import project from './project';
 import providers from './providers';
 import ragEval from './ragEval';
 import setting from './setting';
@@ -53,6 +55,7 @@ import welcome from './welcome';
 const resources = {
   agent,
   agentGroup,
+  aico,
   auth,
   authError,
   changelog,
@@ -90,6 +93,7 @@ const resources = {
   plugin,
   portal,
   providers,
+  project,
   ragEval,
   setting,
   spend,

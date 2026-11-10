@@ -20,6 +20,7 @@ services:
       - 'DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@postgresql:5432/${LOBE_DB_NAME}'
       - 'INTERNAL_APP_URL=http://localhost:3210'
       - 'S3_ENDPOINT=${S3_ENDPOINT}'
+      - 'S3_INTERNAL_ENDPOINT=http://rustfs:9000'
       - 'S3_BUCKET=${RUSTFS_LOBE_BUCKET}'
       - 'S3_ENABLE_PATH_STYLE=1'
       - 'S3_ACCESS_KEY=${RUSTFS_ACCESS_KEY}'
@@ -40,11 +41,10 @@ services:
   postgresql:
     image: paradedb/paradedb:latest-pg17
     container_name: lobe-postgres
-    # Optional: Remove or change these ports if:
-    # - You don't need external database access
-    # - The ports conflict with other services on your host
-    ports:
-      - '5432:5432'
+    # Do not publish DB ports to the host by default (INFRA / AICO-109).
+    # Uncomment only for local debugging — never expose Postgres on public networks.
+    # ports:
+    #   - '5432:5432'
     volumes:
       - './data:/var/lib/postgresql/data'
     command: ['postgres', '-c', 'shared_preload_libraries=pg_search']
@@ -63,11 +63,10 @@ services:
   redis:
     image: redis:7-alpine
     container_name: lobe-redis
-    # Optional: Remove or change these ports if:
-    # - You don't need external access
-    # - The ports conflict with other services on your host
-    ports:
-      - '6379:6379'
+    # Do not publish Redis ports to the host by default (INFRA / AICO-109).
+    # Uncomment only for local debugging — never expose Redis on public networks.
+    # ports:
+    #   - '6379:6379'
     command: redis-server --save 60 1000 --appendonly yes
     volumes:
       - 'redis_data:/data'
@@ -95,6 +94,9 @@ services:
       - RUSTFS_CONSOLE_ENABLE=true
       - RUSTFS_ACCESS_KEY=${RUSTFS_ACCESS_KEY}
       - RUSTFS_SECRET_KEY=${RUSTFS_SECRET_KEY}
+      # Unset = RustFS sends no CORS headers. Chat image PUT is cross-origin
+      # (app origin → S3_ENDPOINT) via a presigned URL, so browsers block it.
+      - 'RUSTFS_CORS_ALLOWED_ORIGINS=${RUSTFS_CORS_ALLOWED_ORIGINS:-*}'
     volumes:
       - 'rustfs-data:/data'
     healthcheck:
@@ -104,6 +106,7 @@ services:
       retries: 30
     command:
       ['--access-key', '${RUSTFS_ACCESS_KEY}', '--secret-key', '${RUSTFS_SECRET_KEY}', '/data']
+    restart: always
     networks:
       - lobe-network
 
@@ -116,7 +119,7 @@ services:
     volumes:
       - ./bucket.config.json:/bucket.config.json:ro
     entrypoint: /bin/sh
-    command: -c ' set -eux; echo "S3_ACCESS_KEY=${RUSTFS_ACCESS_KEY}, S3_SECRET_KEY=${RUSTFS_SECRET_KEY}"; mc --version; mc alias set rustfs "http://rustfs:9000" "${RUSTFS_ACCESS_KEY}" "${RUSTFS_SECRET_KEY}"; mc ls rustfs || true; mc mb "rustfs/lobe" --ignore-existing; mc admin info rustfs || true; mc anonymous set-json "/bucket.config.json" "rustfs/lobe"; '
+    command: -c ' set -eux; echo "S3_ACCESS_KEY=${RUSTFS_ACCESS_KEY}, S3_SECRET_KEY=${RUSTFS_SECRET_KEY}"; mc --version; mc alias set rustfs "http://rustfs:9000" "${RUSTFS_ACCESS_KEY}" "${RUSTFS_SECRET_KEY}"; mc ls rustfs || true; mc mb "rustfs/lobe" --ignore-existing; mc admin info rustfs || true; mc anonymous set none "rustfs/lobe"; '
     restart: 'no'
     networks:
       - lobe-network

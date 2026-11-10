@@ -46,9 +46,18 @@ export const config = {
     '/onboarding',
     '/onboarding(.*)',
 
+    '/org',
+    '/org(.*)',
+    '/invite(.*)',
+    '/wallet',
+    '/wallet(.*)',
+
     '/signup(.*)',
     '/signin(.*)',
+    '/terms(.*)',
+    '/privacy(.*)',
     '/verify-email(.*)',
+    '/verify-phone(.*)',
     '/verify-im(.*)',
     '/verify',
     '/verify/(.*)',

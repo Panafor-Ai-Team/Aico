@@ -1,4 +1,4 @@
-import { Flexbox, Icon, Popover, Tooltip } from '@lobehub/ui';
+import { Flexbox, Icon, Popover, Skeleton, Tooltip } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import {
   ChevronDownIcon,
@@ -123,6 +123,12 @@ const styles = createStaticStyles(({ css }) => ({
       border-radius: ${cssVar.borderRadiusLG};
     }
   `,
+  chevron: css`
+    transition: transform 150ms ${cssVar.motionEaseOut};
+  `,
+  chevronOpen: css`
+    transform: rotate(180deg);
+  `,
 }));
 
 const AGENT_CAPS = [
@@ -245,11 +251,24 @@ const AgentMode = memo(() => {
     <div className={cx(styles.button, disabled && styles.buttonDisabled)}>
       <Icon icon={CurrentIcon} size={14} />
       <span>{t(`chatMode.${currentMode}`)}</span>
-      <Icon icon={ChevronDownIcon} size={12} />
+      <Icon
+        className={cx(styles.chevron, open && styles.chevronOpen)}
+        icon={ChevronDownIcon}
+        size={12}
+      />
     </div>
   );
 
-  if (isAccessLoading || isPreferenceLoading) return null;
+  // Hold the 28px pill's footprint so the action bar does not shift when it resolves.
+  if (isAccessLoading || isPreferenceLoading)
+    return (
+      <Skeleton.Button
+        active
+        shape="round"
+        size="small"
+        style={{ height: 28, minWidth: 84, width: 84 }}
+      />
+    );
 
   if (disabled)
     return (

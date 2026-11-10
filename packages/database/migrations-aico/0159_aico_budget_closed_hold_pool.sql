@@ -1,0 +1,11 @@
+-- What a ledger close withheld for holds that were still open.
+--
+-- A renewal or reclaim under the usage ledger counts an open hold as used, so
+-- the org is refunded the cycle without it. When that hold settles later for
+-- less than it reserved, the difference is owed back to the org. This column
+-- holds what closes actually withheld (per budget, drawn down by each late
+-- settle), so a close that was not ledger-based, or one clamped at zero, can
+-- never produce a refund it did not withhold.
+--
+-- Additive, defaults to 0, no backfill: nothing is withheld in shadow mode.
+ALTER TABLE "member_budgets" ADD COLUMN IF NOT EXISTS "closed_hold_pool_micro_usd" bigint DEFAULT 0 NOT NULL;

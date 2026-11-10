@@ -34,6 +34,18 @@ describe('isSupportedChatUploadFile', () => {
     expect(
       isSupportedChatUploadFile(new File(['{}'], 'data.json', { type: 'application/json' })),
     ).toBe(true);
+    expect(
+      isSupportedChatUploadFile(
+        new File(['document'], 'document.doc', { type: 'application/msword' }),
+      ),
+    ).toBe(true);
+    expect(
+      isSupportedChatUploadFile(
+        new File(['document'], 'document.docx', {
+          type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        }),
+      ),
+    ).toBe(true);
   });
 
   it('rejects unsupported archive formats before upload', () => {
@@ -51,6 +63,11 @@ describe('isSupportedChatUploadFile', () => {
     expect(isSupportedChatUploadFile(new File(['a'], 'voice.wav', { type: 'audio/wav' }))).toBe(
       true,
     );
+  });
+
+  it('falls back to extension when browser reports empty mime for Word files', () => {
+    expect(isSupportedChatUploadFile(new File(['d'], 'report.doc', { type: '' }))).toBe(true);
+    expect(isSupportedChatUploadFile(new File(['d'], 'report.docx', { type: '' }))).toBe(true);
   });
 });
 

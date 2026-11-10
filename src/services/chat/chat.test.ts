@@ -1,7 +1,8 @@
 import { AgentBuilderIdentifier } from '@lobechat/builtin-tool-agent-builder';
 import { WebBrowsingManifest } from '@lobechat/builtin-tool-web-browsing';
 import { REQUEST_TRIGGER_HEADER } from '@lobechat/const';
-import { createVisualFileRef } from '@lobechat/const/visualRef';
+import { createMediaFileRef } from '@lobechat/const/mediaRef';
+import type { FetchSSEOptions } from '@lobechat/fetch-sse';
 import type { ChatStreamPayload, LobeTool, UIChatMessage } from '@lobechat/types';
 import { ChatErrorType, RequestTrigger } from '@lobechat/types';
 import { act } from '@testing-library/react';
@@ -9,6 +10,7 @@ import { type EnabledAiModel, ModelProvider } from 'model-bank';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AGENT_CONFIG } from '@/const/settings';
+import type * as AicoBillingModule from '@/features/AicoBilling';
 import { isCanUseFC } from '@/helpers/isCanUseFC';
 import * as toolEngineeringModule from '@/helpers/toolEngineering';
 import { agentDocumentService } from '@/services/agentDocument';
@@ -19,6 +21,7 @@ import { useChatStore } from '@/store/chat';
 import { useToolStore } from '@/store/tool';
 import { settingsSelectors } from '@/store/user/selectors';
 
+import { GZIP_REQUEST_BODY_MIN_BYTES } from './helper';
 import { chatService } from './index';
 import * as mechaModule from './mecha';
 import { type ResolvedAgentConfig } from './mecha';
@@ -48,6 +51,8 @@ vi.hoisted(() => {
 const mockCreateHeaderWithAuth = vi.hoisted(() =>
   vi.fn(async ({ headers }: { headers: Record<string, string> }) => headers),
 );
+const mockAssertAicoBillingAllowsChat = vi.hoisted(() => vi.fn());
+const mockRefreshAicoBillingBalance = vi.hoisted(() => vi.fn());
 
 // Helper to compute expected date content from SystemDateProvider
 const getCurrentDateContent = () => {
@@ -125,6 +130,8 @@ afterEach(() => {
 beforeEach(async () => {
   // Reset all mocks
   vi.clearAllMocks();
+  mockAssertAicoBillingAllowsChat.mockResolvedValue(undefined);
+  mockRefreshAicoBillingBalance.mockResolvedValue(undefined);
   // 清除所有模块的缓存
   vi.resetModules();
 
@@ -160,6 +167,15 @@ vi.mock('../_auth', () => ({
 vi.mock('@/helpers/isCanUseFC', () => ({
   isCanUseFC: vi.fn(() => true), // Default to true, tests can override
 }));
+
+vi.mock('@/features/AicoBilling', async (importOriginal) => {
+  const actual = await importOriginal<typeof AicoBillingModule>();
+  return {
+    ...actual,
+    assertAicoBillingAllowsChat: mockAssertAicoBillingAllowsChat,
+    refreshAicoBillingBalance: mockRefreshAicoBillingBalance,
+  };
+});
 
 describe('ChatService', () => {
   describe('createAssistantMessage', () => {
@@ -227,6 +243,31 @@ describe('ChatService', () => {
           enableAgentMode: false,
         }),
       );
+    });
+
+    it('starts the reasoning-config fetch before context engineering finishes', async () => {
+      const original = useAiInfraStore.getState().ensureModelReasoningConfig;
+      const ensureModelReasoningConfig = vi.fn().mockResolvedValue(undefined);
+      useAiInfraStore.setState({ ensureModelReasoningConfig });
+      let fetchStartedBeforeContext = false;
+      vi.spyOn(mechaModule, 'contextEngineering').mockImplementation(async () => {
+        fetchStartedBeforeContext = ensureModelReasoningConfig.mock.calls.length > 0;
+        return [];
+      });
+
+      try {
+        await chatService.createAssistantMessage({
+          messages: [{ content: 'Hello', role: 'user' }] as UIChatMessage[],
+          model: 'test-model',
+          provider: 'openai',
+          resolvedAgentConfig: createMockResolvedConfig(),
+        });
+      } finally {
+        useAiInfraStore.setState({ ensureModelReasoningConfig: original });
+      }
+
+      expect(ensureModelReasoningConfig).toHaveBeenCalledWith('test-model', 'openai');
+      expect(fetchStartedBeforeContext).toBe(true);
     });
 
     describe('historyCount functionality', () => {
@@ -501,6 +542,11 @@ describe('ChatService', () => {
         // Mock aiModelSelectors for extend params support
         vi.spyOn(aiModelSelectors, 'isModelHasExtendParams').mockReturnValue(() => true);
         vi.spyOn(aiModelSelectors, 'modelExtendParams').mockReturnValue(() => ['reasoningEffort']);
+        // The user-level model-instance config supplies the effort; the legacy
+        // agent chatConfig value below must be ignored by the resolver
+        vi.spyOn(aiModelSelectors, 'modelReasoningConfig').mockReturnValue(() => ({
+          reasoningEffort: 'high',
+        }));
 
         await chatService.createAssistantMessage({
           messages,
@@ -508,7 +554,7 @@ describe('ChatService', () => {
           provider: 'test-provider',
           resolvedAgentConfig: createMockResolvedConfig({
             agentConfig: { model: 'test-model', provider: 'test-provider' },
-            chatConfig: { reasoningEffort: 'high' },
+            chatConfig: { reasoningEffort: 'low' },
           }),
         });
 
@@ -530,6 +576,11 @@ describe('ChatService', () => {
         vi.spyOn(aiModelSelectors, 'modelExtendParams').mockReturnValue(() => [
           'deepseekV4ReasoningEffort',
         ]);
+        // Reasoning fields are user-level model-instance settings now — agent
+        // chatConfig values are ignored by the resolver
+        vi.spyOn(aiModelSelectors, 'modelReasoningConfig').mockReturnValue(() => ({
+          deepseekV4ReasoningEffort: 'max',
+        }));
 
         await chatService.createAssistantMessage({
           messages,
@@ -537,7 +588,6 @@ describe('ChatService', () => {
           provider: 'deepseek',
           resolvedAgentConfig: createMockResolvedConfig({
             agentConfig: { model: 'deepseek-v4-pro', provider: 'deepseek' },
-            chatConfig: { deepseekV4ReasoningEffort: 'max' },
           }),
         });
 
@@ -562,6 +612,9 @@ describe('ChatService', () => {
         vi.spyOn(aiModelSelectors, 'modelExtendParams').mockReturnValue(() => [
           'deepseekV4ReasoningEffort',
         ]);
+        vi.spyOn(aiModelSelectors, 'modelReasoningConfig').mockReturnValue(() => ({
+          deepseekV4ReasoningEffort: 'none',
+        }));
 
         await chatService.createAssistantMessage({
           messages,
@@ -569,7 +622,6 @@ describe('ChatService', () => {
           provider: 'deepseek',
           resolvedAgentConfig: createMockResolvedConfig({
             agentConfig: { model: 'deepseek-v4-pro', provider: 'deepseek' },
-            chatConfig: { deepseekV4ReasoningEffort: 'none' },
           }),
         });
 
@@ -791,7 +843,7 @@ describe('ChatService', () => {
         );
         expect(imageUrlToBase64).toHaveBeenCalledWith('http://127.0.0.1:3000/uploads/image.png');
 
-        const visualRef = createVisualFileRef({
+        const mediaRef = createMediaFileRef({
           index: 0,
           messageId: 'test-id',
           type: 'image',
@@ -819,7 +871,7 @@ describe('ChatService', () => {
 <files_info>
 <images>
 <images_docstring>here are user upload images you can refer to</images_docstring>
-<image ref="${visualRef}" name="local-image.png" url="http://127.0.0.1:3000/uploads/image.png"></image>
+<image ref="${mediaRef}" name="local-image.png" url="http://127.0.0.1:3000/uploads/image.png"></image>
 </images>
 </files_info>
 <!-- END SYSTEM CONTEXT -->`,
@@ -892,7 +944,7 @@ describe('ChatService', () => {
         );
         expect(imageUrlToBase64).not.toHaveBeenCalled(); // Should NOT be called for remote URLs
 
-        const visualRef = createVisualFileRef({
+        const mediaRef = createMediaFileRef({
           index: 0,
           messageId: 'test-id-2',
           type: 'image',
@@ -920,7 +972,7 @@ describe('ChatService', () => {
 <files_info>
 <images>
 <images_docstring>here are user upload images you can refer to</images_docstring>
-<image ref="${visualRef}" name="remote-image.jpg" url="https://example.com/remote-image.jpg"></image>
+<image ref="${mediaRef}" name="remote-image.jpg" url="https://example.com/remote-image.jpg"></image>
 </images>
 </files_info>
 <!-- END SYSTEM CONTEXT -->`,
@@ -1636,17 +1688,14 @@ describe('ChatService', () => {
         expect(agentDocumentService.getContextDocuments).toHaveBeenCalledWith({
           agentId: 'agent-1',
         });
-        expect(contextEngineeringSpy).toHaveBeenCalledWith(
+        // Handed over still loading so contextEngineering can overlap its lookups.
+        expect(await contextEngineeringSpy.mock.calls[0][0].agentDocuments).toEqual([
           expect.objectContaining({
-            agentDocuments: [
-              expect.objectContaining({
-                content: 'Project setup steps',
-                filename: 'setup.md',
-                id: 'doc-1',
-              }),
-            ],
+            content: 'Project setup steps',
+            filename: 'setup.md',
+            id: 'doc-1',
           }),
-        );
+        ]);
       });
 
       it('should resolve agent builder documents from the edited agent', async () => {
@@ -1681,15 +1730,11 @@ describe('ChatService', () => {
         expect(agentDocumentService.getContextDocuments).toHaveBeenCalledWith({
           agentId: 'edited-agent',
         });
-        expect(contextEngineeringSpy).toHaveBeenCalledWith(
+        expect(await contextEngineeringSpy.mock.calls[0][0].agentDocuments).toEqual([
           expect.objectContaining({
-            agentDocuments: [
-              expect.objectContaining({
-                content: 'Edited agent setup',
-              }),
-            ],
+            content: 'Edited agent setup',
           }),
-        );
+        ]);
       });
     });
   });
@@ -1738,14 +1783,14 @@ describe('ChatService', () => {
       };
 
       await chatService.getChatCompletion(params, {
-        metadata: { trigger: RequestTrigger.VisualAnalysis },
+        metadata: { trigger: RequestTrigger.MultimodalAnalysis },
       });
 
       expect(mockFetchSSE).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({
           headers: expect.objectContaining({
-            [REQUEST_TRIGGER_HEADER]: RequestTrigger.VisualAnalysis,
+            [REQUEST_TRIGGER_HEADER]: RequestTrigger.MultimodalAnalysis,
           }),
         }),
       );
@@ -1753,6 +1798,86 @@ describe('ChatService', () => {
       const payload = JSON.parse(mockFetchSSE.mock.calls[0][1].body);
       expect(payload).not.toHaveProperty('requestTrigger');
       expect(payload).not.toHaveProperty('metadata');
+    });
+
+    it('updates a managed wallet immediately with the final stream cost', async () => {
+      const billingContext = { source: 'personal' as const };
+      const onFinish = vi.fn();
+      mockAssertAicoBillingAllowsChat.mockResolvedValueOnce(billingContext);
+      mockFetchSSE.mockImplementationOnce(async (_url: string, fetchOptions: FetchSSEOptions) => {
+        await fetchOptions.onFinish?.('done', {
+          type: 'done',
+          usage: { cost: 0.25, totalTokens: 10 },
+        });
+        return new Response('mock response');
+      });
+
+      await chatService.getChatCompletion(
+        { messages: [], model: 'managed-model', provider: 'aico' },
+        { onFinish },
+      );
+
+      expect(onFinish).toHaveBeenCalled();
+      expect(mockRefreshAicoBillingBalance).toHaveBeenCalledWith({
+        billingContext,
+        costUsd: 0.25,
+      });
+      expect(JSON.parse(mockFetchSSE.mock.calls[0][1].body)).toMatchObject({
+        aicoBilling: billingContext,
+      });
+    });
+
+    it('gzips a large request body and marks it with Content-Encoding', async () => {
+      const longText = 'سلام، history '.repeat(GZIP_REQUEST_BODY_MIN_BYTES / 4);
+
+      await chatService.getChatCompletion(
+        { messages: [{ content: longText, role: 'user' }], model: 'test-model' },
+        {},
+      );
+
+      const [, fetchOptions] = mockFetchSSE.mock.calls[0];
+      expect(fetchOptions.headers['Content-Encoding']).toBe('gzip');
+      expect(fetchOptions.body).toBeInstanceOf(ArrayBuffer);
+      const decoded = await new Response(
+        new Blob([fetchOptions.body]).stream().pipeThrough(new DecompressionStream('gzip')),
+      ).json();
+      expect(decoded.messages[0].content).toBe(longText);
+      expect(fetchOptions.body.byteLength).toBeLessThan(new TextEncoder().encode(longText).length);
+    });
+
+    it('keeps a small request body as plain JSON', async () => {
+      await chatService.getChatCompletion(
+        { messages: [{ content: 'hi', role: 'user' }], model: 'test-model' },
+        {},
+      );
+
+      const [, fetchOptions] = mockFetchSSE.mock.calls[0];
+      expect(typeof fetchOptions.body).toBe('string');
+      expect(fetchOptions.headers['Content-Encoding']).toBeUndefined();
+    });
+
+    it('does not hold a cost-less finish on the wallet refetch', async () => {
+      const billingContext = { source: 'personal' as const };
+      mockAssertAicoBillingAllowsChat.mockResolvedValueOnce(billingContext);
+      // The refetch never settles; awaiting it would hang the finish forever.
+      mockRefreshAicoBillingBalance.mockReturnValueOnce(new Promise(() => {}));
+      let finished = false;
+      mockFetchSSE.mockImplementationOnce(async (_url: string, fetchOptions: FetchSSEOptions) => {
+        await fetchOptions.onFinish?.('', { type: 'error' });
+        finished = true;
+        return new Response('mock response');
+      });
+
+      await chatService.getChatCompletion(
+        { messages: [], model: 'managed-model', provider: 'aico' },
+        {},
+      );
+
+      expect(finished).toBe(true);
+      expect(mockRefreshAicoBillingBalance).toHaveBeenCalledWith({
+        billingContext,
+        costUsd: undefined,
+      });
     });
 
     it('should make a POST request with chatCompletion apiMode in non-openai provider payload', async () => {
@@ -2075,6 +2200,11 @@ describe('ChatService private methods', () => {
       // Mock aiModelSelectors for extend params support
       vi.spyOn(aiModelSelectors, 'isModelHasExtendParams').mockReturnValue(() => true);
       vi.spyOn(aiModelSelectors, 'modelExtendParams').mockReturnValue(() => ['reasoningEffort']);
+      // The user-level model-instance config supplies the effort; the legacy
+      // agent chatConfig value below must be ignored by the resolver
+      vi.spyOn(aiModelSelectors, 'modelReasoningConfig').mockReturnValue(() => ({
+        reasoningEffort: 'high',
+      }));
 
       await chatService.createAssistantMessage({
         messages,
@@ -2082,7 +2212,7 @@ describe('ChatService private methods', () => {
         provider: 'test-provider',
         resolvedAgentConfig: createMockResolvedConfig({
           agentConfig: { model: 'test-model', provider: 'test-provider' },
-          chatConfig: { reasoningEffort: 'high' },
+          chatConfig: { reasoningEffort: 'low' },
         }),
       });
 

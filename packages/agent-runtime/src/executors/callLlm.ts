@@ -64,6 +64,30 @@ const isOperationInterrupted = async (host: AgentRuntimeHost) => {
 const runWithTrace = <T>(trace: LLMTrace | undefined, task: () => Promise<T>) =>
   trace ? trace.run(task) : task();
 
+const emptyDirectToolCallOutput = (
+  toolsCalling: NonNullable<ContextBuildOutput['directToolCalls']>,
+): LLMAttemptOutput => ({
+  answerSalvagedFromReasoning: false,
+  content: '',
+  contentParts: [],
+  finishReason: 'tool_calls',
+  grounding: null,
+  hasContentImages: false,
+  hasReasoningImages: false,
+  imageList: [],
+  reasoningParts: [],
+  thinkingContent: '',
+  toolCalls: toolsCalling.map((tool) => ({
+    function: {
+      arguments: tool.arguments,
+      name: `${tool.identifier}____${tool.apiName}`,
+    },
+    id: tool.id,
+    type: 'function' as const,
+  })),
+  toolsCalling,
+});
+
 const executePreparedCall = async (
   host: AgentRuntimeHost,
   llm: LLMCallTransport,
@@ -76,6 +100,25 @@ const executePreparedCall = async (
   let errorHandled = false;
   let lastOutput: LLMAttemptOutput | undefined;
   let terminalError: unknown;
+
+  // Clear photo asks: skip the chat model and run generateImage the same way
+  // Create → Image does (user text → image pipeline), so reasoning models cannot
+  // invent a plaintext prompt instead of producing a photo.
+  const directToolCalls = prepared.context.directToolCalls;
+  if (directToolCalls?.length) {
+    return await finalizeCallLlmTurn({
+      assistantMessageId: prepared.assistantMessageId,
+      events,
+      host,
+      model: prepared.model,
+      output: emptyDirectToolCallOutput(directToolCalls),
+      provider: prepared.provider,
+      recordResult: trace?.recordResult?.bind(trace),
+      shouldReplayAssistantReasoning: prepared.context.replayAssistantReasoning,
+      state: prepared.state,
+      stepLabel: prepared.stepLabel,
+    });
+  }
 
   try {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -121,7 +164,9 @@ const executePreparedCall = async (
             delayMs,
             errorType: classified.code,
             kind: classified.kind,
-            maxAttempts,
+            // The budget can be lower than the provider's attempt count (e.g. a
+            // start timeout retries once), and the UI shows this as "n/max".
+            maxAttempts: Math.min(maxAttempts, retryBudget + 1),
           },
           type: 'stream_retry',
         };
@@ -138,7 +183,10 @@ const executePreparedCall = async (
           stepIndex: host.operation.stepIndex,
           type: 'stream_retry',
         });
-        await (retryPolicy.waitForRetry ?? waitForRetry)(delayMs);
+        // Called as a method: a policy may keep state on `this` (the server
+        // policy skips backoff after a stall).
+        if (retryPolicy.waitForRetry) await retryPolicy.waitForRetry(delayMs);
+        else await waitForRetry(delayMs);
 
         interrupted = await isOperationInterrupted(host);
         if (!interrupted) continue;
@@ -274,7 +322,7 @@ const buildAssistantMessageSeed = (
  */
 export const callLlm =
   (host: AgentRuntimeHost): InstructionExecutor =>
-  async (instruction, state) => {
+  async (instruction, state, runtimeContext) => {
     const { operation, transports } = host;
     const contextBuilder = requireContextBuilder(host);
     const llm = requireLLMCallTransport(host);
@@ -305,19 +353,56 @@ export const callLlm =
     }
 
     const existingAssistantMessageId = llmPayload.assistantMessageId;
+    // Pre-created placeholders (e.g. sendMessage creates the assistant row
+    // before the operation exists) miss the creation-time provenance stamp —
+    // merge it here so reused messages carry metadata.operationId too. They
+    // also carry whatever model/provider the placeholder was stamped with at
+    // creation time, which for the top-level turn is the AGENT's default
+    // (sendMessage doesn't know about a topic-scoped model override) — not
+    // necessarily `model`/`provider` resolved above, the ones this call
+    // actually runs against (e.g. after a mid-topic model switch). Correct it
+    // here so the persisted row, and everything reading it (cost/usage
+    // display, history replay), reflects the model that really answered.
+    // Best-effort: this stamp is only a tracing/display aid and must never
+    // turn a normal send/resume into an LLM error before streaming starts.
+    if (existingAssistantMessageId) {
+      try {
+        await transports.messages.update(existingAssistantMessageId, {
+          metadata: { operationId: operation.operationId },
+          model,
+          provider,
+        });
+      } catch (error) {
+        console.warn('[call_llm] Failed to stamp operation id provenance:', error);
+      }
+    }
     const assistantMessage = existingAssistantMessageId
       ? { id: existingAssistantMessageId }
-      : await transports.messages.createAssistantMessage({
-          agentId: state.metadata!.agentId!,
-          content: '',
-          groupId: state.metadata?.groupId ?? undefined,
-          model,
-          parentId,
-          provider,
-          role: 'assistant',
-          threadId: state.metadata?.threadId,
-          topicId: state.metadata?.topicId,
-        });
+      : await transports.messages.createAssistantMessage(
+          {
+            agentId: state.metadata!.agentId!,
+            content: '',
+            groupId: state.metadata?.groupId ?? undefined,
+            // Creation provenance (metadata.operationId): ties the row to the
+            // operation that produced it so the id survives client reloads.
+            metadata: { operationId: operation.operationId },
+            model,
+            parentId,
+            provider,
+            role: 'assistant',
+            threadId: state.metadata?.threadId,
+            topicId: state.metadata?.topicId,
+          },
+          {
+            /**
+             * Step retries must reuse the same assistant message, while multiple LLM
+             * instructions in one step must keep independent messages.
+             */
+            idempotencyKey:
+              `agent-runtime:${operation.operationId}:step:${operation.stepIndex}:` +
+              `instruction:${runtimeContext?.instructionIndex ?? 0}:assistant`,
+          },
+        );
 
     const assistantMessageSeed = existingAssistantMessageId
       ? ((await transports.messages.findById(existingAssistantMessageId)) ?? assistantMessage)

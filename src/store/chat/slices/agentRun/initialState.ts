@@ -28,6 +28,11 @@ export interface ChatAIChatState {
   searchWorkflowLoadingIds: string[];
   threadInputEditor: ChatInputEditor | null;
   /**
+   * Requests whose tool calls the user approved for the rest of the request,
+   * keyed by the request's root user message id. In memory only.
+   */
+  toolApprovalRequestGrants: Record<string, true>;
+  /**
    * the tool calling stream ids
    */
   toolCallingStreamIds: Record<string, boolean[]>;
@@ -42,5 +47,6 @@ export const initialAiChatState: ChatAIChatState = {
   pendingClientToolExecutions: {},
   searchWorkflowLoadingIds: [],
   threadInputEditor: null,
+  toolApprovalRequestGrants: {},
   toolCallingStreamIds: {},
 };

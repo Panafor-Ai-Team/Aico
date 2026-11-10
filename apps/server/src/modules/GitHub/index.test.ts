@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { BRANDING_NAME } from '@lobechat/business-const';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -245,7 +246,7 @@ describe('GitHub', () => {
         'https://github.com/lobehub/lobe-chat/archive/refs/heads/main.zip',
         {
           headers: {
-            'User-Agent': 'LobeHub',
+            'User-Agent': `${BRANDING_NAME}`,
           },
         },
       );
@@ -336,7 +337,7 @@ describe('GitHub', () => {
         'https://raw.githubusercontent.com/lobehub/lobe-chat/main/README.md',
         {
           headers: {
-            'User-Agent': 'LobeHub',
+            'User-Agent': `${BRANDING_NAME}`,
           },
         },
       );

@@ -1,8 +1,11 @@
+import { convertIpynbToMarkdown, scrubIpynbFallbackText } from '@lobechat/file-loaders';
+
 import { SUPPORT_TEXT_LIST } from '../file';
 import { SUPPORTED_LANGUAGES, type SupportedLanguage } from '../splitter';
 import { type DocumentChunk, type FileLoaderType } from '../types';
 import { CodeLoader } from './code';
 import { CsVLoader } from './csv';
+import { DocLoader } from './doc';
 import { DocxLoader } from './docx';
 import { EPubLoader } from './epub';
 import { LatexLoader } from './latex';
@@ -48,8 +51,12 @@ export class ChunkingLoader {
           return await MarkdownLoader(txt);
         }
 
-        case 'doc': {
+        case 'docx': {
           return await DocxLoader(fileBlob);
+        }
+
+        case 'doc': {
+          return await DocLoader(content);
         }
 
         case 'text': {
@@ -62,6 +69,15 @@ export class ChunkingLoader {
 
         case 'epub': {
           return await EPubLoader(content);
+        }
+
+        case 'ipynb': {
+          // Notebook JSON → markdown so chunks carry semantic text instead
+          // of base64 payloads; non-nbformat-v4 files fall back to raw text.
+          const markdown = convertIpynbToMarkdown(txt);
+          return markdown === null
+            ? await TextLoader(scrubIpynbFallbackText(txt))
+            : await MarkdownLoader(markdown);
         }
 
         default: {
@@ -80,7 +96,11 @@ export class ChunkingLoader {
       return 'ppt';
     }
 
-    if (filename.endsWith('docx') || filename.endsWith('doc')) {
+    if (filename.endsWith('docx')) {
+      return 'docx';
+    }
+
+    if (filename.endsWith('doc')) {
       return 'doc';
     }
 
@@ -102,6 +122,10 @@ export class ChunkingLoader {
 
     if (filename.endsWith('epub')) {
       return 'epub';
+    }
+
+    if (filename.endsWith('ipynb')) {
+      return 'ipynb';
     }
 
     const ext = filename.split('.').pop();

@@ -3,14 +3,15 @@ import {
   isRemoteHeterogeneousType,
 } from '@lobechat/heterogeneous-agents';
 import { type ModelPerformance, type ModelUsage } from '@lobechat/types';
-import { ModelIcon } from '@lobehub/icons';
 import { Center, Flexbox, Icon, Tooltip } from '@lobehub/ui';
 import { createStaticStyles } from 'antd-style';
 import isEqual from 'fast-deep-equal';
-import { CircleDollarSignIcon } from 'lucide-react';
+import { CoinsIcon } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
 import { useAgentStore } from '@/store/agent';
 import { builtinAgentSelectors } from '@/store/agent/selectors';
 import { aiModelSelectors, useAiInfraStore } from '@/store/aiInfra';
@@ -20,6 +21,7 @@ import { isDev } from '@/utils/env';
 import { formatNumber } from '@/utils/format';
 
 import { contextSelectors, useConversationStore } from '../../../../store';
+import { formatMessageCostUsd } from '../../resolveMessageCost';
 import TokenDetail from './UsageDetail';
 
 export const styles = createStaticStyles(({ css, cssVar }) => ({
@@ -30,10 +32,10 @@ export const styles = createStaticStyles(({ css, cssVar }) => ({
 }));
 
 // Cheap messages don't need a cost callout — only surface it once it's
-// expensive enough to matter.
+// expensive enough to matter (~0.2 USD ≈ 5000 π at default CVC rates).
 const MIN_DISPLAY_COST = 0.2;
 
-const formatCost = (cost: number) => cost.toFixed(2);
+const formatCost = (cost: number) => formatMessageCostUsd(cost);
 
 interface UsageProps {
   model: string;
@@ -79,8 +81,8 @@ const Usage = memo<UsageProps>(({ model, usage, performance, provider }) => {
         <Center horizontal gap={4}>
           {heteroName || (
             <>
-              <ModelIcon model={model as string} type={'mono'} />
-              {modelCard?.displayName || model}
+              <BrandedModelIcon model={model as string} type={'mono'} />
+              {modelCard?.displayName || formatBrandedModelId(model as string)}
             </>
           )}
         </Center>
@@ -120,7 +122,7 @@ const Usage = memo<UsageProps>(({ model, usage, performance, provider }) => {
         )}
         {!isShowCredit && !!usage?.cost && usage.cost >= MIN_DISPLAY_COST && (
           <Center horizontal gap={2}>
-            <Icon icon={CircleDollarSignIcon} />
+            <Icon icon={CoinsIcon} />
             {formatCost(usage.cost)}
           </Center>
         )}

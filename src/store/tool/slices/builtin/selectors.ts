@@ -4,6 +4,7 @@ import {
   manualModeExcludeToolIds,
   runtimeManagedToolIds,
 } from '@lobechat/builtin-tools';
+import { BRANDING_NAME } from '@lobechat/business-const';
 import type { BuiltinSkill, LobeToolMeta } from '@lobechat/types';
 
 import {
@@ -62,7 +63,7 @@ const getComposioMetas = (s: ToolStoreState): LobeToolMeta[] =>
       identifier: server.identifier,
       meta: {
         avatar: '☁️',
-        description: `LobeHub Mcp Server: ${server.label}`,
+        description: `${BRANDING_NAME} Mcp Server: ${server.label}`,
         tags: ['composio', 'mcp'],
         title: server.label,
       },

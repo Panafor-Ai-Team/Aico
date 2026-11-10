@@ -258,8 +258,6 @@ describe('Operation Actions', () => {
         }).operationId;
       });
 
-      const startTime = result.current.operations[operationId!].metadata.startTime;
-
       act(() => {
         result.current.completeOperation(operationId!);
       });
@@ -270,6 +268,60 @@ describe('Operation Actions', () => {
       expect(operation.metadata.endTime).toBeDefined();
       expect(operation.metadata.duration).toBeDefined();
       expect(operation.metadata.duration).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should complete still-running reasoning children when the parent finishes', () => {
+      const { result } = renderHook(() => useChatStore());
+
+      let parentId: string;
+      let reasoningId: string;
+
+      act(() => {
+        parentId = result.current.startOperation({
+          type: 'execAgentRuntime',
+          context: { agentId: 'session1' },
+        }).operationId;
+        reasoningId = result.current.startOperation({
+          context: { agentId: 'session1' },
+          parentOperationId: parentId,
+          type: 'reasoning',
+        }).operationId;
+      });
+
+      expect(result.current.operations[reasoningId!].status).toBe('running');
+
+      act(() => {
+        result.current.completeOperation(parentId!);
+      });
+
+      expect(result.current.operations[parentId!].status).toBe('completed');
+      expect(result.current.operations[reasoningId!].status).toBe('completed');
+    });
+
+    it('should complete reasoning children when the parent marks visible loading done', () => {
+      const { result } = renderHook(() => useChatStore());
+
+      let parentId: string;
+      let reasoningId: string;
+
+      act(() => {
+        parentId = result.current.startOperation({
+          type: 'execAgentRuntime',
+          context: { agentId: 'session1' },
+        }).operationId;
+        reasoningId = result.current.startOperation({
+          context: { agentId: 'session1' },
+          parentOperationId: parentId,
+          type: 'reasoning',
+        }).operationId;
+      });
+
+      act(() => {
+        result.current.updateOperationMetadata(parentId!, { visibleLoadingDone: true });
+      });
+
+      expect(result.current.operations[parentId!].status).toBe('running');
+      expect(result.current.operations[reasoningId!].status).toBe('completed');
     });
   });
 
@@ -537,6 +589,50 @@ describe('Operation Actions', () => {
       });
 
       expect(result.current.operations[operationId!].status).toBe('cancelled');
+    });
+
+    it('should not cancel a creating thread when cancelling the main conversation', () => {
+      const { result } = renderHook(() => useChatStore());
+
+      let mainOperationId: string;
+      let threadOperationId: string;
+
+      act(() => {
+        mainOperationId = result.current.startOperation({
+          context: {
+            agentId: 'session1',
+            scope: 'main',
+            threadId: null,
+            topicId: 'topic1',
+          },
+          type: 'execAgentRuntime',
+        }).operationId;
+        threadOperationId = result.current.startOperation({
+          context: {
+            agentId: 'session1',
+            isNew: true,
+            scope: 'thread',
+            threadId: null,
+            topicId: 'topic1',
+          },
+          type: 'execAgentRuntime',
+        }).operationId;
+      });
+
+      act(() => {
+        const cancelled = result.current.cancelOperations({
+          agentId: 'session1',
+          scope: 'main',
+          status: 'running',
+          threadId: null,
+          topicId: 'topic1',
+          type: 'execAgentRuntime',
+        });
+        expect(cancelled).toEqual([mainOperationId!]);
+      });
+
+      expect(result.current.operations[mainOperationId!].status).toBe('cancelled');
+      expect(result.current.operations[threadOperationId!].status).toBe('running');
     });
   });
 
@@ -1009,7 +1105,7 @@ describe('Operation Actions', () => {
       const { result } = renderHook(() => useChatStore());
 
       let operationId: string;
-      const asyncHandler = vi.fn(async ({ type }) => {
+      const asyncHandler = vi.fn(async () => {
         // Simulate async cleanup
         await new Promise((resolve) => setTimeout(resolve, 10));
         // Don't return anything (void)
@@ -1098,6 +1194,36 @@ describe('Operation Actions', () => {
   });
 
   describe('internal_getConversationContext', () => {
+    it('should prefer an explicit message context over the operation context', () => {
+      const { result } = renderHook(() => useChatStore());
+      const { operationId } = result.current.startOperation({
+        context: {
+          agentId: 'operation-agent',
+          isNew: true,
+          scope: 'main',
+          topicId: 'operation-topic',
+        },
+        type: 'execAgentRuntime',
+      });
+
+      const context = result.current.internal_getConversationContext({
+        context: {
+          agentId: 'projection-agent',
+          isNew: false,
+          scope: 'main',
+          topicId: 'persisted-topic',
+        },
+        operationId,
+      });
+
+      expect(context).toEqual({
+        agentId: 'projection-agent',
+        isNew: false,
+        scope: 'main',
+        topicId: 'persisted-topic',
+      });
+    });
+
     it('should return context from operationId when provided', () => {
       const { result } = renderHook(() => useChatStore());
 
@@ -1473,6 +1599,57 @@ describe('Operation Actions', () => {
       expect(
         result.current.operations[childOpId!].metadata.runtimeHooks?.afterCompletionCallbacks,
       ).toBeUndefined();
+    });
+  });
+});
+
+describe('markTopicUnread', () => {
+  beforeEach(() => {
+    useChatStore.setState(useChatStore.getInitialState());
+  });
+
+  // Regression: a group run writes its topic status with an explicit `scope`,
+  // but the run-end `markTopicUnread` dropped it. `updateTopicStatus` then
+  // auto-derives `group_agent` from agentId+groupId and patches a bucket the
+  // sidebar never renders, so the VISIBLE group topic keeps the run-start
+  // 'running' — spinner still turning on a chat that already finished.
+  it('carries the group scope through to the status write', () => {
+    const updateTopicStatus = vi.fn().mockResolvedValue(undefined);
+    useChatStore.setState({ activeTopicId: 'other-topic', updateTopicStatus } as any);
+
+    act(() => {
+      useChatStore.getState().markTopicUnread({
+        agentId: 'agent-1',
+        groupId: 'group-1',
+        scope: 'group',
+        topicId: 'topic-1',
+      });
+    });
+
+    expect(updateTopicStatus).toHaveBeenCalledWith({
+      agentId: 'agent-1',
+      groupId: 'group-1',
+      scope: 'group',
+      status: 'unread',
+      topicId: 'topic-1',
+    });
+  });
+
+  it('omits scope entirely for a non-group run so auto-detection still applies', () => {
+    const updateTopicStatus = vi.fn().mockResolvedValue(undefined);
+    useChatStore.setState({ activeTopicId: 'other-topic', updateTopicStatus } as any);
+
+    act(() => {
+      useChatStore
+        .getState()
+        .markTopicUnread({ agentId: 'agent-1', scope: undefined, topicId: 'topic-1' });
+    });
+
+    expect(updateTopicStatus).toHaveBeenCalledWith({
+      agentId: 'agent-1',
+      groupId: undefined,
+      status: 'unread',
+      topicId: 'topic-1',
     });
   });
 });

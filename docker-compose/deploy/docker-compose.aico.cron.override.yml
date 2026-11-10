@@ -1,0 +1,86 @@
+# Optional model catalog sync (every 6h, keeps CVC multipliers fresh), usage ledger
+# maintenance and the scheduled agent-task sweep for self-hosted Aico.
+#
+# chat.panafor.com does NOT use this file: its jobs (renewals, key outbox, ledger
+# maintenance, reconcile, model sync, scheduled tasks) run from the `panachat` user's host
+# crontab — see docs/aico/RENEWAL_SETTLEMENT_RUNBOOK.md. Enabling it there would
+# run each job twice.
+#
+# Requires CRON_SECRET (same value as the app) and APP_URL / internal URL.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.aico.override.yml \
+#     -f docker-compose.aico.cron.override.yml up -d
+
+services:
+  openrouter-model-sync:
+    image: curlimages/curl:8.12.1
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+      - .env
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -eu
+        echo "openrouter-model-sync: waiting for lobe…"
+        sleep 45
+        while true; do
+          TARGET="$${INTERNAL_APP_URL:-$${APP_URL:-http://lobe:3210}}"
+          echo "$$(date -u +%Y-%m-%dT%H:%M:%SZ) syncing OpenRouter catalog via $$TARGET"
+          curl -fsS -X GET \
+            -H "Authorization: Bearer $${CRON_SECRET}" \
+            "$$TARGET/api/aico/cron/sync-openrouter-models" \
+            || echo "sync failed (will retry in 6h)"
+          sleep 21600
+        done
+    depends_on:
+      - lobe
+
+  aico-ledger-maintenance:
+    image: curlimages/curl:8.12.1
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+      - .env
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -eu
+        echo "aico-ledger-maintenance: waiting for lobe…"
+        sleep 60
+        while true; do
+          TARGET="$${INTERNAL_APP_URL:-$${APP_URL:-http://lobe:3210}}"
+          echo "$$(date -u +%Y-%m-%dT%H:%M:%SZ) running usage ledger maintenance via $$TARGET"
+          curl -fsS -X GET \
+            -H "Authorization: Bearer $${CRON_SECRET}" \
+            "$$TARGET/api/aico/cron/ledger-maintenance" \
+            || echo "ledger maintenance failed (retry in 5m)"
+          sleep 300
+        done
+    depends_on:
+      - lobe
+
+  # Runs agent tasks whose cron schedule is due ("do this tomorrow at 10:00").
+  # Without it, schedule-mode tasks are saved but never run.
+  aico-scheduled-tasks:
+    image: curlimages/curl:8.12.1
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+      - .env
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -eu
+        echo "aico-scheduled-tasks: waiting for lobe…"
+        sleep 60
+        while true; do
+          TARGET="$${INTERNAL_APP_URL:-$${APP_URL:-http://lobe:3210}}"
+          curl -fsS -X GET \
+            -H "Authorization: Bearer $${CRON_SECRET}" \
+            "$$TARGET/api/aico/cron/dispatch-scheduled-tasks" \
+            || echo "$$(date -u +%Y-%m-%dT%H:%M:%SZ) scheduled-task sweep failed (retry in 1m)"
+          sleep 60
+        done
+    depends_on:
+      - lobe

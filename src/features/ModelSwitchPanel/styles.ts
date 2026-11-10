@@ -1,10 +1,17 @@
 import { createStaticStyles } from 'antd-style';
 
+// Model names, badges and usage coefficients are always English, so the model list popups
+// (panel, provider submenu) are pinned LTR even when the app runs RTL. The detail popup is
+// not: it is localized prose (titles, abilities, pricing), so it follows the language
+// direction — `ModelDetailPanel` sets it explicitly.
 export const styles = createStaticStyles(({ css, cssVar }) => ({
   container: css`
     pointer-events: auto;
     user-select: none;
+
+    direction: ltr;
     overflow: hidden;
+
     padding: 0 !important;
   `,
   detailPopup: css`

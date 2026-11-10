@@ -10,9 +10,10 @@ import {
 } from '@lobechat/builtin-tool-agent-signal';
 import { BriefManifest } from '@lobechat/builtin-tool-brief';
 import { BrowserManifest } from '@lobechat/builtin-tool-browser';
-import { CalculatorManifest } from '@lobechat/builtin-tool-calculator';
+import { CalculatorManifest } from '@lobechat/builtin-tool-calculator/manifest';
 import { CloudSandboxManifest } from '@lobechat/builtin-tool-cloud-sandbox';
 import { CredsManifest } from '@lobechat/builtin-tool-creds';
+import { GoalManifest } from '@lobechat/builtin-tool-goal';
 import { GroupAgentBuilderManifest } from '@lobechat/builtin-tool-group-agent-builder';
 import { GroupManagementManifest } from '@lobechat/builtin-tool-group-management';
 import { ImageGenerationManifest } from '@lobechat/builtin-tool-image-generation';
@@ -21,7 +22,7 @@ import { LobeAgentManifest, resolveLobeAgentManifest } from '@lobechat/builtin-t
 import { LobeDeliveryCheckerManifest } from '@lobechat/builtin-tool-lobe-delivery-checker';
 import { LocalSystemManifest } from '@lobechat/builtin-tool-local-system';
 import { MemoryManifest } from '@lobechat/builtin-tool-memory';
-import { MessageManifest } from '@lobechat/builtin-tool-message';
+import { MessageManifest, resolveMessageManifest } from '@lobechat/builtin-tool-message';
 import { PageAgentManifest } from '@lobechat/builtin-tool-page-agent';
 import { RemoteDeviceManifest } from '@lobechat/builtin-tool-remote-device';
 import { selfFeedbackIntentManifest } from '@lobechat/builtin-tool-self-iteration';
@@ -32,10 +33,17 @@ import { TaskManifest } from '@lobechat/builtin-tool-task';
 import { TopicReferenceManifest } from '@lobechat/builtin-tool-topic-reference';
 import { UserInteractionManifest } from '@lobechat/builtin-tool-user-interaction';
 import { VerifyToolManifest } from '@lobechat/builtin-tool-verify';
+import { VideoGenerationManifest } from '@lobechat/builtin-tool-video-generation';
 import { WebBrowsingManifest } from '@lobechat/builtin-tool-web-browsing';
 import { WebOnboardingManifest } from '@lobechat/builtin-tool-web-onboarding';
 import { isDesktop, RECOMMENDED_SKILLS, RecommendedSkillType } from '@lobechat/const';
 import { type LobeBuiltinTool } from '@lobechat/types';
+
+export {
+  type MediaGenerationOffer,
+  type MediaGenerationToolMode,
+  resolveMediaGenerationOffer,
+} from './resolveMediaGenerationOffer';
 
 /**
  * Default tool IDs that will always be added to the tools list.
@@ -46,6 +54,8 @@ export const defaultToolIds = [
   SkillsManifest.identifier,
   SkillStoreManifest.identifier,
   WebBrowsingManifest.identifier,
+  ImageGenerationManifest.identifier,
+  VideoGenerationManifest.identifier,
   KnowledgeBaseManifest.identifier,
   MemoryManifest.identifier,
   LocalSystemManifest.identifier,
@@ -62,7 +72,7 @@ export const defaultToolIds = [
  * These are core system tools that the agent needs to function properly.
  *
  * `lobe-agent` is listed first: its built-in capabilities (plan + todo management,
- * sub-agent dispatch, visual-media fallback) should be available on every agent-mode turn,
+ * sub-agent dispatch, multimodal fallback) should be available on every agent-mode turn,
  * not gated behind explicit injection. NOTE: these rules only apply in agent mode — chat
  * mode (`enableAgentMode === false`) drops `alwaysOnToolIds` entirely. In manual
  * skill-activate mode the discovery tools in `manualModeExcludeToolIds` are still removed
@@ -100,11 +110,13 @@ export const manualModeExcludeToolIds = [
  * (`chatConfig.enableAgentMode === false`). Each one still passes through
  * its own runtime gate (e.g. knowledge base requires `hasEnabledKnowledgeBases`,
  * memory requires the global memory setting, web-browsing requires search
- * enabled) — this list is the strict outer whitelist.
+ * enabled, image-generation requires an explicit pin). This list is the
+ * strict outer whitelist.
  *
  * In chat mode, both the server `createServerAgentToolsEngine` and the
  * frontend `createAgentToolsEngine` build their rules from ONLY these
- * identifiers, drop user plugins / `alwaysOnToolIds` entirely, and disable
+ * identifiers, drop user plugins / `alwaysOnToolIds` entirely (except
+ * image-generation, which is re-enabled only when pinned), and disable
  * `allowExplicitActivation` so the activator can't smuggle other tools in.
  */
 export const chatModeAllowedToolIds = [
@@ -112,6 +124,7 @@ export const chatModeAllowedToolIds = [
   MemoryManifest.identifier,
   WebBrowsingManifest.identifier,
   ImageGenerationManifest.identifier,
+  VideoGenerationManifest.identifier,
 ];
 
 /**
@@ -283,9 +296,16 @@ const builtinToolRegistry: LobeBuiltinTool[] = [
     type: 'builtin',
   },
   {
-    hidden: true,
+    // Opt-in image generation: chat mode no longer auto-injects it, so the
+    // Tools popover must expose a pin/disable control.
     identifier: ImageGenerationManifest.identifier,
     manifest: ImageGenerationManifest,
+    type: 'builtin',
+  },
+  {
+    hidden: true,
+    identifier: VideoGenerationManifest.identifier,
+    manifest: VideoGenerationManifest,
     type: 'builtin',
   },
   {
@@ -330,6 +350,9 @@ const builtinToolRegistry: LobeBuiltinTool[] = [
   {
     identifier: MessageManifest.identifier,
     manifest: MessageManifest,
+    // Context-aware: drops APIs the current IM platform can't fulfil (e.g.
+    // WeChat has no `readMessages`), trimming both the tool list and systemRole.
+    resolveManifest: resolveMessageManifest,
     type: 'builtin',
   },
   {
@@ -357,6 +380,13 @@ const builtinToolRegistry: LobeBuiltinTool[] = [
     hidden: true,
     identifier: UserInteractionManifest.identifier,
     manifest: UserInteractionManifest,
+    type: 'builtin',
+  },
+  {
+    discoverable: false,
+    hidden: true,
+    identifier: GoalManifest.identifier,
+    manifest: GoalManifest,
     type: 'builtin',
   },
   {

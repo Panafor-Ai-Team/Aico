@@ -1,3 +1,9 @@
+# syntax=docker/dockerfile:1
+# Empty ENV names (*_API_KEY, AUTH_SECRET, …) document runtime config; real
+# values come from compose/host at start. Dummy builder placeholders are not
+# production secrets. BuildKit flags the names anyway.
+# check=skip=SecretsUsedInArgOrEnv
+
 ## Set global build ENV
 ARG NODEJS_VERSION="24"
 
@@ -24,7 +30,21 @@ RUN set -e && \
     cp /usr/lib/$(arch)-linux-gnu/librt.so.1 /distroless/lib/librt.so.1 && \
     cp /usr/local/bin/node /distroless/bin/node && \
     cp /etc/ssl/certs/ca-certificates.crt /distroless/etc/ssl/certs/ca-certificates.crt && \
+    find /distroless -exec touch -h -d @0 {} + && \
     rm -rf /tmp/* /var/lib/apt/lists/* /var/tmp/*
+
+## Workspace manifests only: the install layer below stays cached across
+## source-only commits, which keeps runtime node_modules byte-identical and
+## lets `docker pull` reuse that layer on deploy.
+FROM base AS manifests
+
+WORKDIR /src
+
+COPY packages ./packages
+
+RUN set -e && \
+    mkdir -p /out && \
+    find packages -name package.json -not -path '*/node_modules/*' -exec cp --parents {} /out/ \;
 
 ## Builder image, install all the dependencies and build the app
 FROM base AS builder
@@ -32,9 +52,6 @@ FROM base AS builder
 ARG USE_CN_MIRROR
 ARG NEXT_PUBLIC_BASE_PATH
 ARG NEXT_PUBLIC_SENTRY_DSN
-ARG NEXT_PUBLIC_ANALYTICS_POSTHOG
-ARG NEXT_PUBLIC_POSTHOG_HOST
-ARG NEXT_PUBLIC_POSTHOG_KEY
 ARG NEXT_PUBLIC_ANALYTICS_UMAMI
 ARG NEXT_PUBLIC_UMAMI_SCRIPT_URL
 ARG NEXT_PUBLIC_UMAMI_WEBSITE_ID
@@ -54,11 +71,6 @@ ENV NEXT_PUBLIC_SENTRY_DSN="${NEXT_PUBLIC_SENTRY_DSN}" \
     SENTRY_ORG="" \
     SENTRY_PROJECT=""
 
-# Posthog
-ENV NEXT_PUBLIC_ANALYTICS_POSTHOG="${NEXT_PUBLIC_ANALYTICS_POSTHOG}" \
-    NEXT_PUBLIC_POSTHOG_HOST="${NEXT_PUBLIC_POSTHOG_HOST}" \
-    NEXT_PUBLIC_POSTHOG_KEY="${NEXT_PUBLIC_POSTHOG_KEY}"
-
 # Umami
 ENV NEXT_PUBLIC_ANALYTICS_UMAMI="${NEXT_PUBLIC_ANALYTICS_UMAMI}" \
     NEXT_PUBLIC_UMAMI_SCRIPT_URL="${NEXT_PUBLIC_UMAMI_SCRIPT_URL}" \
@@ -71,7 +83,7 @@ WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml ./
 COPY .npmrc ./
-COPY packages ./packages
+COPY --from=manifests /out/packages ./packages
 COPY patches ./patches
 # bring in desktop workspace manifest so pnpm can resolve it
 COPY apps/desktop/src/main/package.json ./apps/desktop/src/main/package.json
@@ -101,46 +113,83 @@ RUN rm -rf src/app/desktop "src/app/(backend)/trpc/desktop"
 # run build standalone for docker version
 RUN npm run build:docker
 
-## Application image, copy all the files for production
-FROM busybox:latest AS app
+# Next 16 + pnpm standalone omits @swc/helpers; the server then crashes with
+# MODULE_NOT_FOUND .../next@.../node_modules/@swc/helpers/esm/_interop_require_default.js
+RUN set -eux; \
+    helper_src="$(find /app/node_modules/.pnpm -maxdepth 1 -type d -name '@swc+helpers@*' | head -1)"; \
+    test -n "${helper_src}"; \
+    next_dir="$(find /app/.next/standalone/node_modules/.pnpm -maxdepth 1 -type d -name 'next@*' | head -1)"; \
+    test -n "${next_dir}"; \
+    mkdir -p "${next_dir}/node_modules/@swc/helpers"; \
+    cp -a "${helper_src}/node_modules/@swc/helpers/." "${next_dir}/node_modules/@swc/helpers/"
 
-COPY --from=base /distroless/ /
+# Split the standalone tree so each part becomes its own image layer: deploys
+# then re-pull only the layers whose content changed. mtimes are zeroed only on
+# trees never served over HTTP (static ETags derive from size+mtime), so the
+# same deps produce the same layer digest. The standalone copies of public/_spa*
+# are dropped because the builder's public/_spa* are copied over them anyway.
+#
+# The migration deps (/deps: pg, drizzle-orm) are merged here, not by COPY in
+# the final stage: in the traced tree node_modules/pg is a pnpm symlink into
+# .pnpm/, and `COPY --link` does not follow destination symlinks, so it would
+# replace the link with a bare directory whose siblings (pg-types, …) are
+# unreachable. The trailing `/.` makes cp write through the link, as a plain
+# COPY used to.
+RUN set -eux; \
+    mkdir -p /out; \
+    mv .next/standalone/node_modules /out/node_modules; \
+    mv .next/standalone/dist /out/dist; \
+    rm -rf .next/standalone/public/_spa .next/standalone/public/_spa-auth .next/standalone/public/_spa-workbench; \
+    mkdir -p /out/node_modules/.pnpm; \
+    cp -a /deps/node_modules/.pnpm/. /out/node_modules/.pnpm/; \
+    for pkg in pg drizzle-orm; do \
+        mkdir -p "/out/node_modules/${pkg}"; \
+        cp -a "/deps/node_modules/${pkg}/." "/out/node_modules/${pkg}/"; \
+    done; \
+    find /out/node_modules packages/database/migrations packages/database/migrations-aico -exec touch -h -d @0 {} +
 
-# Automatically leverage output traces to reduce image size
-# https://nextjs.org/docs/advanced-features/output-file-tracing
-COPY --from=builder /app/.next/standalone /app/
-COPY --from=builder /app/.next/static /app/.next/static
-# Copy SPA assets (Vite build output)
-COPY --from=builder /app/public/_spa /app/public/_spa
-# Copy database migrations
-COPY --from=builder /app/packages/database/migrations /app/migrations
-COPY --from=builder /app/scripts/migrateServerDB/docker.cjs /app/docker.cjs
-COPY --from=builder /app/scripts/migrateServerDB/errorHint.js /app/errorHint.js
+## Production image. Not flattened: one layer per part (--link keeps each layer
+## independent of the ones before it), ownership set via --chown instead of
+## `chown -R`, which would duplicate the whole tree into another layer.
+FROM busybox:latest
 
-# copy dependencies
-COPY --from=builder /deps/node_modules/.pnpm /app/node_modules/.pnpm
-COPY --from=builder /deps/node_modules/pg /app/node_modules/pg
-COPY --from=builder /deps/node_modules/drizzle-orm /app/node_modules/drizzle-orm
-
-# Copy server launcher and shared scripts
-COPY --from=builder /app/scripts/serverLauncher/startServer.js /app/startServer.js
-COPY --from=builder /app/scripts/_shared /app/scripts/_shared
+COPY --link --from=base /distroless/ /
 
 RUN set -e && \
     addgroup -S -g 1001 nodejs && \
     adduser -D -G nodejs -H -S -h /app -u 1001 nextjs && \
-    chown -R nextjs:nodejs /app /etc/proxychains4.conf
+    mkdir -p /app && \
+    chown nextjs:nodejs /app /etc/proxychains4.conf
 
-## Production image, copy all the files and run next
-FROM scratch
+# Automatically leverage output traces to reduce image size
+# https://nextjs.org/docs/advanced-features/output-file-tracing
+COPY --link --chown=1001:1001 --from=builder /out/node_modules /app/node_modules
+COPY --link --chown=1001:1001 --from=builder /out/dist /app/dist
+COPY --link --chown=1001:1001 --from=builder /app/.next/standalone /app/
+COPY --link --chown=1001:1001 --from=builder /app/.next/static /app/.next/static
+# Copy SPA assets (Vite build output)
+COPY --link --chown=1001:1001 --from=builder /app/public/_spa /app/public/_spa
+COPY --link --chown=1001:1001 --from=builder /app/public/_spa-auth /app/public/_spa-auth
+COPY --link --chown=1001:1001 --from=builder /app/public/_spa-workbench /app/public/_spa-workbench
+# Copy database migrations
+COPY --link --chown=1001:1001 --from=builder /app/packages/database/migrations /app/migrations
+COPY --link --chown=1001:1001 --from=builder /app/packages/database/migrations-aico /app/migrations-aico
+COPY --link --chown=1001:1001 --from=builder /app/docs/changelog /app/docs/changelog
+COPY --link --chown=1001:1001 --from=builder /app/scripts/migrateServerDB/docker.cjs /app/docker.cjs
+COPY --link --chown=1001:1001 --from=builder /app/scripts/migrateServerDB/errorHint.js /app/errorHint.js
+COPY --link --chown=1001:1001 --from=builder /app/scripts/migrateServerDB/dualJournalRunner.cjs /app/dualJournalRunner.cjs
 
-# Copy all the files from app, set the correct permission for prerender cache
-COPY --from=app / /
+# Copy server launcher and shared scripts
+COPY --link --chown=1001:1001 --from=builder /app/scripts/serverLauncher/startServer.js /app/startServer.js
+COPY --link --chown=1001:1001 --from=builder /app/scripts/_shared /app/scripts/_shared
+
+# --link layers may create parent dirs (/app, /app/.next, …) as root; restore the
+# previous ownership so Next can write .next/cache. Dirs only: a tiny layer.
+RUN find /app -type d ! -user 1001 -exec chown nextjs:nodejs {} +
 
 ENV NODE_ENV="production" \
     NODE_OPTIONS="--dns-result-order=ipv4first --use-openssl-ca" \
     NODE_EXTRA_CA_CERTS="" \
-    NODE_TLS_REJECT_UNAUTHORIZED="" \
     SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
 
 # Make the middleware rewrite through local as default
@@ -150,6 +199,18 @@ ENV MIDDLEWARE_REWRITE_THROUGH_LOCAL="1"
 # set hostname to localhost
 ENV HOSTNAME="0.0.0.0" \
     PORT="3210"
+
+# Panachat deploy metadata (injected by CI build-args; shown on Settings → About)
+ARG GIT_SHA=""
+ARG SHA=""
+ARG PANACHAT_CHANNEL=""
+ARG PANACHAT_VERSION=""
+ARG BUILD_TIME=""
+ENV GIT_SHA="${GIT_SHA}" \
+    SHA="${SHA}" \
+    PANACHAT_CHANNEL="${PANACHAT_CHANNEL}" \
+    PANACHAT_VERSION="${PANACHAT_VERSION}" \
+    BUILD_TIME="${BUILD_TIME}"
 
 # General Variables
 ENV APP_URL="" \

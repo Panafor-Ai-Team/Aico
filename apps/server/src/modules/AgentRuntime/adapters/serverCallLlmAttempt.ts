@@ -1,10 +1,18 @@
 import type { AgentEvent, BlobStore, LLMAttemptOutput } from '@lobechat/agent-runtime';
 import { ToolNameResolver } from '@lobechat/context-engine';
-import type { ChatStreamPayload, ModelRuntime } from '@lobechat/model-runtime';
+import type {
+  Base64ImageData,
+  ChatStreamPayload,
+  ContentPartData,
+  ModelRuntime,
+  ModelRuntimeDiagnostics,
+  OnFinishData,
+} from '@lobechat/model-runtime';
 import {
   consumeStreamUntilDone,
   isEmptyModelCompletion,
   ModelEmptyError,
+  ModelRefusalError,
 } from '@lobechat/model-runtime';
 import type {
   ChatImageItem,
@@ -16,6 +24,9 @@ import type {
   ModelUsage,
 } from '@lobechat/types';
 import { pickString, toRecord } from '@lobechat/utils/object';
+
+import type { ModelCompletionFailureReason } from '@/business/server/recordModelCompletionFailure';
+import { recordModelCompletionFailure } from '@/business/server/recordModelCompletionFailure';
 
 import type { RuntimeExecutorContext } from '../context';
 import { isOperationInterrupted, log, timing } from '../executorHelpers';
@@ -47,6 +58,27 @@ interface CreateServerCallLlmAttemptInput {
   userAgent?: string;
 }
 
+// Silence mid-stream means a stalled upstream: tokens flow continuously while
+// healthy, so no chunk for this long is never a slow model — fail the attempt
+// (retryable, like the first-byte cap) instead of holding the run open until
+// maxDuration kills it. Long generations keep flowing and never trip this.
+const LLM_STREAM_INACTIVITY_TIMEOUT_MS = 60_000;
+
+// Every chunk/event counts as upstream activity; silence trips the watchdog.
+const watchCallbacks = <T extends object>(callbacks: T, touch: () => void): T => {
+  const watched: Record<string, unknown> = {};
+  for (const [key, fn] of Object.entries(callbacks)) {
+    watched[key] =
+      typeof fn === 'function'
+        ? async (...args: unknown[]) => {
+            touch();
+            return (fn as (...args: unknown[]) => unknown)(...args);
+          }
+        : fn;
+  }
+  return watched as T;
+};
+
 const createStreamExecutionError = (errorData: unknown) => {
   const errorRecord = toRecord(errorData);
   const message = pickString(errorRecord?.message);
@@ -65,8 +97,10 @@ const createStreamExecutionError = (errorData: unknown) => {
 export class ServerCallLlmAttempt {
   private answerSalvagedFromReasoning = false;
   private readonly attempt: number;
+  private readonly base64ImageEvents: Base64ImageData[] = [];
   private readonly chatPayload: ChatStreamPayload;
-  private readonly clientIp?: string;
+  private completion?: OnFinishData;
+  private readonly contentPartEvents: ContentPartData[] = [];
   private readonly ctx: RuntimeExecutorContext;
   private finishReason?: string;
   private grounding: GroundingSearch | null = null;
@@ -79,7 +113,11 @@ export class ServerCallLlmAttempt {
   private readonly operationLogId: string;
   private readonly provider: string;
   private reasoning?: ModelReasoning;
+  private readonly reasoningPartEvents: ContentPartData[] = [];
+  private resolvedModel?: string;
   private readonly resolved: ServerCallLlmTooling['resolved'];
+  private readonly runtimeDiagnostics: ModelRuntimeDiagnostics = {};
+  private readonly runtimeMetadata: Record<string, unknown>;
   private speed?: ModelPerformance;
   private readonly streamSink: ServerCallLlmStreamSink;
   private streamError?: unknown;
@@ -87,7 +125,6 @@ export class ServerCallLlmAttempt {
   private toolsCalling: ChatToolPayload[] = [];
   private readonly topicId?: string;
   private readonly trigger?: unknown;
-  private readonly userAgent?: string;
   private usage?: ModelUsage;
 
   constructor({
@@ -111,7 +148,6 @@ export class ServerCallLlmAttempt {
   }: CreateServerCallLlmAttemptInput) {
     this.attempt = attempt;
     this.chatPayload = chatPayload;
-    this.clientIp = clientIp;
     this.ctx = ctx;
     this.maxAttempts = maxAttempts;
     this.messageCount = messageCount;
@@ -121,6 +157,13 @@ export class ServerCallLlmAttempt {
     this.operationLogId = operationLogId;
     this.provider = provider;
     this.resolved = resolved;
+    this.runtimeMetadata = {
+      clientIp,
+      operationId: ctx.operationId,
+      topicId,
+      trigger,
+      userAgent,
+    };
     this.streamSink = createServerCallLlmStreamSink({
       blobStore,
       ctx,
@@ -129,10 +172,44 @@ export class ServerCallLlmAttempt {
     });
     this.topicId = topicId;
     this.trigger = trigger;
-    this.userAgent = userAgent;
   }
 
   async execute(): Promise<void> {
+    let rejectStalled!: (reason: Error) => void;
+    const stalled = new Promise<never>((_, reject) => {
+      rejectStalled = reject;
+    });
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    const touchActivity = () => {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => {
+        // Keep "[stall-guard]": the retry policy skips backoff sleeps for our
+        // own stall timeouts, while "timed out" keeps them retryable.
+        rejectStalled(
+          new Error(
+            `LLM stream stalled: no chunk for ${LLM_STREAM_INACTIVITY_TIMEOUT_MS}ms (timed out waiting for upstream, model ${this.model}) [stall-guard]`,
+          ),
+        );
+      }, LLM_STREAM_INACTIVITY_TIMEOUT_MS);
+    };
+    touchActivity();
+    try {
+      await Promise.race([
+        this.executeInner({
+          disarmStall: () => clearTimeout(stallTimer),
+          touchActivity,
+        }),
+        stalled,
+      ]);
+    } finally {
+      clearTimeout(stallTimer);
+    }
+  }
+
+  private async executeInner(guard: {
+    disarmStall: () => void;
+    touchActivity: () => void;
+  }): Promise<void> {
     log(
       '[%s][call_llm] calling model-runtime chat (attempt %d/%d, model: %s, messages: %d, tools: %d)',
       this.operationLogId,
@@ -144,102 +221,109 @@ export class ServerCallLlmAttempt {
     );
 
     const response = await this.modelRuntime.chat(this.chatPayload, {
-      callback: {
-        onBase64Image: async ({ image }) => {
-          this.onFirstChunk();
-          await this.streamSink.appendBase64Image(image);
-        },
-        onCompletion: async (data) => {
-          if (data.usage) this.usage = data.usage;
-          if (data.speed) this.speed = data.speed;
-          if (data.finishReason) this.finishReason = data.finishReason;
-          if (data.reasoning) this.reasoning = data.reasoning;
-        },
-        onContentPart: async (part) => {
-          this.onFirstChunk();
-          await this.streamSink.appendContentPart(part);
-        },
-        onError: async (errorData) => {
-          this.streamError = errorData;
-          console.error(`[${this.operationLogId}][stream_error]`, errorData);
-        },
-        onGrounding: async (groundingData) => {
-          log(`[${this.operationLogId}][grounding] %O`, groundingData);
-          this.grounding = groundingData;
+      callback: watchCallbacks(
+        {
+          onBase64Image: async ({ image }) => {
+            this.onFirstChunk();
+            this.base64ImageEvents.push({ ...image });
+            await this.streamSink.appendBase64Image(image);
+          },
+          onCompletion: async (data) => {
+            this.completion = data;
+            if (data.usage) this.usage = data.usage;
+            if (data.speed) this.speed = data.speed;
+            if (data.finishReason) this.finishReason = data.finishReason;
+            if (data.reasoning) this.reasoning = data.reasoning;
+            if (data.resolvedModel) this.resolvedModel = data.resolvedModel;
+          },
+          onContentPart: async (part) => {
+            this.onFirstChunk();
+            this.contentPartEvents.push({ ...part });
+            await this.streamSink.appendContentPart(part);
+          },
+          onError: async (errorData) => {
+            this.streamError = errorData;
+            console.error(`[${this.operationLogId}][stream_error]`, errorData);
+          },
+          onGrounding: async (groundingData) => {
+            log(`[${this.operationLogId}][grounding] %O`, groundingData);
+            this.grounding = groundingData;
 
-          await this.ctx.streamManager.publishStreamChunk(
-            this.ctx.operationId,
-            this.ctx.stepIndex,
-            {
-              chunkType: 'grounding',
-              grounding: groundingData,
-            },
-          );
-        },
-        onReasoningPart: async (part) => {
-          this.onFirstChunk();
-          await this.streamSink.appendReasoningPart(part);
-        },
-        onText: async (text) => {
-          this.onFirstChunk();
-          timing(
-            '[%s] onText received chunk at %d, length: %d',
-            this.operationLogId,
-            Date.now(),
-            text.length,
-          );
-          await this.streamSink.appendText(text);
-        },
-        onThinking: async (reasoning) => {
-          this.onFirstChunk();
-          timing(
-            '[%s] onThinking received chunk at %d, length: %d',
-            this.operationLogId,
-            Date.now(),
-            reasoning.length,
-          );
-          await this.streamSink.appendThinking(reasoning);
-        },
-        onToolsCalling: async ({ toolsCalling: raw }) => {
-          const resolvedCalls = new ToolNameResolver().resolve(
-            raw,
-            this.resolved.promptManifestMap,
-            this.resolved.tools.map((tool) => tool.function.name),
-          );
-          const payload = resolvedCalls.map((toolCall) => ({
-            ...toolCall,
-            executor: this.resolved.executorMap?.[toolCall.identifier],
-            source: this.resolved.sourceMap[toolCall.identifier],
-          }));
+            await this.ctx.streamManager.publishStreamChunk(
+              this.ctx.operationId,
+              this.ctx.stepIndex,
+              {
+                chunkType: 'grounding',
+                grounding: groundingData,
+              },
+            );
+          },
+          onReasoningPart: async (part) => {
+            this.onFirstChunk();
+            this.reasoningPartEvents.push({ ...part });
+            await this.streamSink.appendReasoningPart(part);
+          },
+          onText: async (text) => {
+            this.onFirstChunk();
+            timing(
+              '[%s] onText received chunk at %d, length: %d',
+              this.operationLogId,
+              Date.now(),
+              text.length,
+            );
+            await this.streamSink.appendText(text);
+          },
+          onThinking: async (reasoning) => {
+            this.onFirstChunk();
+            timing(
+              '[%s] onThinking received chunk at %d, length: %d',
+              this.operationLogId,
+              Date.now(),
+              reasoning.length,
+            );
+            await this.streamSink.appendThinking(reasoning);
+          },
+          onToolsCalling: async ({ toolsCalling: raw }) => {
+            const resolvedCalls = new ToolNameResolver().resolve(
+              raw,
+              this.resolved.promptManifestMap,
+              this.resolved.tools.map((tool) => tool.function.name),
+            );
+            const payload = resolvedCalls.map((toolCall) => ({
+              ...toolCall,
+              executor: this.resolved.executorMap?.[toolCall.identifier],
+              source: this.resolved.sourceMap[toolCall.identifier],
+            }));
 
-          this.toolsCalling = payload;
-          // Keep raw arguments through execution so malformed JSON can reach the
-          // tool error path and give the model a self-repair signal. Finalizers
-          // sanitize only the persisted DB and replay-state copies.
-          this.toolCalls = raw;
+            this.toolsCalling = payload;
+            // Keep raw arguments through execution so malformed JSON can reach the
+            // tool error path and give the model a self-repair signal. Finalizers
+            // sanitize only the persisted DB and replay-state copies.
+            this.toolCalls = raw;
 
-          await this.streamSink.flushTextBuffer();
-          await this.ctx.streamManager.publishStreamChunk(
-            this.ctx.operationId,
-            this.ctx.stepIndex,
-            {
-              chunkType: 'tools_calling',
-              toolsCalling: payload,
-            },
-          );
+            await this.streamSink.flushTextBuffer();
+            await this.ctx.streamManager.publishStreamChunk(
+              this.ctx.operationId,
+              this.ctx.stepIndex,
+              {
+                chunkType: 'tools_calling',
+                toolsCalling: payload,
+              },
+            );
+          },
         },
-      },
-      metadata: {
-        clientIp: this.clientIp,
-        operationId: this.ctx.operationId,
-        topicId: this.topicId,
-        trigger: this.trigger,
-        userAgent: this.userAgent,
-      },
+        guard.touchActivity,
+      ),
+      diagnostics: this.runtimeDiagnostics,
+      metadata: this.runtimeMetadata,
       user: this.ctx.userId,
     });
 
     await consumeStreamUntilDone(response);
+
+    // The stream is done: uploads and finalizers below run without chunk
+    // activity and must not trip the watchdog.
+    guard.disarmStall();
 
     if (this.streamError) throw createStreamExecutionError(this.streamError);
 
@@ -269,6 +353,7 @@ export class ServerCallLlmAttempt {
       imageList: [...this.imageList],
       reasoning: this.reasoning,
       reasoningParts: [...this.streamSink.reasoningParts],
+      resolvedModel: this.resolvedModel,
       speed: this.speed,
       thinkingContent: this.streamSink.thinkingContent,
       toolCalls: [...this.toolCalls],
@@ -278,35 +363,113 @@ export class ServerCallLlmAttempt {
   }
 
   private async assertNonEmptyCompletion() {
-    if (
-      isEmptyModelCompletion({
-        content: this.streamSink.content,
-        hasGrounding: !!this.grounding,
-        imageCount: this.imageList.length,
-        outputTokens: this.usage?.totalOutputTokens,
-        reasoning: this.streamSink.thinkingContent,
-        toolCallCount: this.toolsCalling.length + this.toolCalls.length,
-      }) &&
-      !(await isOperationInterrupted(this.ctx))
-    ) {
+    const imageCount = this.getOutputImageCount();
+    const isRefusal = this.finishReason?.toLowerCase() === 'refusal';
+    /**
+     * A refusal needs ordinary response output to count as a successful
+     * completion. Provider-internal reasoning alone must not turn a blank
+     * refusal into a successful assistant message.
+     */
+    const visibleReasoning = isRefusal ? '' : this.streamSink.thinkingContent;
+    const isEmpty = isEmptyModelCompletion({
+      content: this.streamSink.content,
+      hasGrounding: !!this.grounding,
+      imageCount,
+      outputTokens: this.usage?.totalOutputTokens,
+      reasoning: visibleReasoning,
+      toolCallCount: this.toolsCalling.length + this.toolCalls.length,
+    });
+
+    if (!isEmpty || (await isOperationInterrupted(this.ctx))) return;
+
+    const diagnostics = {
+      attempt: this.attempt,
+      contentLength: this.streamSink.content.length,
+      cost: this.usage?.cost,
+      finishReason: this.finishReason,
+      imageCount,
+      maxAttempts: this.maxAttempts,
+      model: this.model,
+      outputTokens: this.usage?.totalOutputTokens,
+      provider: this.provider,
+      reasoningLength: this.streamSink.thinkingContent.length,
+      toolCallCount: this.toolsCalling.length + this.toolCalls.length,
+    };
+
+    await this.recordCompletionFailure(isRefusal ? 'refusal' : 'empty_completion');
+
+    if (isRefusal) {
       log(
-        '[%s] Model returned an empty completion (attempt %d/%d) — throwing terminal ModelEmptyError',
+        '[%s] Model explicitly refused an empty completion (attempt %d/%d) — throwing terminal ModelRefusalError',
         this.operationLogId,
         this.attempt,
         this.maxAttempts,
       );
-      throw new ModelEmptyError(undefined, {
+      throw new ModelRefusalError(undefined, diagnostics);
+    }
+
+    log(
+      '[%s] Model returned an empty completion (attempt %d/%d) — throwing terminal ModelEmptyError',
+      this.operationLogId,
+      this.attempt,
+      this.maxAttempts,
+    );
+    throw new ModelEmptyError(undefined, diagnostics);
+  }
+
+  /**
+   * Native multimodal responses store generated images in contentParts rather
+   * than the legacy imageList. Count both paths so image-only completions are
+   * not mistaken for empty provider responses.
+   */
+  private getOutputImageCount() {
+    const contentPartImageCount = this.streamSink.contentParts.filter(
+      (part) => part.type === 'image',
+    ).length;
+
+    return this.imageList.length + contentPartImageCount;
+  }
+
+  private async recordCompletionFailure(reason: ModelCompletionFailureReason) {
+    try {
+      const providerEvidence =
+        this.runtimeDiagnostics.providerRequest || this.runtimeDiagnostics.providerResponse
+          ? this.runtimeDiagnostics
+          : undefined;
+      const routeEvidence = this.runtimeMetadata.routeAttempt;
+      const runtimeEvidence =
+        providerEvidence === undefined && routeEvidence === undefined
+          ? undefined
+          : { provider: providerEvidence, route: routeEvidence };
+
+      await recordModelCompletionFailure({
         attempt: this.attempt,
-        contentLength: this.streamSink.content.length,
-        cost: this.usage?.cost,
-        finishReason: this.finishReason,
-        imageCount: this.imageList.length,
         maxAttempts: this.maxAttempts,
         model: this.model,
-        outputTokens: this.usage?.totalOutputTokens,
+        operationId: this.ctx.operationId,
+        operationLogId: this.operationLogId,
         provider: this.provider,
-        reasoningLength: this.streamSink.thinkingContent.length,
-        toolCallCount: this.toolsCalling.length + this.toolCalls.length,
+        reason,
+        request: this.chatPayload,
+        response: {
+          base64ImageEvents: [...this.base64ImageEvents],
+          completion: this.completion,
+          contentPartEvents: [...this.contentPartEvents],
+          output: this.snapshot(),
+          reasoningPartEvents: [...this.reasoningPartEvents],
+        },
+        ...(runtimeEvidence ? { runtime: runtimeEvidence } : {}),
+        stepIndex: this.ctx.stepIndex,
+        topicId: this.topicId,
+        trigger: this.trigger,
+        userId: this.ctx.userId,
+        workspaceId: this.ctx.workspaceId,
+      });
+    } catch (error) {
+      console.error('[ModelCompletionFailure] Failed to record completion evidence.', {
+        error: error instanceof Error ? error.message : String(error),
+        operationId: this.ctx.operationId,
+        stepIndex: this.ctx.stepIndex,
       });
     }
   }

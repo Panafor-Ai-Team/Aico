@@ -1,6 +1,5 @@
 'use client';
 
-import { ModelIcon, ProviderIcon } from '@lobehub/icons';
 import { Block, Flexbox, Icon, Popover, Tag, Text } from '@lobehub/ui';
 import { createStaticStyles } from 'antd-style';
 import dayjs from 'dayjs';
@@ -9,6 +8,9 @@ import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import urlJoin from 'url-join';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
+import { BrandedProviderIcon } from '@/components/Branding/BrandedProviderIcon';
 import { ModelInfoTags } from '@/components/ModelSelect';
 import PublishedTime from '@/components/PublishedTime';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
@@ -96,7 +98,12 @@ const ModelItem = memo<DiscoverModelItem>(
               overflow: 'hidden',
             }}
           >
-            <ModelIcon model={identifier} size={40} style={{ flex: 'none' }} type={'avatar'} />
+            <BrandedModelIcon
+              model={identifier}
+              size={40}
+              style={{ flex: 'none' }}
+              type={'avatar'}
+            />
             <Flexbox
               flex={1}
               gap={2}
@@ -119,7 +126,7 @@ const ModelItem = memo<DiscoverModelItem>(
                   </Text>
                 </WorkspaceLink>
               </Flexbox>
-              <div className={styles.author}>{identifier}</div>
+              <div className={styles.author}>{formatBrandedModelId(identifier)}</div>
             </Flexbox>
           </Flexbox>
           <Flexbox horizontal align={'center'} gap={4}>
@@ -173,14 +180,14 @@ const ModelItem = memo<DiscoverModelItem>(
                   }}
                 >
                   {providers.map((item) => (
-                    <ProviderIcon key={item} provider={item} size={24} />
+                    <BrandedProviderIcon key={item} provider={item} size={24} />
                   ))}
                 </Flexbox>
               }
             >
               <Flexbox horizontal align={'center'} gap={6}>
                 {providers.slice(0, 6).map((item) => (
-                  <ProviderIcon key={item} provider={item} size={14} type={'mono'} />
+                  <BrandedProviderIcon key={item} provider={item} size={14} type={'mono'} />
                 ))}
                 {providers.length > 6 && <Tag size={'small'}>{providers.length}</Tag>}
               </Flexbox>

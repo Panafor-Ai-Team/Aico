@@ -1,11 +1,14 @@
 import { Accordion, AccordionItem, Flexbox, Icon, Tag, Text, Tooltip } from '@lobehub/ui';
-import { createStaticStyles } from 'antd-style';
+import { createStaticStyles, cssVar } from 'antd-style';
 import { ArrowDownToDot, ArrowUpFromDot, CircleFadingArrowUp } from 'lucide-react';
 import type { FC } from 'react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { PiTokenIcon } from '@/features/AicoBilling/PiTokenIcon';
 import type { EnabledProviderWithModels } from '@/types/aiProvider';
+import { getDocumentDirection } from '@/utils/client/applyDocumentDirection';
+import { getModelDescriptionI18nKey } from '@/utils/modelDescriptionI18n';
 
 import type { FormattedUnitPrice } from '../hooks/useModelDetailPanel';
 import { UNIT_ICON_MAP, useModelDetailPanel } from '../hooks/useModelDetailPanel';
@@ -35,6 +38,7 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     padding-inline: 8px;
 
     line-height: 1.5;
+    text-align: start;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
   `,
@@ -72,7 +76,12 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   priceValue: css`
     display: inline-flex;
     gap: 4px;
-    align-items: baseline;
+    align-items: center;
+  `,
+  priceAmount: css`
+    display: inline-flex;
+    gap: 3px;
+    align-items: center;
   `,
   titleText: css`
     font-size: 14px;
@@ -84,10 +93,11 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 interface PriceValueProps {
   prefix?: string;
   price: FormattedUnitPrice;
+  showPiIcon?: boolean;
   suffix?: string;
 }
 
-const PriceValue: FC<PriceValueProps> = ({ price, prefix = '', suffix = '' }) => (
+const PriceValue: FC<PriceValueProps> = ({ price, prefix = '', showPiIcon, suffix = '' }) => (
   <span className={styles.priceValue}>
     {price.original && (
       <span className={styles.originalPriceText}>
@@ -95,9 +105,13 @@ const PriceValue: FC<PriceValueProps> = ({ price, prefix = '', suffix = '' }) =>
         {price.original}
       </span>
     )}
-    <span>
-      {prefix}
-      {price.current}
+    <span className={styles.priceAmount}>
+      {/* Keep "4×" / "0.33×" LTR inside RTL text so the × never mirrors to "×4". */}
+      <bdi dir="ltr">
+        {prefix}
+        {price.current}
+      </bdi>
+      {showPiIcon && price.current !== '-' && <PiTokenIcon size={12} />}
       {suffix}
     </span>
   </span>
@@ -112,14 +126,16 @@ interface ModelDetailPanelProps {
 
 const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
   ({ model: modelId, provider, enabledList: enabledListProp, pricingMode }) => {
-    const { t } = useTranslation(['components', 'models']);
+    const { t, i18n } = useTranslation(['components', 'models']);
     const {
+      approximatePiPrice,
       approximatePriceLabel,
       contextWindowLabel,
       enabledAbilities,
       expandedKeys,
       formatPrice,
       formatUnitPrice,
+      getCreditsUnitLabel,
       getPricingTooltip,
       getUnitPriceSuffix,
       handleExpandedChange,
@@ -128,10 +144,13 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
       hasPricing,
       isAbilitiesExpanded,
       isCreditPricing,
+      isPiAmountUnit,
       isPricingExpanded,
+      isSingleTextRate,
       model,
       pricingGroups,
       rating,
+      reasoningBilledTwice,
     } = useModelDetailPanel({
       enabledList: enabledListProp,
       modelId,
@@ -139,6 +158,11 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
       provider,
       t,
     });
+
+    const withBilledTwiceHint = (text: string) =>
+      reasoningBilledTwice
+        ? `${text} ${t('ModelSwitchPanel.detail.pricing.reasoningBilledTwiceHint')}`
+        : text;
 
     if (!model) return null;
 
@@ -162,19 +186,45 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
     const ratedDimensions = ratingDimensions.filter((item) => item.score !== undefined);
     const hasRating = ratedDimensions.length > 0;
 
+    const approximatePrice = approximatePiPrice ? (
+      <span className={styles.priceAmount}>
+        ~ {approximatePiPrice.amount}
+        <PiTokenIcon size={14} />
+        {getCreditsUnitLabel(approximatePiPrice.unit)}
+      </span>
+    ) : (
+      approximatePriceLabel
+    );
+
+    // Model ids can contain `:` (e.g. `gemini-3-pro-image-preview:image`). i18next
+    // defaults nsSeparator to `:`, so without disabling it the lookup splits into the
+    // wrong namespace and never hits `models.lobehub.<id>.description`.
     const description = model.description
       ? String(
-          t(`${model.id}.description` as any, {
+          t(getModelDescriptionI18nKey(model.id, provider) as any, {
             defaultValue: model.description,
+            keySeparator: false,
             ns: 'models',
+            nsSeparator: false,
           }),
         ).trim()
       : undefined;
 
     return (
-      <Flexbox className={styles.container}>
+      // Explicit language direction: the model list around this popup is pinned LTR, and
+      // titles / abilities / pricing rows must still start from the right in Persian.
+      <Flexbox className={styles.container} dir={getDocumentDirection(i18n?.language)}>
         {description && (
-          <Text as={'p'} className={styles.description} fontSize={12} type={'secondary'}>
+          // The popup is pinned LTR for the English model names, but the description is
+          // localized prose: `dir="auto"` lets a Persian description start from the right
+          // and an English one from the left.
+          <Text
+            as={'p'}
+            className={styles.description}
+            dir={'auto'}
+            fontSize={12}
+            type={'secondary'}
+          >
             {description}
           </Text>
         )}
@@ -340,7 +390,7 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
             )}
 
             {/* Pricing */}
-            {hasPricing && (formatPrice || approximatePriceLabel) && (
+            {hasPricing && (formatPrice || approximatePrice) && (
               <AccordionItem
                 alwaysShowAction
                 itemKey="pricing"
@@ -348,8 +398,18 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
                 paddingInline={8}
                 action={
                   !isPricingExpanded &&
-                  (approximatePriceLabel ? (
-                    <span className={styles.actionText}>{approximatePriceLabel}</span>
+                  (approximatePrice ? (
+                    <span className={styles.actionText}>{approximatePrice}</span>
+                  ) : isSingleTextRate ? (
+                    <Tooltip
+                      title={withBilledTwiceHint(
+                        getPricingTooltip('coefficient', formatPrice!.input.current),
+                      )}
+                    >
+                      <span className={styles.actionText}>
+                        <PriceValue price={formatPrice!.input} />
+                      </span>
+                    </Tooltip>
                   ) : (
                     <Flexbox horizontal align={'center'} className={styles.actionText} gap={8}>
                       {hasCachedInputPricing && (
@@ -393,9 +453,9 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
                 }
               >
                 <Flexbox gap={8}>
-                  {approximatePriceLabel && (
+                  {approximatePrice && (
                     <Flexbox className={styles.row} style={{ fontWeight: 500 }}>
-                      {approximatePriceLabel}
+                      {approximatePrice}
                     </Flexbox>
                   )}
                   {pricingGroups.map(({ group, units }) => (
@@ -405,31 +465,43 @@ const ModelDetailPanel: FC<ModelDetailPanelProps> = memo(
                           {t(`ModelSwitchPanel.detail.pricing.group.${group}` as any)}
                         </Flexbox>
                       )}
-                      {units.map((unit) => (
-                        <Flexbox
-                          horizontal
-                          align={'center'}
-                          className={styles.row}
-                          justify={'space-between'}
-                          key={unit.name}
-                        >
-                          <Flexbox horizontal align={'center'} gap={6}>
-                            {UNIT_ICON_MAP[unit.name] && (
-                              <Icon icon={UNIT_ICON_MAP[unit.name]!} size={'small'} />
-                            )}
-                            <span>
-                              {t(`ModelSwitchPanel.detail.pricing.unit.${unit.name}` as any)}
-                            </span>
+                      {units.map((unit) => {
+                        const isCoefficientRow = isSingleTextRate && unit.name === 'textInput';
+
+                        return (
+                          <Flexbox
+                            horizontal
+                            align={'center'}
+                            className={styles.row}
+                            justify={'space-between'}
+                            key={unit.name}
+                          >
+                            <Flexbox horizontal align={'center'} gap={6}>
+                              {!isCoefficientRow && UNIT_ICON_MAP[unit.name] && (
+                                <Icon icon={UNIT_ICON_MAP[unit.name]!} size={'small'} />
+                              )}
+                              <span>
+                                {isCoefficientRow
+                                  ? t('ModelSwitchPanel.detail.pricing.credits.coefficientLabel')
+                                  : t(`ModelSwitchPanel.detail.pricing.unit.${unit.name}` as any)}
+                              </span>
+                            </Flexbox>
+                            <PriceValue
+                              prefix={isCreditPricing ? '' : '$'}
+                              price={formatUnitPrice(unit)}
+                              showPiIcon={isPiAmountUnit(unit.unit)}
+                              suffix={getUnitPriceSuffix(unit.unit)}
+                            />
                           </Flexbox>
-                          <PriceValue
-                            prefix={isCreditPricing ? '' : '$'}
-                            price={formatUnitPrice(unit)}
-                            suffix={getUnitPriceSuffix(unit.unit)}
-                          />
-                        </Flexbox>
-                      ))}
+                        );
+                      })}
                     </Flexbox>
                   ))}
+                  {reasoningBilledTwice && (
+                    <Flexbox className={styles.row} style={{ color: cssVar.colorWarning }}>
+                      {t('ModelSwitchPanel.detail.pricing.reasoningBilledTwiceHint')}
+                    </Flexbox>
+                  )}
                 </Flexbox>
               </AccordionItem>
             )}

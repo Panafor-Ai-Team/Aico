@@ -60,6 +60,7 @@ bun.lockb
 dist/
 public/_spa/
 public/_spa-auth/
+public/_spa-workbench/
 public/spa/
 es/
 lib/
@@ -94,6 +95,7 @@ public/swe-worker*
 # Generated files
 src/app/spa/[variants]/[[...path]]/spaHtmlTemplates.ts
 src/app/spa-auth/authHtmlTemplate.ts
+src/app/spa-workbench/workbenchHtmlTemplate.ts
 public/*.js
 robots.txt
 
@@ -114,6 +116,7 @@ vertex-ai-key.json
 .local/
 .claude/
 .mcp.json
+.cursor/mcp.json
 CLAUDE.local.md
 .agent/
 
@@ -122,6 +125,12 @@ CLAUDE.local.md
 
 # Docker development data
 docker-compose/dev/data/
+docker-compose/deploy/data
+docker-compose/deploy/data/
+
+# Control-plane SPA publish dir (built by build:spa:control-plane / moz)
+apps/aico-control-plane/web/spa/
+docker-compose/deploy/.env
 
 # Migration scripts data
 scripts/clerk-to-betterauth/test/*.csv
@@ -156,4 +165,9 @@ docs/superpowers/
 .kagura/
 
 # Amp agent runtime
-.amp/
+.amp/*
+!.amp/settings.json
+
+# Security audit extracted source kits (portable .tar.gz is committed; tree is local)
+security-audit-reports/phase-02-business-logic/tenant-isolation-source/*
+!security-audit-reports/phase-02-business-logic/tenant-isolation-source/README.md

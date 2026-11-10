@@ -1,6 +1,6 @@
 import { useTheme } from 'next-themes';
 import type { ComponentType, CSSProperties, ReactElement } from 'react';
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import type { RouteObject } from 'react-router';
 import { Outlet, useRouteError } from 'react-router';
 
@@ -30,9 +30,11 @@ const AuthErrorBoundary = () => {
   const error = useRouteError() as Error;
   const { resolvedTheme } = useTheme();
 
-  if (typeof window !== 'undefined' && isChunkLoadError(error)) {
-    notifyChunkError();
-  }
+  useEffect(() => {
+    if (isChunkLoadError(error)) {
+      notifyChunkError(error);
+    }
+  }, [error]);
 
   // index.auth.html paints the body black in dark mode before React mounts
   const isDark = resolvedTheme === 'dark';
@@ -87,6 +89,10 @@ export const authRoutes: RouteObject[] = [
         path: 'verify-email',
       },
       {
+        element: lazyElement(() => import('@/routes/auth/verify-phone')),
+        path: 'verify-phone',
+      },
+      {
         element: lazyElement(() => import('@/routes/auth/reset-password')),
         path: 'reset-password',
       },
@@ -97,6 +103,14 @@ export const authRoutes: RouteObject[] = [
       {
         element: lazyElement(() => import('@/routes/auth/market-auth-callback')),
         path: 'market-auth-callback',
+      },
+      {
+        element: lazyElement(() => import('@/routes/auth/terms')),
+        path: 'terms',
+      },
+      {
+        element: lazyElement(() => import('@/routes/auth/privacy')),
+        path: 'privacy',
       },
       {
         element: lazyElement(() => import('@/routes/auth/oauth/consent/[uid]')),

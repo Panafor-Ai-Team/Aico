@@ -1,3 +1,4 @@
+import { BRANDING_NAME, MANAGED_PROVIDER_IDS } from '@lobechat/business-const';
 import type {
   BuiltinServerRuntimeOutput,
   BuiltinToolContext,
@@ -6,6 +7,7 @@ import type {
 import { BaseExecutor } from '@lobechat/types';
 import type { AiModelForSelect, AiProviderModelListItem } from 'model-bank';
 
+import { filterAicoManagedProviders } from '@/features/AicoBilling/isManagedRuntimeProvider';
 import { aiModelService } from '@/services/aiModel';
 import { aiProviderService } from '@/services/aiProvider';
 import { generationService } from '@/services/generation';
@@ -14,6 +16,7 @@ import { imageService } from '@/services/image';
 import { getAgentStoreState } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
 import { aiProviderSelectors, getAiInfraStoreState } from '@/store/aiInfra';
+import { filterHiddenProviderModels } from '@/utils/aiProvider';
 
 import { ImageGenerationExecutionRuntime } from '../../ExecutionRuntime';
 import { ImageGenerationManifest } from '../../manifest';
@@ -27,6 +30,17 @@ import type {
 } from '../../types';
 import { ImageGenerationApiName } from '../../types';
 
+const brandProviderName = (id: string, name?: string) => {
+  const normalized = id.trim().toLowerCase();
+  if (
+    normalized === 'aico' ||
+    normalized === 'lobehub' ||
+    (MANAGED_PROVIDER_IDS as readonly string[]).includes(normalized)
+  ) {
+    return BRANDING_NAME;
+  }
+  return name || id;
+};
 const normalizeStoreModel = (model: AiModelForSelect): ImageGenerationModelSummary => ({
   approximatePricePerImage: model.approximatePricePerImage,
   description: model.description,
@@ -67,7 +81,9 @@ const createClientImageGenerationRuntime = (topicVisibility?: 'private' | 'publi
       };
     },
     listImageModels: async ({ provider, limit }) => {
-      const storeProviders = aiProviderSelectors.enabledImageModelList(getAiInfraStoreState());
+      const storeProviders = filterAicoManagedProviders(
+        aiProviderSelectors.enabledImageModelList(getAiInfraStoreState()),
+      );
       const filteredStoreProviders = provider
         ? storeProviders.filter((item) => item.id === provider)
         : storeProviders;
@@ -76,7 +92,7 @@ const createClientImageGenerationRuntime = (topicVisibility?: 'private' | 'publi
         .map((item) => ({
           id: item.id,
           models: item.children.map(normalizeStoreModel),
-          name: item.name,
+          name: brandProviderName(item.id, item.name),
         }))
         .filter((item) => item.models.length > 0);
 
@@ -89,21 +105,44 @@ const createClientImageGenerationRuntime = (topicVisibility?: 'private' | 'publi
       }
 
       const runtimeState = await aiProviderService.getAiProviderRuntimeState();
-      const enabledProviders = provider
-        ? runtimeState.enabledImageAiProviders.filter((item) => item.id === provider)
-        : runtimeState.enabledImageAiProviders;
+      let hiddenBuiltinModels = runtimeState.hiddenBuiltinModels;
+
+      if (runtimeState.hiddenBuiltinModelsResolved !== false && hiddenBuiltinModels === undefined) {
+        const { loadDefaultHiddenBuiltinModels } =
+          await import('@/business/client/model-bank/loadModels');
+        hiddenBuiltinModels = await loadDefaultHiddenBuiltinModels();
+      }
+
+      if (hiddenBuiltinModels === undefined) {
+        return { providers: [], totalModels: 0 };
+      }
+
+      const enabledProviders = filterAicoManagedProviders(
+        provider
+          ? runtimeState.enabledImageAiProviders.filter((item) => item.id === provider)
+          : runtimeState.enabledImageAiProviders,
+      );
 
       const providers = await Promise.all(
         enabledProviders.map(async (item) => {
+          /**
+           * Hidden models must be removed before applying the caller's limit so they do not
+           * consume result slots while the store-backed model list is still hydrating.
+           */
+          const hasHiddenModels = hiddenBuiltinModels.some((model) => model.providerId === item.id);
           const models = await aiModelService.getAiProviderModelList(item.id, {
             enabled: true,
-            limit,
+            limit: hasHiddenModels ? undefined : limit,
             type: 'image',
           });
+          const visibleModels = filterHiddenProviderModels(models, item.id, hiddenBuiltinModels);
+          const limitedModels =
+            typeof limit === 'number' ? visibleModels.slice(0, limit) : visibleModels;
+
           return {
             id: item.id,
-            models: models.map(normalizeRawModel),
-            name: item.name || item.id,
+            models: limitedModels.map(normalizeRawModel),
+            name: brandProviderName(item.id, item.name),
           };
         }),
       );
@@ -159,6 +198,8 @@ class ImageGenerationExecutor extends BaseExecutor<typeof ImageGenerationApiName
       : undefined;
     const runtime = createClientImageGenerationRuntime(topicVisibility);
 
+    // Same one-shot path as Create → Image: no confirmation overlay; the runtime
+    // pins gpt-image-2 / openai/gpt-image-2 when the caller omits provider/model.
     return this.toResult(await runtime.generateImage(params, { signal: ctx?.signal }));
   };
 

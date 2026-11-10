@@ -136,3 +136,94 @@ describe('useToolStore:plugin', () => {
     });
   });
 });
+
+// Regression: the chat page's menus are popup-scoped, so a run started right
+// after a page load built its tool set from an empty store — every connected
+// app and installed plugin was missing ("Not found: github").
+describe('ensureRuntimeToolsReady', () => {
+  beforeEach(() => {
+    useToolStore.setState({
+      fetchConnectors: vi.fn().mockResolvedValue(undefined),
+      installedPlugins: [],
+      isComposioServersInit: false,
+      isConnectorsInit: false,
+      loadingInstallPlugins: true,
+    });
+  });
+
+  // Regression: a custom MCP connector is only discoverable once the connector
+  // list is loaded, so a run must not depend on a settings page having loaded it.
+  it('loads custom connectors that are not loaded yet', async () => {
+    vi.mocked(pluginService.getInstalledPlugins).mockResolvedValue([]);
+    const fetchConnectors = vi.fn().mockResolvedValue(undefined);
+    useToolStore.setState({ fetchConnectors });
+
+    await useToolStore.getState().ensureRuntimeToolsReady();
+
+    expect(fetchConnectors).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads installed plugins and Composio connections that are not loaded yet', async () => {
+    const plugins = [{ identifier: 'my-mcp' }] as LobeTool[];
+    vi.mocked(pluginService.getInstalledPlugins).mockResolvedValue(plugins);
+    const refreshComposioConnections = vi.fn().mockResolvedValue(undefined);
+    useToolStore.setState({ refreshComposioConnections });
+
+    await act(async () => {
+      await useToolStore.getState().ensureRuntimeToolsReady({ composio: true });
+    });
+
+    expect(useToolStore.getState().installedPlugins).toEqual(plugins);
+    expect(useToolStore.getState().loadingInstallPlugins).toBe(false);
+    expect(refreshComposioConnections).toHaveBeenCalledTimes(1);
+  });
+
+  it('does nothing when the tool state is already loaded', async () => {
+    const refreshComposioConnections = vi.fn();
+    const fetchConnectors = vi.fn();
+    useToolStore.setState({
+      fetchConnectors,
+      isComposioServersInit: true,
+      isConnectorsInit: true,
+      loadingInstallPlugins: false,
+      refreshComposioConnections,
+    });
+
+    await useToolStore.getState().ensureRuntimeToolsReady({ composio: true });
+
+    expect(pluginService.getInstalledPlugins).not.toHaveBeenCalled();
+    expect(refreshComposioConnections).not.toHaveBeenCalled();
+    expect(fetchConnectors).not.toHaveBeenCalled();
+  });
+
+  it('skips Composio when it is not enabled', async () => {
+    vi.mocked(pluginService.getInstalledPlugins).mockResolvedValue([]);
+    const refreshComposioConnections = vi.fn();
+    useToolStore.setState({ refreshComposioConnections });
+
+    await useToolStore.getState().ensureRuntimeToolsReady();
+
+    expect(refreshComposioConnections).not.toHaveBeenCalled();
+  });
+
+  it('gives up after the timeout so a slow request cannot stall the send', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(pluginService.getInstalledPlugins).mockReturnValue(new Promise(() => {}));
+
+      const ready = useToolStore.getState().ensureRuntimeToolsReady({ timeoutMs: 50 });
+      await vi.advanceTimersByTimeAsync(50);
+
+      await expect(ready).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not throw when a load fails', async () => {
+    vi.mocked(pluginService.getInstalledPlugins).mockRejectedValue(new Error('offline'));
+
+    await expect(useToolStore.getState().ensureRuntimeToolsReady()).resolves.toBeUndefined();
+    expect(useToolStore.getState().loadingInstallPlugins).toBe(true);
+  });
+});

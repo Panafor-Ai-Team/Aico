@@ -64,4 +64,29 @@ describe('mergeModelRuntimeHooks', () => {
     expect(merged?.beforeChat).toBe(onlyInA);
     expect(merged?.onChatFinal).toBe(onlyInB);
   });
+
+  it('chains the metering hooks (tts, transcribe, embeddings complete)', async () => {
+    const order: string[] = [];
+    const push = (tag: string) => vi.fn(async () => void order.push(tag));
+    const merged = mergeModelRuntimeHooks(
+      {
+        beforeTextToSpeech: push('a-tts'),
+        beforeTranscribe: push('a-asr'),
+        onEmbeddingsComplete: push('a-emb'),
+      },
+      {
+        beforeTextToSpeech: push('b-tts'),
+        beforeTranscribe: push('b-asr'),
+        onEmbeddingsComplete: push('b-emb'),
+      },
+    );
+
+    await merged?.beforeTextToSpeech?.({ input: '', model: 'm', voice: 'v' });
+    await merged?.beforeTranscribe?.({ model: 'm' } as any);
+    await merged?.onEmbeddingsComplete?.(
+      { latencyMs: 0, success: true },
+      { payload: { input: '', model: 'm' } },
+    );
+    expect(order).toEqual(['a-tts', 'b-tts', 'a-asr', 'b-asr', 'a-emb', 'b-emb']);
+  });
 });

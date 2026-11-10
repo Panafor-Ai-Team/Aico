@@ -7,6 +7,7 @@ import { useClientDataSWR } from '@/libs/swr';
 import { toolKeys } from '@/libs/swr/keys';
 import { pluginService } from '@/services/plugin';
 import { type StoreSetter } from '@/store/types';
+import { type PluginInstallError } from '@/types/tool/plugin';
 import { merge } from '@/utils/merge';
 
 import { type ToolStore } from '../../store';
@@ -39,7 +40,40 @@ export class PluginActionImpl {
    */
   refreshPlugins = async (): Promise<void> => {
     const data = await pluginService.getInstalledPlugins();
-    this.#set({ installedPlugins: data }, false, 'refreshPlugins');
+    this.#set({ installedPlugins: data, loadingInstallPlugins: false }, false, 'refreshPlugins');
+  };
+
+  /**
+   * Load the tool state an agent run reads — installed plugins (MCP / custom),
+   * custom MCP connectors and,
+   * when enabled, the user's Composio connections — if it isn't loaded yet.
+   *
+   * The run must not depend on some component having fetched it: the chat page's
+   * menus are popup-scoped, so a run started right after a page load would
+   * otherwise build its tool set (and answer `activateTools`) without any
+   * connected app. Bounded so a slow request can't stall the send; on timeout
+   * the run proceeds with whatever is loaded.
+   */
+  ensureRuntimeToolsReady = async (
+    options: { composio?: boolean; timeoutMs?: number } = {},
+  ): Promise<void> => {
+    const { composio = false, timeoutMs = 3000 } = options;
+    const state = this.#get();
+    const pending: Promise<void>[] = [];
+
+    if (state.loadingInstallPlugins) pending.push(state.refreshPlugins());
+    if (composio && !state.isComposioServersInit) pending.push(state.refreshComposioConnections());
+    if (!state.isConnectorsInit) pending.push(state.fetchConnectors());
+    if (pending.length === 0) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.allSettled(pending),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+    clearTimeout(timer);
   };
 
   updateInstallLoadingState = (id: string, loading: boolean | undefined): void => {
@@ -47,6 +81,14 @@ export class PluginActionImpl {
       { pluginInstallLoading: { ...this.#get().pluginInstallLoading, [id]: loading } },
       false,
       'updateInstallLoadingState',
+    );
+  };
+
+  updateInstallError = (id: string, error: PluginInstallError | undefined): void => {
+    this.#set(
+      { pluginInstallErrors: { ...this.#get().pluginInstallErrors, [id]: error } },
+      false,
+      'updateInstallError',
     );
   };
 

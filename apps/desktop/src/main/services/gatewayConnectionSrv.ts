@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 
-import { OFFICIAL_DEVICE_GATEWAY_URL } from '@lobechat/const/url';
 import type {
   EnrollWorkspaceParams,
   EnrollWorkspaceResult,
@@ -9,16 +8,15 @@ import type {
 } from '@lobechat/device-control';
 import type {
   AgentRunRequestMessage,
-  GatewayMcpStdioParams,
+  GatewayClient,
+  GatewayMcpParams,
   MessageApiRequestMessage,
   RpcRequestMessage,
   SystemInfoRequestMessage,
   ToolCallRequestMessage,
   ToolCallResponseMessage,
 } from '@lobechat/device-gateway-client';
-import { GatewayClient } from '@lobechat/device-gateway-client';
 import type { IdentitySource } from '@lobechat/device-identity';
-import { deriveDeviceId, deriveScopedFallbackId } from '@lobechat/device-identity';
 import type { GatewayConnectionStatus } from '@lobechat/electron-client-ipc';
 import { app, powerSaveBlocker } from 'electron';
 
@@ -31,7 +29,7 @@ import { ServiceModule } from './index';
 
 const logger = createLogger('services:GatewayConnectionSrv');
 
-const DEFAULT_GATEWAY_URL = OFFICIAL_DEVICE_GATEWAY_URL;
+const GATEWAY_NOT_CONFIGURED_ERROR = 'Device gateway is not configured';
 
 /**
  * Result envelope a tool-call handler must return. Mirrors
@@ -65,7 +63,7 @@ interface McpCallHandler {
     apiName: string;
     arguments: string;
     identifier: string;
-    params: GatewayMcpStdioParams;
+    params: GatewayMcpParams;
   }): Promise<ToolCallResult>;
 }
 
@@ -259,7 +257,10 @@ export default class GatewayConnectionService extends ServiceModule {
    * because it hashes the OS machine id; falls back to the stored random UUID
    * when the machine id is unavailable. Caches the result for this session.
    */
-  resolveDeviceIdentity(userId: string): { deviceId: string; identitySource: IdentitySource } {
+  async resolveDeviceIdentity(
+    userId: string,
+  ): Promise<{ deviceId: string; identitySource: IdentitySource }> {
+    const { deriveDeviceId } = await import('@lobechat/device-identity');
     const fallbackId = this.app.storeManager.get('gatewayDeviceId') as string | undefined;
     const identity = deriveDeviceId(userId, { fallbackId });
     this.deviceId = identity.deviceId;
@@ -294,32 +295,17 @@ export default class GatewayConnectionService extends ServiceModule {
     return this.status;
   }
 
+  /** Whether a device gateway URL is set; without one the gateway feature is unavailable. */
+  isConfigured(): boolean {
+    return !!this.getGatewayUrl();
+  }
+
   getDeviceInfo() {
     return {
-      description: this.getDeviceDescription(),
       deviceId: this.getDeviceId(),
       hostname: os.hostname(),
-      name: this.getDeviceName(),
       platform: process.platform,
     };
-  }
-
-  // ─── Device Name & Description ───
-
-  getDeviceName(): string {
-    return (this.app.storeManager.get('gatewayDeviceName') as string) || os.hostname();
-  }
-
-  setDeviceName(name: string) {
-    this.app.storeManager.set('gatewayDeviceName', name);
-  }
-
-  getDeviceDescription(): string {
-    return (this.app.storeManager.get('gatewayDeviceDescription') as string) || '';
-  }
-
-  setDeviceDescription(description: string) {
-    this.app.storeManager.set('gatewayDeviceDescription', description);
   }
 
   // ─── Connection Logic ───
@@ -353,6 +339,12 @@ export default class GatewayConnectionService extends ServiceModule {
       this.client = null;
     }
 
+    const gatewayUrl = this.getGatewayUrl();
+    if (!gatewayUrl) {
+      logger.info('Skipping connect: no device gateway URL configured');
+      return { error: GATEWAY_NOT_CONFIGURED_ERROR, success: false };
+    }
+
     if (!this.tokenProvider) {
       logger.warn('Cannot connect: no token provider configured');
       return { error: 'No token provider configured', success: false };
@@ -364,7 +356,6 @@ export default class GatewayConnectionService extends ServiceModule {
       return { error: 'No access token available', success: false };
     }
 
-    const gatewayUrl = this.getGatewayUrl();
     const userId = this.extractUserIdFromToken(token);
     logger.info(`Connecting to device gateway: ${gatewayUrl}, userId: ${userId || 'unknown'}`);
 
@@ -372,7 +363,7 @@ export default class GatewayConnectionService extends ServiceModule {
     // registry before opening the WS, so the device row exists by the time the
     // gateway reports it online.
     if (userId) {
-      const identity = this.resolveDeviceIdentity(userId);
+      const identity = await this.resolveDeviceIdentity(userId);
       await this.deviceRegistrar?.({
         deviceId: identity.deviceId,
         hostname: os.hostname(),
@@ -383,6 +374,7 @@ export default class GatewayConnectionService extends ServiceModule {
       });
     }
 
+    const { GatewayClient } = await import('@lobechat/device-gateway-client');
     const client = new GatewayClient({
       channel: isDev ? 'desktop-dev' : 'desktop',
       connectionId: this.getConnectionId(),
@@ -507,7 +499,10 @@ export default class GatewayConnectionService extends ServiceModule {
    * enrolled into a workspace — via desktop share or `lh connect --workspace` —
    * resolves to one workspace device.
    */
-  private resolveWorkspaceDeviceIdentity(workspaceId: string): EnrollWorkspaceResult {
+  private async resolveWorkspaceDeviceIdentity(
+    workspaceId: string,
+  ): Promise<EnrollWorkspaceResult> {
+    const { deriveDeviceId, deriveScopedFallbackId } = await import('@lobechat/device-identity');
     // Fallback machines (no readable machine id) must still derive a STABLE
     // workspace id — the identity-only probe, the real enroll, and restore
     // checks each re-derive it. Namespace the persisted install UUID rather
@@ -525,11 +520,15 @@ export default class GatewayConnectionService extends ServiceModule {
     workspaceId: string,
     token: string,
   ): Promise<EnrollWorkspaceResult> {
+    const gatewayUrl = this.getGatewayUrl();
+    if (!gatewayUrl) throw new Error(GATEWAY_NOT_CONFIGURED_ERROR);
+
     // Re-enroll replaces the previous share connection instead of stacking one.
     await this.closeWorkspaceClient(workspaceId);
 
-    const identity = this.resolveWorkspaceDeviceIdentity(workspaceId);
+    const identity = await this.resolveWorkspaceDeviceIdentity(workspaceId);
 
+    const { GatewayClient } = await import('@lobechat/device-gateway-client');
     const client = new GatewayClient({
       channel: isDev ? 'desktop-dev' : 'desktop',
       // Reuse the install's connectionId: the gateway dedupes stale sockets per
@@ -537,7 +536,7 @@ export default class GatewayConnectionService extends ServiceModule {
       // predecessor, never the personal socket.
       connectionId: this.getConnectionId(),
       deviceId: identity.deviceId,
-      gatewayUrl: this.getGatewayUrl(),
+      gatewayUrl,
       logger,
       token,
       userAgent: getDesktopUserAgent(),
@@ -598,7 +597,7 @@ export default class GatewayConnectionService extends ServiceModule {
         if (this.workspaceClients.has(workspaceId)) continue;
 
         try {
-          const identity = this.resolveWorkspaceDeviceIdentity(workspaceId);
+          const identity = await this.resolveWorkspaceDeviceIdentity(workspaceId);
 
           const registered = await this.workspaceDeviceChecker?.(workspaceId, identity.deviceId);
           if (registered === false) {
@@ -679,14 +678,17 @@ export default class GatewayConnectionService extends ServiceModule {
 
   // ─── System Info ───
 
-  private handleSystemInfoRequest(client: GatewayClient, request: SystemInfoRequestMessage) {
+  private async handleSystemInfoRequest(client: GatewayClient, request: SystemInfoRequestMessage) {
     logger.info(`Received system_info_request: requestId=${request.requestId}`);
+    const { getShellInfo } = await import('@lobechat/local-file-shell/shell');
     client.sendSystemInfoResponse({
       requestId: request.requestId,
       result: {
         success: true,
         systemInfo: {
           arch: os.arch(),
+          // Tell the server-side prompt builder which shell runCommand spawns here.
+          defaultShell: (await getShellInfo()).displayName,
           desktopPath: app.getPath('desktop'),
           documentsPath: app.getPath('documents'),
           downloadsPath: app.getPath('downloads'),
@@ -902,13 +904,12 @@ export default class GatewayConnectionService extends ServiceModule {
 
   // ─── Gateway URL ───
 
-  private getGatewayUrl(): string {
-    // Env override wins (dev: point at a local `wrangler dev` gateway), then the
-    // user-configured store value, then the production default.
+  private getGatewayUrl(): string | undefined {
+    // Env override wins (build-time / dev: point at a local `wrangler dev` gateway),
+    // then the user-configured store value. There is no hosted default: Panachat
+    // does not run a device gateway, so without a URL the gateway stays off.
     return (
-      getDesktopEnv().DEVICE_GATEWAY_URL ||
-      this.app.storeManager.get('gatewayUrl') ||
-      DEFAULT_GATEWAY_URL
+      getDesktopEnv().DEVICE_GATEWAY_URL || this.app.storeManager.get('gatewayUrl') || undefined
     );
   }
 

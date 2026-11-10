@@ -1,4 +1,4 @@
-import { Flexbox, Icon, Popover, Tooltip } from '@lobehub/ui';
+import { Flexbox, Icon, Popover, Skeleton, Tooltip } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import {
   ChevronDownIcon,
@@ -251,7 +251,9 @@ const ModeSelector = memo(() => {
     </div>
   );
 
-  if (isPreferenceLoading) return null;
+  // Hold the pill's footprint (~70x23 settled) instead of collapsing the left cluster.
+  if (isPreferenceLoading)
+    return <Skeleton.Button active size="small" style={{ height: 22, minWidth: 68, width: 68 }} />;
 
   if (disabled)
     return (

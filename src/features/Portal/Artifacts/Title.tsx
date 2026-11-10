@@ -1,9 +1,10 @@
 import { ArtifactType } from '@lobechat/types';
+import { exportFile } from '@lobechat/utils/client';
 import { ActionIcon, Flexbox, Icon, Text } from '@lobehub/ui';
 import { Tabs } from '@lobehub/ui/base-ui';
 import { ConfigProvider } from 'antd';
 import { cx } from 'antd-style';
-import { ArrowLeft, CodeIcon, EyeIcon } from 'lucide-react';
+import { ArrowLeft, CodeIcon, DownloadIcon, EyeIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import ArtifactDeploymentActions from '@/business/client/features/ArtifactDeploymentActions';
@@ -11,6 +12,16 @@ import { useChatStore } from '@/store/chat';
 import { chatPortalSelectors } from '@/store/chat/selectors';
 import { ArtifactDisplayMode } from '@/store/chat/slices/portal/initialState';
 import { oneLineEllipsis } from '@/styles';
+
+// file extension per artifact type; anything else is HTML
+const DOWNLOAD_EXTENSIONS: Record<string, string> = {
+  'application/lobe.artifacts.mermaid': 'mmd',
+  [ArtifactType.Code]: 'txt',
+  [ArtifactType.Python]: 'py',
+  [ArtifactType.React]: 'tsx',
+  'image/svg+xml': 'svg',
+  'text/markdown': 'md',
+};
 
 const Title = () => {
   const { t } = useTranslation('portal');
@@ -43,6 +54,16 @@ const Title = () => {
   // show switch only when artifact is closed and the type is not code
   const showSwitch = isArtifactTagClosed && artifactType !== ArtifactType.Code;
 
+  const downloadArtifact = () => {
+    const content = chatPortalSelectors.artifactCode(
+      messageId,
+      artifactIdentifier,
+    )(useChatStore.getState());
+    const extension = (artifactType && DOWNLOAD_EXTENSIONS[artifactType]) || 'html';
+
+    exportFile(content, `${artifactIdentifier || 'artifact'}.${extension}`);
+  };
+
   return (
     <Flexbox horizontal align={'center'} flex={1} gap={12} justify={'space-between'} width={'100%'}>
       <Flexbox horizontal align={'center'} gap={4}>
@@ -70,6 +91,14 @@ const Title = () => {
             messageId={messageId}
             topicId={topicId}
           />
+          {isArtifactTagClosed && (
+            <ActionIcon
+              icon={DownloadIcon}
+              size={'small'}
+              title={t('download', { ns: 'common' })}
+              onClick={downloadArtifact}
+            />
+          )}
           {showSwitch && (
             <Tabs
               activeKey={displayMode}

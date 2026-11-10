@@ -3,7 +3,7 @@
  *
  * Creates and exports the ActivatorExecutor instance for registration.
  * Resolves tool manifests from the tool store (installedPlugins + builtinTools +
- * lobehubSkillServers + composio servers).
+ * lobehubSkillServers + composio servers + custom MCP connectors).
  *
  * State tracking (getActivatedToolIds / markActivated) is intentionally a no-op
  * because the activated state is persisted in message pluginState and accumulated
@@ -19,9 +19,13 @@ import { ActivatorExecutor } from '@lobechat/builtin-tool-activator/executor';
 import { SkillsExecutionRuntime } from '@lobechat/builtin-tool-skills/executionRuntime';
 
 import { filterBuiltinSkills } from '@/helpers/skillFilters';
+import { buildClientConnectorManifests } from '@/helpers/toolEngineering/buildClientConnectorManifests';
 import { agentSkillService } from '@/services/skill';
+import { getServerConfigStoreState, serverConfigSelectors } from '@/store/serverConfig';
 import { getToolStoreState } from '@/store/tool';
+import { composioStoreSelectors } from '@/store/tool/selectors';
 import { toolSelectors } from '@/store/tool/selectors/tool';
+import { connectorSelectors } from '@/store/tool/slices/connector/selectors';
 import { LobehubSkillStatus } from '@/store/tool/slices/lobehubSkillStore';
 
 const skillsRuntime = new SkillsExecutionRuntime({
@@ -38,6 +42,12 @@ const service: ActivatorRuntimeService = {
   activateSkill: (args) => skillsRuntime.activateSkill(args),
   getActivatedToolIds: () => [],
   getToolManifests: async (identifiers: string[]): Promise<ToolManifestInfo[]> => {
+    // Connected apps / installed plugins may not be loaded yet (nothing on the
+    // chat page guarantees it); answering from an empty store says "Not found".
+    const serverConfig = getServerConfigStoreState();
+    await getToolStoreState().ensureRuntimeToolsReady({
+      composio: !!serverConfig && serverConfigSelectors.enableComposio(serverConfig),
+    });
     const s = getToolStoreState();
 
     // Only allow activation of tools that passed discovery filters
@@ -62,6 +72,44 @@ const service: ActivatorRuntimeService = {
           identifier: builtin.identifier,
           name: builtin.title ?? builtin.identifier,
           systemRole: builtin.manifest.systemRole,
+        });
+        continue;
+      }
+
+      // Search connected Composio apps. Read from the Composio store, not
+      // `installedPlugins`: that list is fetched once at page load, so an app
+      // connected in this session is in <available_tools> but not in it yet.
+      const composio = composioStoreSelectors
+        .composioAsLobeTools(s)
+        .find((tool) => tool.identifier === id);
+      if (composio?.manifest) {
+        results.push({
+          apiDescriptions: composio.manifest.api.map(
+            (a: { description: string; name: string }) => ({
+              description: a.description,
+              name: a.name,
+            }),
+          ),
+          avatar: composio.manifest.meta?.avatar,
+          identifier: composio.identifier,
+          name: composio.manifest.meta?.title ?? composio.identifier,
+        });
+        continue;
+      }
+
+      // Search custom MCP connectors (tools execute server-side via connector.callTool)
+      const connector = buildClientConnectorManifests(connectorSelectors.customConnectors(s)).find(
+        (m) => m.identifier === id,
+      );
+      if (connector) {
+        results.push({
+          apiDescriptions: connector.api.map((a) => ({
+            description: a.description,
+            name: a.name,
+          })),
+          avatar: connector.meta?.avatar,
+          identifier: connector.identifier,
+          name: connector.meta?.title ?? connector.identifier,
         });
         continue;
       }

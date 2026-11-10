@@ -74,6 +74,148 @@ const createService = (
 });
 
 describe('ImageGenerationExecutionRuntime', () => {
+  const pinnedCatalogService = () =>
+    createService({
+      listImageModels: vi.fn().mockResolvedValue({
+        providers: [
+          {
+            id: 'openrouter',
+            models: [{ id: 'some/other-image-model' }, { id: 'meta/muse-image' }],
+            name: 'OpenRouter',
+          },
+        ],
+        totalModels: 2,
+      }),
+    });
+
+  it('prefers the pinned default image model over catalog order when none is requested', async () => {
+    const service = pinnedCatalogService();
+    const runtime = new ImageGenerationExecutionRuntime(service);
+
+    const result = await runtime.generateImage({ prompt: 'a cat' });
+
+    expect(result.success).toBe(true);
+    expect(service.createImage).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'meta/muse-image', provider: 'openrouter' }),
+    );
+  });
+
+  it('prefers GPT Image 2 over Muse when both are available', async () => {
+    const service = createService({
+      listImageModels: vi.fn().mockResolvedValue({
+        providers: [
+          {
+            id: 'openrouter',
+            models: [{ id: 'meta/muse-image' }, { id: 'gpt-image-2' }],
+            name: 'Panachat',
+          },
+        ],
+        totalModels: 2,
+      }),
+    });
+
+    await new ImageGenerationExecutionRuntime(service).generateImage({ prompt: 'a cat' });
+
+    expect(service.createImage).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'gpt-image-2', provider: 'openrouter' }),
+    );
+  });
+
+  it('resolves bare gpt-image-2 onto OpenRouter openai/gpt-image-2', async () => {
+    const service = createService({
+      listImageModels: vi.fn().mockResolvedValue({
+        providers: [
+          {
+            id: 'openrouter',
+            models: [{ id: 'meta/muse-image' }, { id: 'openai/gpt-image-2' }],
+            name: 'Panachat',
+          },
+        ],
+        totalModels: 2,
+      }),
+    });
+
+    await new ImageGenerationExecutionRuntime(service).generateImage({
+      model: 'gpt-image-2',
+      prompt: 'a cat',
+      provider: 'openrouter',
+    });
+
+    expect(service.createImage).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'openai/gpt-image-2', provider: 'openrouter' }),
+    );
+  });
+
+  it('pins openai/gpt-image-2 when omitting model on an OpenRouter-only catalog', async () => {
+    const service = createService({
+      listImageModels: vi.fn().mockResolvedValue({
+        providers: [
+          {
+            id: 'openrouter',
+            models: [{ id: 'meta/muse-image' }, { id: 'openai/gpt-image-2' }],
+            name: 'Panachat',
+          },
+        ],
+        totalModels: 2,
+      }),
+    });
+
+    await new ImageGenerationExecutionRuntime(service).generateImage({ prompt: 'a cat' });
+
+    expect(service.createImage).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'openai/gpt-image-2', provider: 'openrouter' }),
+    );
+  });
+
+  it('sends the model schema defaults, with explicit parameters winning', async () => {
+    const service = createService({
+      listImageModels: vi.fn().mockResolvedValue({
+        providers: [
+          {
+            id: 'openrouter',
+            models: [
+              {
+                id: 'gpt-image-2',
+                parameters: {
+                  imageUrls: { default: [] },
+                  prompt: { default: '' },
+                  quality: { default: 'medium', enum: ['low', 'medium', 'high', 'auto'] },
+                  size: { default: 'auto', enum: ['auto', '1024x1024'] },
+                },
+              },
+            ],
+            name: 'Panachat',
+          },
+        ],
+        totalModels: 1,
+      }),
+    });
+    const runtime = new ImageGenerationExecutionRuntime(service);
+
+    await runtime.generateImage({ parameters: { size: '1024x1024' }, prompt: 'a cat' });
+
+    expect(service.createImage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: { prompt: 'a cat', quality: 'medium', size: '1024x1024' },
+      }),
+    );
+  });
+
+  it('still honours an explicitly requested image model', async () => {
+    const service = pinnedCatalogService();
+    const runtime = new ImageGenerationExecutionRuntime(service);
+
+    const result = await runtime.generateImage({
+      model: 'some/other-image-model',
+      prompt: 'a cat',
+    });
+
+    expect(result.success).toBe(true);
+    expect(service.createImage).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'some/other-image-model' }),
+    );
+  });
+
   it('lists available image models with descriptions and parameter hints', async () => {
     const runtime = new ImageGenerationExecutionRuntime(createService());
 
@@ -136,6 +278,8 @@ describe('ImageGenerationExecutionRuntime', () => {
       model: DEFAULT_IMAGE_GENERATION_MODEL,
       params: {
         prompt: 'A compact workbench UI',
+        // The model's schema default, sent as the Create page would.
+        size: '1024x1024',
       },
       provider: DEFAULT_IMAGE_GENERATION_PROVIDER,
     });
@@ -160,6 +304,9 @@ describe('ImageGenerationExecutionRuntime', () => {
     expect(result.content).not.toContain('imageUrl=https://cdn.example.com/image.png');
     expect(result.content).toContain('Copy them exactly');
     expect(result.content).toContain('![Generated image 1](https://cdn.example.com/image.png)');
+    expect(result.content).toContain(
+      'Reusable reference URLs for follow-up edits (pass as imageUrl or imageUrls):',
+    );
   });
 
   it('selects the first enabled model from an explicitly requested provider', async () => {

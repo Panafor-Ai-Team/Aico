@@ -1,8 +1,8 @@
+import type { ChatContextContent } from '@lobechat/types';
 import { toast } from '@lobehub/ui/base-ui';
 import { act, renderHook } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { notification } from '@/components/AntdStaticMethods';
 import { fileService } from '@/services/file';
 import { agentByIdSelectors } from '@/store/agent/selectors';
 
@@ -26,13 +26,6 @@ vi.mock('zustand/traditional');
 
 vi.mock('@lobehub/ui/base-ui', () => ({
   toast: {
-    error: vi.fn(),
-  },
-}));
-
-// Mock necessary modules and functions
-vi.mock('@/components/AntdStaticMethods', () => ({
-  notification: {
     error: vi.fn(),
   },
 }));
@@ -77,6 +70,112 @@ beforeEach(() => {
 });
 
 describe('useFileStore:chat', () => {
+  it('isolates context selections by conversation key', () => {
+    const { result } = renderHook(() => useStore());
+    const sharedIdSelectionA: ChatContextContent = {
+      content: 'selection A',
+      id: 'shared-selection',
+      type: 'text',
+    };
+    const sharedIdSelectionB: ChatContextContent = {
+      content: 'selection B',
+      id: 'shared-selection',
+      type: 'text',
+    };
+
+    act(() => {
+      useStore.setState({ chatContextSelectionsByContext: {} });
+      result.current.addChatContextSelection({
+        contextKey: 'topic-a',
+        selection: sharedIdSelectionA,
+      });
+      result.current.addChatContextSelection({
+        contextKey: 'topic-b',
+        selection: sharedIdSelectionB,
+      });
+    });
+
+    expect(result.current.chatContextSelectionsByContext).toEqual({
+      'topic-a': [sharedIdSelectionA],
+      'topic-b': [sharedIdSelectionB],
+    });
+
+    act(() => {
+      result.current.removeChatContextSelection({
+        contextKey: 'topic-a',
+        id: sharedIdSelectionA.id,
+      });
+    });
+
+    expect(result.current.chatContextSelectionsByContext).toEqual({
+      'topic-b': [sharedIdSelectionB],
+    });
+
+    act(() => {
+      result.current.clearChatContextSelections('topic-b');
+    });
+
+    expect(result.current.chatContextSelectionsByContext).toEqual({});
+  });
+
+  it('moves context selections to a new conversation key without overwriting the target', () => {
+    const { result } = renderHook(() => useStore());
+    const sourceSelection: ChatContextContent = {
+      content: 'source selection',
+      id: 'shared-selection',
+      type: 'text',
+    };
+    const targetSelection: ChatContextContent = {
+      content: 'stale target selection',
+      id: 'shared-selection',
+      type: 'text',
+    };
+    const targetOnlySelection: ChatContextContent = {
+      content: 'target only',
+      id: 'target-only',
+      type: 'text',
+    };
+
+    act(() => {
+      useStore.setState({
+        chatContextSelectionsByContext: {
+          'topic-new': [sourceSelection],
+          'topic-real': [targetSelection, targetOnlySelection],
+        },
+      });
+      result.current.moveChatContextSelections('topic-new', 'topic-real');
+    });
+
+    expect(result.current.chatContextSelectionsByContext).toEqual({
+      'topic-real': [sourceSelection, targetOnlySelection],
+    });
+  });
+
+  it('restores submitted selections without overwriting context added while sending', () => {
+    const { result } = renderHook(() => useStore());
+    const submittedSelection: ChatContextContent = {
+      content: 'submitted selection',
+      id: 'submitted',
+      type: 'text',
+    };
+    const newerSelection: ChatContextContent = {
+      content: 'newer selection',
+      id: 'newer',
+      type: 'text',
+    };
+
+    act(() => {
+      useStore.setState({
+        chatContextSelectionsByContext: { topic: [newerSelection] },
+      });
+      result.current.restoreChatContextSelections('topic', [submittedSelection]);
+    });
+
+    expect(result.current.chatContextSelectionsByContext).toEqual({
+      topic: [submittedSelection, newerSelection],
+    });
+  });
+
   it('clearChatUploadFileList should clear the inputFilesList', () => {
     const { result } = renderHook(() => useStore());
 
@@ -170,7 +269,7 @@ describe('useFileStore:chat', () => {
     expect(uploadWithProgress).toHaveBeenCalledTimes(1);
   });
 
-  it('shows a permission denied description when upload is rejected by RBAC', async () => {
+  it('keeps a permission-denied upload in place with a retryable error', async () => {
     mockAgentMode({ enableAgentMode: false, heterogeneous: false });
 
     const { result } = renderHook(() => useStore());
@@ -185,10 +284,14 @@ describe('useFileStore:chat', () => {
       await result.current.uploadChatFiles([file], AGENT_ID);
     });
 
-    expect(notification.error).toHaveBeenCalledWith({
-      description: 'You do not have permission to upload files in this workspace.',
-      message: 'File upload failed.',
-    });
+    expect(result.current.chatUploadFileList).toEqual([
+      expect.objectContaining({
+        agentId: AGENT_ID,
+        error: 'You do not have permission to upload files in this workspace.',
+        id: 'test.txt',
+        status: 'error',
+      }),
+    ]);
   });
 
   describe('removeChatUploadFile', () => {
@@ -224,6 +327,104 @@ describe('useFileStore:chat', () => {
 
       // draft entry is dropped, but the persisted file backing the original
       // message must NOT be deleted
+      expect(result.current.chatUploadFileList).toEqual([]);
+      expect(removeFile).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('attachChatFile / detachChatFile', () => {
+    const persisted = {
+      id: 'file-1',
+      name: 'report.pdf',
+      size: 2048,
+      type: 'application/pdf',
+      url: 'https://files.example.test/report.pdf',
+    };
+
+    it('adds a persisted file to the draft list that the chip row and send path read', () => {
+      const { result } = renderHook(() => useStore());
+
+      act(() => {
+        useStore.setState({ chatUploadFileList: [] });
+        result.current.attachChatFile(persisted);
+      });
+
+      expect(result.current.chatUploadFileList).toHaveLength(1);
+      expect(result.current.chatUploadFileList[0]).toMatchObject({
+        file: { name: 'report.pdf', size: 2048, type: 'application/pdf' },
+        fileUrl: '/f/file-1',
+        id: 'file-1',
+        previewUrl: '/f/file-1',
+        skipRemoveFile: true,
+        status: 'success',
+      });
+    });
+
+    it('accepts a raw files row that carries the mime in fileType, not type', () => {
+      const { result } = renderHook(() => useStore());
+      const { type: _type, ...rest } = persisted;
+
+      act(() => {
+        useStore.setState({ chatUploadFileList: [] });
+        result.current.attachChatFile({ ...rest, fileType: 'image/png' } as any);
+      });
+
+      const [item] = result.current.chatUploadFileList;
+      expect(item.file.type).toBe('image/png');
+      expect(item.previewUrl).toBe('/f/file-1');
+    });
+
+    it('never leaves file.type undefined when the row has no mime at all', () => {
+      const { result } = renderHook(() => useStore());
+      const { type: _type, ...rest } = persisted;
+
+      act(() => {
+        useStore.setState({ chatUploadFileList: [] });
+        result.current.attachChatFile(rest as any);
+      });
+
+      expect(result.current.chatUploadFileList[0].file.type).toBe('');
+    });
+
+    it('does not add the same file twice', () => {
+      const { result } = renderHook(() => useStore());
+
+      act(() => {
+        useStore.setState({ chatUploadFileList: [] });
+        result.current.attachChatFile(persisted);
+        result.current.attachChatFile(persisted);
+      });
+
+      expect(result.current.chatUploadFileList).toHaveLength(1);
+    });
+
+    it('detaches from the draft without deleting the stored file', () => {
+      const removeFile = vi.spyOn(fileService, 'removeFile').mockResolvedValue(undefined);
+      const { result } = renderHook(() => useStore());
+
+      act(() => {
+        useStore.setState({ chatUploadFileList: [] });
+        result.current.attachChatFile(persisted);
+        result.current.detachChatFile('file-1');
+      });
+
+      expect(result.current.chatUploadFileList).toEqual([]);
+      expect(removeFile).not.toHaveBeenCalled();
+    });
+
+    it('removing the chip of an attached file does not delete the stored file', async () => {
+      const removeFile = vi.spyOn(fileService, 'removeFile').mockResolvedValue(undefined);
+      const { result } = renderHook(() => useStore());
+
+      act(() => {
+        useStore.setState({ chatUploadFileList: [] });
+        result.current.attachChatFile(persisted);
+      });
+
+      await act(async () => {
+        await result.current.removeChatUploadFile('file-1');
+      });
+
       expect(result.current.chatUploadFileList).toEqual([]);
       expect(removeFile).not.toHaveBeenCalled();
     });

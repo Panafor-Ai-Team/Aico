@@ -12,7 +12,7 @@
   "discover.models.title": "モデルコミュニティ",
   "discover.plugins.description": "グラフ生成、学術、画像生成、動画生成、音声生成、自動化ワークフローの検索を行い、あなたのアシスタントに豊富なプラグイン機能を統合します。",
   "discover.plugins.title": "プラグインコミュニティ",
-  "discover.providers.description": "主流のモデルプロバイダーを探索 OpenAI / Qwen / Ollama / Anthropic / DeepSeek / Google Gemini / OpenRouter",
+  "discover.providers.description": "主流のモデルプロバイダーを探索 OpenAI / Qwen / Ollama / Anthropic / DeepSeek / Google Gemini",
   "discover.providers.title": "モデルサービスコミュニティ",
   "discover.search": "検索",
   "discover.title": "発見",

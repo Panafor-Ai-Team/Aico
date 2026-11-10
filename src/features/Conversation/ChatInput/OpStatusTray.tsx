@@ -4,7 +4,7 @@ import { formatElapsedClockTime } from '@lobechat/utils';
 import { Flexbox, Icon, Popover, Tooltip } from '@lobehub/ui';
 import { createStaticStyles, cx } from 'antd-style';
 import type { LucideIcon } from 'lucide-react';
-import { CircleDollarSignIcon, CoinsIcon, FootprintsIcon } from 'lucide-react';
+import { CoinsIcon, DollarSignIcon, FootprintsIcon } from 'lucide-react';
 import { Fragment, memo, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -198,14 +198,12 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   `,
 }));
 
-const ActivityGlyph = memo(() => (
+const ActivityGlyph = () => (
   <svg aria-hidden className={styles.activityGlyph} viewBox="0 0 16 16">
     <circle className={styles.glyphOrbit} cx="8" cy="8" r="6.1" />
     <circle className={styles.glyphCore} cx="8" cy="8" r="2.7" />
   </svg>
-));
-
-ActivityGlyph.displayName = 'ActivityGlyph';
+);
 
 const formatTokens = (n: number) => {
   if (n < 1000) return String(n);
@@ -357,7 +355,7 @@ const OpStatusTray = memo<OpStatusTrayProps>(({ seamless, topAttached }) => {
       : undefined,
     totalCost > 0
       ? {
-          icon: CircleDollarSignIcon,
+          icon: DollarSignIcon,
           key: 'cost',
           label: costLabel,
           title: `${costLabel}: ${formatCost(totalCost)}`,

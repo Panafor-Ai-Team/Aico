@@ -2,7 +2,8 @@
 
 import 'antd/dist/reset.css';
 
-import { ConfigProvider, ThemeProvider } from '@lobehub/ui';
+import { ConfigProvider, FontLoader, ThemeProvider } from '@lobehub/ui';
+import { ToastHost } from '@lobehub/ui/base-ui';
 import { App } from 'antd';
 import { domMax, LazyMotion } from 'motion/react';
 import * as m from 'motion/react-m';
@@ -11,16 +12,19 @@ import { memo } from 'react';
 
 import AntdStaticMethods from '@/components/AntdStaticMethods';
 import { useIsDark } from '@/hooks/useIsDark';
+import { useLocaleThemeFont } from '@/hooks/useLocaleThemeFont';
 import Image from '@/libs/next/Image';
 import Link from '@/libs/next/Link';
 
 interface AuthThemeLiteProps extends PropsWithChildren {
+  // Retained for API compat; external CDN proxy is permanently disabled.
   globalCDN?: boolean;
 }
 
 const AuthThemeLite = memo<AuthThemeLiteProps>(({ children, globalCDN }) => {
   const isDark = useIsDark();
   const currentAppearance = isDark ? 'dark' : 'light';
+  const { fontFamily, fontURL } = useLocaleThemeFont();
 
   return (
     <ThemeProvider
@@ -31,8 +35,12 @@ const AuthThemeLite = memo<AuthThemeLiteProps>(({ children, globalCDN }) => {
       style={{ height: '100%' }}
       theme={{
         cssVar: { key: 'lobe-vars' },
+        token: {
+          fontFamily,
+        },
       }}
     >
+      {!!fontURL && <FontLoader url={fontURL} />}
       <App style={{ height: '100%' }}>
         <AntdStaticMethods />
         <ConfigProvider
@@ -41,10 +49,12 @@ const AuthThemeLite = memo<AuthThemeLiteProps>(({ children, globalCDN }) => {
             aAs: Link,
             imgAs: Image,
             imgUnoptimized: true,
-            proxy: globalCDN ? 'unpkg' : undefined,
+            // Self-hosted fonts only: 'unpkg'/npmmirror are unreachable from Iran.
+            proxy: undefined,
           }}
         >
           <LazyMotion features={domMax}>{children}</LazyMotion>
+          <ToastHost />
         </ConfigProvider>
       </App>
     </ThemeProvider>

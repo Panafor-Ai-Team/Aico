@@ -1,12 +1,15 @@
 'use client';
 
 import type { BuiltinRenderProps } from '@lobechat/types';
-import { Alert, Block, Text } from '@lobehub/ui';
-import { Button } from '@lobehub/ui/base-ui';
+import { Block, Text } from '@lobehub/ui';
+import { Alert, Button } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { memo, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { GenerationCostBadge } from '@/components/GenerationCostBadge';
+import { GenerationElapsedTime } from '@/components/GenerationElapsedTime';
+import NeuralNetworkLoading from '@/components/NeuralNetworkLoading';
 import { useClientDataSWR } from '@/libs/swr';
 import { imageKeys } from '@/libs/swr/keys';
 import { normalizeAsyncError } from '@/libs/swr/normalizeError';
@@ -19,6 +22,7 @@ import type {
   GetImageGenerationStatusParams,
   GetImageGenerationStatusState,
 } from '../../types';
+import { formatImageGenerationModelLabel } from '../displayModel';
 
 const POLLING_INTERVAL = 3000;
 
@@ -88,6 +92,8 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     background: ${cssVar.colorFillTertiary};
   `,
   tile: css`
+    position: relative;
+
     overflow: hidden;
 
     aspect-ratio: 1;
@@ -112,6 +118,8 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 }));
 
 const isTerminalStatus = (status?: string) => status === 'success' || status === 'error';
+
+const isRunningStatus = (status?: string) => status === 'pending' || status === 'processing';
 
 const getAssetUrl = (state?: GetImageGenerationStatusState) => {
   const asset = state?.generation?.asset;
@@ -194,6 +202,7 @@ const GenerationTile = memo<{ index: number; task: GeneratedImageTask }>(({ inde
     task.status ||
     (isLoading ? 'processing' : 'pending');
   const url = getTaskAssetUrl(task) || getAssetUrl(data);
+  const costUsd = data?.generation?.asset?.costUsd ?? task.asset?.costUsd;
   const errorDetail =
     error instanceof Error ? error.message : getTaskErrorDetail(task) || getErrorDetail(data);
   const canRetry = Boolean(error) && normalizeAsyncError(error).retryable;
@@ -206,6 +215,11 @@ const GenerationTile = memo<{ index: number; task: GeneratedImageTask }>(({ inde
           className={styles.image}
           src={url}
         />
+      ) : isRunningStatus(status) ? (
+        <div className={styles.tileBody}>
+          <NeuralNetworkLoading size={48} />
+          <GenerationElapsedTime isActive timerKey={task.generationId} />
+        </div>
       ) : (
         <div className={styles.tileBody}>
           <Text
@@ -225,6 +239,7 @@ const GenerationTile = memo<{ index: number; task: GeneratedImageTask }>(({ inde
           )}
         </div>
       )}
+      <GenerationCostBadge costUsd={costUsd} />
     </div>
   );
 });
@@ -250,8 +265,10 @@ export const GenerateImageRender = memo<
 
   if (generations.length === 0) return null;
 
-  const provider = pluginState?.provider || args?.provider;
-  const model = pluginState?.model || args?.model;
+  const model = formatImageGenerationModelLabel(
+    pluginState?.model || args?.model,
+    pluginState?.provider || args?.provider,
+  );
   const prompt = pluginState?.prompt || args?.prompt;
 
   return (
@@ -259,7 +276,7 @@ export const GenerateImageRender = memo<
       <div className={styles.header}>
         <div className={styles.meta}>
           <div className={styles.prompt}>{prompt}</div>
-          <div className={styles.model}>{[provider, model].filter(Boolean).join('/')}</div>
+          {model && <div className={styles.model}>{model}</div>}
         </div>
         <span className={styles.status}>
           {t('builtins.lobe-image-generation.render.generatedCount', {

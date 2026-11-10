@@ -1,12 +1,10 @@
 'use client';
 
-import data from '@emoji-mart/data';
-import Picker from '@emoji-mart/react';
 import { ActionIcon, Flexbox, Tooltip } from '@lobehub/ui';
 import { Popover } from 'antd';
 import { createStaticStyles, useTheme } from 'antd-style';
 import { PlusIcon, SmilePlus } from 'lucide-react';
-import { type FC, memo, type ReactNode, useState } from 'react';
+import { type FC, lazy, memo, type ReactNode, Suspense, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { usePermission } from '@/hooks/usePermission';
@@ -17,6 +15,33 @@ import { useConversationResourceAccess } from '../../hooks/useConversationResour
 import { useConversationStore } from '../../store';
 
 const QUICK_REACTIONS = ['👍', '👎', '❤️', '😄', '😂', '😅', '🎉', '😢', '🤔', '🚀'];
+
+// The emoji-mart dataset is ~4.6 MB raw. It must NOT be in the entry bundle —
+// load it only when the user opens the full picker (rare), not on every chat render.
+const LazyEmojiPicker = lazy(() =>
+  Promise.all([import('@emoji-mart/data'), import('@emoji-mart/react')]).then(
+    ([{ default: data }, { default: Picker }]) => ({
+      default: ({
+        locale,
+        theme,
+        onSelect,
+      }: {
+        locale: string;
+        theme: 'dark' | 'light';
+        onSelect: (emoji: any) => void;
+      }) => (
+        <Picker
+          data={data}
+          locale={locale}
+          previewPosition="none"
+          skinTonePosition="none"
+          theme={theme}
+          onEmojiSelect={onSelect}
+        />
+      ),
+    }),
+  ),
+);
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   emojiButton: css`
@@ -95,14 +120,13 @@ const ReactionPicker: FC<ReactionPickerProps> = memo(({ messageId, trigger }) =>
   };
 
   const content = showFullPicker ? (
-    <Picker
-      data={data}
-      locale={locale?.split('-')[0] || 'en'}
-      previewPosition="none"
-      skinTonePosition="none"
-      theme={theme.appearance === 'dark' ? 'dark' : 'light'}
-      onEmojiSelect={(emoji: any) => handleSelect(emoji.native)}
-    />
+    <Suspense fallback={null}>
+      <LazyEmojiPicker
+        locale={locale?.split('-')[0] || 'en'}
+        theme={theme.appearance === 'dark' ? 'dark' : 'light'}
+        onSelect={(emoji: any) => handleSelect(emoji.native)}
+      />
+    </Suspense>
   ) : (
     <Flexbox horizontal className={styles.pickerContainer} gap={4} wrap="wrap">
       {QUICK_REACTIONS.map((emoji) => (

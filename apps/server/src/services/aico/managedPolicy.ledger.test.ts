@@ -1,0 +1,249 @@
+import { OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
+import type { LobeChatDatabase } from '@lobechat/database';
+import { getTestDB } from '@lobechat/database/test-utils';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { cleanupAicoTables, seedUsers } from '@/database/models/__tests__/aico.phase2.helpers';
+import { OrganizationModel } from '@/database/models/organization';
+import {
+  memberBudgets,
+  openrouterModelCatalog,
+  userWallets,
+} from '@/database/schemas/aicoOrganization';
+
+import { ManagedKeyCapacityError } from '../managedProvider/cheapvibecode';
+import type { LedgerGate } from './ledger/gate';
+import { AicoManagedPolicy } from './managedPolicy';
+
+const SHARED = 'sk-shared-test';
+const legacyGate: LedgerGate = { authoritative: true, mode: 'enforce', sharedKey: null };
+const sharedGate: LedgerGate = { authoritative: true, mode: 'enforce', sharedKey: SHARED };
+
+const userId = 'ledger-policy-user';
+const personal = { billing: { source: 'personal' }, modelId: OPENROUTER_AUTO_MODEL_ID, userId };
+
+let db: LobeChatDatabase;
+
+beforeEach(async () => {
+  db = await getTestDB();
+  await cleanupAicoTables(db);
+  await seedUsers(db, [{ email: 'ledger-policy@example.com', id: userId }]);
+});
+
+const seedOrgBudget = async (values: Partial<typeof memberBudgets.$inferInsert>) => {
+  const orgModel = new OrganizationModel(db);
+  const org = await orgModel.createOrganization({ name: 'Ledger Org', ownerUserId: userId });
+  const members = await orgModel.listMembers(org.id);
+  const me = members.find((m) => m.userId === userId)!;
+  await db.insert(memberBudgets).values({
+    orgId: org.id,
+    orgMemberId: me.id,
+    periodAmountMicroUsd: 1_000_000,
+    ...values,
+  });
+  return {
+    billing: { organizationId: org.id, source: 'organization' },
+    modelId: OPENROUTER_AUTO_MODEL_ID,
+    userId,
+  };
+};
+
+describe('AicoManagedPolicy under the usage ledger', () => {
+  it('refuses a wallet whose ledger capacity is used up even with a positive balance', async () => {
+    await db.insert(userWallets).values({
+      balanceMicroUsd: 5_000_000,
+      openrouterKeyCiphertext: 'cipher',
+      openrouterKeyId: 'key_1',
+      rawCapacityMicroUsd: 1_000_000,
+      rawUsedMicroUsd: 1_000_000,
+      userId,
+    });
+    const policy = new AicoManagedPolicy(db, async () => 'decrypted', undefined, sharedGate);
+
+    await expect(policy.authorize(personal)).rejects.toMatchObject({
+      code: 'PERSONAL_FUNDS_UNAVAILABLE',
+    });
+  });
+
+  it('counts open holds against the wallet', async () => {
+    await db.insert(userWallets).values({
+      balanceMicroUsd: 5_000_000,
+      rawCapacityMicroUsd: 1_000_000,
+      rawHeldMicroUsd: 400_000,
+      rawUsedMicroUsd: 600_000,
+      userId,
+    });
+    const policy = new AicoManagedPolicy(db, async () => null, undefined, sharedGate);
+
+    await expect(policy.authorize(personal)).rejects.toMatchObject({
+      code: 'PERSONAL_FUNDS_UNAVAILABLE',
+    });
+  });
+
+  it('hands out the shared key to a keyless wallet without decrypting or repairing', async () => {
+    await db.insert(userWallets).values({
+      balanceMicroUsd: 1_000_000,
+      rawCapacityMicroUsd: 1_000_000,
+      userId,
+    });
+    const decrypt = vi.fn(async () => 'decrypted');
+    const ensureUserKey = vi.fn();
+    const ensureMemberKey = vi.fn();
+    const policy = new AicoManagedPolicy(
+      db,
+      decrypt,
+      { ensureMemberKey, ensureUserKey },
+      sharedGate,
+    );
+
+    const authorized = await policy.authorize(personal);
+    expect(authorized.apiKey).toBe(SHARED);
+    expect(decrypt).not.toHaveBeenCalled();
+    expect(ensureUserKey).not.toHaveBeenCalled();
+  });
+
+  it('still requires a per-subject key when the gate has no shared key', async () => {
+    await db.insert(userWallets).values({
+      balanceMicroUsd: 1_000_000,
+      rawCapacityMicroUsd: 1_000_000,
+      userId,
+    });
+    const policy = new AicoManagedPolicy(db, async () => 'decrypted', undefined, legacyGate);
+
+    await expect(policy.authorize(personal)).rejects.toMatchObject({
+      code: 'MANAGED_KEY_UNAVAILABLE',
+    });
+  });
+
+  it('reports a full upstream key inventory as a platform outage, not a user key fault', async () => {
+    await db.insert(userWallets).values({
+      balanceMicroUsd: 1_000_000,
+      rawCapacityMicroUsd: 1_000_000,
+      userId,
+    });
+    const ensureUserKey = vi.fn(async () => {
+      throw new ManagedKeyCapacityError();
+    });
+    const policy = new AicoManagedPolicy(
+      db,
+      async () => 'decrypted',
+      { ensureMemberKey: vi.fn(), ensureUserKey },
+      legacyGate,
+    );
+
+    await expect(policy.authorize(personal)).rejects.toMatchObject({
+      code: 'PLATFORM_CAPACITY_EXHAUSTED:key_limit',
+    });
+    expect(ensureUserKey).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the deposit-based check without a gate', async () => {
+    await db.insert(userWallets).values({
+      balanceMicroUsd: 5_000_000,
+      openrouterKeyCiphertext: 'cipher',
+      openrouterKeyId: 'key_1',
+      rawCapacityMicroUsd: 1_000_000,
+      rawUsedMicroUsd: 1_000_000,
+      userId,
+    });
+    // Legacy keys minted before migration 0154 carry no provider stamp.
+    const policy = new AicoManagedPolicy(db, async () => 'decrypted');
+
+    const outcome = await policy.authorize(personal).catch((error: { code?: string }) => error);
+    expect((outcome as { code?: string }).code).not.toBe('PERSONAL_FUNDS_UNAVAILABLE');
+  });
+
+  it('without an authoritative ledger, refuses a wallet whose known usage has caught up with its deposits', async () => {
+    // What an admin debit of the whole available balance leaves: deposits
+    // still positive, every remaining dollar already spent.
+    await db.insert(userWallets).values({
+      balanceMicroUsd: 2_400_000,
+      openrouterKeyCiphertext: 'cipher',
+      openrouterKeyId: 'key_1',
+      rawCapacityMicroUsd: 2_000_000,
+      settledUsageMicroUsd: 2_400_000,
+      userId,
+    });
+    const policy = new AicoManagedPolicy(db, async () => 'decrypted');
+
+    await expect(policy.authorize(personal)).rejects.toMatchObject({
+      code: 'PERSONAL_FUNDS_UNAVAILABLE',
+    });
+  });
+
+  it('without an authoritative ledger, still authorizes a wallet with money left after known usage', async () => {
+    await db.insert(userWallets).values({
+      balanceMicroUsd: 2_400_000,
+      openrouterKeyCiphertext: 'cipher',
+      openrouterKeyId: 'key_1',
+      rawCapacityMicroUsd: 2_000_000,
+      settledUsageMicroUsd: 1_000_000,
+      userId,
+    });
+    const policy = new AicoManagedPolicy(db, async () => 'decrypted');
+
+    const outcome = await policy.authorize(personal).catch((error: { code?: string }) => error);
+    expect((outcome as { code?: string }).code).not.toBe('PERSONAL_FUNDS_UNAVAILABLE');
+  });
+
+  it('authorizes an organization member without a budget key under the shared key', async () => {
+    const params = await seedOrgBudget({});
+    const ensureMemberKey = vi.fn();
+    const policy = new AicoManagedPolicy(db, async () => null, { ensureMemberKey }, sharedGate);
+
+    const authorized = await policy.authorize(params);
+    expect(authorized.apiKey).toBe(SHARED);
+    expect(authorized.budgetId).toBeTruthy();
+    expect(ensureMemberKey).not.toHaveBeenCalled();
+  });
+
+  it('counts held spend against the member budget', async () => {
+    const params = await seedOrgBudget({ heldMicroUsd: 100, settledUsageMicroUsd: 999_900 });
+    const policy = new AicoManagedPolicy(db, async () => null, undefined, sharedGate);
+
+    await expect(policy.authorize(params)).rejects.toMatchObject({
+      code: 'MEMBER_BUDGET_UNFUNDED',
+    });
+  });
+});
+
+describe('platform catalog kill-switch', () => {
+  const disabledModel = 'openai/disabled-probe-model';
+  const enabledModel = 'openai/enabled-probe-model';
+
+  beforeEach(async () => {
+    await db.delete(openrouterModelCatalog);
+    await db.insert(openrouterModelCatalog).values([
+      { enabled: false, id: disabledModel, syncedAt: new Date() },
+      { enabled: true, id: enabledModel, syncedAt: new Date() },
+    ]);
+    await db.insert(userWallets).values({
+      balanceMicroUsd: 1_000_000,
+      rawCapacityMicroUsd: 1_000_000,
+      userId,
+    });
+  });
+
+  afterEach(async () => {
+    await db.delete(openrouterModelCatalog);
+  });
+
+  it('denies a catalog-disabled model even on a funded personal wallet', async () => {
+    const policy = new AicoManagedPolicy(db, async () => 'decrypted', undefined, sharedGate);
+
+    await expect(
+      policy.authorize({ billing: { source: 'personal' }, modelId: disabledModel, userId }),
+    ).rejects.toMatchObject({ code: `MODEL_DISABLED:${disabledModel}` });
+  });
+
+  it('allows a catalog-enabled model on a funded personal wallet', async () => {
+    const policy = new AicoManagedPolicy(db, async () => 'decrypted', undefined, sharedGate);
+
+    const authorized = await policy.authorize({
+      billing: { source: 'personal' },
+      modelId: enabledModel,
+      userId,
+    });
+    expect(authorized.apiKey).toBe(SHARED);
+  });
+});

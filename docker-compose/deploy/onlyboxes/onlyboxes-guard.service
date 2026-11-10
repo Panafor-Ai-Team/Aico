@@ -1,0 +1,12 @@
+[Unit]
+Description=Onlyboxes sandbox guard (swap 0, disk I/O cap, disk-fill and firewall watch)
+Requires=docker.service
+After=docker.service onlyboxes-sandbox-firewall.service
+
+[Service]
+ExecStart=/opt/onlyboxes/onlyboxes-guard.sh run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

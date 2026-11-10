@@ -17,7 +17,10 @@ concurrency:
 jobs:
   release:
     name: Release
-    if: ${{ !contains(github.ref_name, '-') }}
+    # Upstream LobeHub's release job (README sync committed as lobehubbot). In this
+    # fork a `v*` tag comes from publishing a desktop release, and the job only
+    # failed for want of upstream's GH_TOKEN (2026-11-09, v1.0.0).
+    if: ${{ github.repository == 'lobehub/lobehub' && !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
 
     services:

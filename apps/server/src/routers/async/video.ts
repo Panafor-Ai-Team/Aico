@@ -19,7 +19,10 @@ import { AsyncTaskModel } from '@/database/models/asyncTask';
 import { GenerationModel } from '@/database/models/generation';
 import { asyncAuthedProcedure, asyncRouter as router } from '@/libs/trpc/async';
 import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import { parseAicoBillingContext } from '@/server/services/aico/billingContext';
+import { toManagedGenerationModelId } from '@/server/services/aico/generationBilling';
 import { VideoGenerationService } from '@/server/services/generation/video';
+import { isTerminalVideoPollError } from '@/server/services/generation/videoBackgroundPolling';
 import { buildVideoGenerationFilePayload } from '@/server/services/generation/videoFile';
 import { FileSource } from '@/types/files';
 
@@ -60,7 +63,12 @@ async function pollUntilCompletion(
   modelRuntime: any,
   inferenceId: string,
   signal: AbortSignal,
-): Promise<{ headers?: Record<string, string>; videoUrl: string } | null> {
+): Promise<{
+  costUsd?: number;
+  headers?: Record<string, string>;
+  modelUsage?: { cost?: number; totalOutputTokens?: number; totalTokens?: number };
+  videoUrl: string;
+} | null> {
   const maxRetries = 120;
   const pollingInterval = 5000;
 
@@ -74,7 +82,12 @@ async function pollUntilCompletion(
 
       if (result.status === 'success') {
         log('Video generation succeeded for inferenceId: %s', inferenceId);
-        return { headers: result.headers, videoUrl: result.videoUrl };
+        return {
+          ...(typeof result.costUsd === 'number' ? { costUsd: result.costUsd } : {}),
+          headers: result.headers,
+          modelUsage: result.modelUsage,
+          videoUrl: result.videoUrl,
+        };
       }
 
       if (result.status === 'failed') {
@@ -97,7 +110,7 @@ async function pollUntilCompletion(
     } catch (error) {
       checkAbortSignal(signal);
 
-      if (error instanceof Error && error.message.includes('failed')) {
+      if (isTerminalVideoPollError(error)) {
         throw error;
       }
 
@@ -156,11 +169,23 @@ export const videoRouter = router({
     try {
       const pollingPromise = async (signal: AbortSignal) => {
         log('Initializing agent runtime for provider: %s', provider);
+
+        const asyncTask = await asyncTaskModel.findById(asyncTaskId);
+        const taskMetadata = asyncTask?.metadata as { aicoBilling?: unknown } | undefined;
+        const billingContext =
+          taskMetadata?.aicoBilling !== undefined
+            ? parseAicoBillingContext(taskMetadata.aicoBilling)
+            : undefined;
+
         const modelRuntime = await initModelRuntimeFromDB(
           ctx.serverDB,
           ctx.userId,
           provider,
           workspaceId,
+          {
+            billingContext,
+            modelId: toManagedGenerationModelId(resolvedModelId),
+          },
         );
 
         checkAbortSignal(signal);
@@ -187,6 +212,7 @@ export const videoRouter = router({
         await generationModel.createAssetAndFile(
           generationId,
           {
+            ...(typeof pollResult.costUsd === 'number' ? { costUsd: pollResult.costUsd } : {}),
             coverUrl: processResult.coverKey,
             duration: processResult.duration,
             height: processResult.height,
@@ -235,7 +261,13 @@ export const videoRouter = router({
               model: resolvedModelId,
               prechargeResult,
               provider,
-              usage: undefined,
+              usage: pollResult.modelUsage
+                ? {
+                    completionTokens: pollResult.modelUsage.totalOutputTokens ?? 0,
+                    cost: pollResult.modelUsage.cost,
+                    totalTokens: pollResult.modelUsage.totalTokens ?? 0,
+                  }
+                : undefined,
               userId: ctx.userId,
               workspaceId,
             });

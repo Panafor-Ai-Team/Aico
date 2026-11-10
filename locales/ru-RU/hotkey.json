@@ -17,7 +17,7 @@
   "desktop.showApp.title": "Показать/Скрыть главное окно",
   "editMessage.desc": "Войти в режим редактирования, удерживая Alt и дважды щелкнув по сообщению",
   "editMessage.title": "Редактировать сообщение",
-  "navigateToChat.desc": "Переключиться на вкладку чата и войти в Lobe AI",
+  "navigateToChat.desc": "Переключиться на вкладку чата и войти в {{appName}} AI",
   "navigateToChat.title": "Переключиться на чат по умолчанию",
   "nextTab.desc": "Переключение на следующую вкладку в стиле браузера в приложении для рабочего стола; возвращается к первой вкладке в конце",
   "nextTab.title": "Следующая вкладка",
@@ -44,5 +44,7 @@
   "toggleLeftPanel.desc": "Показать или скрыть левую панель",
   "toggleLeftPanel.title": "Переключить левую панель",
   "toggleRightPanel.desc": "Показать или скрыть правую панель",
-  "toggleRightPanel.title": "Переключить правую панель"
+  "toggleRightPanel.title": "Переключить правую панель",
+  "toggleTerminalPanel.desc": "Показать или скрыть нижнюю панель терминала",
+  "toggleTerminalPanel.title": "Переключить панель терминала"
 }

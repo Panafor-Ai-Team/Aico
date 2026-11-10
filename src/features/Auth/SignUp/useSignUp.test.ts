@@ -15,16 +15,17 @@ vi.mock('react-router', () => ({
   useSearchParams: () => [{ get: mockSearchParamsGet }],
 }));
 
-vi.mock('@/components/AntdStaticMethods', () => ({
-  message: { error: mockMessageError, success: vi.fn() },
+vi.mock('@lobehub/ui/base-ui', () => ({
+  toast: { error: mockMessageError, success: vi.fn() },
 }));
 
 vi.mock('@/libs/better-auth/auth-client', () => ({
+  signIn: { oauth2: vi.fn(), social: vi.fn() },
   signUp: { email: mockSignUpEmail },
 }));
 
 vi.mock('@lobechat/business-const', () => ({
-  BRANDING_NAME: 'Aico',
+  BRANDING_NAME: 'Panachat',
 }));
 
 vi.mock('@/business/client/hooks/useBusinessSignup', () => ({
@@ -89,6 +90,26 @@ describe('useSignUp', () => {
       email: 'new@example.com',
       password: 'Password123!',
     };
+
+    it('should prefer optional first and last name for the profile name', async () => {
+      mockSignUpEmail.mockResolvedValue({ error: null });
+
+      const { result } = renderHook(() => useSignUp());
+
+      await act(async () => {
+        await result.current.onSubmit({
+          ...validValues,
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+        });
+      });
+
+      expect(mockSignUpEmail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Ada Lovelace',
+        }),
+      );
+    });
 
     it('should call signUp.email with correct params', async () => {
       mockSignUpEmail.mockResolvedValue({ error: null });

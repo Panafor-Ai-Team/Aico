@@ -1,6 +1,12 @@
 import { isRemoteServerNetworkError } from '@lobechat/types';
 import { type TRPCLink } from '@trpc/client';
-import { createTRPCClient, httpBatchLink, httpLink, splitLink } from '@trpc/client';
+import {
+  createTRPCClient,
+  httpBatchLink,
+  httpLink,
+  httpSubscriptionLink,
+  splitLink,
+} from '@trpc/client';
 import { createTRPCReact } from '@trpc/react-query';
 import { observable } from '@trpc/server/observable';
 import debug from 'debug';
@@ -75,11 +81,14 @@ const errorHandlingLink: TRPCLink<LambdaRouter> = () => {
                       // If user is still marked as signed in but got 401,
                       // session is invalid - clear client state first
                       if (isSignedIn) {
-                        await logout();
+                        const params = new URLSearchParams({ callbackUrl: location.toString() });
+                        params.set('reason', 'sessionExpired');
+                        await logout({ redirectTo: `/signin?${params.toString()}` });
+                      } else {
+                        const { loginRequired } =
+                          await import('@/components/Error/loginRequiredNotification');
+                        loginRequired.redirect({ reason: 'sessionExpired' });
                       }
-                      const { loginRequired } =
-                        await import('@/components/Error/loginRequiredNotification');
-                      loginRequired.redirect();
                     }
                   }
                 }
@@ -121,11 +130,35 @@ const notifyRemoteServerNetworkError = async (response: Response) => {
   }
 };
 
+/**
+ * An error response whose body is not JSON: an edge proxy's own page (nginx
+ * 413/502/504 are HTML) rather than a tRPC envelope. tRPC would otherwise
+ * `res.json()` it and surface "Unexpected token '<'", losing the status.
+ */
+export class NonJsonHttpResponseError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`HTTP ${status}`);
+    this.name = 'NonJsonHttpResponseError';
+    this.status = status;
+  }
+}
+
+/** The HTTP status of a non-JSON error response behind a tRPC failure, if that is what it was. */
+export const getNonJsonHttpStatus = (error: unknown): number | undefined => {
+  const cause = (error as { cause?: unknown } | null | undefined)?.cause;
+  return cause instanceof NonJsonHttpResponseError ? cause.status : undefined;
+};
+
 // 2. Shared link options
 const linkOptions = {
   fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
     // Ensure credentials are included to send cookies (like mp_token)
     const response = await fetch(input, { ...init, credentials: 'include' });
+    if (!response.ok && !response.headers.get('content-type')?.includes('json')) {
+      throw new NonJsonHttpResponseError(response.status);
+    }
     if (isDesktop && isProxyNetworkFailure(response)) void notifyRemoteServerNetworkError(response);
     return response;
   },
@@ -162,14 +195,40 @@ const linkOptions = {
 
 // Procedures that should skip batching for faster initial load
 const initialLoadProcedures = new Set(['user.getUserState', 'config.getGlobalConfig']);
-const slowProcedures = new Set(['market.getAssistantList']);
+// `aicoBilling.getMyBillingSources` with `syncLive` waits on the key gateway.
+// Batched, it held back whatever shared its request — on the send path that is
+// the agent's context documents, so the prompt waited on a balance read.
+const slowProcedures = new Set(['market.getAssistantList', 'aicoBilling.getMyBillingSources']);
 const SKIP_BATCH_PROCEDURES = new Set([...initialLoadProcedures, ...slowProcedures]);
 
+// Queries whose input can exceed the GET URL budget (`maxURLLength` 2083):
+// the transfer-job status poll sends the visible-topic candidate set (up to
+// 1000 ids), which httpBatchLink would reject client-side with "Input is too
+// big for a single dispatch". Route them over POST instead (the lambda route
+// handler enables `allowMethodOverride`).
+const LARGE_INPUT_QUERY_PROCEDURES = new Set([
+  'agent.getTransferJobStatus',
+  'group.getTransferJobStatus',
+]);
+
 // 3. splitLink to conditionally disable batching
+const buildHttpLinks = (options: typeof linkOptions) =>
+  splitLink({
+    condition: (op) => LARGE_INPUT_QUERY_PROCEDURES.has(op.path),
+    false: splitLink({
+      condition: (op) => SKIP_BATCH_PROCEDURES.has(op.path),
+      false: httpBatchLink({ ...options, maxURLLength: 2083 }),
+      true: httpLink(options),
+    }),
+    true: httpLink({ ...options, methodOverride: 'POST' }),
+  });
+
 const customSplitLink = splitLink({
-  condition: (op) => SKIP_BATCH_PROCEDURES.has(op.path),
-  false: httpBatchLink({ ...linkOptions, maxURLLength: 2083 }),
-  true: httpLink(linkOptions),
+  condition: (op) => op.type === 'subscription',
+  false: buildHttpLinks(linkOptions),
+  // EventSource sends the same-origin session cookie. Subscription event payloads are progress
+  // hints only; all durable onboarding state is still read via the authenticated polling calls.
+  true: httpSubscriptionLink({ transformer: superjson, url: linkOptions.url }),
 });
 
 // 4. assembly links
@@ -201,9 +260,9 @@ export const createWorkspaceLambdaClient = (workspaceId: string) => {
     links: [
       errorHandlingLink,
       splitLink({
-        condition: (op) => SKIP_BATCH_PROCEDURES.has(op.path),
-        false: httpBatchLink({ ...scopedLinkOptions, maxURLLength: 2083 }),
-        true: httpLink(scopedLinkOptions),
+        condition: (op) => op.type === 'subscription',
+        false: buildHttpLinks(scopedLinkOptions),
+        true: httpSubscriptionLink({ transformer: superjson, url: scopedLinkOptions.url }),
       }),
     ],
   });

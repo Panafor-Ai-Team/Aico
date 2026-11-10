@@ -47,11 +47,12 @@ describe('OIDC Provider - Market Client Integration', () => {
       }));
 
       const { defaultClients } = await import('./config');
+      const { BRANDING_NAME } = await import('@lobechat/business-const');
       const marketClient = defaultClients.find((c) => c.client_id === MARKET_CLIENT_ID);
 
       expect(marketClient).toBeDefined();
       expect(marketClient?.client_id).toBe('lobehub-market');
-      expect(marketClient?.client_name).toBe('LobeHub Marketplace');
+      expect(marketClient?.client_name).toBe(`${BRANDING_NAME} Marketplace`);
 
       vi.doUnmock('@/envs/app');
     });

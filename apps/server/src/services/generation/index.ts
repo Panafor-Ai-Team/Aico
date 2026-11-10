@@ -59,6 +59,8 @@ export async function fetchImageFromUrl(
     // See GHSA-53h9-fmjf-frwr / #16536.
     const response = await ssrfSafeFetch(url, { headers: fetchHeaders });
     if (!response.ok) {
+      // ssrfSafeFetch streams the body; release the unread error body's connection.
+      await response.body?.cancel().catch(() => {});
       throw new Error(
         `Failed to fetch image from ${url}: ${response.status} ${response.statusText}`,
       );

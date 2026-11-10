@@ -1,15 +1,24 @@
 import urlJoin from 'url-join';
 
-const readEnvUrl = (name: string, fallback: string) => {
-  const value = process.env[name] ?? process.env[`NEXT_PUBLIC_${name}`];
-  return value?.trim() || fallback;
-};
+/**
+ * Keys must be written out literally — a `process.env[name]` lookup with a
+ * variable key is not statically analysable, so esbuild leaves it as
+ * `({})[name]` in the SPA bundle and it always reads `undefined`. See the note
+ * in `@lobechat/business-const`'s `branding.ts` for the full explanation.
+ */
+const envUrl = (value: string | undefined, fallback: string) => value?.trim() || fallback;
 
 const defaultAppUrl =
   process.env.NODE_ENV === 'development' ? 'http://localhost:3010' : 'http://localhost:3210';
 
-export const OFFICIAL_URL = readEnvUrl('APP_URL', defaultAppUrl);
-export const OFFICIAL_SITE = readEnvUrl('BRANDING_SITE_URL', OFFICIAL_URL);
+export const OFFICIAL_URL = envUrl(
+  process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL,
+  defaultAppUrl,
+);
+export const OFFICIAL_SITE = envUrl(
+  process.env.BRANDING_SITE_URL ?? process.env.NEXT_PUBLIC_BRANDING_SITE_URL,
+  OFFICIAL_URL,
+);
 export const OFFICIAL_DOMAIN = (() => {
   try {
     return new URL(OFFICIAL_SITE).hostname;
@@ -21,7 +30,7 @@ export const OFFICIAL_DOMAIN = (() => {
 export const OFFICIAL_DEVICE_GATEWAY_URL = 'https://device-gateway.lobehub.com';
 export const OFFICIAL_AGENT_GATEWAY_URL = 'https://agent-gateway.lobehub.com';
 
-export const OG_URL = '/og/og.webp?v=1';
+export const OG_URL = '/og/og.webp?v=2';
 
 export const LobeHubPath = {
   webapi: {
@@ -31,7 +40,8 @@ export const LobeHubPath = {
 
 export const GITHUB = 'https://github.com/lobehub/lobe-chat';
 export const GITHUB_ISSUES = urlJoin(GITHUB, 'issues/new/choose');
-export const CHANGELOG = 'https://lobehub.com/changelog';
+export const CHANGELOG_PATH = '/changelog';
+export const CHANGELOG = CHANGELOG_PATH;
 
 export const DOCUMENTS = urlJoin(OFFICIAL_SITE, '/docs');
 export const USAGE_DOCUMENTS = urlJoin(DOCUMENTS, '/usage');
@@ -48,8 +58,12 @@ export const BLOG = urlJoin(OFFICIAL_SITE, 'blog');
 
 export const ABOUT = OFFICIAL_SITE;
 export const FEEDBACK = 'https://github.com/lobehub/lobe-chat/issues/new/choose';
-export const PRIVACY_URL = urlJoin(OFFICIAL_SITE, '/privacy');
-export const TERMS_URL = urlJoin(OFFICIAL_SITE, '/terms');
+/** Same-origin auth SPA routes — prefer these for in-app links. */
+export const PRIVACY_PATH = '/privacy';
+export const TERMS_PATH = '/terms';
+
+export const PRIVACY_URL = urlJoin(OFFICIAL_SITE, PRIVACY_PATH);
+export const TERMS_URL = urlJoin(OFFICIAL_SITE, TERMS_PATH);
 
 export const PLUGINS_INDEX_URL = 'https://chat-plugins.lobehub.com';
 
@@ -89,7 +103,7 @@ export const GROUP_CHAT_TOPIC_URL = (groupId: string, topicId: string) =>
 
 export const LIBRARY_URL = (id: string) => urlJoin('/resource/library', id);
 
-export const imageUrl = (filename: string) => `/images/${filename}`;
+export const imageUrl = (filename: string) => `/app-images/${filename}`;
 
 export const LOBE_URL_IMPORT_NAME = 'settings';
 
@@ -99,7 +113,7 @@ export const mailTo = (email: string) => `mailto:${email}`;
 
 export const AES_GCM_URL = 'https://datatracker.ietf.org/doc/html/draft-ietf-avt-srtp-aes-gcm-01';
 export const BASE_PROVIDER_DOC_URL = 'https://lobehub.com/docs/usage/providers';
-export const CHANGELOG_URL = urlJoin(OFFICIAL_SITE, 'changelog');
+export const CHANGELOG_URL = CHANGELOG_PATH;
 
 export const DOWNLOAD_URL = {
   android: 'https://play.google.com/store/apps/details?id=com.lobehub.app',

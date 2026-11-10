@@ -4,9 +4,17 @@ import { z } from 'zod';
 import { wsCompatProcedure } from '@/business/server/trpc-middlewares/workspaceAuth';
 import { ConnectorModel } from '@/database/models/connector';
 import { PluginModel } from '@/database/models/plugin';
-import { getComposioClient } from '@/libs/composio';
+import {
+  getComposioClient,
+  isComposioConnectedAccountNotFoundError,
+  toComposioToolOutcome,
+} from '@/libs/composio';
 import { publicProcedure, router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
+import {
+  fetchCuratedComposioTools,
+  normalizeComposioTool,
+} from '@/server/services/composio/curate';
 import { MCPService } from '@/server/services/mcp';
 
 // wsCompatProcedure (not authedProcedure): when a request carries X-Workspace-Id
@@ -65,14 +73,29 @@ export const composioToolsRouter = router({
         });
       }
 
-      const result = await (ctx.composioClient.tools as any).execute(input.toolSlug, {
-        arguments: input.toolArgs || {},
-        connectedAccountId,
-        // Toolkit version resolves to "latest"; allow manual execution without a
-        // pinned version (Composio otherwise throws ComposioToolVersionRequiredError).
-        dangerouslySkipVersionCheck: true,
-        userId: ownerUserId ?? ctx.userId,
-      });
+      let result: unknown;
+      try {
+        result = await (ctx.composioClient.tools as any).execute(input.toolSlug, {
+          arguments: input.toolArgs || {},
+          connectedAccountId,
+          // Toolkit version resolves to "latest"; allow manual execution without a
+          // pinned version (Composio otherwise throws ComposioToolVersionRequiredError).
+          dangerouslySkipVersionCheck: true,
+          userId: ownerUserId ?? ctx.userId,
+        });
+      } catch (error) {
+        if (connector?.id && isComposioConnectedAccountNotFoundError(error)) {
+          try {
+            await ctx.connectorModel.markComposioConnectionUnavailable(
+              connector.id,
+              connectedAccountId,
+            );
+          } catch {
+            // Preserve the remote execution error if the secondary health write fails.
+          }
+        }
+        throw error;
+      }
 
       if (!result) {
         return {
@@ -82,34 +105,27 @@ export const composioToolsRouter = router({
         };
       }
 
-      const data = result as any;
-      const content = data?.data || data?.result || data;
-      const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
+      const outcome = toComposioToolOutcome(result);
 
       return await MCPService.processToolCallResult({
-        content: [{ text: contentStr, type: 'text' }],
-        isError: false,
+        content: [{ text: outcome.content, type: 'text' }],
+        isError: !outcome.success,
       });
     }),
 
   getActions: publicProcedure.input(z.object({ appSlug: z.string() })).query(async ({ input }) => {
     const client = getComposioClient();
-    const response = await (client.tools as any).getRawComposioTools({
-      toolkits: [input.appSlug],
-    });
+    const rawTools = await fetchCuratedComposioTools(client, input.appSlug);
 
-    const items = response?.items || response || [];
-    const tools = Array.isArray(items)
-      ? items.map((tool: any) => ({
-          description: tool.description || '',
-          inputSchema: tool.inputParameters ||
-            tool.inputSchema || {
-              properties: {},
-              type: 'object',
-            },
-          name: tool.slug || tool.name || '',
-        }))
-      : [];
+    const tools = rawTools.map((tool) => ({
+      description: tool.description || '',
+      inputSchema: tool.inputParameters ||
+        tool.inputSchema || {
+          properties: {},
+          type: 'object',
+        },
+      name: tool.slug || tool.name || '',
+    }));
 
     return { tools };
   }),
@@ -117,26 +133,13 @@ export const composioToolsRouter = router({
   listActions: composioProcedure
     .input(z.object({ appSlug: z.string() }))
     .query(async ({ ctx, input }) => {
-      // Use getRawComposioTools (raw tool defs with slug/inputParameters), NOT
-      // tools.get() — the latter returns provider-wrapped (OpenAI-format) tools
-      // whose name/params live under `.function`, so slug/name/inputSchema come
-      // back empty and every tool collapses to the same `${identifier}____` name.
-      const response = await (ctx.composioClient.tools as any).getRawComposioTools({
-        toolkits: [input.appSlug],
-      });
+      // Use the curated raw tool list (slug/inputParameters), NOT `tools.get()` —
+      // the latter returns provider-wrapped (OpenAI-format) tools whose
+      // name/params live under `.function`, so slug/name/inputSchema come back
+      // empty and every tool collapses to the same `${identifier}____` name.
+      const rawTools = await fetchCuratedComposioTools(ctx.composioClient, input.appSlug);
 
-      const items = response?.items || response || [];
-      const tools = Array.isArray(items)
-        ? items.map((tool: any) => ({
-            description: tool.description || '',
-            inputSchema: tool.inputParameters ||
-              tool.inputSchema || {
-                properties: {},
-                type: 'object',
-              },
-            name: tool.slug || tool.name || '',
-          }))
-        : [];
+      const tools = rawTools.map(normalizeComposioTool);
 
       return { tools };
     }),

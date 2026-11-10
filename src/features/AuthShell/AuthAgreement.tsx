@@ -6,7 +6,7 @@ import { createStaticStyles } from 'antd-style';
 import { memo, useCallback, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 
-import { PRIVACY_URL, TERMS_URL } from '@/const/url';
+import { PRIVACY_PATH, TERMS_PATH } from '@/const/url';
 
 /**
  * Remembers that the user already accepted the terms & privacy policy on this
@@ -37,18 +37,19 @@ const persistAgreement = (accepted: boolean) => {
 const styles = createStaticStyles(({ css, cssVar }) => ({
   link: css`
     cursor: pointer;
-    color: inherit;
-    text-decoration: underline;
+    font-weight: 600;
+    color: ${cssVar.colorPrimary};
+    text-decoration: none;
 
     &:active,
     &:focus,
-    &:hover,
-    &:visited {
+    &:hover {
+      color: ${cssVar.colorPrimaryHover};
       text-decoration: underline;
     }
 
     &:visited {
-      color: ${cssVar.colorLinkActive};
+      color: ${cssVar.colorPrimary};
     }
   `,
 }));
@@ -79,12 +80,12 @@ const AgreementText = memo<AgreementTextProps>(({ i18nKey }) => {
       ns={'auth'}
       components={{
         privacy: (
-          <a className={styles.link} href={PRIVACY_URL} rel="noopener noreferrer" target="_blank">
+          <a className={styles.link} href={PRIVACY_PATH} rel="noopener noreferrer" target="_blank">
             {translate('footer.privacy')}
           </a>
         ),
         terms: (
-          <a className={styles.link} href={TERMS_URL} rel="noopener noreferrer" target="_blank">
+          <a className={styles.link} href={TERMS_PATH} rel="noopener noreferrer" target="_blank">
             {translate('footer.terms')}
           </a>
         ),

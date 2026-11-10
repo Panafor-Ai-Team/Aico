@@ -1,3 +1,4 @@
+import { BRANDING_NAME } from '@lobechat/business-const';
 import {
   COMPOSIO_APP_TYPES,
   LOBEHUB_SKILL_PROVIDERS,
@@ -56,6 +57,7 @@ import { useAgentId } from '../../hooks/useAgentId';
 import { useUpdateAgentConfig } from '../../hooks/useUpdateAgentConfig';
 import ComposioServerItem from './ComposioServerItem';
 import ComposioSkillIcon from './ComposioSkillIcon';
+import { formatSkillAuthor } from './formatSkillAuthor';
 import LobehubSkillIcon from './LobehubSkillIcon';
 import LobehubSkillServerItem from './LobehubSkillServerItem';
 import MarketAgentSkillPopoverContent from './MarketAgentSkillPopoverContent';
@@ -67,10 +69,12 @@ const SKILL_ICON_SIZE = 18;
 const CLOSE_TOOL_DETAIL_POPOVER_EVENT = 'lobe-chat-tool-detail-popover-close';
 
 const officialTag = (
-  <Tooltip placement={'top'} title={'LobeHub'}>
+  <Tooltip placement={'top'} title={BRANDING_NAME}>
     <Tag color={'success'} icon={<Icon icon={BadgeCheck} />} size={'small'} />
   </Tooltip>
 );
+
+const isOfficialSkillAuthor = (author?: string) => author === 'LobeHub' || author === BRANDING_NAME;
 
 type SkillPolicyMode = AgentPluginMode;
 
@@ -410,7 +414,13 @@ const styles = createStaticStyles(({ css }) => ({
   `,
 }));
 
-export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = {}) => {
+export const useControls = ({
+  closeDropdown,
+  open = true,
+}: {
+  closeDropdown?: () => void;
+  open?: boolean;
+} = {}) => {
   const { t } = useTranslation('setting');
   const agentId = useAgentId();
   const navigate = useWorkspaceAwareNavigate();
@@ -805,8 +815,9 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
   // Load user's Composio integrations via SWR (from database)
   useFetchUserComposioConnections(isComposioEnabledInEnv);
 
-  // Load user's LobeHub Skill connections via SWR
-  useFetchLobehubSkillConnections(isLobehubSkillEnabled);
+  // Load user's LobeHub Skill connections via SWR (gated on popover open to
+  // skip the market request at mount — the request can hang up to 10s upstream)
+  useFetchLobehubSkillConnections(isLobehubSkillEnabled && open);
 
   // Get connected server by identifier
   const getServerByName = useCallback(
@@ -912,7 +923,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
               <ToolItemDetailPopover
                 icon={<ComposioSkillIcon icon={type.icon} label={type.label} size={36} />}
                 identifier={type.identifier}
-                sourceLabel={type.author}
+                sourceLabel={formatSkillAuthor(type.author)}
                 title={type.label}
                 description={t(`tools.composio.servers.${type.identifier}.description` as any, {
                   defaultValue: type.description,
@@ -927,7 +938,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
                   displayName: type.label,
                   onDelete: () => removeComposioServer(server.identifier),
                 },
-                extraTag: type.author === 'LobeHub' ? officialTag : undefined,
+                extraTag: isOfficialSkillAuthor(type.author) ? officialTag : undefined,
                 icon,
                 id: server.identifier,
                 popoverContent,
@@ -1028,7 +1039,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
               <ToolItemDetailPopover
                 icon={<LobehubSkillIcon icon={provider.icon} label={provider.label} size={36} />}
                 identifier={provider.id}
-                sourceLabel={provider.author}
+                sourceLabel={formatSkillAuthor(provider.author)}
                 title={provider.label}
                 description={t(`tools.lobehubSkill.providers.${provider.id}.description` as any, {
                   defaultValue: provider.description,
@@ -1039,7 +1050,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
             if (server?.status === LobehubSkillStatus.CONNECTED || server?.isConnected) {
               return createManagedSkillItem({
                 badge: <Icon icon={McpIcon} size={12} />,
-                extraTag: provider.author === 'LobeHub' ? officialTag : undefined,
+                extraTag: isOfficialSkillAuthor(provider.author) ? officialTag : undefined,
                 icon,
                 id: server.identifier,
                 popoverContent,
@@ -1419,7 +1430,7 @@ export const useControls = ({ closeDropdown }: { closeDropdown?: () => void } = 
         <Tag color={'warning'} icon={<Icon icon={Package} />} size={'small'}>
           {t('store.customPlugin', { ns: 'plugin' })}
         </Tag>
-      ) : item.author === 'LobeHub' ? (
+      ) : isOfficialSkillAuthor(item.author) ? (
         officialTag
       ) : undefined,
       icon,

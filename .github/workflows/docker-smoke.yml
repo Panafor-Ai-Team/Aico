@@ -1,0 +1,195 @@
+name: Docker Smoke
+
+# Build the production images on PRs that change how they are assembled, boot
+# them against a throwaway Postgres, and run the checks the canary deploy runs
+# (migration, /signin, SPA icon; control-plane /health) — before merge instead
+# of on the prod host. Reads the canary build cache but never writes it.
+on:
+  pull_request:
+    branches: [canary]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - apps/aico-control-plane/Dockerfile
+      - package.json
+      - pnpm-workspace.yaml
+      - .npmrc
+      - patches/**
+      - scripts/migrateServerDB/**
+      - scripts/serverLauncher/**
+      - packages/database/migrations/**
+      - packages/database/migrations-aico/**
+      - .github/workflows/docker-smoke.yml
+  workflow_dispatch: {}
+
+concurrency:
+  group: docker-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Throwaway values (same as e2e.yml); the database is the job's own service.
+env:
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+  KEY_VAULTS_SECRET: LA7n9k3JdEcbSgml2sxfw+4TV1AzaaFU5+R176aQz4s=
+  AUTH_SECRET: docker-smoke-secret-key-for-better-auth-32ch
+  AUTH_EMAIL_VERIFICATION: '0'
+  S3_ACCESS_KEY_ID: smoke-mock-access-key
+  S3_SECRET_ACCESS_KEY: smoke-mock-secret-key
+  S3_BUCKET: smoke-mock-bucket
+  S3_ENDPOINT: https://smoke-mock-s3.localhost
+
+jobs:
+  chat:
+    name: Chat image boots and migrates
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: paradedb/paradedb:latest-pg17
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          push: false
+          tags: panachat:smoke
+          cache-from: type=gha
+          platforms: linux/amd64
+
+      - name: Boot (migrate + serve)
+        run: |
+          docker run -d --name app --network host \
+            -e DATABASE_URL -e KEY_VAULTS_SECRET -e AUTH_SECRET -e AUTH_EMAIL_VERIFICATION \
+            -e S3_ACCESS_KEY_ID -e S3_SECRET_ACCESS_KEY -e S3_BUCKET -e S3_ENDPOINT \
+            -e APP_URL=http://localhost:3210 \
+            panachat:smoke
+          deadline=$((SECONDS + 180))
+          while ((SECONDS < deadline)); do
+            if [ "$(docker inspect -f '{{.State.Running}}' app)" != true ]; then
+              echo "::error::container exited"; exit 1
+            fi
+            if docker logs app 2>&1 | grep -q 'database migration pass'; then
+              code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3210/signin || true)
+              case "$code" in 200|302|307) echo "healthy: /signin $code"; exit 0 ;; esac
+            fi
+            sleep 3
+          done
+          echo "::error::not healthy within 180s"; exit 1
+
+      - name: Runtime checks
+        run: |
+          set -x
+          # Migration deps resolve through pnpm's layout (pg loads pg-types:
+          # the #416 regression).
+          docker exec -w /app app /bin/node -e "require('pg'); require('drizzle-orm/node-postgres/migrator')"
+          # SPA assets are served.
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:3210/_spa/app-icons/icon-192x192.png)" = 200
+          # Next can write its cache as the image user.
+          docker exec app /bin/sh -c 'id; mkdir -p /app/.next/cache && touch /app/.next/cache/.smoke'
+          # The image ships both journals beside the runner.
+          docker exec app /bin/sh -c 'test -f /app/migrations/meta/_journal.json && test -f /app/migrations-aico/meta/_journal.json && test -f /app/dualJournalRunner.cjs'
+          # The boot migrated the fresh database from both journals: every entry once.
+          expected=$(python3 -c "import json; print(sum(len(json.load(open(f'packages/database/{d}/meta/_journal.json'))['entries']) for d in ('migrations', 'migrations-aico')))")
+          docker logs app 2>&1 | grep -F "[Database] dual-journal runner: applied=${expected} skipped=0 equivalent=0 drift=0 unknownRows=0"
+          # Re-running applies nothing, finds no unknown rows and no drift.
+          out=$(docker exec -e DATABASE_URL app /bin/node /app/docker.cjs)
+          echo "$out"
+          echo "$out" | grep -q 'database migration pass'
+          echo "$out" | grep -q 'applied=0 skipped=0 equivalent=0 drift=0 unknownRows=0'
+          # Drizzle's single-journal migrator would skip migrations-aico, so it is refused.
+          if out=$(docker exec -e AICO_MIGRATION_RUNNER=stock -e DATABASE_URL app /bin/node /app/docker.cjs 2>&1); then
+            echo "$out"; echo "::error::AICO_MIGRATION_RUNNER=stock must be refused"; exit 1
+          fi
+          echo "$out" | grep -qF 'AICO_MIGRATION_RUNNER=stock is no longer supported'
+          # Every MCP SDK copy in the image is at or above the security floor
+          # (no lockfile, so a cached install layer could otherwise keep an old one).
+          docker exec -w /app app /bin/node -e "
+            const fs = require('fs');
+            const floor = [1, 32, 2];
+            const dir = 'node_modules/.pnpm';
+            const prefix = '@modelcontextprotocol+sdk@';
+            const found = fs.existsSync(dir)
+              ? fs.readdirSync(dir).filter((d) => d.startsWith(prefix))
+              : [];
+            if (found.length === 0) console.log('::warning::no @modelcontextprotocol/sdk copy found in ' + dir);
+            for (const d of found) {
+              // e.g. @modelcontextprotocol+sdk@1.32.2_@cfworker+json-schema@4.1.4_zod@3.25.76
+              const v = d.slice(prefix.length).split('_')[0].split('.').map(Number);
+              const ok = v[0] !== floor[0] ? v[0] > floor[0] : v[1] !== floor[1] ? v[1] > floor[1] : v[2] >= floor[2];
+              console.log(d, ok ? 'ok' : 'BELOW FLOOR');
+              if (!ok) process.exitCode = 1;
+            }
+          "
+
+      - name: Logs
+        if: always()
+        run: docker logs app 2>&1 | tail -n 150 || true
+
+  control-plane:
+    name: Control-plane image boots
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./apps/aico-control-plane/Dockerfile
+          load: true
+          push: false
+          tags: panachat-control-plane:smoke
+          cache-from: type=gha,scope=control-plane
+          platforms: linux/amd64
+
+      - name: Boot and check
+        run: |
+          # Startup refuses a missing/weak service token; mint a throwaway one.
+          # No bootstrap-admin env, so boot does not touch the database.
+          docker run -d --name cp --network host \
+            -e DATABASE_URL -e KEY_VAULTS_SECRET -e AUTH_SECRET \
+            -e AICO_CONTROL_PLANE_SERVICE_TOKEN="$(openssl rand -hex 32)" \
+            -e AICO_IS_CONTROL_PLANE=1 -e AICO_CONTROL_PLANE_PORT=3020 \
+            panachat-control-plane:smoke
+          deadline=$((SECONDS + 120))
+          until [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3020/health || true)" = 200 ]; do
+            if [ "$(docker inspect -f '{{.State.Running}}' cp)" != true ]; then
+              echo "::error::container exited"; exit 1
+            fi
+            if ((SECONDS >= deadline)); then echo "::error::/health not 200 within 120s"; exit 1; fi
+            sleep 3
+          done
+          echo "healthy: /health 200"
+          # Operator SPA is in the image.
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:3020/)" = 200
+
+      - name: Logs
+        if: always()
+        run: docker logs cp 2>&1 | tail -n 150 || true

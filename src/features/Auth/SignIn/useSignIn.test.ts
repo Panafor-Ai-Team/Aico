@@ -5,6 +5,8 @@ import { useSignIn } from './useSignIn';
 
 const mockNavigate = vi.hoisted(() => vi.fn());
 const mockSearchParamsGet = vi.hoisted(() => vi.fn().mockReturnValue(null));
+const mockPhoneSendOtp = vi.hoisted(() => vi.fn());
+const mockPhoneVerify = vi.hoisted(() => vi.fn());
 const mockMessageError = vi.hoisted(() => vi.fn());
 const mockMessageSuccess = vi.hoisted(() => vi.fn());
 const mockSignInSocial = vi.hoisted(() => vi.fn());
@@ -33,11 +35,15 @@ vi.mock('react-router', () => ({
   useSearchParams: () => [{ get: mockSearchParamsGet }],
 }));
 
-vi.mock('@/components/AntdStaticMethods', () => ({
-  message: { error: mockMessageError, success: mockMessageSuccess },
+vi.mock('@lobehub/ui/base-ui', () => ({
+  toast: { error: mockMessageError, success: mockMessageSuccess },
 }));
 
 vi.mock('@/libs/better-auth/auth-client', () => ({
+  phoneNumber: {
+    sendOtp: mockPhoneSendOtp,
+    verify: mockPhoneVerify,
+  },
   requestPasswordReset: mockRequestPasswordReset,
   signIn: {
     email: mockSignInEmail,
@@ -53,7 +59,7 @@ vi.mock('@/libs/better-auth/utils/client', () => ({
 }));
 
 vi.mock('@lobechat/business-const', () => ({
-  BRANDING_NAME: 'Aico',
+  BRANDING_NAME: 'Panachat',
 }));
 
 vi.mock('@/business/client/hooks/useBusinessSignin', () => ({
@@ -170,7 +176,7 @@ describe('useSignIn', () => {
 
     it('should go to password step when user exists with password', async () => {
       mockFetch.mockResolvedValueOnce({
-        json: async () => ({ exists: true, hasPassword: true }),
+        json: async () => ({ exists: true }),
         ok: true,
       });
 
@@ -193,7 +199,7 @@ describe('useSignIn', () => {
         })
         // Second call: check-user
         .mockResolvedValueOnce({
-          json: async () => ({ exists: true, hasPassword: true }),
+          json: async () => ({ exists: true }),
           ok: true,
         });
 
@@ -244,7 +250,7 @@ describe('useSignIn', () => {
       });
 
       mockFetch.mockResolvedValueOnce({
-        json: async () => ({ exists: true, hasPassword: true }),
+        json: async () => ({ exists: true }),
         ok: true,
       });
 
@@ -280,7 +286,7 @@ describe('useSignIn', () => {
           return { error: null };
         });
         mockFetch.mockResolvedValueOnce({
-          json: async () => ({ exists: true, hasPassword: true }),
+          json: async () => ({ exists: true }),
           ok: true,
         });
 
@@ -304,7 +310,7 @@ describe('useSignIn', () => {
       });
 
       mockFetch.mockResolvedValueOnce({
-        json: async () => ({ exists: true, hasPassword: true }),
+        json: async () => ({ exists: true }),
         ok: true,
       });
 
@@ -332,7 +338,7 @@ describe('useSignIn', () => {
       });
 
       mockFetch.mockResolvedValueOnce({
-        json: async () => ({ exists: true, hasPassword: true }),
+        json: async () => ({ exists: true }),
         ok: true,
       });
 
@@ -363,7 +369,10 @@ describe('useSignIn', () => {
       });
 
       expect(mockSignInSocial).toHaveBeenCalledWith(
-        expect.objectContaining({ newUserCallbackURL: '/onboarding', provider: 'google' }),
+        expect.objectContaining({
+          newUserCallbackURL: '/onboarding',
+          provider: 'google',
+        }),
       );
       expect(mockMessageError).not.toHaveBeenCalled();
     });
@@ -378,7 +387,10 @@ describe('useSignIn', () => {
       });
 
       expect(mockSignInOauth2).toHaveBeenCalledWith(
-        expect.objectContaining({ newUserCallbackURL: '/onboarding', providerId: 'custom-oidc' }),
+        expect.objectContaining({
+          newUserCallbackURL: '/onboarding',
+          providerId: 'custom-oidc',
+        }),
       );
     });
 
@@ -428,18 +440,6 @@ describe('useSignIn', () => {
       expect(mockMessageError).toHaveBeenCalled();
     });
 
-    it('should save last auth provider to localStorage', async () => {
-      mockSignInSocial.mockResolvedValue({ url: 'https://google.com/auth' });
-
-      const { result } = renderHook(() => useSignIn());
-
-      await act(async () => {
-        await result.current.handleSocialSignIn('google');
-      });
-
-      expect(localStorage.getItem('lobehub:auth:last-provider:v1')).toBe('google');
-    });
-
     it('should stop social sign in when business pre-check rejects', async () => {
       mockEnableBusinessFeatures = true;
       mockBusinessSignin.preSocialSigninCheck.mockResolvedValue(false);
@@ -458,7 +458,7 @@ describe('useSignIn', () => {
   describe('handleBackToEmail', () => {
     it('should reset to email step', async () => {
       mockFetch.mockResolvedValueOnce({
-        json: async () => ({ exists: true, hasPassword: true }),
+        json: async () => ({ exists: true }),
         ok: true,
       });
 
@@ -485,10 +485,10 @@ describe('useSignIn', () => {
 
   describe('handleForgotPassword', () => {
     it('should call requestPasswordReset and land on the email-sent state', async () => {
-      mockRequestPasswordReset.mockResolvedValue(undefined);
+      mockRequestPasswordReset.mockResolvedValue({ data: { status: true }, error: null });
 
       mockFetch.mockResolvedValueOnce({
-        json: async () => ({ exists: true, hasPassword: true }),
+        json: async () => ({ exists: true }),
         ok: true,
       });
 
@@ -524,11 +524,40 @@ describe('useSignIn', () => {
       expect(result.current.step).toBe('email');
     });
 
+    // The better-auth client resolves with `{ data, error }` rather than
+    // throwing, so a rejected-promise test alone leaves the failure branch
+    // unreachable and a failed send lands on the "email sent" screen.
+    it('should show error and stay put when the client resolves with an error', async () => {
+      mockRequestPasswordReset.mockResolvedValue({
+        data: null,
+        error: { message: 'Email provider rejected the request', status: 503 },
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        json: async () => ({ exists: true, hasPassword: true }),
+        ok: true,
+      });
+
+      const { result } = renderHook(() => useSignIn());
+
+      await act(async () => {
+        await result.current.handleCheckUser({ email: 'user@example.com' });
+      });
+
+      await act(async () => {
+        await result.current.handleForgotPassword();
+      });
+
+      expect(mockMessageError).toHaveBeenCalled();
+      expect(result.current.step).toBe('password');
+      expect(result.current.sentInfo).toBeNull();
+    });
+
     it('should show error on failure', async () => {
       mockRequestPasswordReset.mockRejectedValue(new Error('fail'));
 
       mockFetch.mockResolvedValueOnce({
-        json: async () => ({ exists: true, hasPassword: true }),
+        json: async () => ({ exists: true }),
         ok: true,
       });
 
@@ -548,11 +577,11 @@ describe('useSignIn', () => {
   });
 
   describe('magic link', () => {
-    it('should land on email-sent state when a passwordless user triggers magic link', async () => {
+    it('does not auto-send magic link from check-user (AUTH-001: no auth-method oracle)', async () => {
       mockEnableMagicLink = true;
       mockSignInMagicLink.mockResolvedValue({ error: null });
       mockFetch.mockResolvedValueOnce({
-        json: async () => ({ exists: true, hasPassword: false }),
+        json: async () => ({ exists: true }),
         ok: true,
       });
 
@@ -562,19 +591,17 @@ describe('useSignIn', () => {
         await result.current.handleCheckUser({ email: 'user@example.com' });
       });
 
-      expect(mockSignInMagicLink).toHaveBeenCalledTimes(1);
-      expect(result.current.step).toBe('emailSent');
-      expect(result.current.sentInfo).toEqual(
-        expect.objectContaining({ email: 'user@example.com', type: 'magicLink' }),
-      );
+      expect(mockSignInMagicLink).not.toHaveBeenCalled();
+      expect(result.current.step).toBe('password');
+      expect(result.current.isSocialOnly).toBe(false);
     });
   });
 
   describe('handleResendEmail', () => {
     it('should resend the password reset email and confirm', async () => {
-      mockRequestPasswordReset.mockResolvedValue(undefined);
+      mockRequestPasswordReset.mockResolvedValue({ data: { status: true }, error: null });
       mockFetch.mockResolvedValueOnce({
-        json: async () => ({ exists: true, hasPassword: true }),
+        json: async () => ({ exists: true }),
         ok: true,
       });
 
@@ -601,9 +628,9 @@ describe('useSignIn', () => {
 
   describe('handleBackFromSent', () => {
     it('should return to the email entry (not the password step) after a reset email', async () => {
-      mockRequestPasswordReset.mockResolvedValue(undefined);
+      mockRequestPasswordReset.mockResolvedValue({ data: { status: true }, error: null });
       mockFetch.mockResolvedValueOnce({
-        json: async () => ({ exists: true, hasPassword: true }),
+        json: async () => ({ exists: true }),
         ok: true,
       });
 
@@ -632,16 +659,6 @@ describe('useSignIn', () => {
   });
 
   describe('provider sorting', () => {
-    it('should sort last used provider first', () => {
-      localStorage.setItem('lobehub:auth:last-provider:v1', 'github');
-
-      const { result } = renderHook(() => useSignIn());
-
-      expect(result.current.oAuthSSOProviders[0]).toBe('github');
-
-      localStorage.removeItem('lobehub:auth:last-provider:v1');
-    });
-
     it('should use business SSO providers when business features are enabled by server config', () => {
       mockEnableBusinessFeatures = true;
       mockBusinessSignin.ssoProviders = ['saml'];
@@ -649,6 +666,69 @@ describe('useSignIn', () => {
       const { result } = renderHook(() => useSignIn());
 
       expect(result.current.oAuthSSOProviders).toEqual(['saml']);
+    });
+  });
+
+  describe('handleVerifyPhoneOtp', () => {
+    it('should show a localized error when the phone is not verified for login', async () => {
+      mockPhoneSendOtp.mockResolvedValue({
+        error: { code: 'PHONE_NUMBER_NOT_VERIFIED', message: 'PHONE_NUMBER_NOT_VERIFIED' },
+      });
+
+      const { result } = renderHook(() => useSignIn());
+
+      act(() => {
+        result.current.handleGoToPhone();
+      });
+
+      await act(async () => {
+        await result.current.handleSendPhoneOtp({ phoneNumber: '09121234567' });
+      });
+
+      expect(result.current.step).toBe('phone');
+      expect(mockMessageError).toHaveBeenCalledWith(
+        'betterAuth.verifyPhone.errors.phoneNotVerifiedForLogin',
+      );
+    });
+
+    it('should redirect to onboarding after successful phone OTP (avoids chat-home flash)', async () => {
+      mockPhoneSendOtp.mockResolvedValue({ error: null });
+      mockPhoneVerify.mockResolvedValue({ error: null });
+
+      const { result } = renderHook(() => useSignIn());
+
+      await act(async () => {
+        await result.current.handleSendPhoneOtp({ phoneNumber: '09121234567' });
+      });
+
+      await act(async () => {
+        await result.current.handleVerifyPhoneOtp({ code: '123456' });
+      });
+
+      expect(mockPhoneVerify).toHaveBeenCalledWith({
+        code: '123456',
+        phoneNumber: '+989121234567',
+      });
+      expect(window.location.href).toBe('/onboarding');
+    });
+
+    it('should thread callbackUrl through the onboarding redirect', async () => {
+      mockSearchParamsGet.mockImplementation((key: string) =>
+        key === 'callbackUrl' ? '/agent/abc' : null,
+      );
+      mockPhoneSendOtp.mockResolvedValue({ error: null });
+      mockPhoneVerify.mockResolvedValue({ error: null });
+
+      const { result } = renderHook(() => useSignIn());
+
+      await act(async () => {
+        await result.current.handleSendPhoneOtp({ phoneNumber: '09121234567' });
+      });
+      await act(async () => {
+        await result.current.handleVerifyPhoneOtp({ code: '123456' });
+      });
+
+      expect(window.location.href).toBe('/onboarding?callbackUrl=%2Fagent%2Fabc');
     });
   });
 });

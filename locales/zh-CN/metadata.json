@@ -12,7 +12,7 @@
   "discover.models.title": "模型社区",
   "discover.plugins.description": "探索图表、学术工具、图像/视频/语音生成与工作流——为您的智能体添加技能。",
   "discover.plugins.title": "技能社区",
-  "discover.providers.description": "探索领先的模型提供商：OpenAI / 通义千问 / Ollama / Anthropic / DeepSeek / Google Gemini / OpenRouter",
+  "discover.providers.description": "探索领先的模型提供商：OpenAI / 通义千问 / Ollama / Anthropic / DeepSeek / Google Gemini",
   "discover.providers.title": "提供商社区",
   "discover.search": "搜索",
   "discover.title": "探索",

@@ -6,10 +6,11 @@ import { CURRENT_VERSION } from '@/const/version';
 import { globalService } from '@/services/global';
 import { useGlobalStore } from '@/store/global';
 import { initialState } from '@/store/global/initialState';
-import { switchLang } from '@/utils/client/switchLang';
+import { hasAutoLocaleCookie, switchLang } from '@/utils/client/switchLang';
 import { withSWR } from '~test-utils';
 
 vi.mock('@/utils/client/switchLang', () => ({
+  hasAutoLocaleCookie: vi.fn(() => false),
   switchLang: vi.fn(),
 }));
 
@@ -174,6 +175,43 @@ describe('generalActionSlice', () => {
       expect(useGlobalStore.getState().status.showCommandMenu).toBe(false);
       expect(useGlobalStore.getState().status.showHotkeyHelper).toBe(false);
       expect(useGlobalStore.getState().status.noWideScreen).toBe(false);
+    });
+
+    const initWithLanguage = async (language: 'auto' | 'en-US' | undefined) => {
+      const { result } = renderHook(() => useGlobalStore());
+      vi.spyOn(result.current.statusStorage, 'getFromLocalStorage').mockResolvedValueOnce({
+        ...initialState.status,
+        language,
+      });
+
+      const { result: hookResult } = renderHook(() => useGlobalStore().useInitSystemStatus(), {
+        wrapper: withSWR,
+      });
+
+      await act(async () => {
+        await hookResult.current.data;
+      });
+    };
+
+    it('should re-apply a stored `auto` choice whose cookie was dropped by older builds', async () => {
+      await initWithLanguage('auto');
+
+      expect(switchLang).toHaveBeenCalledWith('auto');
+    });
+
+    it('should not touch the locale when the `auto` cookie is already in place', async () => {
+      vi.mocked(hasAutoLocaleCookie).mockReturnValueOnce(true);
+
+      await initWithLanguage('auto');
+
+      expect(switchLang).not.toHaveBeenCalled();
+    });
+
+    it('should not touch the locale for an explicit language or no choice', async () => {
+      await initWithLanguage('en-US');
+      await initWithLanguage(undefined);
+
+      expect(switchLang).not.toHaveBeenCalled();
     });
   });
 

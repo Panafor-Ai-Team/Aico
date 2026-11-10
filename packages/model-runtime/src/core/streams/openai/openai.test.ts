@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { AgentRuntimeErrorType } from '../../../types/error';
+import { serializeScopedSignature, type SignatureScope } from '../../../utils/signatureScope';
 import { FIRST_CHUNK_ERROR_KEY } from '../protocol';
 import { OpenAIStream } from './openai';
 
@@ -628,7 +629,7 @@ describe('OpenAIStream', () => {
           `data: "stop"\n`,
           'id: chatcmpl-B7CcnaeK3jqWBMOhxg7SSKFwlk7dC',
           'event: usage',
-          `data: {"inputCacheMissTokens":1646,"inputTextTokens":1646,"outputTextTokens":11,"totalInputTokens":1646,"totalOutputTokens":11,"totalTokens":1657}\n`,
+          `data: {"inputAudioTokens":0,"inputCacheMissTokens":1646,"inputTextTokens":1646,"outputTextTokens":11,"totalInputTokens":1646,"totalOutputTokens":11,"totalTokens":1657}\n`,
         ].map((i) => `${i}\n`),
       );
     });
@@ -730,9 +731,69 @@ describe('OpenAIStream', () => {
           `data: {"delta":{},"id":"chatcmpl-c1f6a6a6-fcf8-463a-96bf-cf634d3e98a5","index":0}\n`,
           'id: chatcmpl-c1f6a6a6-fcf8-463a-96bf-cf634d3e98a5',
           'event: usage',
-          `data: {"inputCacheMissTokens":1797,"inputTextTokens":1797,"outputTextTokens":1720,"totalInputTokens":1797,"totalOutputTokens":1720,"totalTokens":3517}\n`,
+          `data: {"inputAudioTokens":0,"inputCacheMissTokens":1797,"inputTextTokens":1797,"outputTextTokens":1720,"totalInputTokens":1797,"totalOutputTokens":1720,"totalTokens":3517}\n`,
         ].map((i) => `${i}\n`),
       );
+    });
+  });
+
+  describe('router alias resolution', () => {
+    const buildStream = (model: string) =>
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue({
+            choices: [{ delta: { content: 'Hi' }, index: 0 }],
+            id: 'chat-1',
+            model,
+          });
+          controller.enqueue({
+            choices: [{ delta: { content: '!' }, index: 0 }],
+            id: 'chat-1',
+            model,
+          });
+          controller.close();
+        },
+      });
+
+    const collect = async (protocolStream: ReadableStream) => {
+      const decoder = new TextDecoder();
+      const chunks: string[] = [];
+      // @ts-ignore async iteration over the protocol stream
+      for await (const chunk of protocolStream) {
+        chunks.push(decoder.decode(chunk, { stream: true }));
+      }
+      return chunks;
+    };
+
+    it('reports the model an auto router picked, once per stream', async () => {
+      const onFinal = vi.fn();
+
+      const chunks = await collect(
+        OpenAIStream(buildStream('openai/gpt-5'), {
+          callbacks: { onFinal },
+          payload: { model: 'openrouter/auto', provider: 'openrouter' },
+        }),
+      );
+
+      expect(chunks.filter((chunk) => chunk.includes('event: resolved_model'))).toHaveLength(1);
+      expect(chunks.join('')).toContain('data: "openai/gpt-5"');
+      expect(onFinal).toHaveBeenCalledWith(
+        expect.objectContaining({ resolvedModel: 'openai/gpt-5' }),
+      );
+    });
+
+    it('stays quiet for a direct model request, even when the provider answers with a dated snapshot id', async () => {
+      const onFinal = vi.fn();
+
+      const chunks = await collect(
+        OpenAIStream(buildStream('gpt-4o-2024-08-06'), {
+          callbacks: { onFinal },
+          payload: { model: 'gpt-4o', provider: 'openai' },
+        }),
+      );
+
+      expect(chunks.join('')).not.toContain('resolved_model');
+      expect(onFinal).toHaveBeenCalledWith(expect.objectContaining({ resolvedModel: undefined }));
     });
   });
 
@@ -1195,11 +1256,18 @@ describe('OpenAIStream', () => {
       });
 
       const onToolCallMock = vi.fn();
+      const thoughtSignatureScope: SignatureScope = { fingerprint: 'a'.repeat(32) };
+      const persistedSignature = serializeScopedSignature(
+        'ErEDCq4DAdHtim...',
+        thoughtSignatureScope,
+        'thought_signature',
+      )!;
 
       const protocolStream = OpenAIStream(mockOpenAIStream, {
         callbacks: {
           onToolsCalling: onToolCallMock,
         },
+        payload: { thoughtSignatureScope },
       });
 
       const decoder = new TextDecoder();
@@ -1214,7 +1282,7 @@ describe('OpenAIStream', () => {
         'id: or-123\n',
         'event: tool_calls\n',
         // thoughtSignature should be preserved in the output
-        `data: [{"function":{"arguments":"{}","name":"github__get_me"},"id":"call_123","index":0,"type":"function","thoughtSignature":"ErEDCq4DAdHtim..."}]\n\n`,
+        `data: [{"function":{"arguments":"{}","name":"github__get_me"},"id":"call_123","index":0,"type":"function","thoughtSignature":"${persistedSignature}"}]\n\n`,
       ]);
 
       // Verify the callback receives thoughtSignature
@@ -1224,7 +1292,7 @@ describe('OpenAIStream', () => {
             function: { arguments: '{}', name: 'github__get_me' },
             id: 'call_123',
             index: 0,
-            thoughtSignature: 'ErEDCq4DAdHtim...',
+            thoughtSignature: persistedSignature,
             type: 'function',
           },
         ],
@@ -1232,7 +1300,7 @@ describe('OpenAIStream', () => {
           {
             function: { arguments: '{}', name: 'github__get_me' },
             id: 'call_123',
-            thoughtSignature: 'ErEDCq4DAdHtim...',
+            thoughtSignature: persistedSignature,
             type: 'function',
           },
         ],
@@ -2212,6 +2280,74 @@ describe('OpenAIStream', () => {
       );
     });
 
+    // Providers that batch several tokens per SSE frame (e.g. custom OpenAI-compatible
+    // proxies) can emit the tail of the reasoning and the head of the answer in the same
+    // delta. Both have to survive — dropping the content there makes the reply start
+    // mid-sentence. See the Venice AI reports.
+    it('should keep content when a single delta carries both reasoning_content and content', async () => {
+      const data = [
+        {
+          id: '1',
+          object: 'chat.completion.chunk',
+          created: 1737563070,
+          model: 'qwen-3-6-plus',
+          choices: [{ index: 0, delta: { role: 'assistant', reasoning_content: 'Let me think' } }],
+        },
+        {
+          id: '1',
+          object: 'chat.completion.chunk',
+          created: 1737563070,
+          model: 'qwen-3-6-plus',
+          choices: [
+            { index: 0, delta: { reasoning_content: '. Ready.', content: 'Dear Angela,' } },
+          ],
+        },
+        {
+          id: '1',
+          object: 'chat.completion.chunk',
+          created: 1737563070,
+          model: 'qwen-3-6-plus',
+          choices: [{ index: 0, delta: { content: ' I hear you.' } }],
+        },
+      ];
+
+      const mockOpenAIStream = new ReadableStream({
+        start(controller) {
+          data.forEach((chunk) => {
+            controller.enqueue(chunk);
+          });
+
+          controller.close();
+        },
+      });
+
+      const protocolStream = OpenAIStream(mockOpenAIStream);
+
+      const decoder = new TextDecoder();
+      const chunks = [];
+
+      // @ts-ignore
+      for await (const chunk of protocolStream) {
+        chunks.push(decoder.decode(chunk, { stream: true }));
+      }
+
+      expect(chunks).toEqual(
+        [
+          'id: 1',
+          'event: reasoning',
+          `data: "Let me think"\n`,
+          'id: 1',
+          'event: reasoning',
+          `data: ". Ready."\n`,
+          'id: 1',
+          'event: text',
+          `data: "Dear Angela,"\n`,
+          'id: 1',
+          'event: text',
+          `data: " I hear you."\n`,
+        ].map((i) => `${i}\n`),
+      );
+    });
     it('should handle reasoning in litellm', async () => {
       const data = [
         {

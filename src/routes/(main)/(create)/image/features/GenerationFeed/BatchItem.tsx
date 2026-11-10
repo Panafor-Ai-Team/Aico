@@ -1,9 +1,8 @@
 'use client';
 
 import { useAutoAnimate } from '@formkit/auto-animate/react';
-import { ModelTag } from '@lobehub/icons';
 import { ActionIconGroup, Block, Flexbox, Grid, Image, Markdown, Tag, Text } from '@lobehub/ui';
-import { App } from 'antd';
+import { toast } from '@lobehub/ui/base-ui';
 import { createStaticStyles } from 'antd-style';
 import dayjs from 'dayjs';
 import { omit } from 'es-toolkit/compat';
@@ -14,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useActiveWorkspaceId } from '@/business/client/hooks/useActiveWorkspaceId';
 import useRenderBusinessBatchItem from '@/business/client/hooks/useRenderBusinessBatchItem';
+import { BrandedModelTag } from '@/components/Branding/BrandedModelTag';
 import { GenerationInvalidAPIKey } from '@/routes/(main)/(create)/features/GenerationInput';
 import { useImageStore } from '@/store/image';
 import { AsyncTaskErrorType } from '@/types/asyncTask';
@@ -60,7 +60,6 @@ interface GenerationBatchItemProps {
 
 export const GenerationBatchItem = memo<GenerationBatchItemProps>(({ batch }) => {
   const { t } = useTranslation('image');
-  const { message } = App.useApp();
 
   const [imageGridRef] = useAutoAnimate();
 
@@ -70,6 +69,8 @@ export const GenerationBatchItem = memo<GenerationBatchItemProps>(({ batch }) =>
   const activeWorkspaceId = useActiveWorkspaceId();
   const { shouldRenderBusinessBatchItem, businessBatchItem } = useRenderBusinessBatchItem(batch);
 
+  // Resolve the model's display name from the enabled model catalog, falling back
+  // to the raw model id when the model is not found (e.g. removed/renamed models).
   const creator = batch.creator;
   const showCreator = Boolean(activeWorkspaceId && creator?.id);
   const creatorName = creator?.fullName || creator?.username || '';
@@ -81,10 +82,10 @@ export const GenerationBatchItem = memo<GenerationBatchItemProps>(({ batch }) =>
   const handleCopyPrompt = async () => {
     try {
       await navigator.clipboard.writeText(batch.prompt);
-      message.success(t('generation.actions.promptCopied'));
+      toast.success(t('generation.actions.promptCopied'));
     } catch (error) {
       console.error('Failed to copy prompt:', error);
-      message.error(t('generation.actions.promptCopyFailed'));
+      toast.error(t('generation.actions.promptCopyFailed'));
     }
   };
 
@@ -156,7 +157,7 @@ export const GenerationBatchItem = memo<GenerationBatchItemProps>(({ batch }) =>
         style={{ opacity: 0.66 }}
       >
         <Flexbox horizontal align={'center'} gap={4}>
-          <ModelTag model={batch.model} variant={'borderless'} />
+          <BrandedModelTag model={batch.model} variant={'borderless'} />
           {batch.width && batch.height && (
             <Tag variant={'borderless'}>
               {batch.width} × {batch.height}

@@ -14,6 +14,7 @@ import type { LobeChatDatabase } from '@/database/type';
 import { assertAgentUsableBy } from '@/database/utils/agent-access';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
+import { assertCapability } from '@/server/services/aico/capabilityGate';
 import { EditLockService } from '@/server/services/editLock';
 import { publishResourceEvent } from '@/server/services/resourceEvents';
 import { TaskService } from '@/server/services/task';
@@ -58,6 +59,7 @@ const createSchema = z.object({
   // 'schedule', `schedulePattern` (cron) is required for the central
   // schedule-dispatch sweep to pick the task up.
   automationMode: z.enum(['heartbeat', 'schedule']).optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
   createdByAgentId: z.string().optional(),
   description: z.string().optional(),
   editorData: z.unknown().optional(),
@@ -66,6 +68,7 @@ const createSchema = z.object({
   name: z.string().optional(),
   parentTaskId: z.string().optional(),
   priority: z.number().min(0).max(4).optional(),
+  projectId: z.string().optional(),
   schedulePattern: z.string().optional(),
   scheduleTimezone: z.string().optional(),
   // When omitted, the server derives visibility from the parent task or the
@@ -103,11 +106,19 @@ const updateSchema = z.object({
 
 const listSchema = z.object({
   assigneeAgentId: z.string().optional(),
+  // true → only tasks whose schedule or heartbeat can still fire (a terminal or
+  // misconfigured one cannot), false → its exact complement. Omitted leaves the
+  // set unnarrowed.
+  automated: z.boolean().optional(),
+  hasGoal: z.boolean().optional(),
   limit: z.number().min(1).max(100).default(50),
   offset: z.number().min(0).default(0),
+  // Which timestamp orders the page, newest first. Defaults to creation time.
+  orderBy: z.enum(['createdAt', 'updatedAt']).optional(),
   parentIdentifier: z.string().optional(),
   parentTaskId: z.string().nullish(),
   priorities: z.array(z.number().min(0).max(4)).max(5).optional(),
+  projectId: z.string().optional(),
   statuses: z.array(z.enum(TASK_STATUSES)).max(10).optional(),
   // UI-side narrowing of the result set. Omitted means "All" (the chip's
   // default 'private' is enforced client-side; the server stays permissive
@@ -128,9 +139,24 @@ const groupListSchema = z.object({
     )
     .min(1)
     .max(10),
+  hasGoal: z.boolean().optional(),
   parentTaskId: z.string().nullish(),
+  projectId: z.string().optional(),
   visibility: z.enum(['private', 'public']).optional(),
 });
+
+/**
+ * Aico capability gate: a task may only join a project, or carry a goal marker
+ * (`config.goal`, which drives autonomous goal rounds), while the operator has
+ * enabled that capability. Clearing a goal (`goal: null`) is always allowed.
+ */
+async function assertTaskCapabilities(
+  userId: string,
+  input: { config?: Record<string, unknown> | null; projectId?: string | null },
+) {
+  if (input.projectId) await assertCapability(userId, 'projects');
+  if (input.config?.goal) await assertCapability(userId, 'goals');
+}
 
 // Helper: resolve id/identifier and throw if not found
 async function resolveOrThrow(model: TaskModel, id: string) {
@@ -180,6 +206,14 @@ async function resolveSafeParentTaskId(
     throw new TRPCError({
       code: 'BAD_REQUEST',
       message: 'Task cannot be parented to its own descendant',
+    });
+  }
+
+  const task = await resolveOrThrow(model, taskId);
+  if (task.projectId !== parent.projectId) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Parent task must belong to the same project',
     });
   }
 
@@ -348,6 +382,9 @@ export const taskRouter = router({
       } catch (error) {
         if (error instanceof TRPCError) throw error;
         console.error('[task:addDependency]', error);
+        if (error instanceof Error && error.message.includes('project boundaries')) {
+          throw new TRPCError({ cause: error, code: 'BAD_REQUEST', message: error.message });
+        }
         throw new TRPCError({
           cause: error,
           code: 'INTERNAL_SERVER_ERROR',
@@ -392,6 +429,7 @@ export const taskRouter = router({
 
   create: taskProcedureWrite.input(createSchema).mutation(async ({ input, ctx }) => {
     try {
+      await assertTaskCapabilities(ctx.userId, input);
       const task = await ctx.taskService.createTask(input);
       return { data: task, message: 'Task created', success: true };
     } catch (error) {
@@ -439,6 +477,27 @@ export const taskRouter = router({
         cause: error,
         code: 'INTERNAL_SERVER_ERROR',
         message: 'Failed to delete task',
+      });
+    }
+  }),
+
+  deleteGoal: taskProcedureWrite.input(idInput).mutation(async ({ input, ctx }) => {
+    try {
+      const model = ctx.taskModel;
+      const task = await resolveOrThrow(model, input.id);
+      if (!(task.config as { goal?: unknown } | null)?.goal) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Task is not a goal root' });
+      }
+      assertWorkspaceRowManageable(ctx, task.createdByUserId, 'task');
+      const count = await model.deleteSubtree(task.id);
+      return { count, data: task, message: 'Goal deleted', success: true };
+    } catch (error) {
+      if (error instanceof TRPCError) throw error;
+      console.error('[task:deleteGoal]', error);
+      throw new TRPCError({
+        cause: error,
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to delete goal',
       });
     }
   }),
@@ -1011,6 +1070,7 @@ export const taskRouter = router({
   update: taskProcedureWrite.input(idInput.merge(updateSchema)).mutation(async ({ input, ctx }) => {
     const { id, parentTaskId, ...data } = input;
     try {
+      await assertTaskCapabilities(ctx.userId, data);
       const model = ctx.taskModel;
       await assertAssigneeAgentBelongsToUser(
         ctx.serverDB,
@@ -1105,7 +1165,7 @@ export const taskRouter = router({
         // The creator can always change visibility on their own tasks. In
         // workspace mode, workspace owners may still promote other members'
         // tasks (mirrors the transferTask policy at line ~1166), but demoting
-        // to private stays creator-only (LOBE-11760): the task would land in
+        // to private stays creator-only: the task would land in
         // the creator's private list, so an owner-initiated demotion just
         // appropriates another member's data.
         if (ctx.workspaceId && resolved.createdByUserId !== ctx.userId) {
@@ -1223,6 +1283,7 @@ export const taskRouter = router({
     .mutation(async ({ input, ctx }) => {
       const { id, config } = input;
       try {
+        await assertTaskCapabilities(ctx.userId, { config });
         const model = ctx.taskModel;
         const resolved = await resolveOrThrow(model, id);
         const task = await model.updateTaskConfig(resolved.id, config);

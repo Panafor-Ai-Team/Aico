@@ -17,7 +17,7 @@
   "desktop.showApp.title": "メインウィンドウの表示/非表示",
   "editMessage.desc": "Altキーを押しながらメッセージをダブルクリックして編集モードに入ります",
   "editMessage.title": "メッセージを編集",
-  "navigateToChat.desc": "チャットタブに切り替えてLobe AIに入る",
+  "navigateToChat.desc": "チャットタブに切り替えて{{appName}} AIに入る",
   "navigateToChat.title": "デフォルトの会話に切り替え",
   "nextTab.desc": "デスクトップアプリでブラウザスタイルの次のタブに移動します。最後のタブに到達すると最初のタブに戻ります。",
   "nextTab.title": "次のタブ",
@@ -44,5 +44,7 @@
   "toggleLeftPanel.desc": "左側パネルの表示・非表示を切り替えます",
   "toggleLeftPanel.title": "左側パネルの表示/非表示",
   "toggleRightPanel.desc": "右側パネルの表示・非表示を切り替えます",
-  "toggleRightPanel.title": "右側パネルの表示/非表示"
+  "toggleRightPanel.title": "右側パネルの表示/非表示",
+  "toggleTerminalPanel.desc": "下部のターミナルパネルを表示または非表示にする",
+  "toggleTerminalPanel.title": "ターミナルパネルの切り替え"
 }

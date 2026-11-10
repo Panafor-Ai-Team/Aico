@@ -1,0 +1,190 @@
+import {
+  AICO_ERROR_MESSAGES_FA,
+  isAicoErrorCode,
+  normalizeAicoErrorCode,
+  resolveAicoErrorCode,
+} from '@lobechat/business-const';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import enUS from '../../../locales/en-US/aico.json';
+import faIR from '../../../locales/fa-IR/aico.json';
+import frFR from '../../../locales/fr-FR/aico.json';
+import zhCN from '../../../locales/zh-CN/aico.json';
+import aicoSource from '../../../packages/locales/src/default/aico';
+
+const mockToastError = vi.hoisted(() => vi.fn());
+
+vi.mock('@lobehub/ui/base-ui', () => ({
+  toast: {
+    error: (...args: unknown[]) => mockToastError(...args),
+  },
+}));
+
+vi.mock('@/libs/better-auth/phone', () => ({
+  buildPhoneVerifyRedirectUrl: (url: string) =>
+    `/verify-phone?callbackUrl=${encodeURIComponent(url)}`,
+}));
+
+describe('Aico error catalog', () => {
+  it('includes the three contract-required codes with Persian defaults', () => {
+    expect(AICO_ERROR_MESSAGES_FA.BUDGET_EXCEEDED).toBe('سهمیه‌ی شما تمام شده است.');
+    expect(AICO_ERROR_MESSAGES_FA.ORG_WALLET_EMPTY).toBe('موجودی کیف پول سازمان کافی نیست.');
+    expect(AICO_ERROR_MESSAGES_FA.MODEL_NOT_ALLOWED).toBe('دسترسی به این مدل برای شما فعال نیست.');
+  });
+
+  it('normalizes and aliases server codes', () => {
+    expect(normalizeAicoErrorCode('MODEL_NOT_ALLOWED:gpt-4')).toBe('MODEL_NOT_ALLOWED');
+    expect(resolveAicoErrorCode('INSUFFICIENT_ORG_BALANCE')).toBe('ORG_WALLET_EMPTY');
+    expect(isAicoErrorCode('BUDGET_EXCEEDED')).toBe(true);
+    expect(resolveAicoErrorCode('not-a-code')).toBeUndefined();
+  });
+
+  it('resolves USER_ALREADY_IN_ORGANIZATION for invite/create conflicts', () => {
+    expect(isAicoErrorCode('USER_ALREADY_IN_ORGANIZATION')).toBe(true);
+    expect(resolveAicoErrorCode('USER_ALREADY_IN_ORGANIZATION')).toBe(
+      'USER_ALREADY_IN_ORGANIZATION',
+    );
+    expect(AICO_ERROR_MESSAGES_FA.USER_ALREADY_IN_ORGANIZATION).toContain('سازمان دیگری');
+  });
+
+  it('includes DIRECT_PROVIDER_NOT_ALLOWED with Persian default', () => {
+    expect(isAicoErrorCode('DIRECT_PROVIDER_NOT_ALLOWED')).toBe(true);
+    expect(AICO_ERROR_MESSAGES_FA.DIRECT_PROVIDER_NOT_ALLOWED).toContain('ارائه‌دهنده مستقیم');
+  });
+
+  it('includes personal funds codes with Persian defaults', () => {
+    expect(AICO_ERROR_MESSAGES_FA.PERSONAL_FUNDS_UNAVAILABLE).toBe(
+      'موجودی کیف پول شخصی کافی نیست. لطفاً شارژ کنید یا دوره آزمایشی را فعال کنید.',
+    );
+    expect(AICO_ERROR_MESSAGES_FA.MEMBER_BUDGET_UNFUNDED).toBe(
+      'سهمیه سازمانی انتخاب‌شده موجودی ندارد.',
+    );
+    expect(isAicoErrorCode('PERSONAL_FUNDS_UNAVAILABLE')).toBe(true);
+  });
+
+  it('includes control-plane operator auth codes with Persian defaults', () => {
+    expect(isAicoErrorCode('INVALID_CREDENTIALS')).toBe(true);
+    expect(isAicoErrorCode('EMAIL_PASSWORD_REQUIRED')).toBe(true);
+    expect(isAicoErrorCode('PASSWORD_TOO_WEAK')).toBe(true);
+    expect(isAicoErrorCode('OPERATOR_EMAIL_EXISTS')).toBe(true);
+    expect(AICO_ERROR_MESSAGES_FA.INVALID_CREDENTIALS).toBe('ایمیل یا رمز عبور نادرست است.');
+    expect(AICO_ERROR_MESSAGES_FA.EMAIL_PASSWORD_REQUIRED).toBe('ایمیل و رمز عبور الزامی است.');
+    expect(AICO_ERROR_MESSAGES_FA.PASSWORD_TOO_WEAK).toContain('۸');
+    expect(AICO_ERROR_MESSAGES_FA.OPERATOR_EMAIL_EXISTS).toContain('اپراتور');
+  });
+});
+
+describe('resolveAicoErrorMessage', () => {
+  it('maps contract codes to Persian defaults without i18n', async () => {
+    const { resolveAicoErrorMessage } = await import('./resolveAicoErrorMessage');
+    expect(resolveAicoErrorMessage('BUDGET_EXCEEDED')).toBe('سهمیه‌ی شما تمام شده است.');
+    expect(resolveAicoErrorMessage('ORG_WALLET_EMPTY')).toBe('موجودی کیف پول سازمان کافی نیست.');
+    expect(resolveAicoErrorMessage('MODEL_NOT_ALLOWED:claude-sonnet')).toBe(
+      'دسترسی به این مدل برای شما فعال نیست.',
+    );
+    expect(resolveAicoErrorMessage('INVALID_CREDENTIALS')).toBe('ایمیل یا رمز عبور نادرست است.');
+  });
+
+  it('uses i18n when provided', async () => {
+    const { resolveAicoErrorMessage } = await import('./resolveAicoErrorMessage');
+    const t = (key: string) => (key === 'errors.TRIAL_ALREADY_USED' ? 'Trial used (en)' : key);
+    expect(resolveAicoErrorMessage('TRIAL_ALREADY_USED', t)).toBe('Trial used (en)');
+  });
+
+  it('returns undefined for unknown errors so callers keep their fallback', async () => {
+    const { resolveAicoErrorMessage } = await import('./resolveAicoErrorMessage');
+    expect(resolveAicoErrorMessage(new Error('network down'))).toBeUndefined();
+    expect(resolveAicoErrorMessage(undefined)).toBeUndefined();
+  });
+
+  it('reads message from TRPC-shaped errors', async () => {
+    const { extractErrorCodeCandidate, resolveAicoErrorMessage } =
+      await import('./resolveAicoErrorMessage');
+    expect(extractErrorCodeCandidate({ message: 'PHONE_VERIFICATION_REQUIRED' })).toBe(
+      'PHONE_VERIFICATION_REQUIRED',
+    );
+    expect(resolveAicoErrorMessage({ data: { message: 'PHONE_VERIFICATION_REQUIRED' } })).toBe(
+      'برای ادامه، ابتدا شماره موبایل خود را تأیید کنید.',
+    );
+  });
+
+  it('prefers ChatMessageError body.error over generic InvalidUserKey message', async () => {
+    const { extractErrorCodeCandidate, resolveAicoErrorMessage } =
+      await import('./resolveAicoErrorMessage');
+    const chatError = {
+      body: { error: 'MEMBER_BUDGET_UNFUNDED', provider: 'aico' },
+      message: 'translated_response.InvalidUserKey',
+      type: 'InvalidUserKey',
+    };
+    expect(extractErrorCodeCandidate(chatError)).toBe('MEMBER_BUDGET_UNFUNDED');
+    expect(resolveAicoErrorMessage(chatError)).toBe('سهمیه سازمانی انتخاب‌شده موجودی ندارد.');
+  });
+});
+
+describe('toastAicoError', () => {
+  beforeEach(() => {
+    mockToastError.mockReset();
+    vi.stubGlobal('location', {
+      assign: vi.fn(),
+      pathname: '/wallet',
+      search: '',
+    });
+  });
+
+  it('adds a verify-phone action for PHONE_VERIFICATION_REQUIRED', async () => {
+    const { toastAicoError } = await import('./resolveAicoErrorMessage');
+    const t = (key: string, opts?: { defaultValue?: string }) => opts?.defaultValue || key;
+
+    toastAicoError({ message: 'PHONE_VERIFICATION_REQUIRED' }, t, 'wallet.trialFailed');
+
+    expect(mockToastError).toHaveBeenCalledTimes(1);
+    const arg = mockToastError.mock.calls[0][0] as {
+      actions: Array<{ label: string; onClick: () => void }>;
+      title: string;
+    };
+    expect(arg.title).toContain('موبایل');
+    expect(arg.actions).toHaveLength(1);
+    expect(arg.actions[0].label).toBe('Verify phone');
+
+    arg.actions[0].onClick();
+    expect(window.location.assign).toHaveBeenCalledWith('/verify-phone?callbackUrl=%2Fwallet');
+  });
+
+  it('keeps a plain string toast for other errors', async () => {
+    const { toastAicoError } = await import('./resolveAicoErrorMessage');
+    const t = (key: string) => key;
+
+    toastAicoError(new Error('network'), t, 'wallet.trialFailed');
+
+    expect(mockToastError).toHaveBeenCalledWith('wallet.trialFailed');
+  });
+});
+
+describe('Aico usage ledger error codes', () => {
+  const LEDGER_CODES = [
+    'MANAGED_OPERATION_NOT_METERED',
+    'MEMBER_NOT_ACTIVE',
+    'MEMBER_REMOVAL_IN_PROGRESS',
+    'MODEL_PRICING_UNAVAILABLE',
+    'ORG_DELETED',
+    'PLATFORM_CAPACITY_EXHAUSTED',
+    'USAGE_CONCURRENCY_LIMIT',
+  ] as const;
+
+  it('resolves suffixed gate refusals to the base code', () => {
+    expect(resolveAicoErrorCode('PLATFORM_CAPACITY_EXHAUSTED:paused')).toBe(
+      'PLATFORM_CAPACITY_EXHAUSTED',
+    );
+  });
+
+  it.each(LEDGER_CODES)('%s has a Persian default and copy in every shipped locale', (code) => {
+    expect(isAicoErrorCode(code)).toBe(true);
+    expect(AICO_ERROR_MESSAGES_FA[code]).toBeTruthy();
+
+    const key = `errors.${code}`;
+    expect((aicoSource as Record<string, string>)[key]).toBeTruthy();
+    for (const [locale, messages] of Object.entries({ enUS, faIR, frFR, zhCN })) {
+      expect((messages as Record<string, string>)[key], locale).toBeTruthy();
+    }
+  });
+});

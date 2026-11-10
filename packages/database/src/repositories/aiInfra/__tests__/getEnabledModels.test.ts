@@ -94,6 +94,56 @@ describe('AiInfraRepos', () => {
       );
     });
 
+    it('should keep the builtin deploymentName when the user row only stores chatConfig', async () => {
+      const mockProviders = [
+        {
+          enabled: true,
+          id: 'volcengine',
+          name: 'Volcengine',
+          sort: 1,
+          source: 'builtin' as const,
+        },
+      ];
+
+      // Preference-only row created by updateModelReasoningConfig: its config
+      // holds just chatConfig, but must not shadow the builtin card's
+      // config.deploymentName that findDeploymentName relies on
+      const mockAllModels = [
+        {
+          config: { chatConfig: { reasoningEffort: 'high' } },
+          id: 'deepseek-v4',
+          providerId: 'volcengine',
+          type: 'chat' as const,
+        },
+      ] as any[];
+
+      vi.spyOn(repo, 'getAiProviderList').mockResolvedValue(mockProviders);
+      vi.spyOn(repo.aiModelModel, 'getAllModels').mockResolvedValue(mockAllModels);
+      vi.spyOn(repo as any, 'fetchBuiltinModels').mockResolvedValue([
+        {
+          abilities: {},
+          config: { deploymentName: 'deepseek-v4-250801' },
+          displayName: 'DeepSeek V4',
+          enabled: true,
+          id: 'deepseek-v4',
+          type: 'chat' as const,
+        },
+      ]);
+
+      const result = await repo.getEnabledModels();
+
+      expect(result).toContainEqual(
+        expect.objectContaining({
+          config: {
+            chatConfig: { reasoningEffort: 'high' },
+            deploymentName: 'deepseek-v4-250801',
+          },
+          id: 'deepseek-v4',
+          providerId: 'volcengine',
+        }),
+      );
+    });
+
     it('should handle case when user model not found', async () => {
       const mockProviders = [
         { enabled: true, id: 'openai', name: 'OpenAI', sort: 1, source: 'builtin' as const },
@@ -1087,6 +1137,132 @@ describe('AiInfraRepos', () => {
       expect(merged?.pricing).toEqual({
         units: [{ name: 'textInput', rate: 0.15, strategy: 'fixed', unit: 'millionTokens' }],
       });
+    });
+
+    it('should exclude free models marked by :free id or (free) display name', async () => {
+      const mockProviders = [
+        {
+          enabled: true,
+          id: 'openrouter',
+          name: 'OpenRouter',
+          sort: 1,
+          source: 'builtin' as const,
+        },
+      ];
+
+      vi.spyOn(repo, 'getAiProviderList').mockResolvedValue(mockProviders);
+      vi.spyOn(repo.aiModelModel, 'getAllModels').mockResolvedValue([]);
+      vi.spyOn(repo as any, 'fetchBuiltinModels').mockResolvedValue([
+        {
+          displayName: 'Llama 3.3 70B Instruct',
+          enabled: true,
+          id: 'meta-llama/llama-3.3-70b-instruct:free',
+          type: 'chat' as const,
+        },
+        {
+          displayName: 'Gemma 2 9B (free)',
+          enabled: true,
+          id: 'google/gemma-2-9b-it',
+          type: 'chat' as const,
+        },
+        {
+          displayName: 'GPT-4o',
+          enabled: true,
+          id: 'openai/gpt-4o',
+          type: 'chat' as const,
+        },
+      ]);
+
+      const result = await repo.getEnabledModels();
+
+      expect(result.map((m) => m.id)).toEqual(['openai/gpt-4o']);
+    });
+
+    it('promotes OpenRouter :image siblings when the chat parent is user-enabled', async () => {
+      const mockProviders = [
+        {
+          enabled: true,
+          id: 'openrouter',
+          name: 'OpenRouter',
+          sort: 1,
+          source: 'builtin' as const,
+        },
+      ];
+
+      vi.spyOn(repo, 'getAiProviderList').mockResolvedValue(mockProviders);
+      vi.spyOn(repo.aiModelModel, 'getAllModels').mockResolvedValue([
+        {
+          enabled: true,
+          id: 'google/gemini-3.1-flash-image-preview',
+          providerId: 'openrouter',
+          type: 'chat',
+        },
+      ] as EnabledAiModel[]);
+      vi.spyOn(repo as any, 'fetchBuiltinModels').mockResolvedValue([
+        {
+          displayName: 'Nano Banana 2',
+          enabled: false,
+          id: 'google/gemini-3.1-flash-image-preview',
+          type: 'chat' as const,
+        },
+        {
+          displayName: 'Nano Banana 2',
+          enabled: false,
+          id: 'google/gemini-3.1-flash-image-preview:image',
+          type: 'image' as const,
+        },
+      ]);
+
+      const result = await repo.getEnabledModels();
+
+      expect(result.map((m) => m.id).sort()).toEqual([
+        'google/gemini-3.1-flash-image-preview',
+        'google/gemini-3.1-flash-image-preview:image',
+      ]);
+    });
+
+    it('does not promote :image siblings the user explicitly disabled', async () => {
+      const mockProviders = [
+        {
+          enabled: true,
+          id: 'openrouter',
+          name: 'OpenRouter',
+          sort: 1,
+          source: 'builtin' as const,
+        },
+      ];
+
+      vi.spyOn(repo, 'getAiProviderList').mockResolvedValue(mockProviders);
+      vi.spyOn(repo.aiModelModel, 'getAllModels').mockResolvedValue([
+        {
+          enabled: true,
+          id: 'google/gemini-3.1-flash-image-preview',
+          providerId: 'openrouter',
+          type: 'chat',
+        },
+        {
+          enabled: false,
+          id: 'google/gemini-3.1-flash-image-preview:image',
+          providerId: 'openrouter',
+          type: 'image',
+        },
+      ] as EnabledAiModel[]);
+      vi.spyOn(repo as any, 'fetchBuiltinModels').mockResolvedValue([
+        {
+          enabled: false,
+          id: 'google/gemini-3.1-flash-image-preview',
+          type: 'chat' as const,
+        },
+        {
+          enabled: false,
+          id: 'google/gemini-3.1-flash-image-preview:image',
+          type: 'image' as const,
+        },
+      ]);
+
+      const result = await repo.getEnabledModels();
+
+      expect(result.map((m) => m.id)).toEqual(['google/gemini-3.1-flash-image-preview']);
     });
   });
 });

@@ -11,6 +11,7 @@ import { DocumentSourceType, type LobeDocument } from '@/types/document';
 import { setNamespace } from '@/utils/storeDebug';
 
 import { type PageStore } from '../../store';
+import { TEMP_PAGE_ID_PREFIX } from '../internal/reducer';
 
 const documentItemToLobeDocument = (document: DocumentItem): LobeDocument => ({
   content: document.content || null,
@@ -48,6 +49,22 @@ const isAllowedPage = (page: { fileType: string; sourceType: string }) => {
   );
 };
 
+/**
+ * Apply a server page list without dropping optimistic pages that are still
+ * being created. A focus revalidation (e.g. closing the upload file picker)
+ * can land mid-upload; replacing the array would remove the temp page, and
+ * the upload would then have nothing to swap its real page into.
+ */
+const keepPendingTempPages = (
+  current: LobeDocument[] | undefined,
+  serverDocuments: LobeDocument[],
+): LobeDocument[] => {
+  const pending = (current ?? []).filter((doc) => doc.id.startsWith(TEMP_PAGE_ID_PREFIX));
+  if (pending.length === 0) return serverDocuments;
+
+  return [...pending, ...serverDocuments];
+};
+
 type Setter = StoreSetter<PageStore>;
 export const createListSlice = (set: Setter, get: () => PageStore, _api?: unknown) =>
   new ListActionImpl(set, get, _api);
@@ -70,7 +87,10 @@ export class ListActionImpl {
       const hasMore = documents.length >= pageSize;
 
       // Use internal dispatch to set documents
-      this.#get().internal_dispatchDocuments({ documents, type: 'setDocuments' });
+      this.#get().internal_dispatchDocuments({
+        documents: keepPendingTempPages(this.#get().documents, documents),
+        type: 'setDocuments',
+      });
 
       this.#set(
         {
@@ -145,11 +165,8 @@ export class ListActionImpl {
    * "Workspace" immediately. Errors bubble up so the caller can surface a
    * localized toast without swallowing the reason.
    */
-  publishPageToWorkspace = async (
-    pageId: string,
-    accessLevel?: 'view' | 'edit',
-  ): Promise<{ documentIds: string[] }> => {
-    const result = await documentService.publishDocumentToWorkspace(pageId, accessLevel);
+  publishPageToWorkspace = async (pageId: string): Promise<{ documentIds: string[] }> => {
+    const result = await documentService.publishDocumentToWorkspace(pageId);
     await this.#get().refreshDocuments();
     return result;
   };
@@ -202,7 +219,10 @@ export class ListActionImpl {
           const hasMore = documents.length >= pageSize;
 
           // Use internal dispatch to set documents
-          this.#get().internal_dispatchDocuments({ documents, type: 'setDocuments' });
+          this.#get().internal_dispatchDocuments({
+            documents: keepPendingTempPages(this.#get().documents, documents),
+            type: 'setDocuments',
+          });
 
           this.#set(
             {

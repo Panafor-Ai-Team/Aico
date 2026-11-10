@@ -4,6 +4,7 @@ import isEqual from 'fast-deep-equal';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useBusinessChatInputSendLoadingHint } from '@/business/client/hooks/useBusinessChatInputSendAreaPrefix';
 import { usePermission } from '@/hooks/usePermission';
 
 import { useChatInputResourceAccess } from '../hooks/useChatInputResourceAccess';
@@ -27,6 +28,7 @@ const SendButton = memo(() => {
   const { canUseResource } = useChatInputResourceAccess();
   const viewOnly = !canUseResource;
   const canSend = canCreate && !viewOnly;
+  const loadingHint = useBusinessChatInputSendLoadingHint();
 
   const button = (
     <Send
@@ -44,6 +46,7 @@ const SendButton = memo(() => {
 
   if (!canCreate) return <Tooltip title={reason}>{button}</Tooltip>;
   if (viewOnly) return <Tooltip title={t('permission.viewOnlySendTip')}>{button}</Tooltip>;
+  if (loadingHint) return <Tooltip title={loadingHint}>{button}</Tooltip>;
   return button;
 });
 

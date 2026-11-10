@@ -6,8 +6,14 @@ import type {
 type NamespaceModule = { default: Record<string, unknown> };
 type NamespaceLoaderMap = Record<string, () => Promise<NamespaceModule>>;
 
-// Use import.meta.glob so Vite can statically analyze and avoid CJS/dynamic import issues
-const defaultLoaders = import.meta.glob('/packages/locales/src/default/*.ts') as NamespaceLoaderMap;
+// Use import.meta.glob so Vite can statically analyze and avoid CJS/dynamic import issues.
+// Platform variants are resolved from their canonical file; exposing them as
+// separate namespace keys creates duplicate, unreachable dynamic entries.
+const defaultLoaders = import.meta.glob([
+  '/packages/locales/src/default/*.ts',
+  '!/packages/locales/src/default/*.vite.ts',
+  '!/packages/locales/src/default/index.ts',
+]) as NamespaceLoaderMap;
 const localeLoaders = import.meta.glob('/locales/*/*.json') as NamespaceLoaderMap;
 
 const getDefaultKey = (ns: string) => `/packages/locales/src/default/${ns}.ts`;
@@ -19,6 +25,10 @@ export const loadI18nNamespaceModule = async (
   const { defaultLang, normalizeLocale, lng, ns } = params;
 
   if (lng === defaultLang) {
+    const localeKey = getLocaleKey(defaultLang, ns);
+    const loadLocale = localeLoaders[localeKey];
+    if (loadLocale) return loadLocale();
+
     const key = getDefaultKey(ns);
     const load = defaultLoaders[key];
     if (!load) throw new Error(`Missing default namespace: ${ns}`);

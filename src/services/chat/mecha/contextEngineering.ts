@@ -15,6 +15,7 @@ import { GroupAgentBuilderIdentifier } from '@lobechat/builtin-tool-group-agent-
 import { LobeAgentIdentifier } from '@lobechat/builtin-tool-lobe-agent';
 import { PageAgentIdentifier } from '@lobechat/builtin-tool-page-agent';
 import { WebOnboardingIdentifier } from '@lobechat/builtin-tool-web-onboarding';
+import { BRANDING_NAME } from '@lobechat/business-const';
 import {
   AGENT_PLAN_FILE_TYPE,
   COMPOSIO_APP_TYPES,
@@ -41,6 +42,7 @@ import { historySummaryPrompt } from '@lobechat/prompts';
 import {
   getActivePluginIds,
   type OpenAIChatMessage,
+  type RuntimeAdditionalContextFragment,
   type RuntimeInitialContext,
   type RuntimeStepContext,
   type UIChatMessage,
@@ -85,9 +87,15 @@ import { resolveClientSkills } from './skillEngineering';
 const log = debug('context-engine:contextEngineering');
 
 interface ContextEngineeringContext {
+  /** Agent-materialized presentation contexts for this LLM call */
+  additionalContexts?: readonly RuntimeAdditionalContextFragment[];
   /** Agent Builder context for injecting current agent info */
   agentBuilderContext?: AgentBuilderContext;
-  agentDocuments?: AgentContextDocument[];
+  /**
+   * May be passed while still loading: it is only awaited when the engine is
+   * built, so the other context lookups below run alongside it.
+   */
+  agentDocuments?: AgentContextDocument[] | Promise<AgentContextDocument[] | undefined>;
   /** The agent ID that will respond (for group context injection) */
   agentId?: string;
   /**
@@ -137,6 +145,7 @@ interface ContextEngineeringContext {
 
 // REVIEW: Maybe we can constrain identity, preference, exp to reorder or trim the context instead of passing everything in
 export const contextEngineering = async ({
+  additionalContexts,
   messages = [],
   manifests,
   tools,
@@ -284,7 +293,7 @@ export const contextEngineering = async ({
             const server = allComposioServers.find((s) => s.identifier === composioType.identifier);
 
             officialTools.push({
-              description: `LobeHub Mcp Server: ${composioType.label}`,
+              description: `${BRANDING_NAME} Mcp Server: ${composioType.label}`,
               enabled: enabledPlugins.includes(composioType.identifier),
               identifier: composioType.identifier,
               installed: !!server,
@@ -306,7 +315,7 @@ export const contextEngineering = async ({
             const server = allLobehubSkillServers.find((s) => s.identifier === provider.id);
 
             officialTools.push({
-              description: `LobeHub Skill Provider: ${provider.label}`,
+              description: `${BRANDING_NAME} Skill Provider: ${provider.label}`,
               enabled: enabledPlugins.includes(provider.id),
               identifier: provider.id,
               installed: !!server,
@@ -696,6 +705,7 @@ export const contextEngineering = async ({
 
   // Create MessagesEngine with injected dependencies
   const engine = new MessagesEngine({
+    additionalContexts,
     // Agent configuration
     enableHistoryCount,
     formatHistorySummary: historySummaryPrompt,
@@ -720,7 +730,7 @@ export const contextEngineering = async ({
       fileContents,
       knowledgeBases,
     },
-    agentDocuments,
+    agentDocuments: await agentDocuments,
 
     // Messages
     messages,

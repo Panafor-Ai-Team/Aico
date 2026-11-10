@@ -1,4 +1,5 @@
 import { AgentBuilderIdentifier } from '@lobechat/builtin-tool-agent-builder';
+import { BRANDING_NAME } from '@lobechat/business-const';
 import {
   COMPOSIO_APP_TYPES,
   LOBEHUB_SKILL_PROVIDERS,
@@ -6,14 +7,17 @@ import {
   REQUEST_TOPIC_ID_HEADER,
   REQUEST_TRIGGER_HEADER,
 } from '@lobechat/const';
-import { type OfficialToolItem } from '@lobechat/context-engine';
+import { type AgentContextDocument, type OfficialToolItem } from '@lobechat/context-engine';
 import { type FetchSSEOptions } from '@lobechat/fetch-sse';
 import { fetchSSE, standardizeAnimationStyle } from '@lobechat/fetch-sse';
 import type { ChatCompletionErrorPayload } from '@lobechat/model-runtime';
-import { AgentRuntimeError, isResponsesAPIModel } from '@lobechat/model-runtime';
+import { isResponsesAPIModel } from '@lobechat/model-runtime/providers/openai/modelId';
+import { AgentRuntimeError } from '@lobechat/model-runtime/utils/createError';
+import { recordChatTtftPhase } from '@lobechat/observability-otel/modules/agent-runtime';
 import {
   ChatErrorType,
   getDisabledPluginIds,
+  type RuntimeAdditionalContextFragment,
   type RuntimeInitialContext,
   type RuntimeStepContext,
   type TracePayload,
@@ -21,7 +25,7 @@ import {
   type UIChatMessage,
 } from '@lobechat/types';
 import { merge } from 'es-toolkit/compat';
-import { ModelProvider } from 'model-bank';
+import { ModelProvider } from 'model-bank/modelProvider';
 
 import { DEFAULT_AGENT_CONFIG } from '@/const/settings';
 import { getSearchConfig } from '@/helpers/getSearchConfig';
@@ -32,7 +36,7 @@ import {
   agentChatConfigSelectors,
   agentSelectors,
 } from '@/store/agent/selectors';
-import { aiProviderSelectors, getAiInfraStoreState } from '@/store/aiInfra';
+import { aiModelSelectors, aiProviderSelectors, getAiInfraStoreState } from '@/store/aiInfra';
 import { getChatStoreState } from '@/store/chat';
 import { getToolStoreState } from '@/store/tool';
 import {
@@ -52,7 +56,12 @@ import { createTraceHeader } from '@/utils/trace';
 
 import { createHeaderWithAuth } from '../_auth';
 import { API_ENDPOINTS } from '../_url';
-import { findDeploymentName, isEnableFetchOnClient, resolveRuntimeProvider } from './helper';
+import {
+  encodeJsonRequestBody,
+  findDeploymentName,
+  isEnableFetchOnClient,
+  resolveRuntimeProvider,
+} from './helper';
 import { type ResolvedAgentConfig } from './mecha';
 import {
   contextEngineering,
@@ -72,6 +81,7 @@ const providersWithDeploymentName = new Set<string>([
   ModelProvider.VolcengineCodingPlan,
 ]);
 export interface GetChatCompletionPayload extends Partial<Omit<ChatStreamPayload, 'messages'>> {
+  additionalContexts?: readonly RuntimeAdditionalContextFragment[];
   agentId?: string;
   groupId?: string;
   messages: UIChatMessage[];
@@ -136,6 +146,7 @@ class ChatService {
       messages,
       agentId,
       groupId,
+      additionalContexts,
       topicId,
       resolvedAgentConfig,
       ...params
@@ -156,6 +167,16 @@ class ChatService {
     // which handles isSubAgent filtering, disableTools, and tools generation
 
     const targetAgentId = getTargetAgentId(agentId);
+
+    // Make sure the user's saved model-instance reasoning config is loaded
+    // before extend params are resolved below — after a reload the
+    // ReasoningConfigLoader SWR fetch may still be in flight when the user
+    // sends the first message. Started now so the round trip overlaps context
+    // engineering; no-op once cached; failures fall back to level defaults.
+    const reasoningConfigReady = getAiInfraStoreState().ensureModelReasoningConfig(
+      payload.model,
+      payload.provider!,
+    );
 
     // Tools are pre-generated in internal_createAgentState and passed via resolvedAgentConfig
     // This avoids duplicate toolsEngine creation and ensures disableTools is properly handled
@@ -191,17 +212,22 @@ class ChatService {
     const isAgentBuilderEnabled = enabledToolIds.includes(AgentBuilderIdentifier);
     const documentsAgentId = this.resolveAgentDocumentsTargetId(targetAgentId, enabledToolIds);
     let agentBuilderContext;
-    let agentDocuments = documentsAgentId
-      ? agentSelectors.getAgentDocumentsById(documentsAgentId)(getAgentStoreState())
-      : undefined;
+    let agentDocuments:
+      AgentContextDocument[] | Promise<AgentContextDocument[] | undefined> | undefined =
+      documentsAgentId
+        ? agentSelectors.getAgentDocumentsById(documentsAgentId)(getAgentStoreState())
+        : undefined;
 
     if (documentsAgentId && agentDocuments === undefined) {
-      try {
-        agentDocuments = await getAgentStoreState().ensureAgentDocuments(documentsAgentId);
-      } catch (error) {
-        // Agent documents are optional on the client; keep generation working if hydration fails.
-        console.error('[ChatService] Failed to ensure agent documents:', error);
-      }
+      // Not awaited here: contextEngineering awaits it last, so the hydration
+      // round trip overlaps its own lookups (e.g. the topic plan).
+      agentDocuments = getAgentStoreState()
+        .ensureAgentDocuments(documentsAgentId)
+        .catch((error) => {
+          // Agent documents are optional on the client; keep generation working if hydration fails.
+          console.error('[ChatService] Failed to ensure agent documents:', error);
+          return undefined;
+        });
     }
 
     if (isAgentBuilderEnabled) {
@@ -247,7 +273,7 @@ class ChatService {
           const server = allComposioServers.find((s) => s.identifier === composioType.identifier);
 
           officialTools.push({
-            description: `LobeHub Mcp Server: ${composioType.label}`,
+            description: `${BRANDING_NAME} Mcp Server: ${composioType.label}`,
             enabled: enabledPlugins.includes(composioType.identifier),
             identifier: composioType.identifier,
             installed: !!server,
@@ -269,7 +295,7 @@ class ChatService {
           const server = allLobehubSkillServers.find((s) => s.identifier === provider.id);
 
           officialTools.push({
-            description: `LobeHub Skill Provider: ${provider.label}`,
+            description: `${BRANDING_NAME} Skill Provider: ${provider.label}`,
             enabled: enabledPlugins.includes(provider.id),
             identifier: provider.id,
             installed: !!server,
@@ -299,6 +325,7 @@ class ChatService {
       enableHistoryCount: chatConfig.enableHistoryCount,
       enableUserMemories,
       groupId,
+      additionalContexts,
       // historyCount is number of history messages; add 1 for current user message
       historyCount: (chatConfig.historyCount ?? 20) + 1,
       // Page editor context from agent runtime
@@ -321,11 +348,27 @@ class ChatService {
 
     // ============  3. process extend params   ============ //
 
+    await reasoningConfigReady;
+
     const extendParams = resolveModelExtendParams({
       chatConfig,
       model: payload.model,
       provider: payload.provider!,
+      subAgentChatConfigOverride: resolvedAgentConfig.subAgentChatConfigOverride,
     });
+
+    // For models governed by the reasoning extend-params family the user-level
+    // model-instance config is the single source of truth, so drop the legacy
+    // per-agent Advanced `params.reasoning_effort` — otherwise a stale agent
+    // value would leak into the payload whenever no instance value overlays it.
+    if (
+      aiModelSelectors.isModelHasReasoningExtendParams(
+        payload.model,
+        payload.provider!,
+      )(getAiInfraStoreState())
+    ) {
+      delete (params as Record<string, unknown>).reasoning_effort;
+    }
 
     return {
       options: { ...options, agentId: targetAgentId, topicId },
@@ -497,14 +540,57 @@ class ChatService {
       responseAnimation,
     ].reduce((acc, cur) => merge(acc, standardizeAnimationStyle(cur)), {});
 
+    // Managed OpenRouter/Aico chat must send an explicit billing context so the
+    // server can pick the personal vs org key (credits are never pooled).
+    const { assertAicoBillingAllowsChat, refreshAicoBillingBalance } =
+      await import('@/features/AicoBilling');
+    const billingGateStartedAt = Date.now();
+    const aicoBilling = await assertAicoBillingAllowsChat(provider);
+    recordChatTtftPhase('client_pre_http', Date.now() - billingGateStartedAt, {
+      managed: Boolean(aicoBilling),
+      provider,
+    });
+    const requestBody = aicoBilling ? { ...payload, aicoBilling } : payload;
+
+    // The body repeats the whole history and tool set on every step (often
+    // 0.3–1.4 MB), so upload time adds up on slow links. The client-side
+    // fetcher builds its own request from `payload` and never sends this body.
+    const encodedBody = enableFetchOnClient
+      ? { body: JSON.stringify(requestBody), gzip: false }
+      : await encodeJsonRequestBody(JSON.stringify(requestBody));
+    if (encodedBody.gzip) (headers as Record<string, string>)['Content-Encoding'] = 'gzip';
+
+    const onFinish: FetchSSEOptions['onFinish'] | undefined = aicoBilling
+      ? async (content, context) => {
+          const costUsd = context.usage?.cost;
+          const refreshPromise = refreshAicoBillingBalance({
+            billingContext: aicoBilling,
+            costUsd,
+          });
+          try {
+            return await options?.onFinish?.(content, context);
+          } finally {
+            // A finish without cost (e.g. an upstream error event) only refetches
+            // balances from the server. The send gate is already invalidated
+            // synchronously, so awaiting that round trip would only delay the
+            // runtime's retry of the failed attempt.
+            if (costUsd) await refreshPromise;
+            else void refreshPromise.catch(console.error);
+          }
+        }
+      : options?.onFinish;
+
     return fetchSSE(API_ENDPOINTS.chat(provider), {
-      body: JSON.stringify(payload),
+      body: encodedBody.body,
       fetcher,
       headers,
       method: 'POST',
       onAbort: options?.onAbort,
       onErrorHandle: options?.onErrorHandle,
-      onFinish: options?.onFinish,
+      onFinish,
+      onFirstVisibleText: ({ animation, bufferDelayMs }) => {
+        recordChatTtftPhase('ui_buffer', bufferDelayMs, { animation, provider });
+      },
       onMessageHandle: options?.onMessageHandle,
       requestContext: {
         apiMode,

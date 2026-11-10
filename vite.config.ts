@@ -12,19 +12,26 @@ import {
   createSharedRolldownOutput,
   sharedModulePreload,
   sharedOptimizeDeps,
+  sharedPwaGlobIgnores,
+  sharedPwaRuntimeCaching,
+  sharedRendererDedupe,
   sharedRendererDefine,
   sharedRendererPlugins,
 } from './plugins/vite/sharedRendererConfig';
 import { vercelSkewProtection } from './plugins/vite/vercelSkewProtection';
+import { createViteWatchOptions } from './plugins/vite/watchOptions';
 
 const isMobile = process.env.MOBILE === 'true';
 const isAuth = process.env.AUTH === 'true';
+const isWorkbench = process.env.SPA_TARGET === 'workbench';
+const isControlPlane = process.env.SPA_TARGET === 'control-plane';
 const mode = process.env.NODE_ENV === 'production' ? 'production' : 'development';
 
 Object.assign(process.env, loadEnv(mode, process.cwd(), ''));
 
 const isDev = process.env.NODE_ENV !== 'production';
-const platform = isAuth ? 'auth' : isMobile ? 'mobile' : 'web';
+const isMobileRuntime = isMobile || isWorkbench;
+const platform = isAuth ? 'auth' : isMobileRuntime ? 'mobile' : 'web';
 const enableViteDevTools = process.env.LOBE_VITE_DEVTOOLS === 'true';
 
 const resolveCommandExecutable = (cmd: string) => {
@@ -102,29 +109,96 @@ const openExternalBrowser = async (
 };
 
 export default defineConfig({
-  base: isDev ? '/' : process.env.VITE_CDN_BASE || (isAuth ? '/_spa-auth/' : '/_spa/'),
+  base: isDev
+    ? '/'
+    : process.env.VITE_CDN_BASE ||
+      (isAuth
+        ? '/_spa-auth/'
+        : isWorkbench
+          ? '/_spa-workbench/'
+          : isControlPlane
+            ? // Dedicated control-plane origin (moz / production) serves UI at `/`
+              '/'
+            : '/_spa/'),
   build: {
     modulePreload: sharedModulePreload,
-    outDir: isAuth ? 'dist/auth' : isMobile ? 'dist/mobile' : 'dist/desktop',
+    outDir: isAuth
+      ? 'dist/auth'
+      : isWorkbench
+        ? 'dist/workbench'
+        : isControlPlane
+          ? 'dist/control-plane'
+          : isMobile
+            ? 'dist/mobile'
+            : 'dist/desktop',
     reportCompressedSize: false,
     rolldownOptions: {
       ...(enableViteDevTools && { devtools: {} }),
       input: path.resolve(
         __dirname,
-        isAuth ? 'index.auth.html' : isMobile ? 'index.mobile.html' : 'index.html',
+        isAuth
+          ? 'index.auth.html'
+          : isWorkbench
+            ? 'index.workbench.html'
+            : isControlPlane
+              ? 'index.controlPlane.html'
+              : isMobile
+                ? 'index.mobile.html'
+                : 'index.html',
       ),
       output: createSharedRolldownOutput({ strictExecutionOrder: true }),
     },
   },
-  define: sharedRendererDefine({ isMobile, isElectron: false }),
+  define: {
+    ...sharedRendererDefine({ isMobile: isMobileRuntime, isElectron: false }),
+    __WORKBENCH__: JSON.stringify(isWorkbench),
+    __CONTROL_PLANE__: JSON.stringify(isControlPlane),
+  },
   experimental: {
     bundledDev: false,
   },
   resolve: {
+    dedupe: sharedRendererDedupe,
     tsconfigPaths: true,
   },
   optimizeDeps: sharedOptimizeDeps,
   plugins: [
+    isMobileRuntime &&
+      isDev && {
+        name: 'mobile-runtime-html-dev-entry',
+        enforce: 'pre' as const,
+        configureServer(server: ViteDevServer) {
+          server.middlewares.use((req, _res, next) => {
+            const raw = req.url;
+            if (!raw) return next();
+            const q = raw.indexOf('?');
+            const pathOnly = q === -1 ? raw : raw.slice(0, q);
+            const search = q === -1 ? '' : raw.slice(q);
+            if (pathOnly === '/' || pathOnly === '/index.html') {
+              req.url = `/${isWorkbench ? 'index.workbench.html' : 'index.mobile.html'}${search}`;
+            }
+            next();
+          });
+        },
+      },
+    isControlPlane &&
+      isDev && {
+        name: 'control-plane-html-dev-entry',
+        enforce: 'pre' as const,
+        configureServer(server: ViteDevServer) {
+          server.middlewares.use((req, _res, next) => {
+            const raw = req.url;
+            if (!raw) return next();
+            const q = raw.indexOf('?');
+            const pathOnly = q === -1 ? raw : raw.slice(0, q);
+            const search = q === -1 ? '' : raw.slice(q);
+            if (pathOnly === '/' || pathOnly === '/index.html') {
+              req.url = `/index.controlPlane.html${search}`;
+            }
+            next();
+          });
+        },
+      },
     vercelSkewProtection(),
     viteEnvRestartKeys(['APP_URL']),
     enableViteDevTools &&
@@ -254,15 +328,20 @@ export default defineConfig({
       },
     },
 
+    // Control-plane admin UI must never PWA-cache /api/auth or /trpc (breaks login).
     !isAuth &&
+      !isWorkbench &&
+      !isControlPlane &&
       VitePWA({
         injectRegister: null,
         manifest: false,
         registerType: 'prompt',
         workbox: {
+          globIgnores: sharedPwaGlobIgnores,
           globPatterns: ['**/*.{js,css,html,woff2}'],
           maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
           runtimeCaching: [
+            ...sharedPwaRuntimeCaching,
             {
               handler: 'StaleWhileRevalidate',
               options: { cacheName: 'google-fonts-stylesheets' },
@@ -300,11 +379,15 @@ export default defineConfig({
   server: {
     cors: true,
     host: true,
-    port: isMobile
-      ? Number(process.env.MOBILE_SPA_PORT) || 3012
-      : isAuth
-        ? Number(process.env.AUTH_SPA_PORT) || 3013
-        : Number(process.env.SPA_PORT) || 9876,
+    port: isWorkbench
+      ? Number(process.env.WORKBENCH_SPA_PORT) || 3014
+      : isControlPlane
+        ? Number(process.env.CONTROL_PLANE_SPA_PORT) || 3021
+        : isMobile
+          ? Number(process.env.MOBILE_SPA_PORT) || 3012
+          : isAuth
+            ? Number(process.env.AUTH_SPA_PORT) || 3013
+            : Number(process.env.SPA_PORT) || 9876,
     // The dev orchestrator (scripts/devStartupSequence.mts) pre-resolves a free
     // port and injects it via env; never silently drift to another port, since
     // downstream consumers locate this server through that env contract.
@@ -312,7 +395,9 @@ export default defineConfig({
     proxy: {
       '/api': `http://localhost:${process.env.PORT || 3010}`,
       '/oidc': `http://localhost:${process.env.PORT || 3010}`,
-      '/trpc': `http://localhost:${process.env.PORT || 3010}`,
+      '/trpc': isControlPlane
+        ? `http://localhost:${process.env.AICO_CONTROL_PLANE_PORT || 3020}`
+        : `http://localhost:${process.env.PORT || 3010}`,
       '/webapi': `http://localhost:${process.env.PORT || 3010}`,
     },
     warmup: {
@@ -364,8 +449,6 @@ export default defineConfig({
         './packages/agent-manager-runtime/src/**/*.ts',
       ],
     },
-    watch: {
-      ignored: ['**/e2e/reports/**', '**/e2e/screenshots/**'],
-    },
+    watch: createViteWatchOptions([__dirname]),
   },
 });

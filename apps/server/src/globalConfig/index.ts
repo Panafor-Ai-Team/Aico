@@ -13,6 +13,7 @@ import { langfuseEnv } from '@/envs/langfuse';
 import { toolsEnv } from '@/envs/tools';
 import { parseSSOProviders } from '@/libs/better-auth/utils/server';
 import { parseSystemAgent } from '@/server/globalConfig/parseSystemAgent';
+import { isCloudSandboxConfigured } from '@/server/services/sandbox/config';
 import { type GlobalServerConfig } from '@/types/serverConfig';
 import { cleanObject } from '@/utils/object';
 
@@ -47,7 +48,11 @@ export const getServerGlobalConfig = async () => {
       enabledKey: 'ENABLED_AWS_BEDROCK',
       modelListKey: 'AWS_BEDROCK_MODEL_LIST',
     },
+    // Native DeepSeek BYOK is not used — Aico chats via managed OpenRouter keys.
     deepseek: {
+      enabled: false,
+    },
+    openrouter: {
       enabled: true,
     },
     giteeai: {
@@ -105,6 +110,7 @@ export const getServerGlobalConfig = async () => {
     disableEmailPassword: authEnv.AUTH_DISABLE_EMAIL_PASSWORD,
     enableBusinessFeatures: ENABLE_BUSINESS_FEATURES,
     enableEmailVerification: authEnv.AUTH_EMAIL_VERIFICATION,
+    enableCloudSandbox: isCloudSandboxConfigured(),
     enableComposio: !!composioEnv.COMPOSIO_API_KEY,
     enableGatewayMode:
       ENABLE_BUSINESS_FEATURES || (!!appEnv.ENABLE_AGENT_GATEWAY && !!appEnv.AGENT_GATEWAY_URL),
@@ -114,14 +120,14 @@ export const getServerGlobalConfig = async () => {
       appEnv.MARKET_TRUSTED_CLIENT_SECRET && appEnv.MARKET_TRUSTED_CLIENT_ID
     ),
     enableUploadFileToServer: !!fileEnv.S3_SECRET_ACCESS_KEY,
-    enableVisualUnderstanding: !!(
-      toolsEnv.VISUAL_UNDERSTANDING_PROVIDER && toolsEnv.VISUAL_UNDERSTANDING_MODEL
+    enableMultimodalUnderstanding: !!(
+      toolsEnv.MULTIMODAL_UNDERSTANDING_PROVIDER && toolsEnv.MULTIMODAL_UNDERSTANDING_MODEL
     ),
-    ...(toolsEnv.VISUAL_UNDERSTANDING_PROVIDER && toolsEnv.VISUAL_UNDERSTANDING_MODEL
+    ...(toolsEnv.MULTIMODAL_UNDERSTANDING_PROVIDER && toolsEnv.MULTIMODAL_UNDERSTANDING_MODEL
       ? {
-          visualUnderstanding: {
-            model: toolsEnv.VISUAL_UNDERSTANDING_MODEL,
-            provider: toolsEnv.VISUAL_UNDERSTANDING_PROVIDER,
+          multimodalUnderstanding: {
+            model: toolsEnv.MULTIMODAL_UNDERSTANDING_MODEL,
+            provider: toolsEnv.MULTIMODAL_UNDERSTANDING_PROVIDER,
           },
         }
       : undefined),

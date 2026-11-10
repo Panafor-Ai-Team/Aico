@@ -8,7 +8,9 @@ import { useTranslation } from 'react-i18next';
 
 import { highlightTextStyles, inspectorTextStyles, shinyTextStyles } from '@/styles';
 
+import type { GenerateImageState } from '../../types';
 import { ImageGenerationApiName } from '../../types';
+import { formatImageGenerationModelLabel } from '../displayModel';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   chip: css`
@@ -84,51 +86,54 @@ const apiMeta = {
   },
 };
 
-const ImageGenerationInspector = memo<BuiltinInspectorProps<ImageGenerationInspectorArgs, unknown>>(
-  ({ apiName, args, partialArgs, isArgumentsStreaming, isLoading }) => {
-    const { t } = useTranslation('plugin');
-    const currentArgs = { ...partialArgs, ...args };
-    const provider = stringValue(currentArgs.provider);
-    const model = stringValue(currentArgs.model);
-    const prompt = stringValue(currentArgs.prompt);
-    const generationId = stringValue(currentArgs.generationId);
-    const meta = apiMeta[apiName as ImageGenerationApiName] ?? apiMeta.generateImage;
-    const imageNum = typeof currentArgs.imageNum === 'number' ? currentArgs.imageNum : undefined;
-    const label = t(`builtins.lobe-image-generation.apiName.${apiName}`, {
-      defaultValue: meta.defaultLabel,
-    });
-    const Icon = meta.Icon;
+const ImageGenerationInspector = memo<
+  BuiltinInspectorProps<ImageGenerationInspectorArgs, GenerateImageState>
+>(({ apiName, args, partialArgs, isArgumentsStreaming, isLoading, pluginState }) => {
+  const { t } = useTranslation('plugin');
+  const currentArgs = { ...partialArgs, ...args };
+  // Prefer resolved model from pluginState after the runtime pins the default;
+  // never surface the managed provider id (openrouter / aico).
+  const model = formatImageGenerationModelLabel(
+    stringValue(currentArgs.model) ?? pluginState?.model,
+    stringValue(currentArgs.provider) ?? pluginState?.provider,
+  );
+  const prompt = stringValue(currentArgs.prompt) ?? pluginState?.prompt;
+  const generationId = stringValue(currentArgs.generationId);
+  const meta = apiMeta[apiName as ImageGenerationApiName] ?? apiMeta.generateImage;
+  const imageNum = typeof currentArgs.imageNum === 'number' ? currentArgs.imageNum : undefined;
+  const label = t(`builtins.lobe-image-generation.apiName.${apiName}`, {
+    defaultValue: meta.defaultLabel,
+  });
+  const Icon = meta.Icon;
 
-    return (
-      <div
-        className={cx(
-          inspectorTextStyles.root,
-          styles.root,
-          (isArgumentsStreaming || isLoading) && shinyTextStyles.shinyText,
-        )}
-      >
-        <Icon className={styles.icon} size={14} />
-        <span className={styles.label}>{label}</span>
-        {apiName === ImageGenerationApiName.generateImage && prompt && (
-          <span className={cx(highlightTextStyles.primary, styles.prompt)}>{prompt}</span>
-        )}
-        {apiName === ImageGenerationApiName.generateImage && imageNum && imageNum > 1 && (
-          <span className={styles.chip}>
-            {t('builtins.lobe-image-generation.render.generatedCount', {
-              count: imageNum,
-              defaultValue: '{{count}} images',
-            })}
-          </span>
-        )}
-        {provider && <span className={styles.chip}>{provider}</span>}
-        {model && <span className={styles.chip}>{model}</span>}
-        {apiName === ImageGenerationApiName.getImageGenerationStatus && generationId && (
-          <span className={styles.chip}>{compactId(generationId)}</span>
-        )}
-      </div>
-    );
-  },
-);
+  return (
+    <div
+      className={cx(
+        inspectorTextStyles.root,
+        styles.root,
+        (isArgumentsStreaming || isLoading) && shinyTextStyles.shinyText,
+      )}
+    >
+      <Icon className={styles.icon} size={14} />
+      <span className={styles.label}>{label}</span>
+      {apiName === ImageGenerationApiName.generateImage && prompt && (
+        <span className={cx(highlightTextStyles.primary, styles.prompt)}>{prompt}</span>
+      )}
+      {apiName === ImageGenerationApiName.generateImage && imageNum && imageNum > 1 && (
+        <span className={styles.chip}>
+          {t('builtins.lobe-image-generation.render.generatedCount', {
+            count: imageNum,
+            defaultValue: '{{count}} images',
+          })}
+        </span>
+      )}
+      {model && <span className={styles.chip}>{model}</span>}
+      {apiName === ImageGenerationApiName.getImageGenerationStatus && generationId && (
+        <span className={styles.chip}>{compactId(generationId)}</span>
+      )}
+    </div>
+  );
+});
 
 ImageGenerationInspector.displayName = 'ImageGenerationInspector';
 

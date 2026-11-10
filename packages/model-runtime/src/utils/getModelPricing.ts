@@ -1,4 +1,5 @@
 import type { LobeDefaultAiModelListItem, Pricing } from 'model-bank';
+import { applyPricingMultiplier, composeMultiplierBp } from 'model-bank';
 
 import type { ModelPricingContext } from '../types';
 
@@ -20,6 +21,30 @@ export async function getModelPricing(
   provider?: string,
   pricingContext?: ModelPricingContext,
 ): Promise<Pricing | undefined> {
+  // Managed Aico traffic resells upstream capacity: the caller passes the
+  // platform multiplier so every cost derived from this pricing is the billed
+  // amount. Raw rates stay server-side.
+  //
+  // A per-model correction (AICO-187) is composed on top, because some upstream
+  // models bill above their published coefficient and the picker applies the
+  // same pair — reporting a cost without it would contradict the listed price.
+  const modelBp = pricingContext?.modelCostMultiplierBp?.[model];
+  const withMultiplier = (pricing: Pricing): Pricing => {
+    if (!pricingContext?.costMultiplierBp && !modelBp) return pricing;
+    return applyPricingMultiplier(
+      pricing,
+      composeMultiplierBp(pricingContext?.costMultiplierBp, modelBp),
+    );
+  };
+
+  // Server-resolved managed-catalog pricing wins: the static bank never lists
+  // dynamic catalog ids, and without this every such model streams with no
+  // usage.cost.
+  const resolved = pricingContext?.resolvedPricing;
+  if (resolved && resolved.modelId === model && resolved.pricing) {
+    return withMultiplier(resolved.pricing);
+  }
+
   const { loadModels } =
     (await import('@lobechat/business-model-bank/model-config')) as BusinessModelConfigModule;
   const models = await loadModels(pricingContext ? { pricingContext } : undefined);
@@ -29,7 +54,7 @@ export async function getModelPricing(
     const exactMatch = models.find((m) => m.id === model && m.providerId === provider);
 
     if (exactMatch?.pricing) {
-      return exactMatch.pricing;
+      return withMultiplier(exactMatch.pricing);
     }
   }
 
@@ -37,7 +62,7 @@ export async function getModelPricing(
   const fallbackMatch = models.find((m) => m.id === model);
 
   if (fallbackMatch?.pricing) {
-    return fallbackMatch.pricing;
+    return withMultiplier(fallbackMatch.pricing);
   }
 
   // 3. Return undefined if no pricing information is found

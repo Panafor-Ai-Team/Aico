@@ -243,13 +243,64 @@ describe('convertUsage', () => {
 
     // Assert
     expect(result).toEqual({
-      inputTextTokens: 100,
+      inputTextTokens: 80,
       inputAudioTokens: 20,
       totalInputTokens: 100,
       totalOutputTokens: 50,
       outputTextTokens: 50,
       totalTokens: 150,
     });
+  });
+
+  it('distinguishes omitted provider audio usage from an explicitly reported zero', () => {
+    const omitted = convertOpenAIUsage({
+      completion_tokens: 1,
+      prompt_tokens: 10,
+      total_tokens: 11,
+    } as OpenAI.Completions.CompletionUsage);
+    const reportedZero = convertOpenAIUsage({
+      completion_tokens: 1,
+      prompt_tokens: 10,
+      prompt_tokens_details: { audio_tokens: 0 },
+      total_tokens: 11,
+    } as OpenAI.Completions.CompletionUsage);
+
+    expect(omitted).not.toHaveProperty('inputAudioTokens');
+    expect(reportedZero).toHaveProperty('inputAudioTokens', 0);
+  });
+
+  it('should not double-charge aggregate OpenAI prompt tokens when audio has a dedicated unit', () => {
+    const pricing: Pricing = {
+      units: [
+        { name: 'textInput', rate: 1, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'audioInput', rate: 10, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    };
+    const usageWithAudioInput = {
+      completion_tokens: 50,
+      prompt_tokens: 100,
+      prompt_tokens_details: { audio_tokens: 20 },
+      total_tokens: 150,
+    } as OpenAI.Completions.CompletionUsage;
+
+    const result = convertOpenAIUsage(usageWithAudioInput, { pricing });
+
+    expect(result.inputTextTokens).toBe(80);
+    expect(result.inputAudioTokens).toBe(20);
+    expect(result.cost).toBe(0.000_28);
+  });
+
+  it('does not guess cached audio tokens from OpenAI aggregate cache usage', () => {
+    const result = convertOpenAIUsage({
+      completion_tokens: 10,
+      prompt_tokens: 100,
+      prompt_tokens_details: { audio_tokens: 20, cached_tokens: 40 },
+      total_tokens: 110,
+    } as OpenAI.Completions.CompletionUsage);
+
+    expect(result.inputAudioTokens).toBe(20);
+    expect(result.inputCachedTokens).toBe(40);
+    expect(result).not.toHaveProperty('inputCachedAudioTokens');
   });
 
   it('should handle detailed output tokens correctly', () => {
@@ -330,7 +381,7 @@ describe('convertUsage', () => {
 
     // Assert
     expect(result).toEqual({
-      inputTextTokens: 150,
+      inputTextTokens: 100,
       inputAudioTokens: 50,
       inputCachedTokens: 40,
       inputCacheMissTokens: 140, // 180 - 40 (totalInputTokens - cachedTokens)
@@ -588,6 +639,40 @@ describe('convertUsage', () => {
     expect(result.cost).toBeCloseTo(2, 10);
   });
 
+  it('should prefer OpenRouter provider-reported usage.cost over pricing estimate', () => {
+    const pricing: Pricing = {
+      units: [
+        { name: 'textInput', rate: 1, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 2, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    };
+
+    const usage = {
+      completion_tokens: 500_000,
+      cost: 0.0042,
+      prompt_tokens: 1_000_000,
+      total_tokens: 1_500_000,
+    } as OpenAI.Completions.CompletionUsage & { cost: number };
+
+    const result = convertOpenAIUsage(usage, { pricing });
+
+    expect(result.cost).toBe(0.0042);
+  });
+
+  it('should keep provider-reported cost when model-bank pricing is missing', () => {
+    const usage = {
+      completion_tokens: 10,
+      cost: 0.00015,
+      prompt_tokens: 20,
+      total_tokens: 30,
+    } as OpenAI.Completions.CompletionUsage & { cost: number };
+
+    const result = convertOpenAIUsage(usage);
+
+    expect(result.cost).toBe(0.00015);
+    expect(result.totalTokens).toBe(30);
+  });
+
   it('should enrich response usage with pricing cost when pricing is provided', () => {
     const pricing: Pricing = {
       units: [
@@ -612,6 +697,67 @@ describe('convertUsage', () => {
     const result = convertOpenAIResponseUsage(responseUsage, { pricing });
 
     expect(result.cost).toBeCloseTo(2, 10);
+  });
+
+  // BUG-3 repro: CheapVibeCode does not promise usage.cost in USD, but the
+  // converter trusted any numeric cost as billed USD. A CVC-unit figure (e.g.
+  // hundreds of CVC tokens for a "salam") then debited hundreds of "dollars"
+  // from the optimistic wallet balance until the reconcile restored it.
+  it('ignores provider-reported usage.cost from CheapVibeCode and uses computed pricing', () => {
+    const pricing: Pricing = {
+      units: [
+        { name: 'textInput', rate: 1, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 2, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    };
+
+    const usage = {
+      completion_tokens: 500_000,
+      cost: 4200,
+      prompt_tokens: 1_000_000,
+      total_tokens: 1_500_000,
+    } as OpenAI.Completions.CompletionUsage & { cost: number };
+
+    const result = convertOpenAIUsage(usage, { pricing, provider: 'cheapvibecode' });
+
+    // 1M * 1 + 0.5M * 2 per million = 2 USD, not the reported 4200 units.
+    expect(result.cost).toBeCloseTo(2, 10);
+  });
+
+  it('keeps the OpenRouter provider-reported override explicitly', () => {
+    const pricing: Pricing = {
+      units: [
+        { name: 'textInput', rate: 1, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 2, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    };
+
+    const usage = {
+      completion_tokens: 500_000,
+      cost: 0.0042,
+      prompt_tokens: 1_000_000,
+      total_tokens: 1_500_000,
+    } as OpenAI.Completions.CompletionUsage & { cost: number };
+
+    const result = convertOpenAIUsage(usage, { pricing, provider: 'openrouter' });
+
+    expect(result.cost).toBe(0.0042);
+  });
+
+  it('never trusts CheapVibeCode cost, even with no pricing to compute from', () => {
+    const usage = {
+      completion_tokens: 10,
+      cost: 4200,
+      prompt_tokens: 20,
+      total_tokens: 30,
+    } as OpenAI.Completions.CompletionUsage & { cost: number };
+
+    // A wrong-unit cost corrupts the optimistic wallet debit; missing cost
+    // safely degrades to no optimistic debit + authoritative reconcile.
+    const result = convertOpenAIUsage(usage, { provider: 'cheapvibecode' });
+
+    expect(result.cost).toBeUndefined();
+    expect(result.totalTokens).toBe(30);
   });
 });
 
@@ -649,5 +795,53 @@ describe('convertOpenAIImageUsage', () => {
       totalTokens: 4174,
       cost: 0.16647, // Based on pricing: 14 * 5/1M + 0 * 10/1M + 4160 * 40/1M = 0.00007 + 0 + 0.1664 = 0.16647
     });
+  });
+
+  it('prefers OpenRouter provider-reported usage.cost over the pricing estimate', () => {
+    const usage = {
+      input_tokens: 14,
+      input_tokens_details: {
+        text_tokens: 14,
+        image_tokens: 0,
+      },
+      output_tokens: 4160,
+      total_tokens: 4174,
+      cost: 0.04,
+    } as OpenAI.Images.ImagesResponse.Usage;
+
+    const pricing: Pricing = {
+      units: [{ name: 'imageOutput', rate: 40, strategy: 'fixed', unit: 'millionTokens' }],
+    };
+
+    expect(convertOpenAIImageUsage(usage, pricing).cost).toBe(0.04);
+  });
+
+  // OpenRouter's /images/generations returns chat-style usage with no
+  // `input_tokens_details`. Reading that object directly threw
+  // "Cannot read properties of undefined (reading 'image_tokens')", which
+  // discarded an image the provider had already generated and billed for.
+  it('handles OpenRouter chat-style image usage without input_tokens_details', () => {
+    const usage = {
+      prompt_tokens: 0,
+      completion_tokens: 4175,
+      total_tokens: 4175,
+      cost: 0.04,
+    } as unknown as OpenAI.Images.ImagesResponse.Usage;
+
+    const result = convertOpenAIImageUsage(usage);
+
+    expect(result.totalInputTokens).toBe(0);
+    expect(result.totalOutputTokens).toBe(4175);
+    expect(result.outputImageTokens).toBe(4175);
+    expect(result.totalTokens).toBe(4175);
+    // Provider-reported cost is authoritative for this shape.
+    expect(result.cost).toBe(0.04);
+  });
+
+  it('does not throw when the usage object omits input_tokens_details', () => {
+    const usage = { total_tokens: 10 } as unknown as OpenAI.Images.ImagesResponse.Usage;
+
+    expect(() => convertOpenAIImageUsage(usage)).not.toThrow();
+    expect(convertOpenAIImageUsage(usage).inputImageTokens).toBeUndefined();
   });
 });

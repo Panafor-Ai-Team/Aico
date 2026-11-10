@@ -10,6 +10,7 @@ import { AsyncTaskErrorType, AsyncTaskStatus, AsyncTaskType } from '@/types/asyn
 import { MemorySourceType } from '@/types/userMemory';
 
 const mockFindActiveByType = vi.fn();
+const mockFindLatestByType = vi.fn();
 const mockCreate = vi.fn();
 const mockUpdate = vi.fn();
 const mockFindById = vi.fn();
@@ -19,8 +20,20 @@ const mockDeleteAll = vi.fn();
 const mockDeletePersona = vi.fn();
 const mockListPersonaVersions = vi.fn();
 const mockRestorePersonaVersion = vi.fn();
-const { mockTriggerProcessUsers } = vi.hoisted(() => ({
-  mockTriggerProcessUsers: vi.fn(),
+const { mockParseMemoryExtractionConfig, mockScheduleLocalRun, mockTriggerProcessUsers } =
+  vi.hoisted(() => ({
+    mockParseMemoryExtractionConfig: vi.fn(),
+    mockScheduleLocalRun: vi.fn(),
+    mockTriggerProcessUsers: vi.fn(),
+  }));
+const mockActivityUpdate = vi.fn();
+const mockContextUpdate = vi.fn();
+const mockExperienceUpdate = vi.fn();
+const mockPreferenceUpdate = vi.fn();
+const mockUpdateIdentityEntry = vi.fn();
+const { mockEmbed, mockGetEmbeddingRuntime } = vi.hoisted(() => ({
+  mockEmbed: vi.fn(),
+  mockGetEmbeddingRuntime: vi.fn(),
 }));
 
 vi.mock('@/database/models/asyncTask', () => ({
@@ -28,6 +41,7 @@ vi.mock('@/database/models/asyncTask', () => ({
     create: mockCreate,
     findById: mockFindById,
     findActiveByType: mockFindActiveByType,
+    findLatestByType: mockFindLatestByType,
     update: mockUpdate,
   })),
   initUserMemoryExtractionMetadata: vi.fn((metadata) => metadata),
@@ -40,14 +54,20 @@ vi.mock('@/database/models/topic', () => ({
 }));
 
 vi.mock('@/database/models/userMemory', () => ({
-  UserMemoryActivityModel: vi.fn(() => ({})),
-  UserMemoryContextModel: vi.fn(() => ({})),
-  UserMemoryExperienceModel: vi.fn(() => ({})),
+  UserMemoryActivityModel: vi.fn(() => ({ update: mockActivityUpdate })),
+  UserMemoryContextModel: vi.fn(() => ({ update: mockContextUpdate })),
+  UserMemoryExperienceModel: vi.fn(() => ({ update: mockExperienceUpdate })),
   UserMemoryIdentityModel: vi.fn(() => ({})),
   UserMemoryModel: vi.fn(() => ({
     deleteAll: mockDeleteAll,
+    updateIdentityEntry: mockUpdateIdentityEntry,
   })),
-  UserMemoryPreferenceModel: vi.fn(() => ({})),
+  UserMemoryPreferenceModel: vi.fn(() => ({ update: mockPreferenceUpdate })),
+}));
+
+vi.mock('@/server/services/memory/userMemory/embeddingRuntime', () => ({
+  createUserMemoryEmbedder: vi.fn(() => mockEmbed),
+  getUserMemoryEmbeddingRuntime: mockGetEmbeddingRuntime,
 }));
 
 vi.mock('@/database/models/userMemory/persona', () => ({
@@ -68,10 +88,11 @@ vi.mock('@/envs/app', () => ({
 }));
 
 vi.mock('@/server/globalConfig/parseMemoryExtractionConfig', () => ({
-  parseMemoryExtractionConfig: vi.fn(() => ({
-    webhook: { baseUrl: 'https://internal.example.com' },
-    upstashWorkflowExtraHeaders: { 'x-test': 'ok' },
-  })),
+  parseMemoryExtractionConfig: mockParseMemoryExtractionConfig,
+}));
+
+vi.mock('@/server/services/memory/userMemory/extractLocalRunner', () => ({
+  MemoryExtractionLocalRunner: { schedule: mockScheduleLocalRun },
 }));
 
 vi.mock('@/server/services/memory/userMemory/extract', () => ({
@@ -95,6 +116,11 @@ const createCaller = (ctxOverrides: Partial<any> = {}) => {
 describe('userMemoryRouter.requestMemoryFromChatTopic', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockParseMemoryExtractionConfig.mockReturnValue({
+      runner: 'workflow',
+      upstashWorkflowExtraHeaders: { 'x-test': 'ok' },
+      webhook: { baseUrl: 'https://internal.example.com' },
+    });
     mockTriggerProcessUsers.mockResolvedValue({ workflowRunId: 'workflow-run-1' });
   });
 
@@ -153,6 +179,7 @@ describe('userMemoryRouter.requestMemoryFromChatTopic', () => {
       }),
       { extraHeaders: { 'x-test': 'ok' } },
     );
+    expect(mockScheduleLocalRun).not.toHaveBeenCalled();
     expect(mockUpdate).toHaveBeenCalledWith('new-task', {
       metadata: expect.objectContaining({
         control: {
@@ -165,6 +192,70 @@ describe('userMemoryRouter.requestMemoryFromChatTopic', () => {
     expect(result).toMatchObject({
       deduped: false,
       id: 'new-task',
+      status: AsyncTaskStatus.Pending,
+    });
+  });
+
+  it('runs the extraction in-process when the runner is local, without Upstash', async () => {
+    mockParseMemoryExtractionConfig.mockReturnValue({
+      runner: 'local',
+      upstashWorkflowExtraHeaders: {},
+      webhook: {},
+    });
+    mockFindActiveByType.mockResolvedValue(undefined);
+    mockCreate.mockResolvedValue('local-task');
+    mockCountTopicsForMemoryExtractor.mockResolvedValue(3);
+    mockTriggerProcessUsers.mockRejectedValue(new Error('QStash rejected the token'));
+
+    const caller = createCaller();
+    const result = await caller.requestMemoryFromChatTopic({
+      fromDate: new Date('2024-01-01'),
+      toDate: new Date('2024-02-01'),
+    });
+
+    expect(mockTriggerProcessUsers).not.toHaveBeenCalled();
+    expect(mockScheduleLocalRun).toHaveBeenCalledWith({
+      asyncTaskId: 'local-task',
+      from: new Date('2024-01-01'),
+      to: new Date('2024-02-01'),
+      userId: 'user-1',
+      workspaceId: undefined,
+    });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      deduped: false,
+      id: 'local-task',
+      status: AsyncTaskStatus.Pending,
+    });
+  });
+
+  it('falls back to the in-server run when the Upstash trigger fails', async () => {
+    mockFindActiveByType.mockResolvedValue(undefined);
+    mockCreate.mockResolvedValue('fallback-task');
+    mockCountTopicsForMemoryExtractor.mockResolvedValue(2);
+    mockTriggerProcessUsers.mockRejectedValue(new Error('unable to authenticate: invalid token'));
+
+    const caller = createCaller();
+    const result = await caller.requestMemoryFromChatTopic({
+      fromDate: new Date('2024-01-01'),
+      toDate: new Date('2024-02-01'),
+    });
+
+    expect(mockTriggerProcessUsers).toHaveBeenCalledTimes(1);
+    expect(mockScheduleLocalRun).toHaveBeenCalledWith({
+      asyncTaskId: 'fallback-task',
+      from: new Date('2024-01-01'),
+      to: new Date('2024-02-01'),
+      userId: 'user-1',
+      workspaceId: undefined,
+    });
+    expect(mockUpdate).not.toHaveBeenCalledWith(
+      'fallback-task',
+      expect.objectContaining({ status: AsyncTaskStatus.Error }),
+    );
+    expect(result).toMatchObject({
+      deduped: false,
+      id: 'fallback-task',
       status: AsyncTaskStatus.Pending,
     });
   });
@@ -240,6 +331,65 @@ describe('userMemoryRouter.getMemoryExtractionTask', () => {
       },
       status: AsyncTaskStatus.Processing,
     });
+  });
+
+  it('keeps a recent failed run visible when no task is active', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-03-01T01:00:00.000Z'));
+    mockFindActiveByType.mockResolvedValue(undefined);
+    mockFindLatestByType.mockResolvedValue({
+      error: { body: { detail: 'provider rejected the request' }, name: 'ServerError' },
+      id: 'task-failed',
+      metadata: {
+        progress: { completedTopics: 0, totalTopics: 3 },
+        source: 'chat_topic',
+      },
+      status: AsyncTaskStatus.Error,
+      updatedAt: new Date('2024-03-01T00:30:00.000Z'),
+      userId: 'user-1',
+    });
+
+    const result = await createCaller().getMemoryExtractionTask();
+
+    expect(result).toEqual({
+      error: { body: { detail: 'provider rejected the request' }, name: 'ServerError' },
+      id: 'task-failed',
+      metadata: {
+        progress: { completedTopics: 0, totalTopics: 3 },
+        range: undefined,
+        source: 'chat_topic',
+      },
+      status: AsyncTaskStatus.Error,
+    });
+  });
+
+  it('hides a failed run older than 24 hours', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-03-03T00:00:00.000Z'));
+    mockFindActiveByType.mockResolvedValue(undefined);
+    mockFindLatestByType.mockResolvedValue({
+      error: { body: { detail: 'old failure' }, name: 'ServerError' },
+      id: 'task-old',
+      metadata: { progress: { completedTopics: 0, totalTopics: 3 }, source: 'chat_topic' },
+      status: AsyncTaskStatus.Error,
+      updatedAt: new Date('2024-03-01T00:00:00.000Z'),
+      userId: 'user-1',
+    });
+
+    expect(await createCaller().getMemoryExtractionTask()).toBeNull();
+  });
+
+  it('hides a finished run when no task is active', async () => {
+    mockFindActiveByType.mockResolvedValue(undefined);
+    mockFindLatestByType.mockResolvedValue({
+      id: 'task-done',
+      metadata: { progress: { completedTopics: 3, totalTopics: 3 }, source: 'chat_topic' },
+      status: AsyncTaskStatus.Success,
+      updatedAt: new Date(),
+      userId: 'user-1',
+    });
+
+    expect(await createCaller().getMemoryExtractionTask()).toBeNull();
   });
 
   it('fetches by task id when provided', async () => {
@@ -326,6 +476,98 @@ describe('userMemoryRouter.deleteAll', () => {
     expect(mockDeleteAll).toHaveBeenCalledOnce();
     expect(mockDeletePersona).toHaveBeenCalledOnce();
     expect(result).toEqual({ success: true });
+  });
+});
+
+describe('userMemoryRouter manual edits', () => {
+  const vectorOf = (text: string) => [text.length, 1];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetEmbeddingRuntime.mockResolvedValue({ agentRuntime: {}, embeddingModel: 'embed-model' });
+    mockEmbed.mockImplementation(async (text: string) => vectorOf(text));
+  });
+
+  it('re-embeds an edited activity narrative', async () => {
+    await createCaller().updateActivity({ data: { narrative: 'new narrative' }, id: 'act-1' });
+
+    expect(mockActivityUpdate).toHaveBeenCalledWith('act-1', {
+      narrative: 'new narrative',
+      narrativeVector: vectorOf('new narrative'),
+    });
+  });
+
+  it('re-embeds an edited context description', async () => {
+    await createCaller().updateContext({ data: { description: 'new context' }, id: 'ctx-1' });
+
+    expect(mockContextUpdate).toHaveBeenCalledWith('ctx-1', {
+      description: 'new context',
+      descriptionVector: vectorOf('new context'),
+    });
+  });
+
+  it('re-embeds every edited experience field', async () => {
+    await createCaller().updateExperience({
+      data: { action: 'act', keyLearning: 'learned', situation: 'sit' },
+      id: 'exp-1',
+    });
+
+    expect(mockExperienceUpdate).toHaveBeenCalledWith('exp-1', {
+      action: 'act',
+      actionVector: vectorOf('act'),
+      keyLearning: 'learned',
+      keyLearningVector: vectorOf('learned'),
+      situation: 'sit',
+      situationVector: vectorOf('sit'),
+    });
+  });
+
+  it('re-embeds an edited identity description', async () => {
+    await createCaller().updateIdentity({ data: { description: 'new identity' }, id: 'id-1' });
+
+    expect(mockUpdateIdentityEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identity: expect.objectContaining({
+          description: 'new identity',
+          descriptionVector: vectorOf('new identity'),
+        }),
+        identityId: 'id-1',
+      }),
+    );
+  });
+
+  it('re-embeds an edited preference directive', async () => {
+    await createCaller().updatePreference({
+      data: { conclusionDirectives: 'new directive' },
+      id: 'pref-1',
+    });
+
+    expect(mockPreferenceUpdate).toHaveBeenCalledWith('pref-1', {
+      conclusionDirectives: 'new directive',
+      conclusionDirectivesVector: vectorOf('new directive'),
+    });
+  });
+
+  it('keeps the stored vector when the edited text is empty', async () => {
+    await createCaller().updateContext({ data: { description: '  ' }, id: 'ctx-1' });
+
+    expect(mockGetEmbeddingRuntime).not.toHaveBeenCalled();
+    expect(mockContextUpdate).toHaveBeenCalledWith('ctx-1', { description: '  ' });
+  });
+
+  it('still saves the text when embedding fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockEmbed.mockRejectedValue(new Error('provider down'));
+
+    await createCaller().updatePreference({
+      data: { conclusionDirectives: 'new directive' },
+      id: 'pref-1',
+    });
+
+    expect(mockPreferenceUpdate).toHaveBeenCalledWith('pref-1', {
+      conclusionDirectives: 'new directive',
+    });
+    consoleError.mockRestore();
   });
 });
 

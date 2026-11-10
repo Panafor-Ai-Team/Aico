@@ -866,6 +866,99 @@ describe('ModelRuntime', () => {
           payload: embeddingsPayload,
         });
       });
+
+      it('onEmbeddingsComplete fires on success with the reported usage', async () => {
+        const onEmbeddingsComplete = vi.fn();
+        const { runtime, mockRuntimeAI } = createMockRuntime({ onEmbeddingsComplete });
+        const usage = { totalInputTokens: 12 };
+        mockRuntimeAI.embeddings.mockImplementation(async (_p: any, opts: any) => {
+          await opts.onUsage(usage);
+          return [[0.1]];
+        });
+
+        await expect(runtime.embeddings(embeddingsPayload)).resolves.toEqual([[0.1]]);
+        expect(onEmbeddingsComplete).toHaveBeenCalledTimes(1);
+        expect(onEmbeddingsComplete.mock.calls[0][0]).toMatchObject({ success: true, usage });
+      });
+
+      it('onEmbeddingsComplete fires with success=false when the runtime throws', async () => {
+        const onEmbeddingsComplete = vi.fn();
+        const onEmbeddingsError = vi.fn();
+        const { runtime, mockRuntimeAI } = createMockRuntime({
+          onEmbeddingsComplete,
+          onEmbeddingsError,
+        });
+        const error = Object.assign(new Error('boom'), { errorType: 'ProviderBizError' });
+        mockRuntimeAI.embeddings.mockRejectedValue(error);
+
+        await expect(runtime.embeddings(embeddingsPayload)).rejects.toBe(error);
+        expect(onEmbeddingsError).toHaveBeenCalledTimes(1);
+        expect(onEmbeddingsComplete.mock.calls[0][0]).toMatchObject({
+          error: { code: 'ProviderBizError', message: 'boom' },
+          success: false,
+        });
+      });
+
+      it('onEmbeddingsComplete fires when beforeEmbeddings throws', async () => {
+        const onEmbeddingsComplete = vi.fn();
+        const { runtime, mockRuntimeAI } = createMockRuntime({
+          beforeEmbeddings: vi.fn().mockRejectedValue(new Error('refused')),
+          onEmbeddingsComplete,
+        });
+
+        await expect(runtime.embeddings(embeddingsPayload)).rejects.toThrow('refused');
+        expect(mockRuntimeAI.embeddings).not.toHaveBeenCalled();
+        expect(onEmbeddingsComplete.mock.calls[0][0]).toMatchObject({ success: false });
+      });
+
+      it('an onEmbeddingsComplete failure does not break the call', async () => {
+        const { runtime, mockRuntimeAI } = createMockRuntime({
+          onEmbeddingsComplete: vi.fn().mockRejectedValue(new Error('hook broke')),
+        });
+        mockRuntimeAI.embeddings.mockResolvedValue([[0.2]]);
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        await expect(runtime.embeddings(embeddingsPayload)).resolves.toEqual([[0.2]]);
+      });
+    });
+
+    describe('textToSpeech and transcribe hooks', () => {
+      it('beforeTextToSpeech throwing aborts the call', async () => {
+        const mockRuntimeAI = { textToSpeech: vi.fn() } as any;
+        const runtime = new ModelRuntime(mockRuntimeAI, {
+          beforeTextToSpeech: vi.fn().mockRejectedValue(new Error('not metered')),
+        });
+
+        await expect(
+          runtime.textToSpeech({ input: 'hi', model: 'tts-1', voice: 'alloy' }),
+        ).rejects.toThrow('not metered');
+        expect(mockRuntimeAI.textToSpeech).not.toHaveBeenCalled();
+      });
+
+      it('beforeTranscribe throwing aborts the call', async () => {
+        const mockRuntimeAI = { transcribe: vi.fn() } as any;
+        const runtime = new ModelRuntime(mockRuntimeAI, {
+          beforeTranscribe: vi.fn().mockRejectedValue(new Error('not metered')),
+        });
+
+        await expect(runtime.transcribe({ model: 'whisper-1' } as any)).rejects.toThrow(
+          'not metered',
+        );
+        expect(mockRuntimeAI.transcribe).not.toHaveBeenCalled();
+      });
+
+      it('beforeTextToSpeech runs and the call proceeds', async () => {
+        const beforeTextToSpeech = vi.fn();
+        const mockRuntimeAI = {
+          textToSpeech: vi.fn().mockResolvedValue(new ArrayBuffer(1)),
+        } as any;
+        const runtime = new ModelRuntime(mockRuntimeAI, { beforeTextToSpeech });
+        const payload = { input: 'hi', model: 'tts-1', voice: 'alloy' };
+
+        await runtime.textToSpeech(payload);
+        expect(beforeTextToSpeech).toHaveBeenCalledWith(payload, {});
+        expect(mockRuntimeAI.textToSpeech).toHaveBeenCalledWith(payload, {});
+      });
     });
   });
 });

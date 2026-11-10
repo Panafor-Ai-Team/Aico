@@ -128,7 +128,10 @@ const Controls = memo(() => {
   useEffect(() => {
     if (!canCreate) return;
     if (isModelBuiltinSearchInternal && (searchMode ?? 'auto') === 'off') {
-      updateAgentChatConfig({ searchMode: 'auto' });
+      // Auto-correction for a model whose search can't be turned off — the user
+      // didn't touch the toggle, so a rejected write must stay silent instead of
+      // reporting a change they never made (automatic corrections must not trigger phantom save-error toasts).
+      updateAgentChatConfig({ searchMode: 'auto' }, { showErrorMessage: false });
     }
   }, [canCreate, isModelBuiltinSearchInternal, searchMode, updateAgentChatConfig]);
 
@@ -161,9 +164,14 @@ const Controls = memo(() => {
     !isModelBuiltinSearchInternal &&
     (isModelHasBuiltinSearchConfig || isProviderHasBuiltinSearchConfig);
 
+  // `tool` (e.g. xAI Live Search) always uses model-native search while search is on —
+  // same as `internal` for routing — so do not offer the app FC search-model picker.
+  const prefersNativeBuiltinSearch =
+    isModelBuiltinSearchInternal || modelBuiltinSearchImpl === 'tool';
+
   const showFCSearchModel =
     !supportFC &&
-    (!modelBuiltinSearchImpl || (!isModelBuiltinSearchInternal && !useModelBuiltinSearch));
+    (!modelBuiltinSearchImpl || (!prefersNativeBuiltinSearch && !useModelBuiltinSearch));
 
   const showDivider = showModelBuiltinSearch || showFCSearchModel;
 

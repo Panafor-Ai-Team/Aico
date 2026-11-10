@@ -1,4 +1,3 @@
-import { BRANDING_PROVIDER, ENABLE_BUSINESS_FEATURES } from '@lobechat/business-const';
 import {
   DEFAULT_SEARCH_USER_MEMORY_TOP_K,
   DEFAULT_USER_MEMORY_EMBEDDING_MODEL_ITEM,
@@ -22,6 +21,7 @@ import pMap from 'p-map';
 import { z } from 'zod';
 
 import { withScopedPermission } from '@/business/server/trpc-middlewares/rbacPermission';
+import { AicoBillingModel } from '@/database/models/aicoBilling';
 import {
   type IdentityEntryBasePayload,
   type IdentityEntryPayload,
@@ -45,9 +45,13 @@ import {
 import { authedProcedure, router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { getServerDefaultFilesConfig } from '@/server/globalConfig';
-import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
-import type { UserMemoryEmbeddingRuntime } from '@/server/services/memory/userMemory/embedding';
+import { initEmbeddingRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import { resolvePreferredGenerationBilling } from '@/server/services/aico/generationBilling';
 import { embedUserMemoryTexts } from '@/server/services/memory/userMemory/embedding';
+import {
+  createUserMemoryEmbedder as createEmbedder,
+  getUserMemoryEmbeddingRuntime as getEmbeddingRuntime,
+} from '@/server/services/memory/userMemory/embeddingRuntime';
 import { normalizeSearchMemoryParams } from '@/server/services/memory/userMemory/searchParams';
 
 const EMPTY_SEARCH_RESULT: SearchMemoryResult = {
@@ -123,7 +127,23 @@ const searchUserMemories = async (
   const normalizedInput = normalizeSearchMemoryParams(input);
   const { provider, model: embeddingModel } =
     getServerDefaultFilesConfig().embeddingModel || DEFAULT_USER_MEMORY_EMBEDDING_MODEL_ITEM;
-  const modelRuntime = await initModelRuntimeFromDB(ctx.serverDB, ctx.userId, provider);
+  const billingModel = new AicoBillingModel(ctx.serverDB);
+  const billingContext = await resolvePreferredGenerationBilling(
+    // getUserWallet resolves `undefined` when absent; the helper's contract is `null`.
+    async (userId) => (await billingModel.getUserWallet(userId)) ?? null,
+    ctx.userId,
+  );
+  // OR-003 binds every managed key to an explicit model: pass the embedding
+  // model id (exempt from team allow-lists in assertModelAllowed, still gated
+  // by the catalog kill-switch). Without it every memory search fails with
+  // MODEL_ID_REQUIRED.
+  const modelRuntime = await initEmbeddingRuntimeFromDB(
+    ctx.serverDB,
+    ctx.userId,
+    provider,
+    undefined,
+    { billingContext, modelId: embeddingModel },
+  );
   const normalizedQueries = [
     ...new Set((normalizedInput.queries ?? []).map((query) => query.trim()).filter(Boolean)),
   ];
@@ -159,39 +179,6 @@ const searchUserMemories = async (
     { ...normalizedInput, queries: normalizedQueries, topK: effortConstrainedLimits },
     queryEmbeddings,
   ) as Promise<SearchMemoryResult>;
-};
-
-const getEmbeddingRuntime = async (serverDB: LobeChatDatabase, userId: string) => {
-  const { provider, model: embeddingModel } =
-    getServerDefaultFilesConfig().embeddingModel || DEFAULT_USER_MEMORY_EMBEDDING_MODEL_ITEM;
-  // Read user's provider config from database
-  const agentRuntime = await initModelRuntimeFromDB(
-    serverDB,
-    userId,
-    ENABLE_BUSINESS_FEATURES ? BRANDING_PROVIDER : provider,
-  );
-
-  return { agentRuntime, embeddingModel };
-};
-
-const createEmbedder = (
-  agentRuntime: UserMemoryEmbeddingRuntime,
-  embeddingModel: string,
-  userId: string,
-) => {
-  return async (value?: string | null): Promise<number[] | undefined> => {
-    if (!value || value.trim().length === 0) return undefined;
-
-    const [embedding] = await embedUserMemoryTexts({
-      input: [value],
-      model: embeddingModel,
-      runtime: agentRuntime,
-      source: 'lambda:userMemories.tool',
-      userId,
-    });
-
-    return embedding;
-  };
 };
 
 const REEMBED_TABLE_KEYS = [
@@ -926,7 +913,7 @@ export const userMemoriesRouter = router({
     .input(z.object({ topicId: z.string() }))
     .query(async ({ ctx, input }) => {
       // Dev-only escape hatch: skip the embedding + memory search triggered by topic
-      // load / switch, so chat debugging logs aren't drowned in `text-embedding-3-small`
+      // load / switch, so chat debugging logs aren't drowned in embedding-model
       // router-runtime output. Only honored in non-production builds.
       if (process.env.NODE_ENV !== 'production' && process.env.DEV_DISABLE_AUTO_MEMORY === '1') {
         console.info('[dev] skip retrieveMemoryForTopic (DEV_DISABLE_AUTO_MEMORY=1)');
@@ -956,7 +943,15 @@ export const userMemoriesRouter = router({
         const result = await searchUserMemories(ctx, searchParams);
         return result;
       } catch (error) {
-        console.error('Failed to retrieve memory for topic:', error);
+        // Best-effort lookup run on every topic load: log one line, not the provider's
+        // whole error payload (headers included), so a missing upstream route does not
+        // flood the logs.
+        const { errorType, message, provider } = (error ?? {}) as Record<string, unknown>;
+        console.warn('Failed to retrieve memory for topic:', {
+          errorType,
+          message: typeof message === 'string' ? message.trim().slice(0, 200) : String(error),
+          provider,
+        });
         return EMPTY_SEARCH_RESULT;
       }
     }),

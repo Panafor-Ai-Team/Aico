@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getServerDB } from '@/database/core/db-adaptor';
 import type * as UserMemoryModule from '@/database/models/userMemory';
 import { UserMemoryModel } from '@/database/models/userMemory';
-import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import { initEmbeddingRuntimeFromDB } from '@/server/modules/ModelRuntime';
 
 import { userMemoriesRouter } from './userMemories';
 
@@ -19,8 +19,19 @@ vi.mock('@/server/globalConfig', () => ({
   }),
 }));
 
+// Billing resolution is covered elsewhere; these tests only care about memory behaviour.
+vi.mock('@/database/models/aicoBilling', () => ({
+  AicoBillingModel: class {
+    getUserWallet = vi.fn().mockResolvedValue(null);
+  },
+}));
+
+vi.mock('@/server/services/aico/generationBilling', () => ({
+  resolvePreferredGenerationBilling: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock('@/server/modules/ModelRuntime', () => ({
-  initModelRuntimeFromDB: vi.fn(),
+  initEmbeddingRuntimeFromDB: vi.fn(),
 }));
 
 vi.mock('@/database/models/userMemory', async (importOriginal) => {
@@ -55,7 +66,7 @@ beforeEach(() => {
     return items.map((_, index) => [index + 1]);
   });
 
-  vi.mocked(initModelRuntimeFromDB).mockResolvedValue({
+  vi.mocked(initEmbeddingRuntimeFromDB).mockResolvedValue({
     embeddings: embeddingsMock,
   } as any);
 });

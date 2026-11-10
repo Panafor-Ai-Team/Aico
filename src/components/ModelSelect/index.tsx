@@ -1,6 +1,7 @@
+import { BRANDING_NAME } from '@lobechat/business-const';
 import { type ChatModelCard } from '@lobechat/types';
 import { type IconAvatarProps } from '@lobehub/icons';
-import { LobeHub, ModelIcon, ProviderIcon } from '@lobehub/icons';
+import { ProviderIcon } from '@lobehub/icons';
 import { type FlexboxProps } from '@lobehub/ui';
 import { Avatar, Flexbox, Icon, Tag, Text, Tooltip } from '@lobehub/ui';
 import { createStaticStyles, useResponsive } from 'antd-style';
@@ -19,6 +20,13 @@ import { type CSSProperties, type FC } from 'react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import {
+  formatBrandedModelId,
+  isBrandedOpenRouterModelId,
+  isBrandedOpenRouterProvider,
+} from '@/components/Branding/brandedModelId';
+import { ProductLogo } from '@/components/Branding/ProductLogo';
 import { type AiProviderSourceType } from '@/types/aiProvider';
 import { formatTokenNumber } from '@/utils/format';
 
@@ -248,6 +256,10 @@ export const ModelInfoTags = memo<ModelInfoTagsProps>(
 
 interface ModelItemRenderProps extends ChatModelCard, Partial<Omit<FlexboxProps, 'id' | 'title'>> {
   abilities?: ModelAbilities;
+  /** Managed usage coefficient label (already LTR-isolated), e.g. `4×`. */
+  coefficientLabel?: string;
+  /** Why the coefficient understates the cost; renders the tag as a warning. */
+  coefficientWarning?: string;
   newBadgeLabel?: string;
   proBadgeLabel?: string;
   showInfoTag?: boolean;
@@ -263,6 +275,8 @@ export const ModelItemRender = memo<ModelItemRenderProps>(
     imageOutput,
     newBadgeLabel,
     proBadgeLabel,
+    coefficientLabel,
+    coefficientWarning,
     video,
     vision,
     id,
@@ -271,7 +285,9 @@ export const ModelItemRender = memo<ModelItemRenderProps>(
     ...rest
   }) => {
     const { mobile } = useResponsive();
-    const displayNameOrId = displayName || id;
+    const displayNameOrId = isBrandedOpenRouterModelId(id)
+      ? formatBrandedModelId(id)
+      : displayName || id;
 
     return (
       <Flexbox
@@ -293,7 +309,7 @@ export const ModelItemRender = memo<ModelItemRenderProps>(
           gap={8}
           style={{ flexShrink: 1, minWidth: 0, overflow: 'hidden' }}
         >
-          <ModelIcon model={id} size={20} />
+          <BrandedModelIcon model={id} size={20} />
           <Text
             style={mobile ? { maxWidth: '60vw' } : { minWidth: 0, overflow: 'hidden' }}
             ellipsis={{
@@ -313,6 +329,18 @@ export const ModelItemRender = memo<ModelItemRenderProps>(
               {proBadgeLabel}
             </Tag>
           )}
+          {coefficientLabel &&
+            (coefficientWarning ? (
+              <Tooltip title={coefficientWarning}>
+                <Tag color="warning" size="small" style={{ flex: 'none' }}>
+                  {coefficientLabel}
+                </Tag>
+              </Tooltip>
+            ) : (
+              <Tag size="small" style={{ flex: 'none' }}>
+                {coefficientLabel}
+              </Tag>
+            ))}
         </Flexbox>
         {showInfoTag && (
           <ModelInfoTags
@@ -342,6 +370,8 @@ interface ProviderItemRenderProps {
 export const ProviderItemRender = memo<ProviderItemRenderProps>(
   ({ provider, name, source, logo, type = 'mono', size = 16 }) => {
     const isMono = type === 'mono';
+    const useBrandLogo = isBrandedOpenRouterProvider(provider);
+    const displayName = useBrandLogo ? BRANDING_NAME : name;
     return (
       <Flexbox
         horizontal
@@ -358,15 +388,15 @@ export const ProviderItemRender = memo<ProviderItemRenderProps>(
             shape={'circle'}
             size={size}
             style={isMono ? { filter: 'grayscale(1)' } : {}}
-            title={name}
+            title={displayName}
           />
-        ) : provider === 'lobehub' ? (
-          <LobeHub.Morden size={size} />
+        ) : useBrandLogo ? (
+          <ProductLogo size={size} type={isMono ? 'mono' : 'flat'} />
         ) : (
           <ProviderIcon provider={provider} size={size} type={type} />
         )}
         <Text ellipsis color={'inherit'}>
-          {name}
+          {displayName}
         </Text>
       </Flexbox>
     );

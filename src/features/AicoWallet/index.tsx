@@ -1,0 +1,357 @@
+'use client';
+
+import { BRANDING_NAME } from '@lobechat/business-const';
+import { Block, Flexbox, Tag, Text } from '@lobehub/ui';
+import { Button, toast } from '@lobehub/ui/base-ui';
+import { Form, Table } from 'antd';
+import { createStaticStyles } from 'antd-style';
+import { CheckIcon, WalletIcon } from 'lucide-react';
+import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router';
+
+import { toastAicoError } from '@/business/client/resolveAicoErrorMessage';
+import StatisticCard from '@/components/StatisticCard';
+import type {
+  AicoBillingContext,
+  AicoBillingSource,
+  AicoPersonalBillingSource,
+} from '@/features/AicoBilling';
+import {
+  AICO_MY_WALLET_SWR_KEY,
+  PiAmount,
+  PiTokenIcon,
+  useAicoBillingSources,
+} from '@/features/AicoBilling';
+import { FxTopupFields, type FxTopupFormValues } from '@/features/AicoBilling/FxTopupFields';
+import { AICO_TABLE_SCROLL, aicoPanelStyles } from '@/features/AicoPanels';
+import { buildPhoneVerifyRedirectUrl } from '@/libs/better-auth/phone';
+import { useClientDataSWR } from '@/libs/swr';
+import { lambdaClient } from '@/libs/trpc/client';
+import { useUserStore } from '@/store/user';
+import { userProfileSelectors } from '@/store/user/selectors';
+import { type LooseTFunction } from '@/types/looseTranslation';
+
+import { resolveWalletDisplay } from './resolveWalletDisplay';
+import { resolveSourceKeyMessageKey } from './sourceKeyMessage';
+import { useAfterFirstPaint } from './useAfterFirstPaint';
+
+const styles = createStaticStyles(({ css, cssVar }) => ({
+  sourceActive: css`
+    border-color: ${cssVar.colorBorder};
+    background: ${cssVar.colorFillTertiary};
+  `,
+  sourceCard: css`
+    cursor: pointer;
+
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+
+    padding: 12px;
+    border: 1px solid ${cssVar.colorBorderSecondary};
+    border-radius: ${cssVar.borderRadiusLG};
+
+    background: transparent;
+
+    transition:
+      border-color 0.15s ease,
+      background 0.15s ease;
+
+    &:hover {
+      border-color: ${cssVar.colorBorder};
+      background: ${cssVar.colorFillQuaternary};
+    }
+  `,
+}));
+
+const sourceToContext = (source: AicoBillingSource): AicoBillingContext =>
+  source.source === 'personal'
+    ? { source: 'personal' }
+    : { organizationId: source.organizationId, source: 'organization' };
+
+const sourceTitle = (source: AicoBillingSource, t: LooseTFunction): string => {
+  if (source.source === 'personal') return t('billing.personal');
+  return source.organizationName || t('billing.organization');
+};
+
+// Wallet figures change on user action (top-up, switch, trial), not on a
+// timer — the dedupe window only collapses remount refetch storms. Manual
+// mutates (mutateWallet/mutateTrial) still revalidate on demand.
+const WALLET_SWR_DEDUPING_INTERVAL = 30_000;
+
+const WalletTransactions = ({ t }: { t: LooseTFunction }) => {
+  // Same mount as the page, but the null key keeps the transactions scan out
+  // of the initial batched request; it fires one task after first paint.
+  const txsReady = useAfterFirstPaint();
+  const { data: txs, isLoading } = useClientDataSWR(
+    txsReady ? 'aico-my-txs' : null,
+    () => lambdaClient.aicoBilling.getMyTransactions.query({ limit: 20 }),
+    { dedupingInterval: WALLET_SWR_DEDUPING_INTERVAL },
+  );
+
+  return (
+    <Block className={aicoPanelStyles.section} variant="outlined">
+      <Flexbox gap={12}>
+        <Text strong>{t('wallet.transactions')}</Text>
+        <div className={aicoPanelStyles.tableScroll}>
+          <Table
+            dataSource={txs || []}
+            loading={isLoading || !txsReady}
+            pagination={false}
+            rowKey="id"
+            scroll={AICO_TABLE_SCROLL}
+            columns={[
+              { dataIndex: 'type', title: t('wallet.columns.type') },
+              {
+                dataIndex: 'amountPi',
+                title: t('wallet.columns.pi'),
+                render: (v: number | string | null) => (v == null ? '—' : <PiAmount value={v} />),
+              },
+              {
+                dataIndex: 'createdAt',
+                title: t('wallet.columns.date'),
+                render: (v: Date | string) => new Date(v).toLocaleString(),
+              },
+            ]}
+          />
+        </div>
+      </Flexbox>
+    </Block>
+  );
+};
+
+export const AicoWallet = () => {
+  const { t } = useTranslation('aico');
+  const [busy, setBusy] = useState(false);
+  const [topupForm] = Form.useForm<FxTopupFormValues>();
+  const phoneVerified = useUserStore((s) =>
+    Boolean(userProfileSelectors.userProfile(s)?.phoneNumberVerified),
+  );
+
+  const { data: wallet, mutate: mutateWallet } = useClientDataSWR(
+    AICO_MY_WALLET_SWR_KEY,
+    () => lambdaClient.aicoBilling.getMyWallet.query(),
+    { dedupingInterval: WALLET_SWR_DEDUPING_INTERVAL },
+  );
+  const { data: fx } = useClientDataSWR(
+    'aico-fx',
+    () => lambdaClient.aicoBilling.getFxRate.query(),
+    { dedupingInterval: WALLET_SWR_DEDUPING_INTERVAL },
+  );
+  const { data: trial, mutate: mutateTrial } = useClientDataSWR(
+    'aico-my-trial',
+    () => lambdaClient.aicoBilling.getMyTrial.query(),
+    { dedupingInterval: WALLET_SWR_DEDUPING_INTERVAL },
+  );
+  const { data: providerStatus } = useClientDataSWR(
+    'aico-provider-status',
+    () => lambdaClient.aicoBilling.getManagedProviderStatus.query(),
+    { dedupingInterval: WALLET_SWR_DEDUPING_INTERVAL },
+  );
+
+  const { canSwitch, data: billingSources, isSelected, selectSource } = useAicoBillingSources();
+  const personalSource = billingSources?.sources.find(
+    (source): source is AicoPersonalBillingSource => source.source === 'personal',
+  );
+
+  const display = resolveWalletDisplay({
+    paidInPi: wallet?.paidInPi,
+    personal: personalSource,
+  });
+
+  const cardFooter = (paidIn: string) => (
+    <Flexbox gap={2}>
+      <Text fontSize={12} type="secondary">
+        {t('wallet.paidInHint', { value: paidIn })}
+      </Text>
+      {display.stale ? (
+        <Text fontSize={12} type="warning">
+          {t('wallet.remainingStale')}
+        </Text>
+      ) : null}
+    </Flexbox>
+  );
+
+  return (
+    <Flexbox className={aicoPanelStyles.page} gap={20}>
+      <Flexbox gap={4}>
+        <Flexbox horizontal align="center" gap={8}>
+          <Text strong as="h1" style={{ fontSize: 22, margin: 0 }}>
+            {t('wallet.title')}
+          </Text>
+          {wallet?.publicCode ? <Tag>{wallet.publicCode}</Tag> : null}
+        </Flexbox>
+        <Text type="secondary">{t('wallet.subtitle')}</Text>
+      </Flexbox>
+
+      <div className={aicoPanelStyles.grid}>
+        <StatisticCard
+          title={t('wallet.remainingPi')}
+          statistic={{
+            description: cardFooter(display.paidInPi),
+            suffix: display.remainingPi == null ? undefined : <PiTokenIcon size={22} />,
+            value: display.remainingPi ?? t('wallet.remainingUnknown'),
+          }}
+        />
+        <StatisticCard
+          title={t('wallet.provider')}
+          statistic={{
+            description: wallet?.hasManagedKey
+              ? t('wallet.keyProvisioned')
+              : t('wallet.keyPending'),
+            value: providerStatus?.brandName ?? BRANDING_NAME,
+          }}
+        />
+      </div>
+
+      {billingSources && billingSources.sources.length > 0 ? (
+        <Block className={aicoPanelStyles.section} variant="outlined">
+          <Flexbox gap={12}>
+            <Text strong>{t('billing.sourcesTitle')}</Text>
+            <Text type="secondary">{t('billing.selectHint')}</Text>
+            <div className={aicoPanelStyles.sourceGrid}>
+              {billingSources.sources.map((source) => {
+                const ctx = sourceToContext(source);
+                const selected = isSelected(ctx);
+                const title = sourceTitle(source, t);
+
+                return (
+                  <button
+                    className={`${styles.sourceCard}${selected ? ` ${styles.sourceActive}` : ''}`}
+                    disabled={busy || (selected && !canSwitch)}
+                    key={source.source === 'personal' ? 'personal' : source.organizationId}
+                    type="button"
+                    onClick={async () => {
+                      if (selected || busy) return;
+                      setBusy(true);
+                      try {
+                        await selectSource(ctx);
+                        toast.success(t('billing.switched', { label: title }));
+                        await mutateWallet();
+                      } catch (err) {
+                        toastAicoError(err, t, 'billing.switchFailed');
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    <Flexbox horizontal align="center" justify="space-between">
+                      <Flexbox horizontal align="center" gap={6}>
+                        <WalletIcon size={14} />
+                        <Text strong>{title}</Text>
+                      </Flexbox>
+                      {selected ? <CheckIcon size={14} /> : null}
+                    </Flexbox>
+                    <PiAmount iconSize={18} style={{ fontSize: 18 }} value={source.remainingPi} />
+                    <Text style={{ fontSize: 12 }} type="secondary">
+                      {t(resolveSourceKeyMessageKey(source))}
+                    </Text>
+                  </button>
+                );
+              })}
+            </div>
+          </Flexbox>
+        </Block>
+      ) : null}
+
+      <Block className={aicoPanelStyles.section} variant="outlined">
+        <Flexbox gap={16}>
+          <Flexbox horizontal align="center" gap={8}>
+            <Text strong>{t('wallet.onlineTopupTitle')}</Text>
+            <Tag>{t('wallet.onlineTopupSoon')}</Tag>
+          </Flexbox>
+          <Text type="secondary">{t('wallet.onlineTopupDisabledHint')}</Text>
+          <Text type="secondary">{t('wallet.manualCreditHint')}</Text>
+          <Form form={topupForm} layout="vertical">
+            <FxTopupFields
+              disabled
+              form={topupForm}
+              fxRate={fx?.tomanPerUsd}
+              fxSource={fx?.source}
+              piPerUsd={fx?.piPerUsd ?? wallet?.topupPiPerUsd}
+            />
+            <Button disabled type="primary">
+              {t('wallet.onlineTopupSubmit')}
+            </Button>
+          </Form>
+        </Flexbox>
+      </Block>
+
+      <Block className={aicoPanelStyles.section} variant="outlined">
+        <Flexbox gap={12}>
+          <Text strong>{t('wallet.trialTitle')}</Text>
+          {trial && !trial.config.enabled ? (
+            <Text type="secondary">{t('wallet.trialInactive')}</Text>
+          ) : trial?.active ? (
+            <Text>
+              {t('wallet.trialActive', {
+                date: trial.trial?.expiresAt
+                  ? new Date(trial.trial.expiresAt).toLocaleString()
+                  : '—',
+              })}
+            </Text>
+          ) : trial?.trial ? (
+            <Text type="secondary">{t('wallet.trialUsed')}</Text>
+          ) : (
+            <>
+              <Text type="secondary">
+                {t('wallet.trialDesc', { days: trial?.config.durationDays ?? 3 })}
+              </Text>
+              {phoneVerified ? (
+                <Button
+                  loading={busy}
+                  type="primary"
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      await lambdaClient.aicoBilling.activateTrial.mutate();
+                      toast.success(t('wallet.trialActivated'));
+                      await mutateTrial();
+                    } catch (err) {
+                      toastAicoError(err, t, 'wallet.trialFailed', {
+                        phoneVerifyCallbackUrl: '/wallet',
+                      });
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  {t('wallet.trialActivate')}
+                </Button>
+              ) : (
+                <Flexbox horizontal gap={8} wrap="wrap">
+                  <Button
+                    type="primary"
+                    onClick={() => {
+                      window.location.assign(buildPhoneVerifyRedirectUrl('/wallet'));
+                    }}
+                  >
+                    {t('wallet.verifyPhone')}
+                  </Button>
+                  <Text fontSize={12} type="secondary">
+                    {t('wallet.verifyPhoneHint')}
+                  </Text>
+                </Flexbox>
+              )}
+            </>
+          )}
+        </Flexbox>
+      </Block>
+
+      <Block className={aicoPanelStyles.section} variant="outlined">
+        <Flexbox gap={12}>
+          <Text strong>{t('wallet.upgradeTitle')}</Text>
+          <Text type="secondary">{t('wallet.upgradeDesc')}</Text>
+          <Link to="/org">
+            <Button>{t('wallet.linkOrg')}</Button>
+          </Link>
+        </Flexbox>
+      </Block>
+
+      <WalletTransactions t={t} />
+    </Flexbox>
+  );
+};
+
+export default AicoWallet;

@@ -52,7 +52,7 @@ const mockGlobalConfigDependencies = (
   vi.doMock('@/envs/auth', () => ({
     authEnv: {
       AUTH_DISABLE_EMAIL_PASSWORD: false,
-      AUTH_EMAIL_VERIFICATION: false,
+      AUTH_EMAIL_VERIFICATION: true,
       AUTH_ENABLE_MAGIC_LINK: false,
       AUTH_SSO_PROVIDERS: '',
     },
@@ -163,7 +163,9 @@ describe('getServerGlobalConfig', () => {
 
     expect(providerConfig[ModelProvider.LobeHub]).toBeUndefined();
     expect(providerConfig[ModelProvider.OpenAI]).toBeUndefined();
-    expect(providerConfig[ModelProvider.DeepSeek].enabled).toBe(true);
+    // Aico: native DeepSeek BYOK off; managed OpenRouter on.
+    expect(providerConfig[ModelProvider.DeepSeek].enabled).toBe(false);
+    expect(providerConfig[ModelProvider.OpenRouter].enabled).toBe(true);
   });
 
   it('should enable gateway mode for business builds', async () => {

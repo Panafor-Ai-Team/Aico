@@ -10,6 +10,8 @@ import FileIcon from '@/components/FileIcon';
 import RepoIcon from '@/components/LibIcon';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors } from '@/store/agent/selectors';
+import { fileChatSelectors, useFileStore } from '@/store/file';
+import { resolvePersistedFileMime } from '@/store/file/slices/chat/persistedFile';
 
 import { useAgentId } from '../../hooks/useAgentId';
 import CheckboxItem from '../components/CheckboxWithLoading';
@@ -78,13 +80,17 @@ export const useControls = ({
     isEqual,
   );
 
-  const [toggleFile, toggleKnowledgeBase] = useAgentStore((s) => [
-    s.toggleFile,
-    s.toggleKnowledgeBase,
+  const toggleKnowledgeBase = useAgentStore((s) => s.toggleKnowledgeBase);
+
+  // Files are attached to the current draft (chip row + send path), not toggled as
+  // agent-wide knowledge — only libraries keep the agent-level toggle.
+  const attachedFileIds = useFileStore(fileChatSelectors.chatUploadFileIds, isEqual);
+  const [attachChatFile, detachChatFile] = useFileStore((s) => [
+    s.attachChatFile,
+    s.detachChatFile,
   ]);
-  const enabledCount =
-    files.filter((item) => item.enabled).length +
-    knowledgeBases.filter((item) => item.enabled).length;
+  const attachedFiles = files.filter((item) => attachedFileIds.includes(item.id));
+  const enabledCount = attachedFiles.length + knowledgeBases.filter((item) => item.enabled).length;
 
   const libraryItems = knowledgeBases.map((item) => ({
     icon: <RepoIcon />,
@@ -104,17 +110,18 @@ export const useControls = ({
   }));
 
   const fileItems = files.map((item) => ({
-    icon: <FileIcon fileName={item.name} fileType={item.type} size={20} />,
+    icon: <FileIcon fileName={item.name} fileType={resolvePersistedFileMime(item)} size={20} />,
     key: item.id,
     label: (
       <CheckboxItem
-        checked={item.enabled}
+        checked={attachedFileIds.includes(item.id)}
         hasPadding={false}
         id={item.id}
         label={item.name}
         labelMaxWidth={labelMaxWidth}
-        onUpdate={async (id, enabled) => {
-          await toggleFile(id, enabled);
+        onUpdate={async (id, attached) => {
+          if (attached) attachChatFile(item);
+          else detachChatFile(id);
         }}
       />
     ),
@@ -127,20 +134,24 @@ export const useControls = ({
     ...fileItems,
   ];
 
-  const footer =
-    relatedGroups.length > 0 ? (
-      <button
-        className={cx(styles.viewMore)}
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation();
-          openAttachKnowledgeModal();
-        }}
-      >
-        <Icon color={cssVar.colorTextSecondary} icon={LibraryBig} size={14} />
-        <span className={cx(styles.viewMoreLabel)}>{t('knowledgeBase.viewMore')}</span>
-      </button>
-    ) : null;
+  // The footer is the only entry into the full library / file picker, so it stays
+  // rendered when nothing is attached yet — otherwise the submenu shows "no related
+  // files or libraries" with no way to attach the first one.
+  const footer = (
+    <button
+      className={cx(styles.viewMore)}
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        openAttachKnowledgeModal();
+      }}
+    >
+      <Icon color={cssVar.colorTextSecondary} icon={LibraryBig} size={14} />
+      <span className={cx(styles.viewMoreLabel)}>
+        {relatedGroups.length > 0 ? t('knowledgeBase.viewMore') : t('knowledgeBase.related.browse')}
+      </span>
+    </button>
+  );
 
   return { enabledCount, footer, items: relatedGroups } satisfies KnowledgeControls;
 };

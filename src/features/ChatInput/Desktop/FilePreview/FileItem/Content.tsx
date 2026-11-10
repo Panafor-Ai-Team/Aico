@@ -21,11 +21,11 @@ const styles = createStaticStyles(({ css }) => ({
 }));
 
 const Content = memo<UploadFileItem>(({ file, previewUrl }) => {
-  if (file.type.startsWith('image')) {
+  if (file.type?.startsWith('image')) {
     return <Image alt={file.name} classNames={{ wrapper: styles.image }} src={previewUrl} />;
   }
 
-  if (file.type.startsWith('video')) {
+  if (file.type?.startsWith('video')) {
     return <video className={styles.video} src={previewUrl} width={'100%'} />;
   }
 

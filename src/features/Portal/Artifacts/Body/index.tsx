@@ -6,6 +6,7 @@ import { chatPortalSelectors, messageStateSelectors } from '@/store/chat/selecto
 import { ArtifactDisplayMode } from '@/store/chat/slices/portal/initialState';
 import { ArtifactType } from '@/types/artifact';
 
+import { isLivePreviewableArtifactType } from './livePreview';
 import Renderer from './Renderer';
 
 const ArtifactsUI = memo(() => {
@@ -33,7 +34,7 @@ const ArtifactsUI = memo(() => {
   });
 
   useEffect(() => {
-    // When generation completes, switch from the live source stream to the final preview.
+    // When generation completes while the user is on Code, flip back to Preview.
     if (isMessageGenerating && displayMode === ArtifactDisplayMode.Code && isArtifactTagClosed) {
       useChatStore.setState({ portalArtifactDisplayMode: ArtifactDisplayMode.Preview });
     }
@@ -59,11 +60,10 @@ const ArtifactsUI = memo(() => {
     }
   }, [artifactType, artifactCodeLanguage]);
 
-  // Keep incomplete artifacts in code mode so users can inspect and scroll the generated source.
-  const showCode =
-    artifactType === ArtifactType.Code ||
-    !isArtifactTagClosed ||
-    displayMode === ArtifactDisplayMode.Code;
+  // HTML / SVG / mermaid get a live iframe/preview while tokens stream.
+  // Code / Python / React stay on the highlighter (incomplete JSX won't sandbox).
+  const canLivePreview = isLivePreviewableArtifactType(artifactType);
+  const showCode = !canLivePreview || displayMode === ArtifactDisplayMode.Code;
   const isStreamingCode = isMessageGenerating && showCode && !isArtifactTagClosed;
   const isStreamingArtifact = isMessageGenerating && !isArtifactTagClosed;
 

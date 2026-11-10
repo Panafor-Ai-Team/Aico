@@ -5,3 +5,4 @@ apps/desktop/resources/locales/
 **/__snapshots__/
 **/fixtures/
 packages/database/migrations/
+packages/database/migrations-aico/

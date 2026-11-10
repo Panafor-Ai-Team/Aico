@@ -73,6 +73,7 @@ const createMessageTransport = (): MessageTransport => ({
   query: vi.fn(),
   update: vi.fn(),
   updatePluginState: vi.fn(),
+  updateToolIntervention: vi.fn(),
   updateToolMessage: vi.fn(),
 });
 
@@ -182,12 +183,18 @@ describe('callLlm executor', () => {
       type: 'call_llm',
     };
 
-    const result = await callLlm(host)(instructionWithParent, state);
+    const result = await callLlm(host)(instructionWithParent, state, {
+      instructionIndex: 1,
+      phase: 'user_input',
+    });
     expect(messages.findById).toHaveBeenCalledWith('parent-1');
     expect(messages.createAssistantMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         agentId: 'agent-1',
         content: '',
+        // Creation provenance stamp — must reference the running operation so
+        // the id stays resolvable after client reloads.
+        metadata: { operationId: 'op-1' },
         model: 'gpt-4',
         parentId: 'parent-1',
         provider: 'openai',
@@ -195,6 +202,9 @@ describe('callLlm executor', () => {
         threadId: 'thread-1',
         topicId: 'topic-1',
       }),
+      {
+        idempotencyKey: 'agent-runtime:op-1:step:0:instruction:1:assistant',
+      },
     );
     expect(stream.publishEvent).toHaveBeenCalledWith({
       data: {
@@ -241,6 +251,53 @@ describe('callLlm executor', () => {
     expect(transport.trace.close).toHaveBeenCalledWith(undefined);
   });
 
+  it('skips the model when context provides directToolCalls', async () => {
+    const state = createState();
+    const transport = createCallTransport();
+    const messages = createMessageTransport();
+    const stream = createStreamSink();
+    const directToolCalls = [
+      {
+        apiName: 'generateImage',
+        arguments: JSON.stringify({ prompt: 'عکس یک گربه' }),
+        id: 'call_direct_1',
+        identifier: 'lobe-image-generation',
+        type: 'builtin' as const,
+      },
+    ];
+    const context: ContextBuilder = {
+      build: vi.fn().mockResolvedValue({
+        ...contextOutput,
+        directToolCalls,
+      }),
+    };
+    const host = createHost(transport.llm, messages, stream, context);
+
+    const result = await callLlm(host)(instruction, state);
+
+    expect(transport.runAttempt).not.toHaveBeenCalled();
+    expect(result.nextContext).toMatchObject({
+      payload: {
+        hasToolsCalling: true,
+        toolsCalling: directToolCalls,
+      },
+      phase: 'llm_result',
+    });
+    expect(messages.update).toHaveBeenCalledWith(
+      'assistant-1',
+      expect.objectContaining({
+        content: '',
+        tools: expect.arrayContaining([
+          expect.objectContaining({
+            apiName: 'generateImage',
+            id: 'call_direct_1',
+            identifier: 'lobe-image-generation',
+          }),
+        ]),
+      }),
+    );
+  });
+
   it('reuses an existing assistant message without creating a new one', async () => {
     const state = createState();
     const transport = createCallTransport();
@@ -258,11 +315,40 @@ describe('callLlm executor', () => {
       newState: { messages: [expect.objectContaining({ id: 'assistant-existing' })] },
     });
     expect(messages.createAssistantMessage).not.toHaveBeenCalled();
+    // Pre-created placeholders exist before the operation does — the executor
+    // must merge the provenance stamp onto them, and correct their model/provider
+    // to what this call actually resolved to (the placeholder may have been
+    // stamped with the agent's default, e.g. before a mid-topic model switch).
+    expect(messages.update).toHaveBeenCalledWith('assistant-existing', {
+      metadata: { operationId: 'op-1' },
+      model: 'gpt-4',
+      provider: 'openai',
+    });
     expect(transport.createTrace).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantMessageId: 'assistant-existing',
       }),
     );
+  });
+
+  it('keeps the run alive when the provenance stamp write fails', async () => {
+    const state = createState();
+    const transport = createCallTransport();
+    const messages = createMessageTransport();
+    vi.mocked(messages.update).mockRejectedValueOnce(new Error('db down'));
+    const host = createHost(transport.llm, messages);
+    const reuseInstruction: AgentInstructionCallLlm = {
+      payload: {
+        ...instruction.payload,
+        assistantMessageId: 'assistant-existing',
+      },
+      type: 'call_llm',
+    };
+
+    // The stamp is a tracing aid — its failure must not become an LLM error.
+    await expect(callLlm(host)(reuseInstruction, state)).resolves.toMatchObject({
+      newState: { messages: [expect.objectContaining({ id: 'assistant-existing' })] },
+    });
   });
 
   it('throws when the LLM transport does not provide runAttempt', async () => {
@@ -455,6 +541,80 @@ describe('callLlm executor', () => {
     expect(transport.trace.recordResult).toHaveBeenCalledWith(finalOutput);
     expect(policy.onError).not.toHaveBeenCalled();
     expect(transport.trace.close).toHaveBeenCalledWith(undefined);
+  });
+
+  // Prod (2026-11-09): the server retry policy is a class whose waitForRetry reads
+  // `this`; calling it detached failed every retried task run with "Cannot read
+  // properties of undefined (reading 'lastFailureWasStall')".
+  it('calls a class-based waitForRetry with the policy as `this`', async () => {
+    const state = createState();
+    const error = new Error('temporary outage');
+    const runAttempt = vi
+      .fn()
+      .mockResolvedValueOnce({ error, ok: false, output: createAttemptOutput('') })
+      .mockResolvedValueOnce({ ok: true, output: createAttemptOutput('complete') });
+
+    class StatefulRetryPolicy implements LLMRetryPolicy {
+      waits: number[] = [];
+      classifyError() {
+        return { kind: 'retry' as const, message: error.message };
+      }
+      maxAttempts() {
+        return 3;
+      }
+      resolveRetryBudget() {
+        return 2;
+      }
+      async waitForRetry(delayMs: number) {
+        this.waits.push(delayMs);
+      }
+    }
+    const policy = new StatefulRetryPolicy();
+    const transport = createCallTransport({ policy, runAttempt });
+    const host = createHost(
+      transport.llm,
+      createMessageTransport(),
+      createStreamSink(),
+      createContextBuilder(),
+      { clearRunningMark: vi.fn(), loadState: vi.fn().mockResolvedValue(null) },
+    );
+
+    const result = await callLlm(host)(instruction, state);
+
+    expect(policy.waits).toEqual([1000]);
+    expect(result.newState.messages.at(-1)).toMatchObject({ content: 'complete' });
+  });
+
+  it('reports the error-specific retry budget as maxAttempts in stream_retry', async () => {
+    const state = createState();
+    const error = new Error('Chat start timed out: upstream-headers');
+    const runAttempt = vi
+      .fn()
+      .mockResolvedValueOnce({ error, ok: false, output: createAttemptOutput('') })
+      .mockResolvedValueOnce({ ok: true, output: createAttemptOutput('complete') });
+    const policy = createRetryPolicy({
+      classifyError: vi.fn().mockReturnValue({ kind: 'retry', message: error.message }),
+      maxAttempts: vi.fn().mockReturnValue(6),
+      resolveRetryBudget: vi.fn().mockReturnValue(1),
+    });
+    const transport = createCallTransport({ policy, runAttempt });
+    const stream = createStreamSink();
+    const host = createHost(
+      transport.llm,
+      createMessageTransport(),
+      stream,
+      createContextBuilder(),
+      { clearRunningMark: vi.fn(), loadState: vi.fn().mockResolvedValue(null) },
+    );
+
+    await callLlm(host)(instruction, state);
+
+    expect(stream.publishEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ attempt: 2, maxAttempts: 2 }),
+        type: 'stream_retry',
+      }),
+    );
   });
 
   it('stops retrying and persists the partial attempt when the operation is interrupted', async () => {

@@ -79,8 +79,11 @@ const FallbackIntervention = memo<FallbackInterventionProps>(
     const isBuiltin = builtinToolIdentifiers.includes(identifier);
 
     const toolTitle = isBuiltin
-      ? t(`builtins.${identifier}.title`, { defaultValue: identifier, ns: 'plugin' })
-      : (pluginHelpers.getPluginTitle(pluginMeta) ?? identifier);
+      ? t(`builtins.${identifier}.title`, {
+          defaultValue: pluginHelpers.getToolFallbackName(identifier),
+          ns: 'plugin',
+        })
+      : (pluginHelpers.getPluginTitle(pluginMeta) ?? pluginHelpers.getToolFallbackName(identifier));
 
     const actionTitle = isBuiltin
       ? t(`builtins.${identifier}.apiName.${apiName}`, { defaultValue: apiName, ns: 'plugin' })
@@ -111,7 +114,11 @@ const FallbackIntervention = memo<FallbackInterventionProps>(
       (s) =>
         requestedToolIdentifiers.map((toolIdentifier) => {
           const meta = toolSelectors.getMetaById(toolIdentifier)(s);
-          return pluginHelpers.getPluginTitle(meta) ?? meta?.title ?? toolIdentifier;
+          return (
+            pluginHelpers.getPluginTitle(meta) ??
+            meta?.title ??
+            pluginHelpers.getToolFallbackName(toolIdentifier)
+          );
         }),
       isEqual,
     );

@@ -134,6 +134,8 @@ export class StreamingHandler {
    * Handle streaming finish
    */
   async handleFinish(finishData: FinishData): Promise<StreamingResult> {
+    this.endReasoningIfNeeded();
+
     // Update traceId
     if (finishData.traceId) {
       this.msgTraceId = finishData.traceId;
@@ -522,6 +524,8 @@ export class StreamingHandler {
 
     // Get signature from finishData.reasoning (provided by backend in onFinish)
     const reasoningSignature = finishData.reasoning?.signature;
+    // Hidden Responses reasoning items stay replayable without any visible content
+    const hasResponseItems = !!finishData.reasoning?.responseItems?.length;
 
     let finalReasoning: ReasoningState | undefined;
     if (hasReasoningImages) {
@@ -533,11 +537,11 @@ export class StreamingHandler {
       };
     } else if (this.thinkingContent) {
       finalReasoning = {
+        ...finishData.reasoning,
         content: this.thinkingContent,
         duration: finalDuration,
-        signature: reasoningSignature,
       };
-    } else if (finishData.reasoning?.content || reasoningSignature) {
+    } else if (finishData.reasoning?.content || reasoningSignature || hasResponseItems) {
       finalReasoning = {
         ...finishData.reasoning,
         duration: finalDuration,

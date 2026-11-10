@@ -63,6 +63,16 @@ export type MemoryLayerExtractorConfig = MemoryLayerExtractorPublicConfig &
     layers: Record<GlobalMemoryLayer, string>;
   };
 
+export type MemoryExtractionRunner = 'local' | 'workflow';
+
+// Aico: QStash may be configured but unusable (e.g. a rejected token), so the env wins over detection.
+const parseExtractionRunner = (): MemoryExtractionRunner => {
+  const value = process.env.MEMORY_USER_MEMORY_EXTRACTION_RUNNER?.trim().toLowerCase();
+  if (value === 'local' || value === 'workflow') return value;
+
+  return process.env.QSTASH_TOKEN ? 'workflow' : 'local';
+};
+
 export interface MemoryExtractionPrivateConfig {
   agentBenchmarkLoCoMo: MemoryAgentConfig;
   agentGateKeeper: MemoryAgentConfig;
@@ -89,6 +99,12 @@ export interface MemoryExtractionPrivateConfig {
     region?: string;
     secretAccessKey?: string;
   };
+  /**
+   * Where user-initiated chat-topic extraction runs:
+   * - `workflow`: Upstash Workflow (needs a working QStash token and a public callback URL)
+   * - `local`: inside the app server process
+   */
+  runner: MemoryExtractionRunner;
   upstashWorkflowExtraHeaders?: Record<string, string>;
   webhook: {
     baseUrl?: string;
@@ -166,22 +182,33 @@ const parseLayerExtractorAgent = (fallbackModel: string): MemoryLayerExtractorCo
   };
 };
 
+/**
+ * Embeddings default to `DEFAULT_USER_MEMORY_EMBEDDING_MODEL_ITEM` (OpenRouter), not to
+ * the layer extractor's provider: the managed chat gateway (CheapVibeCode) serves no
+ * embeddings route, so inheriting its provider and chat model made every memory
+ * embedding 404. Only the `MEMORY_USER_MEMORY_EMBEDDING_*` env overrides the default.
+ */
 const parseEmbeddingAgent = (
-  fallbackModel: string,
-  fallbackProvider: string,
-  fallbackApiKey?: string,
+  credentialSources: { apiKey?: string; provider?: string }[],
 ): MemoryAgentConfig => {
   const { model: defaultModel, provider: defaultProvider } =
     DEFAULT_USER_MEMORY_EMBEDDING_MODEL_ITEM;
-  const model = process.env.MEMORY_USER_MEMORY_EMBEDDING_MODEL || fallbackModel || defaultModel;
+  const model = process.env.MEMORY_USER_MEMORY_EMBEDDING_MODEL || defaultModel;
   const provider =
-    process.env.MEMORY_USER_MEMORY_EMBEDDING_PROVIDER ||
-    fallbackProvider ||
-    defaultProvider ||
-    DEFAULT_MINI_PROVIDER;
+    process.env.MEMORY_USER_MEMORY_EMBEDDING_PROVIDER || defaultProvider || DEFAULT_MINI_PROVIDER;
+  // Reuse another agent's key only when it belongs to the same provider; otherwise a
+  // chat-gateway key would be sent to the embedding provider.
+  const sharedApiKey = credentialSources.find(
+    (source) => source.apiKey && source.provider === provider,
+  )?.apiKey;
 
   return {
-    apiKey: process.env.MEMORY_USER_MEMORY_EMBEDDING_API_KEY ?? fallbackApiKey,
+    // Embeddings stay on OpenRouter while chat runs on another gateway; its key is
+    // a dedicated one (see `initEmbeddingRuntimeFromDB`).
+    apiKey:
+      process.env.MEMORY_USER_MEMORY_EMBEDDING_API_KEY ??
+      sharedApiKey ??
+      (provider === 'openrouter' ? process.env.AICO_EMBEDDING_OPENROUTER_API_KEY : undefined),
     baseURL: process.env.MEMORY_USER_MEMORY_EMBEDDING_BASE_URL,
     // Embedding providers often have a smaller per-input limit than chat models.
     // Keep this below the provider's single-input embedding window.
@@ -258,15 +285,12 @@ export const parseMemoryExtractionConfig = (): MemoryExtractionPrivateConfig => 
   const agentBenchmarkLoCoMo = parseBenchmarkLoCoMoAgent(agentGateKeeper);
   const agentLayerExtractor = parseLayerExtractorAgent(agentGateKeeper.model);
   const agentPersonaWriter = parsePersonaWriterAgent(agentGateKeeper.model);
-  const embedding = parseEmbeddingAgent(
-    agentLayerExtractor.model,
-    agentLayerExtractor.provider || DEFAULT_MINI_PROVIDER,
-    agentGateKeeper.apiKey || agentLayerExtractor.apiKey,
-  );
+  const embedding = parseEmbeddingAgent([agentGateKeeper, agentLayerExtractor]);
   const extractorObservabilityS3 = parseExtractorAgentObservabilityS3();
   const featureFlags = {
     enableBenchmarkLoCoMo: process.env.MEMORY_USER_MEMORY_FEATURE_FLAG_BENCHMARK_LOCOMO === 'true',
   };
+  // Topics the in-server runner (`extractLocalRunner`) extracts at once; default 5 there.
   const concurrencyRaw = process.env.MEMORY_USER_MEMORY_CONCURRENCY;
   const concurrency =
     concurrencyRaw !== undefined
@@ -343,6 +367,7 @@ export const parseMemoryExtractionConfig = (): MemoryExtractionPrivateConfig => 
     embeddingPreferredProviders,
     featureFlags,
     observabilityS3: extractorObservabilityS3,
+    runner: parseExtractionRunner(),
     upstashWorkflowExtraHeaders,
     webhook: {
       baseUrl: process.env.MEMORY_USER_MEMORY_WEBHOOK_BASE_URL,

@@ -1,4 +1,4 @@
-import { Github, ModelTag, ProviderCombine } from '@lobehub/icons';
+import { Github } from '@lobehub/icons';
 import { ActionIcon, Block, Flexbox, MaskShadow, stopPropagation, Text } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { GlobeIcon } from 'lucide-react';
@@ -6,6 +6,8 @@ import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import urlJoin from 'url-join';
 
+import { BrandedModelTag } from '@/components/Branding/BrandedModelTag';
+import { BrandedProviderCombine } from '@/components/Branding/BrandedProviderCombine';
 import { GITHUB } from '@/const/url';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import WorkspaceLink from '@/features/Workspace/WorkspaceLink';
@@ -81,7 +83,7 @@ const ProviderItem = memo<DiscoverProviderItem>(
             }}
           >
             <WorkspaceLink style={{ color: 'inherit', overflow: 'hidden' }} to={link}>
-              <ProviderCombine provider={identifier} size={28} style={{ flex: 'none' }} />
+              <BrandedProviderCombine provider={identifier} size={28} style={{ flex: 'none' }} />
             </WorkspaceLink>
             <div className={styles.author}>@{name}</div>
           </Flexbox>
@@ -124,7 +126,7 @@ const ProviderItem = memo<DiscoverProviderItem>(
               .filter(Boolean)
               .map((tag: string) => (
                 <WorkspaceLink key={tag} to={urlJoin('/community/model', tag)}>
-                  <ModelTag model={tag} style={{ margin: 0 }} />
+                  <BrandedModelTag model={tag} style={{ margin: 0 }} />
                 </WorkspaceLink>
               ))}
           </MaskShadow>

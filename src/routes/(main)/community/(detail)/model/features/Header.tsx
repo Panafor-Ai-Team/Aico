@@ -1,12 +1,13 @@
 'use client';
 
-import { ModelIcon } from '@lobehub/icons';
 import { Flexbox, Icon, Text } from '@lobehub/ui';
 import { createStaticStyles, cssVar, useResponsive } from 'antd-style';
 import { DotIcon } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
 import { ModelInfoTags } from '@/components/ModelSelect';
 import PublishedTime from '@/components/PublishedTime';
 import ModelTypeIcon from '@/routes/(main)/community/(list)/model/features/List/ModelTypeIcon';
@@ -33,12 +34,16 @@ const Header = memo<{ mobile?: boolean }>(({ mobile: isMobile }) => {
   const { description, identifier, releasedAt, displayName, type, abilities, contextWindowTokens } =
     useDetailContext();
   const { mobile = isMobile } = useResponsive();
+  // `identifier` is optional on the detail context but always present for a
+  // rendered model page; fall back to an empty id rather than passing undefined
+  // into helpers that require a string.
+  const modelId = identifier ?? '';
   const { t } = useTranslation('models');
 
   return (
     <Flexbox gap={12}>
       <Flexbox horizontal align={'flex-start'} gap={16} width={'100%'}>
-        <ModelIcon model={identifier} size={mobile ? 48 : 64} />
+        <BrandedModelIcon model={modelId} size={mobile ? 48 : 64} />
         <Flexbox
           flex={1}
           gap={4}
@@ -70,9 +75,9 @@ const Header = memo<{ mobile?: boolean }>(({ mobile: isMobile }) => {
                 as={'h1'}
                 ellipsis={{ rows: 1 }}
                 style={{ fontSize: mobile ? 18 : 24, margin: 0 }}
-                title={identifier}
+                title={modelId}
               >
-                {displayName || identifier}
+                {displayName || formatBrandedModelId(modelId)}
               </Text>
             </Flexbox>
             <Flexbox horizontal align={'center'} gap={6}>
@@ -80,7 +85,7 @@ const Header = memo<{ mobile?: boolean }>(({ mobile: isMobile }) => {
             </Flexbox>
           </Flexbox>
           <Flexbox horizontal align={'center'} gap={4}>
-            <span>{identifier}</span>
+            <span>{formatBrandedModelId(modelId)}</span>
             <Icon icon={DotIcon} />
             <ModelInfoTags
               directionReverse

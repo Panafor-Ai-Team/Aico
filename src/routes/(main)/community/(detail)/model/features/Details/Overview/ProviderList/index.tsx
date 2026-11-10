@@ -1,6 +1,5 @@
 'use client';
 
-import { ProviderIcon } from '@lobehub/icons';
 import { ActionIcon, Block, Flexbox, Icon, Tooltip, TooltipGroup } from '@lobehub/ui';
 import { cssVar } from 'antd-style';
 import { BadgeCheck, BookIcon, ChevronRightIcon, KeyIcon } from 'lucide-react';
@@ -8,6 +7,7 @@ import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import urlJoin from 'url-join';
 
+import { BrandedProviderIcon } from '@/components/Branding/BrandedProviderIcon';
 import InlineTable from '@/components/InlineTable';
 import { ModelInfoTags } from '@/components/ModelSelect';
 import { BASE_PROVIDER_DOC_URL } from '@/const/url';
@@ -39,7 +39,7 @@ const ProviderList = memo(() => {
                     to={urlJoin('/community/provider', record.id)}
                   >
                     <Flexbox horizontal align="center" gap={8}>
-                      <ProviderIcon provider={record.id} size={24} type={'avatar'} />
+                      <BrandedProviderIcon provider={record.id} size={24} type={'avatar'} />
                       <div style={{ fontWeight: 500 }}>{record.name}</div>
                     </Flexbox>
                   </WorkspaceLink>

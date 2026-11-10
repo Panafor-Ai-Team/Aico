@@ -1,4 +1,7 @@
+import { discoverAuthorizationServerMetadata } from '@modelcontextprotocol/sdk/client/auth.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { exchangeConnectorCode } from '@/server/services/connector/oauth';
 
 import { GET } from './route';
 
@@ -63,6 +66,26 @@ beforeEach(() => {
 });
 
 describe('connector OAuth callback', () => {
+  it('discovers metadata through the SSRF-safe fetch and reuses the authorize-time resource', async () => {
+    mockSync.mockResolvedValue({ toolCount: 1 });
+    mockConsume.mockResolvedValue({
+      authorizationServerUrl: 'https://as',
+      codeVerifier: 'v',
+      connectorId: 'c1',
+      lobeUserId: 'u1',
+      resource: 'https://mcp.example.com/',
+    });
+
+    await GET(makeReq());
+
+    expect(vi.mocked(discoverAuthorizationServerMetadata).mock.calls[0][1]).toEqual({
+      fetchFn: expect.any(Function),
+    });
+    expect(vi.mocked(exchangeConnectorCode).mock.calls[0][0].resource).toBe(
+      'https://mcp.example.com/',
+    );
+  });
+
   it('reports synced:false when auth succeeds but tool sync fails', async () => {
     mockSync.mockRejectedValue(new Error('mcp down'));
 

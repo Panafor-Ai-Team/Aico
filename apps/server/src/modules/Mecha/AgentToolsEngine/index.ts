@@ -17,6 +17,7 @@ import { LocalSystemManifest } from '@lobechat/builtin-tool-local-system';
 import { MemoryManifest } from '@lobechat/builtin-tool-memory';
 import { MessageManifest } from '@lobechat/builtin-tool-message';
 import { RemoteDeviceManifest } from '@lobechat/builtin-tool-remote-device';
+import { VideoGenerationManifest } from '@lobechat/builtin-tool-video-generation';
 import { WebBrowsingManifest } from '@lobechat/builtin-tool-web-browsing';
 import {
   alwaysOnToolIds,
@@ -45,6 +46,7 @@ import {
   DEVICE_TOOL_IDENTIFIERS,
   REMOTE_DEVICE_TOOL_IDENTIFIERS,
 } from '@/server/services/aiAgent/deviceToolRegistry';
+import { isCloudSandboxConfigured } from '@/server/services/sandbox/config';
 
 import {
   type ServerAgentToolsContext,
@@ -60,6 +62,46 @@ export type {
 } from './types';
 
 const log = debug('lobe-server:agent-tools-engine');
+
+/**
+ * A manifest is usable by ToolsEngine only if it has an `api` array.
+ * ToolsEngine.convertManifestsToTools calls `manifest.api.map(...)`
+ * unconditionally, so any entry with `api` missing / non-array crashes the
+ * whole tools build — and with it every execAgent call of the affected user.
+ * Installed-plugin manifests come straight from a DB jsonb column with no
+ * schema validation, so guard defensively at the merge point. Mirrors the
+ * frontend `dropInvalidManifests` in `src/helpers/toolEngineering`.
+ */
+const isValidToolManifest = (m: LobeToolManifest | undefined): m is LobeToolManifest =>
+  !!m && typeof m === 'object' && Array.isArray((m as LobeToolManifest).api);
+
+const dropInvalidManifests = (
+  manifests: (LobeToolManifest | undefined)[],
+  source: string,
+): LobeToolManifest[] => {
+  const valid: LobeToolManifest[] = [];
+  const dropped: Array<{ identifier?: string; reason: string }> = [];
+
+  for (const m of manifests) {
+    if (isValidToolManifest(m)) {
+      valid.push(m);
+    } else if (m) {
+      dropped.push({
+        identifier: (m as { identifier?: string }).identifier,
+        reason: 'missing `api` field (expected array)',
+      });
+    }
+  }
+
+  if (dropped.length > 0) {
+    console.warn(
+      `[AgentToolsEngine] Dropped ${dropped.length} invalid manifest(s) from ${source}:`,
+      dropped,
+    );
+  }
+
+  return valid;
+};
 
 /**
  * Initialize ToolsEngine with server-side context
@@ -84,9 +126,10 @@ export const createServerToolsEngine = (
   } = config;
 
   // Get plugin manifests from installed plugins (from database)
-  const pluginManifests = context.installedPlugins
-    .map((plugin) => plugin.manifest as LobeToolManifest)
-    .filter(Boolean);
+  const pluginManifests = dropInvalidManifests(
+    context.installedPlugins.map((plugin) => plugin.manifest as LobeToolManifest | undefined),
+    'installedPlugins',
+  );
 
   // Get builtin tool manifests from the (possibly pre-filtered) list. The
   // filter is one half of the hard wall keeping device tools out of an
@@ -116,7 +159,11 @@ export const createServerToolsEngine = (
   // Skill/Composio manifest claiming `lobe-remote-device` would otherwise
   // slip through `buildAllowedBuiltinTools` (which only touches the
   // builtin source).
-  const combinedManifests = [...pluginManifests, ...builtinManifests, ...additionalManifests];
+  const combinedManifests = [
+    ...pluginManifests,
+    ...builtinManifests,
+    ...dropInvalidManifests(additionalManifests, 'additionalManifests'),
+  ];
   const allManifests = excludeIdentifiers
     ? combinedManifests.filter((m) => !excludeIdentifiers.has(m.identifier))
     : combinedManifests;
@@ -163,8 +210,9 @@ export const createServerAgentToolsEngine = (
     isBotConversation = false,
     isGroupSupervisor = false,
     manifestContext,
+    mediaGenerationOffer,
     model,
-    modelAbilities,
+    modelAbilities: _modelAbilities,
     provider,
     useApplicationBuiltinSearchTool,
   } = params;
@@ -209,8 +257,12 @@ export const createServerAgentToolsEngine = (
 
   const searchMode = agentConfig.chatConfig?.searchMode ?? 'auto';
   const isSearchEnabled = useApplicationBuiltinSearchTool ?? searchMode !== 'off';
-  const imageGenerationEnabled =
-    context.isModelSupportToolUse(model, provider) && !modelAbilities?.imageOutput;
+  // Offer image/video tools only when the caller detected generative intent
+  // (or an agent pin). Always-on FC offering cost ~5k schema tokens per turn;
+  // clear photo/video asks still run via directToolCalls without the offer.
+  const modelCanUseTools = context.isModelSupportToolUse(model, provider);
+  const imageGenerationEnabled = modelCanUseTools && Boolean(mediaGenerationOffer?.image);
+  const videoGenerationEnabled = modelCanUseTools && Boolean(mediaGenerationOffer?.video);
   // Tool mode: explicit `toolMode` wins; otherwise derive from `enableAgentMode`
   // (undefined = agent). `custom` = toolset is exactly the agent's plugins.
   const toolMode = resolveToolMode(agentConfig.chatConfig ?? undefined);
@@ -230,17 +282,16 @@ export const createServerAgentToolsEngine = (
     isChatMode,
   );
 
-  // Chat mode: strict outer whitelist. Drop user plugins, alwaysOn tools, and
-  // every other runtime-managed rule. Each entry below still passes through
-  // its own runtime gate (KB needs enabled bases, memory needs global toggle,
-  // web-browsing needs search on). `allowExplicitActivation` is off so the
-  // activator can't smuggle anything else in.
+  // Chat mode: strict outer whitelist. Drop alwaysOn tools and every other
+  // runtime-managed rule. Each entry still passes through its own gate (KB /
+  // memory / search). Image generation is opt-in via a pinned plugin — no
+  // automatic injection. `allowExplicitActivation` is off so the activator
+  // can't smuggle anything else in.
   const chatModeRules = {
-    // Example: Claude can call tools but lacks native imageOutput, so expose the
-    // image-generation fallback; image-output models should use their native path.
     [ImageGenerationManifest.identifier]: imageGenerationEnabled,
     [KnowledgeBaseManifest.identifier]: hasEnabledKnowledgeBases,
     [MemoryManifest.identifier]: globalMemoryEnabled,
+    [VideoGenerationManifest.identifier]: videoGenerationEnabled,
     [WebBrowsingManifest.identifier]: isSearchEnabled,
   };
 
@@ -256,7 +307,10 @@ export const createServerAgentToolsEngine = (
     // Always-on builtin tools
     ...Object.fromEntries(alwaysOnToolIds.map((id) => [id, true])),
     // System-level rules (may override user selection for specific tools)
-    [CloudSandboxManifest.identifier]: runtimeMode === 'cloud',
+    // Cloud sandbox: the agent must be on the cloud runtime AND the deployment
+    // must actually have a sandbox backend configured. Without one every call
+    // 401s into a LobeHub sign-in popup, so the tool must never be offered.
+    [CloudSandboxManifest.identifier]: runtimeMode === 'cloud' && isCloudSandboxConfigured(),
     [KnowledgeBaseManifest.identifier]: hasEnabledKnowledgeBases,
     // Local-system: the user must have opted into local runtime
     // (`runtimeMode === 'local'`) AND have an online, auto-activated device
@@ -297,6 +351,8 @@ export const createServerAgentToolsEngine = (
     // physical walls drop it for `canUseDevice=false` turns.
     [RemoteDeviceManifest.identifier]: deviceCapable && hasDeviceProxy && !deviceLocked,
     [WebBrowsingManifest.identifier]: isSearchEnabled,
+    [ImageGenerationManifest.identifier]: imageGenerationEnabled,
+    [VideoGenerationManifest.identifier]: videoGenerationEnabled,
   };
 
   const excludedIdentifiers = new Set(disabledPluginIds);

@@ -1,0 +1,16 @@
+[Unit]
+Description=Onlyboxes sandbox network isolation (iptables + tc)
+Requires=docker.service
+After=docker.service ufw.service
+# Re-apply when dockerd restarts (it rebuilds its own chains).
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/onlyboxes/sandbox-firewall.sh apply
+# No ExecStop: sandbox containers outlive the worker, so stopping this unit
+# must never open the network. Removal is manual: sandbox-firewall.sh remove.
+
+[Install]
+WantedBy=multi-user.target docker.service

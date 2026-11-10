@@ -5,14 +5,15 @@ import { UAParser } from 'ua-parser-js';
 import urlJoin from 'url-join';
 
 import { auth } from '@/auth';
-import { LOBE_LOCALE_COOKIE } from '@/const/locale';
+import { LOBE_LOCALE_AUTO, LOBE_LOCALE_COOKIE } from '@/const/locale';
 import { appEnv } from '@/envs/app';
 import { authEnv } from '@/envs/auth';
 import { type Locales } from '@/locales/resources';
-import { parseBrowserLanguage } from '@/utils/locale';
+import { parseBrowserLanguage, resolveAutoLanguage } from '@/utils/locale';
 import { DEFAULT_LANG, locales, RouteVariants } from '@/utils/server/routeVariants';
 
 import { authSpaRoutes, nextjsOnlyRoutes } from '../nextjsOnlyRoutes';
+import { isWorkbenchSpaRoute } from '../workbenchRoutes';
 import { createRouteMatcher } from './createRouteMatcher';
 
 // Create debug logger instances
@@ -72,9 +73,14 @@ export function defineConfig() {
     // if it's a new user, there's no cookie, So we need to use the fallback language parsed by accept-language
     const browserLanguage = parseBrowserLanguage(request.headers);
 
+    const cookieLocale = request.cookies.get(LOBE_LOCALE_COOKIE)?.value;
+
+    // `auto` ("System Language") follows Accept-Language; no cookie at all keeps the Persian default
     const locale =
       explicitlyLocale ||
-      ((request.cookies.get(LOBE_LOCALE_COOKIE)?.value || browserLanguage) as Locales);
+      ((cookieLocale === LOBE_LOCALE_AUTO
+        ? resolveAutoLanguage(request.headers)
+        : cookieLocale || browserLanguage) as Locales);
 
     const ua = request.headers.get('user-agent');
 
@@ -145,6 +151,17 @@ export function defineConfig() {
       return response;
     }
 
+    if (device.type === 'mobile' && isWorkbenchSpaRoute(url.pathname)) {
+      const workbenchPath = `/spa-workbench/${safeLocale}${url.pathname}`;
+      logDefault('Workbench SPA route, rewriting to: %s', workbenchPath);
+      url.pathname = workbenchPath;
+
+      const response = NextResponse.rewrite(url);
+      persistLocaleCookie(response, request, explicitlyLocale);
+
+      return response;
+    }
+
     const isNextjsRoute = nextjsOnlyRoutes.some((r) => url.pathname.startsWith(r));
 
     // SPA routes: rewrite to /spa/[variants]/[...path] catch-all
@@ -205,13 +222,19 @@ export function defineConfig() {
     '/signup',
     '/auth-error',
     '/verify-email',
+    '/verify-phone',
     '/reset-password',
+    // Legal docs linked from auth consent — must be readable before sign-in.
+    '/terms',
+    '/privacy',
     // oauth
     // Make only the consent view public (GET page), not other oauth paths
     '/oauth/consent/(.*)',
     // Custom connector OAuth callback — hit via a cross-site redirect from the
     // provider, carries its own code+state, so it must not be session-gated.
     '/oauth/connector/callback',
+    // CIMD document fetched server-to-server by the authorization server.
+    '/oauth/connector/client-metadata',
     '/oidc/handoff',
     '/oidc/device/auth',
     '/oidc/token',
@@ -249,8 +272,10 @@ export function defineConfig() {
     if (!isProtected) return response;
 
     // Get full session with user data (Next.js 15.2.0+ feature)
+    // AUTH-002: skip cookie cache so logout / password-reset revoke is honored immediately
     const session = await auth.api.getSession({
       headers: req.headers,
+      query: { disableCookieCache: true },
     });
 
     const isLoggedIn = !!session?.user;

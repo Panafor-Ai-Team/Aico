@@ -1,6 +1,7 @@
-import { type SliderWithInputProps } from '@lobehub/ui';
-import { SliderWithInput } from '@lobehub/ui';
-import { memo, useEffect, useState } from 'react';
+import { SliderWithInput, type SliderWithInputProps } from '@lobehub/ui/base-ui';
+import { memo } from 'react';
+
+import { useClampedSliderValue } from './useClampedSliderValue';
 
 interface FormSliderWithInputProps extends Omit<SliderWithInputProps, 'onChange' | 'value'> {
   onChange?: (value: number) => void;
@@ -10,14 +11,11 @@ interface FormSliderWithInputProps extends Omit<SliderWithInputProps, 'onChange'
 /**
  * Form-integrated slider with delayed onChange behavior.
  * Only triggers onChange on blur to prevent excessive updates during user interaction.
+ * The value stays clamped to [min, max] (see `useClampedSliderValue`).
  */
 const FormSliderWithInput = memo<FormSliderWithInputProps>(
-  ({ onChange, value: defaultValue, ...props }) => {
-    const [value, setValue] = useState(defaultValue ?? 0);
-
-    useEffect(() => {
-      setValue(defaultValue ?? 0);
-    }, [defaultValue]);
+  ({ onChange, value: defaultValue, min, max, ...props }) => {
+    const [value, setValue] = useClampedSliderValue(defaultValue, min, max);
 
     return (
       <SliderWithInput
@@ -30,6 +28,8 @@ const FormSliderWithInput = memo<FormSliderWithInputProps>(
           }
         }}
         {...props}
+        max={max}
+        min={min}
         value={value}
       />
     );

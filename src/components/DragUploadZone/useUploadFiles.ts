@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 
+import { isUploadBlockedByAbility, useMediaUploadAbility } from '@/hooks/useMediaUploadAbility';
 import { usePermission } from '@/hooks/usePermission';
-import { useVisualMediaUploadAbility } from '@/hooks/useVisualMediaUploadAbility';
 import { useFileStore } from '@/store/file';
 
 interface UseUploadFilesOptions {
@@ -12,7 +12,7 @@ interface UseUploadFilesOptions {
 }
 
 /**
- * Hook to handle file uploads with visual media support filtering.
+ * Hook to handle file uploads with multimodal media support filtering.
  * Filters out image/video files if the model cannot receive them directly or via fallback.
  *
  * @param options - The agent id (for upload validation scope) plus model/provider for vision support
@@ -21,11 +21,8 @@ interface UseUploadFilesOptions {
 export const useUploadFiles = (options: UseUploadFilesOptions) => {
   const { agentId, model = '', provider = '' } = options;
 
-  const { canUploadImage, canUploadVideo, canUploadAudio } = useVisualMediaUploadAbility(
-    model,
-    provider,
-    agentId,
-  );
+  const mediaUploadAbility = useMediaUploadAbility(model, provider, agentId);
+  const { canUploadImage, canUploadVideo, canUploadAudio } = mediaUploadAbility;
   const uploadFiles = useFileStore((s) => s.uploadChatFiles);
   const { allowed: canUpload } = usePermission('create_content');
 
@@ -34,18 +31,15 @@ export const useUploadFiles = (options: UseUploadFilesOptions) => {
       if (!canUpload) return;
 
       // Filter out media files if the model cannot receive them directly or via fallback.
-      const filteredFiles = files.filter((file) => {
-        if (file.type.startsWith('image')) return canUploadImage;
-        if (file.type.startsWith('video')) return canUploadVideo;
-        if (file.type.startsWith('audio')) return canUploadAudio;
-        return true;
-      });
+      const filteredFiles = files.filter(
+        (file) => !isUploadBlockedByAbility(file, mediaUploadAbility),
+      );
 
       if (filteredFiles.length > 0) {
         uploadFiles(filteredFiles, agentId);
       }
     },
-    [agentId, canUpload, canUploadImage, canUploadVideo, canUploadAudio, uploadFiles],
+    [agentId, canUpload, mediaUploadAbility, uploadFiles],
   );
 
   return { canUploadImage, canUploadVideo, canUploadAudio, handleUploadFiles };

@@ -8,12 +8,17 @@ import { emitClientAgentSignalSourceEvent } from '@/store/chat/slices/agentRun/a
 import { snapshotTopicWorkingDirGit } from '@/store/chat/slices/agentRun/actions/lifecycle/snapshotWorkingDirGit';
 import type { ChatStore } from '@/store/chat/store';
 import { notifyDesktopAgentCompleted } from '@/store/chat/utils/desktopNotification';
+import { resolveGroupTopicScope } from '@/store/chat/utils/topicMapKey';
 import { markdownToTxt } from '@/utils/markdownToTxt';
 
 import { messageMapKey } from '../../../../utils/messageMapKey';
 import { displayMessageSelectors } from '../../../message/selectors/displayMessage';
 import type { OperationStatus } from '../../../operation/types';
-import { mergeQueuedMessages, reconstructUploadFilesFromQueue } from '../../../operation/types';
+import {
+  AI_RUNTIME_OPERATION_TYPES,
+  mergeQueuedMessages,
+  reconstructUploadFilesFromQueue,
+} from '../../../operation/types';
 import { topicSelectors } from '../../../topic/selectors';
 import type {
   AgentRunLifecycle,
@@ -318,6 +323,11 @@ export const buildRunLifecycle = (
           get().markTopicUnread({
             agentId: completedOp.context.agentId,
             groupId: completedOp.context.groupId,
+            // Same rule as `resetActiveTopicRunningStatus` below: carry the group
+            // scope so the optimistic 'unread' patch lands in the bucket the
+            // sidebar actually renders, instead of leaving the visible group
+            // topic on the run-start 'running'.
+            scope: resolveGroupTopicScope(completedOp.context.scope),
             topicId: completedOp.context.topicId,
           });
         }
@@ -337,6 +347,17 @@ export const buildRunLifecycle = (
         if (adapter.runtimeType !== 'client') return;
         if (adapter.runScope === 'sub_agent') return;
         if (!topicId) return;
+        const hasNewerRuntime = Object.values(get().operations).some(
+          (candidate) =>
+            candidate.id !== operationId &&
+            candidate.status === 'running' &&
+            AI_RUNTIME_OPERATION_TYPES.includes(candidate.type) &&
+            candidate.context.topicId === topicId &&
+            candidate.context.agentId === agentId &&
+            candidate.context.groupId === groupId &&
+            !candidate.parentOperationId,
+        );
+        if (hasNewerRuntime) return;
         const viewing = get().activeTopicId === topicId;
         // Not-viewing clean success is owned by `markTopicUnread` (→ 'unread');
         // skip so the two never race over the status field.

@@ -1,0 +1,100 @@
+import {
+  AICO_ERROR_MESSAGES_FA,
+  type AicoErrorCode,
+  resolveAicoErrorCode,
+} from '@lobechat/business-const';
+import { toast } from '@lobehub/ui/base-ui';
+
+import { buildPhoneVerifyRedirectUrl } from '@/libs/better-auth/phone';
+
+/**
+ * Structural stand-in for react-i18next's `TFunction`.
+ *
+ * `TFunction<Ns>` is a heavily overloaded type whose key parameter is a literal
+ * union of that namespace's keys, so it is not assignable to a plain
+ * `(key: string) => string`. These helpers only ever forward a key and options
+ * through, and are called from many namespaces, so the parameters are
+ * intentionally loose — the useful contract is the `string` return.
+ */
+
+type LooseT = (key: any, options?: any) => string;
+
+/** Pull a likely error-code string out of TRPC / Error / ChatMessageError shapes. */
+export const extractErrorCodeCandidate = (error: unknown): string => {
+  if (!error) return '';
+  if (typeof error === 'string') return error;
+  if (typeof error !== 'object') return '';
+
+  const candidate = error as {
+    body?: { error?: unknown; message?: unknown };
+    data?: { message?: unknown };
+    message?: unknown;
+    shape?: { message?: unknown };
+  };
+
+  // Chat SSE: createErrorResponse puts Aico codes in `body.error` while
+  // `message` is a generic localized InvalidUserKey string — prefer body.
+  if (typeof candidate.body?.error === 'string' && candidate.body.error.trim()) {
+    return candidate.body.error;
+  }
+  if (typeof candidate.body?.message === 'string' && candidate.body.message.trim()) {
+    return candidate.body.message;
+  }
+  if (typeof candidate.message === 'string' && candidate.message.trim()) {
+    return candidate.message;
+  }
+  if (typeof candidate.data?.message === 'string') return candidate.data.message;
+  if (typeof candidate.shape?.message === 'string') return candidate.shape.message;
+  return '';
+};
+
+/**
+ * Map a thrown Aico error code to localized UI copy.
+ * Returns `undefined` when the value is not a known Aico code (caller keeps its fallback).
+ */
+export const resolveAicoErrorMessage = (errorOrCode: unknown, t?: LooseT): string | undefined => {
+  const raw =
+    typeof errorOrCode === 'string' ? errorOrCode : extractErrorCodeCandidate(errorOrCode);
+  const code = resolveAicoErrorCode(raw);
+  if (!code) return undefined;
+
+  const faDefault = AICO_ERROR_MESSAGES_FA[code as AicoErrorCode];
+  if (!t) return faDefault;
+  return t(`errors.${code}`, { defaultValue: faDefault });
+};
+
+const navigateToPhoneVerify = (callbackUrl?: string) => {
+  const target =
+    callbackUrl ||
+    (typeof window !== 'undefined' ? `${window.location.pathname}${window.location.search}` : '/');
+  window.location.assign(buildPhoneVerifyRedirectUrl(target));
+};
+
+/** Toast a known Aico code, otherwise the caller's fallback key. */
+export const toastAicoError = (
+  error: unknown,
+  t: LooseT,
+  fallbackKey: string,
+  options?: { phoneVerifyCallbackUrl?: string },
+): void => {
+  const raw = extractErrorCodeCandidate(error);
+  const code = resolveAicoErrorCode(raw);
+  const message = resolveAicoErrorMessage(error, t) ?? t(fallbackKey);
+
+  if (code === 'PHONE_VERIFICATION_REQUIRED') {
+    toast.error({
+      actions: [
+        {
+          label: t('errors.verifyPhoneAction', { defaultValue: 'Verify phone' }),
+          onClick: () => navigateToPhoneVerify(options?.phoneVerifyCallbackUrl),
+          variant: 'primary',
+        },
+      ],
+      duration: 12_000,
+      title: message,
+    });
+    return;
+  }
+
+  toast.error(message);
+};

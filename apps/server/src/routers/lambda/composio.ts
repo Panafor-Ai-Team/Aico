@@ -18,10 +18,16 @@ import {
   ConnectorSourceType,
   ConnectorStatus,
 } from '@/database/schemas';
-import { getComposioClient } from '@/libs/composio';
-import { inferCrudType } from '@/libs/mcp/utils';
+import { getComposioClient, revokeComposioConnectedAccount } from '@/libs/composio';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
+import { ComposioService } from '@/server/services/composio';
+import {
+  COMPOSIO_TOOLS_VERSION,
+  type ComposioToolInput,
+  fetchCuratedComposioTools,
+  toConnectorToolRows,
+} from '@/server/services/composio/curate';
 
 import { assertWorkspaceRowManageable } from './_helpers/assertWorkspaceRowManageable';
 
@@ -75,12 +81,6 @@ async function assertComposioRowManageable(
   if (existing) assertWorkspaceRowManageable(ctx, existing.userId, 'connector');
 }
 
-type ComposioToolInput = {
-  description?: string;
-  inputSchema?: Record<string, unknown>;
-  name: string;
-};
-
 /**
  * Dual-write helper: mirror a Composio connection into `user_connectors`
  * (+ `user_connector_tools`) so the runtime can resolve it without touching the
@@ -115,9 +115,17 @@ async function upsertComposioConnector(
     tools?: ComposioToolInput[];
   },
 ): Promise<void> {
+  // Stamp the tool-set version only when an authoritative tool list is written,
+  // so a connector synced before the curation rules changed is picked up for a
+  // lazy re-sync at runtime (ComposioService.getComposioManifests).
+  const composio: ComposioConnectorMetadata =
+    params.replaceTools && params.tools?.length
+      ? { ...params.composio, toolsVersion: COMPOSIO_TOOLS_VERSION }
+      : params.composio;
+
   const metadata: ConnectorMetadata = {
     avatar: '🔌',
-    composio: params.composio,
+    composio,
     description: `Composio: ${params.label}`,
   };
 
@@ -155,15 +163,7 @@ async function upsertComposioConnector(
 
   if (params.tools) {
     if (params.tools.length > 0) {
-      await connectorToolModel.upsertMany(
-        connectorId,
-        params.tools.map((t) => ({
-          crudType: inferCrudType(t.name),
-          description: t.description,
-          inputSchema: t.inputSchema,
-          toolName: t.name,
-        })),
-      );
+      await connectorToolModel.upsertMany(connectorId, toConnectorToolRows(params.tools));
     }
 
     // Replace (not merge) so tools removed upstream stop being advertised.
@@ -253,34 +253,43 @@ export const composioRouter = router({
         });
       }
 
+      // Reconnecting over an existing row replaces its account: revoke the old one
+      // so its token doesn't outlive the row that pointed at it. Best-effort — the
+      // link below no longer depends on it.
+      const replaced = await ctx.connectorModel.findScopedByIdentifier(identifier, agentId);
+      const replacedAccountId = replaced?.metadata?.composio?.connectedAccountId;
+      if (replacedAccountId) {
+        try {
+          await revokeComposioConnectedAccount(ctx.composioClient, replacedAccountId);
+        } catch (error) {
+          console.warn('[Composio] Failed to revoke the replaced connection:', error);
+        }
+      }
+
       // Composio-managed OAuth auth configs no longer support `initiate`; use
       // `link` (POST /api/v3/connected_accounts/link) to get the redirect URL.
       //
-      // `allowMultiple` for agent connections: Composio rejects a second linked
-      // account for the same (user entity, auth config) unless this is set. An
-      // agent connector is intentionally a *separate* account from the user's
-      // (and from other agents'), all under the same Composio user entity but
-      // distinguished by connectedAccountId — so agent links must allow multiple.
-      // Personal connections keep the default (one account per auth config).
+      // `allowMultiple` always: without it Composio rejects the link whenever the
+      // user entity already has an ACTIVE account for this auth config — an agent
+      // connection (a deliberately separate account), another scope's connection,
+      // or an orphan whose row was deleted without revoking it. Every runtime call
+      // pins the row's own connectedAccountId, so an extra account is never used.
       const connReq = await (ctx.composioClient.connectedAccounts as any).link(
         userId,
         authConfigId,
-        { callbackUrl, ...(agentId ? { allowMultiple: true } : {}) },
+        { allowMultiple: true, callbackUrl },
       );
 
-      let rawTools: any[] = [];
+      let rawTools: Awaited<ReturnType<typeof fetchCuratedComposioTools>> = [];
       try {
-        const toolsResp = await (ctx.composioClient.tools as any).getRawComposioTools({
-          toolkits: [appSlug],
-        });
-        rawTools = toolsResp?.items || toolsResp || [];
+        rawTools = await fetchCuratedComposioTools(ctx.composioClient, appSlug);
       } catch {
         // tools may not be available before auth
       }
 
       const manifest: ToolManifest = {
         api: Array.isArray(rawTools)
-          ? rawTools.map((tool: any) => ({
+          ? rawTools.map((tool) => ({
               description: tool.description || '',
               name: tool.slug || tool.name || '',
               parameters: tool.inputParameters ||
@@ -365,11 +374,9 @@ export const composioRouter = router({
       // Gate before deleting the remote account, so a non-creator/owner member
       // can't grief another member's Composio connection.
       await assertComposioRowManageable(ctx, input.identifier, input.agentId);
-      try {
-        await (ctx.composioClient.connectedAccounts as any).delete(input.connectedAccountId);
-      } catch (error) {
-        console.warn('[Composio] Failed to delete remote connection:', error);
-      }
+      // Revoke before deleting the rows: if it fails, keep them so the user sees
+      // the error and can retry, instead of an orphan ACTIVE account.
+      await revokeComposioConnectedAccount(ctx.composioClient, input.connectedAccountId);
 
       // Agent connections have no plugin-table row; only remove the base plugin
       // projection for personal connections.
@@ -380,6 +387,14 @@ export const composioRouter = router({
     }),
 
   getComposioPlugins: composioProcedure.query(async ({ ctx }) => {
+    // The browser builds its Composio tools from these rows: bring connections
+    // saved with an older curated tool set up to date first (best-effort).
+    await new ComposioService({
+      db: ctx.serverDB,
+      userId: ctx.userId,
+      workspaceId: ctx.workspaceId ?? undefined,
+    }).resyncStaleConnections();
+
     const allPlugins = await ctx.pluginModel.query();
     return allPlugins.filter((plugin) => plugin.customParams?.composio);
   }),
@@ -440,6 +455,7 @@ export const composioRouter = router({
         status: z.string(),
         tools: z.array(
           z.object({
+            crudType: z.enum(['read', 'write', 'update', 'delete']).optional(),
             description: z.string().optional(),
             inputSchema: z.any().optional(),
             name: z.string(),

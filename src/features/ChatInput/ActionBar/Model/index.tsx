@@ -1,15 +1,21 @@
-import { ModelIcon } from '@lobehub/icons';
 import { Center, Tooltip } from '@lobehub/ui';
 import { createStaticStyles, cx } from 'antd-style';
 import { memo, useCallback } from 'react';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import {
+  formatBrandedModelId,
+  isBrandedOpenRouterModelId,
+} from '@/components/Branding/brandedModelId';
 import ModelSwitchPanel from '@/features/ModelSwitchPanel';
+import { MODEL_SWITCH_PANEL_DEFAULTS } from '@/features/ModelSwitchPanel/defaults';
 import { aiModelSelectors, useAiInfraStore } from '@/store/aiInfra';
 import { useChatStore } from '@/store/chat';
 import { topicSelectors } from '@/store/chat/slices/topic/selectors';
 
 import { useAgentId } from '../../hooks/useAgentId';
 import { useAgentModelSelection } from '../../hooks/useAgentModelSelection';
+import { useModelLockTooltip } from '../../hooks/useModelLockTooltip';
 import { useActionBarContext } from '../context';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
@@ -55,6 +61,7 @@ const ModelSwitch = memo(() => {
     canSelectModel,
     model: agentModel,
     provider: agentProvider,
+    selectionLockReason,
     selectModel,
   } = useAgentModelSelection(agentId);
   // Topic-scoped model: a topic pins its own model (top-level `topics.model`
@@ -68,7 +75,10 @@ const ModelSwitch = memo(() => {
   const provider = topicModel?.model ? topicModel.provider : agentProvider;
 
   const enabledModel = useAiInfraStore(aiModelSelectors.getEnabledModelById(model, provider));
-  const displayName = enabledModel?.displayName || model;
+  const displayName = isBrandedOpenRouterModelId(model)
+    ? formatBrandedModelId(model)
+    : enabledModel?.displayName || model;
+  const lockTooltip = useModelLockTooltip(displayName, selectionLockReason);
 
   const handleModelChange = useCallback(
     async (params: { model: string; provider: string }) => {
@@ -89,19 +99,21 @@ const ModelSwitch = memo(() => {
       width={blockSize}
     >
       <div className={styles.icon}>
-        <ModelIcon model={model} size={iconSize} />
+        <BrandedModelIcon model={model} size={iconSize} />
       </div>
     </Center>
   );
 
   if (!canDisplayModel) return null;
 
-  if (!canSelectModel) return <Tooltip title={displayName}>{trigger}</Tooltip>;
+  // Locked: say which model is pinned AND why it can't be changed here — the
+  // bare model name used to leave the inert button unexplained.
+  if (!canSelectModel) return <Tooltip title={lockTooltip ?? displayName}>{trigger}</Tooltip>;
 
   return (
     <ModelSwitchPanel
       model={model}
-      placement={dropdownPlacement}
+      placement={dropdownPlacement ?? MODEL_SWITCH_PANEL_DEFAULTS.placement}
       provider={provider}
       onModelChange={handleModelChange}
     >

@@ -22,6 +22,11 @@ export interface FileServiceImpl {
   createPreSignedUrl: (key: string) => Promise<string>;
 
   /**
+   * Create pre-signed URL that downloads the file (`Content-Disposition: attachment`)
+   */
+  createPreSignedUrlForDownload: (url: string, filename: string) => Promise<string>;
+
+  /**
    * Create pre-signed preview URL
    */
   createPreSignedUrlForPreview: (key: string, expiresIn?: number) => Promise<string>;

@@ -1,0 +1,2411 @@
+import { OPENROUTER_AUTO_MODEL_ID } from '@lobechat/business-const';
+import { and, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql } from 'drizzle-orm';
+
+import {
+  aicoRenewalBatches,
+  aicoUserPublicIds,
+  type MemberBudgetItem,
+  memberBudgets,
+  modelAccessRules,
+  type NewOrganization,
+  type OrganizationInviteItem,
+  organizationInvites,
+  type OrganizationItem,
+  type OrganizationMemberItem,
+  organizationMembers,
+  organizations,
+  type OrganizationTeamItem,
+  organizationTeamMembers,
+  organizationTeams,
+  platformAdmins,
+  usageHolds,
+  usageLogs,
+  walletTransactions,
+} from '../schemas/aicoOrganization';
+import { users } from '../schemas/user';
+import type { LobeChatDatabase } from '../type';
+import {
+  type BudgetPeriod,
+  currentCycleLimitMicroUsd,
+  cycleRemainingMicroUsd,
+  isBudgetPeriod,
+  isProductBudgetPeriod,
+  periodToOpenRouterLimitReset,
+} from '../utils/aicoMoney';
+import { randomSlug } from '../utils/idGenerator';
+import { measuredCostSql } from './aicoUsageLedger';
+
+export type OrgMemberRole = 'owner' | 'admin' | 'member';
+export type OrgInviteRole = 'admin' | 'member';
+export type OrgMemberStatus = 'invited' | 'active' | 'disabled' | 'revocation_pending' | 'left';
+export type OrgStatus = 'active' | 'suspended' | 'deleted';
+export type InviteIdentifierType = 'email' | 'phone' | 'public_user_id';
+
+/** The member budget a reclaim figure was read against (N4). */
+export interface ReclaimBudgetSnapshot {
+  ledgerEpoch: number;
+  openrouterKeyId: string | null;
+  pendingPeriodAmountMicroUsd: number;
+  periodAmountMicroUsd: number;
+}
+
+type ReclaimBudgetFields = {
+  ledgerEpoch?: number | null;
+  openrouterKeyId?: string | null;
+  pendingPeriodAmountMicroUsd?: number | null;
+  periodAmountMicroUsd?: number | null;
+};
+
+/** The reclaim-relevant view of a member budget (N4). */
+export const reclaimSnapshotOf = (budget: ReclaimBudgetFields): ReclaimBudgetSnapshot => ({
+  ledgerEpoch: Number(budget.ledgerEpoch ?? 0),
+  openrouterKeyId: budget.openrouterKeyId ?? null,
+  pendingPeriodAmountMicroUsd: Number(budget.pendingPeriodAmountMicroUsd ?? 0),
+  periodAmountMicroUsd: Number(budget.periodAmountMicroUsd ?? 0),
+});
+
+/** Reads a snapshot back from an outbox payload; anything malformed is `undefined`. */
+export const parseReclaimSnapshot = (value: unknown): ReclaimBudgetSnapshot | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const v = value as Record<string, unknown>;
+  if (
+    typeof v.ledgerEpoch !== 'number' ||
+    typeof v.periodAmountMicroUsd !== 'number' ||
+    typeof v.pendingPeriodAmountMicroUsd !== 'number' ||
+    (v.openrouterKeyId !== null && typeof v.openrouterKeyId !== 'string')
+  ) {
+    return undefined;
+  }
+  return {
+    ledgerEpoch: v.ledgerEpoch,
+    openrouterKeyId: v.openrouterKeyId,
+    pendingPeriodAmountMicroUsd: v.pendingPeriodAmountMicroUsd,
+    periodAmountMicroUsd: v.periodAmountMicroUsd,
+  };
+};
+
+export const reclaimSnapshotsEqual = (a: ReclaimBudgetSnapshot, b: ReclaimBudgetSnapshot) =>
+  a.ledgerEpoch === b.ledgerEpoch &&
+  a.openrouterKeyId === b.openrouterKeyId &&
+  a.periodAmountMicroUsd === b.periodAmountMicroUsd &&
+  a.pendingPeriodAmountMicroUsd === b.pendingPeriodAmountMicroUsd;
+
+const INVITE_TTL_MS = 72 * 60 * 60 * 1000;
+export const DEFAULT_TEAM_NAME = 'Unspecified';
+export const DEFAULT_TEAM_SLUG = 'unspecified';
+
+/** Cheap OpenRouter chat models granted to new Unspecified teams by default. */
+export const DEFAULT_TEAM_MODEL_IDS = [
+  OPENROUTER_AUTO_MODEL_ID,
+  'openai/gpt-4o-mini',
+  'google/gemini-2.0-flash-001',
+  'deepseek/deepseek-chat-v3-0324',
+] as const;
+
+const slugify = (name: string): string => {
+  const base = name
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^\da-z]+/g, '-')
+    .replaceAll(/(^-|-$)/g, '')
+    .slice(0, 48);
+  return base || randomSlug(2);
+};
+
+type OrgDbLike = Pick<LobeChatDatabase, 'insert' | 'query'>;
+
+/**
+ * Seeds cheap default models onto a team only when it has zero team-scoped rules.
+ * Idempotent — never overwrites a manager-customized allow-list.
+ */
+export const seedDefaultTeamModels = async (
+  db: OrgDbLike,
+  params: { orgId: string; teamId: string },
+) => {
+  const existing = await db.query.modelAccessRules.findMany({
+    where: and(eq(modelAccessRules.teamId, params.teamId), eq(modelAccessRules.scope, 'team')),
+  });
+  if (existing.length > 0) return existing;
+
+  return db
+    .insert(modelAccessRules)
+    .values(
+      DEFAULT_TEAM_MODEL_IDS.map((modelId) => ({
+        modelId,
+        orgId: params.orgId,
+        scope: 'team' as const,
+        teamId: params.teamId,
+      })),
+    )
+    .returning();
+};
+
+/**
+ * Postgres unique_violation. Drizzle wraps driver errors in a `Failed query:`
+ * Error and hangs the original off `cause`, so the code is not always on the
+ * error we are handed.
+ */
+const isUniqueConstraintViolation = (error: unknown): boolean => {
+  let current = error;
+  for (let depth = 0; current && typeof current === 'object' && depth < 5; depth += 1) {
+    if ((current as { code?: string }).code === '23505') return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+};
+
+/**
+ * UTC period-window computation — intentionally duplicated (not imported)
+ * from `apps/server/src/services/aico/periodBoundaries.ts`: the database
+ * package cannot depend on app-level server code. Keep this in lockstep with
+ * that file. OpenRouter resets periodic key limits at midnight UTC
+ * (weeks = Monday 00:00 UTC → Sunday) — never Iran-local midnight.
+ */
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+const startOfUtcDay = (d: Date): Date =>
+  new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
+
+const startOfUtcWeekMonday = (d: Date): Date => {
+  const day = startOfUtcDay(d);
+  const mondayOffset = (day.getUTCDay() + 6) % 7;
+  return new Date(day.getTime() - mondayOffset * DAY_MS);
+};
+
+const startOfUtcMonth = (d: Date): Date =>
+  new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0));
+
+interface PeriodWindow {
+  end: Date;
+  nextRenewalAt: Date;
+  start: Date;
+}
+
+const computePeriodWindow = (period: BudgetPeriod, now = new Date()): PeriodWindow => {
+  switch (period) {
+    case 'daily': {
+      const start = startOfUtcDay(now);
+      const end = new Date(start.getTime() + DAY_MS);
+      return { end, nextRenewalAt: end, start };
+    }
+    case 'weekly': {
+      const start = startOfUtcWeekMonday(now);
+      const end = new Date(start.getTime() + 7 * DAY_MS);
+      return { end, nextRenewalAt: end, start };
+    }
+    case 'monthly': {
+      const start = startOfUtcMonth(now);
+      const end = new Date(
+        Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1, 0, 0, 0, 0),
+      );
+      return { end, nextRenewalAt: end, start };
+    }
+    case 'total': {
+      // No automatic reset — treat as open-ended until manually settled/revoked.
+      const start = now;
+      const end = new Date(Date.UTC(9999, 0, 1, 0, 0, 0, 0));
+      return { end, nextRenewalAt: end, start };
+    }
+    default: {
+      const _exhaustive: never = period;
+      throw new Error(`UNKNOWN_PERIOD:${_exhaustive}`);
+    }
+  }
+};
+
+export class OrganizationModel {
+  private readonly db: LobeChatDatabase;
+
+  constructor(db: LobeChatDatabase) {
+    this.db = db;
+  }
+
+  // ─── Platform admins ───────────────────────────────────────────────
+
+  isPlatformAdmin = async (userId: string): Promise<boolean> => {
+    const row = await this.db.query.platformAdmins.findFirst({
+      where: eq(platformAdmins.userId, userId),
+    });
+    return Boolean(row);
+  };
+
+  addPlatformAdmin = async (userId: string) => {
+    const [row] = await this.db
+      .insert(platformAdmins)
+      .values({ userId })
+      .onConflictDoNothing()
+      .returning();
+    return row;
+  };
+
+  listPlatformAdmins = async () => {
+    return this.db.query.platformAdmins.findMany({
+      orderBy: [desc(platformAdmins.createdAt)],
+    });
+  };
+
+  // ─── Organizations ─────────────────────────────────────────────────
+
+  /**
+   * Creates an org with an active owner membership. Platform-wide, a user may
+   * have at most one active organization membership — enforced here via a
+   * pre-check and, defensively against races, the unique
+   * `organization_members_unique_active_user_idx` on insert.
+   */
+  createOrganization = async (params: {
+    name: string;
+    ownerUserId: string;
+    slug?: string;
+  }): Promise<OrganizationItem> => {
+    const activeElsewhere = await this.db.query.organizationMembers.findFirst({
+      where: and(
+        eq(organizationMembers.userId, params.ownerUserId),
+        eq(organizationMembers.status, 'active'),
+      ),
+    });
+    if (activeElsewhere) throw new Error('USER_ALREADY_IN_ORGANIZATION');
+
+    let slug = params.slug?.trim() || slugify(params.name);
+    // Ensure uniqueness
+    for (let i = 0; i < 5; i++) {
+      const existing = await this.db.query.organizations.findFirst({
+        where: eq(organizations.slug, slug),
+      });
+      if (!existing) break;
+      slug = `${slugify(params.name)}-${randomSlug(1)}`;
+    }
+
+    try {
+      return await this.db.transaction(async (tx) => {
+        const [org] = await tx
+          .insert(organizations)
+          .values({
+            name: params.name.trim(),
+            ownerUserId: params.ownerUserId,
+            slug,
+          } satisfies NewOrganization)
+          .returning();
+
+        const [ownerMember] = await tx
+          .insert(organizationMembers)
+          .values({
+            joinedAt: new Date(),
+            orgId: org.id,
+            role: 'owner',
+            status: 'active',
+            userId: params.ownerUserId,
+          })
+          .returning();
+
+        const [defaultTeam] = await tx
+          .insert(organizationTeams)
+          .values({
+            isDefault: true,
+            name: DEFAULT_TEAM_NAME,
+            orgId: org.id,
+            slug: DEFAULT_TEAM_SLUG,
+          })
+          .returning();
+
+        await tx.insert(organizationTeamMembers).values({
+          orgMemberId: ownerMember.id,
+          teamId: defaultTeam.id,
+        });
+
+        await seedDefaultTeamModels(tx, { orgId: org.id, teamId: defaultTeam.id });
+
+        return org;
+      });
+    } catch (error) {
+      if (isUniqueConstraintViolation(error)) {
+        throw new Error('USER_ALREADY_IN_ORGANIZATION', { cause: error });
+      }
+      throw error;
+    }
+  };
+
+  getById = async (orgId: string) => {
+    return this.db.query.organizations.findFirst({
+      where: eq(organizations.id, orgId),
+    });
+  };
+
+  /**
+   * Orgs a user is an active member of. Suspended orgs are excluded by default —
+   * a suspended org must not grant chat/budget access via membership lookups.
+   * Pass `includeSuspended` for management/dashboard views that need to surface
+   * the suspended state itself (e.g. platform admins, or the org's own "my orgs" list).
+   */
+  listForUser = async (
+    userId: string,
+    options: { includeSuspended?: boolean } = {},
+  ): Promise<Array<OrganizationItem & { myRole: OrgMemberRole }>> => {
+    const memberships = await this.db.query.organizationMembers.findMany({
+      where: and(eq(organizationMembers.userId, userId), eq(organizationMembers.status, 'active')),
+    });
+    if (memberships.length === 0) return [];
+
+    const orgs = await Promise.all(memberships.map((m) => this.getById(m.orgId)));
+    return memberships
+      .map((m, i) => {
+        const org = orgs[i];
+        if (!org) return null;
+        // Soft-deleted orgs never appear in membership lookups.
+        if (org.status === 'deleted') return null;
+        if (!options.includeSuspended && org.status === 'suspended') return null;
+        return { ...org, myRole: m.role as OrgMemberRole };
+      })
+      .filter(Boolean) as Array<OrganizationItem & { myRole: OrgMemberRole }>;
+  };
+
+  listOrganizations = async (params: { page?: number; pageSize?: number; query?: string } = {}) => {
+    const page = Math.max(1, params.page ?? 1);
+    const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 20));
+    const offset = (page - 1) * pageSize;
+
+    const where = params.query
+      ? or(
+          ilike(organizations.name, `%${params.query}%`),
+          ilike(organizations.slug, `%${params.query}%`),
+        )
+      : undefined;
+
+    const [rows, totalRow] = await Promise.all([
+      this.db
+        .select()
+        .from(organizations)
+        .where(where)
+        .orderBy(desc(organizations.createdAt))
+        .limit(pageSize)
+        .offset(offset),
+      this.db.select({ value: count() }).from(organizations).where(where),
+    ]);
+
+    const withCounts = await Promise.all(
+      rows.map(async (org) => {
+        const [memberCount] = await this.db
+          .select({ value: count() })
+          .from(organizationMembers)
+          .where(
+            and(eq(organizationMembers.orgId, org.id), eq(organizationMembers.status, 'active')),
+          );
+        return {
+          ...org,
+          memberCount: Number(memberCount?.value ?? 0),
+          usageCostMicroUsd: 0,
+        };
+      }),
+    );
+
+    return {
+      items: withCounts,
+      page,
+      pageSize,
+      total: Number(totalRow[0]?.value ?? 0),
+    };
+  };
+
+  /** Sum of every org's `wallet_balance_micro_usd` — used for platform financial reporting. */
+  getTotalWalletBalanceMicroUsd = async (): Promise<number> => {
+    const [row] = await this.db
+      .select({ total: sql<number>`COALESCE(SUM(${organizations.walletBalanceMicroUsd}), 0)` })
+      .from(organizations);
+    return Number(row?.total ?? 0);
+  };
+
+  setOrganizationStatus = async (orgId: string, status: OrgStatus) => {
+    const existing = await this.getById(orgId);
+    if (!existing) return undefined;
+    if (existing.status === 'deleted' && status !== 'deleted') {
+      throw new Error('ORG_ALREADY_DELETED');
+    }
+    const [row] = await this.db
+      .update(organizations)
+      .set({ status })
+      .where(eq(organizations.id, orgId))
+      .returning();
+    return row;
+  };
+
+  /**
+   * Soft-deletes an organization (tombstone). Does **not** hard-delete the row —
+   * wallet_transactions / usage history must be retained.
+   *
+   * Preconditions: confirmName matches, no pending renewal batch, no member
+   * budget stuck in `renewal_pending`. A remaining wallet balance does not
+   * block deletion — it is forfeited in this transaction and written to the
+   * ledger as an `adjustment`.
+   *
+   * Side effects inside the transaction: revoke pending invites, mark all
+   * active/revocation_pending members as `left`, zero the wallet, suffix the
+   * slug, set `status: 'deleted'`. Caller should disable OpenRouter keys /
+   * enqueue reclaim.
+   */
+  softDeleteOrganization = async (params: {
+    confirmName: string;
+    /** Owner who confirmed the delete, recorded on the forfeiture ledger row. */
+    createdByUserId?: string | null;
+    orgId: string;
+  }): Promise<{
+    membersToReclaim: Array<{
+      memberId: string;
+      openrouterKeyId: string | null;
+      userId: string;
+    }>;
+    organization: OrganizationItem;
+  }> => {
+    return this.db.transaction(async (tx) => {
+      // D1: lock the org row. The balance read here is forfeited and then set
+      // to 0; unlocked, a credit committed in between was zeroed with no ledger
+      // row, and two deletes could both pass the status check.
+      const [org] = await tx
+        .select()
+        .from(organizations)
+        .where(eq(organizations.id, params.orgId))
+        .limit(1)
+        .for('update');
+      if (!org) throw new Error('ORG_NOT_FOUND');
+      if (org.status === 'deleted') throw new Error('ORG_ALREADY_DELETED');
+      if (org.name !== params.confirmName) throw new Error('ORG_NAME_MISMATCH');
+
+      const pendingBatch = await tx.query.aicoRenewalBatches.findFirst({
+        where: and(
+          eq(aicoRenewalBatches.orgId, params.orgId),
+          // R2: only a batch still in flight blocks deletion. `funded` is
+          // terminal — nothing leaves it — so counting it made an org that had
+          // ever renewed successfully impossible to delete.
+          eq(aicoRenewalBatches.status, 'pending'),
+        ),
+      });
+      if (pendingBatch) throw new Error('ORG_HAS_PENDING_RENEWAL');
+
+      const members = await tx.query.organizationMembers.findMany({
+        where: and(
+          eq(organizationMembers.orgId, params.orgId),
+          inArray(organizationMembers.status, ['active', 'revocation_pending']),
+        ),
+      });
+
+      const memberIds = members.map((m) => m.id);
+      if (memberIds.length > 0) {
+        const budgets = await tx.query.memberBudgets.findMany({
+          where: inArray(memberBudgets.orgMemberId, memberIds),
+        });
+        if (budgets.some((b) => b.renewalStatus === 'renewal_pending')) {
+          throw new Error('ORG_HAS_PENDING_RENEWAL');
+        }
+      }
+
+      await tx
+        .update(organizationInvites)
+        .set({ status: 'revoked' })
+        .where(
+          and(
+            eq(organizationInvites.orgId, params.orgId),
+            eq(organizationInvites.status, 'pending'),
+          ),
+        );
+
+      const leftAt = new Date();
+      if (memberIds.length > 0) {
+        await tx
+          .update(organizationMembers)
+          .set({ leftAt, status: 'left' })
+          .where(inArray(organizationMembers.id, memberIds));
+      }
+
+      const balanceMicroUsd = Number(org.walletBalanceMicroUsd ?? 0);
+      const balanceToman = Number(org.walletBalanceToman ?? 0);
+      if (balanceMicroUsd !== 0 || balanceToman !== 0) {
+        await tx.insert(walletTransactions).values({
+          // Negative so `balance_after − balance_before == amount` holds.
+          amountMicroUsd: -balanceMicroUsd,
+          amountToman: -balanceToman,
+          balanceAfterMicroUsd: 0,
+          balanceAfterToman: 0,
+          balanceBeforeMicroUsd: balanceMicroUsd,
+          balanceBeforeToman: balanceToman,
+          createdByUserId: params.createdByUserId ?? null,
+          description: 'Balance forfeited on organization deletion',
+          orgId: params.orgId,
+          type: 'adjustment',
+        });
+      }
+
+      const freedSlug = `${org.slug}-deleted-${org.id.slice(-8)}`;
+      const [organization] = await tx
+        .update(organizations)
+        .set({
+          slug: freedSlug,
+          status: 'deleted',
+          walletBalanceMicroUsd: 0,
+          walletBalanceToman: 0,
+        })
+        .where(eq(organizations.id, params.orgId))
+        .returning();
+      if (!organization) throw new Error('ORG_NOT_FOUND');
+
+      const membersToReclaim: Array<{
+        memberId: string;
+        openrouterKeyId: string | null;
+        userId: string;
+      }> = [];
+      if (memberIds.length > 0) {
+        const budgets = await tx.query.memberBudgets.findMany({
+          where: inArray(memberBudgets.orgMemberId, memberIds),
+        });
+        const budgetByMember = new Map(budgets.map((b) => [b.orgMemberId, b]));
+        for (const m of members) {
+          const budget = budgetByMember.get(m.id);
+          if (budget?.openrouterKeyId || Number(budget?.reservedMicroUsd ?? 0) > 0) {
+            membersToReclaim.push({
+              memberId: m.id,
+              openrouterKeyId: budget?.openrouterKeyId ?? null,
+              userId: m.userId,
+            });
+          }
+        }
+      }
+
+      return { membersToReclaim, organization };
+    });
+  };
+
+  /**
+   * Adds or re-roles a member. Despite the name this is the only membership
+   * creation path, so the role accepts the full OrgMemberRole union (matching
+   * updateMemberRole) rather than just the manager roles; it already writes
+   * whatever role is passed and defaults to 'admin'.
+   */
+  assignManager = async (params: {
+    orgId: string;
+    role?: OrgMemberRole;
+    userId: string;
+  }): Promise<OrganizationMemberItem> => {
+    const role = params.role ?? 'admin';
+
+    return this.db.transaction(async (tx) => {
+      // Lock the membership row first: a removal that is still being settled
+      // (revocation_pending) has a queued reclaim that would settle whatever
+      // budget the revived membership gets, so re-activating it now would
+      // leave an active member with a dead allocation.
+      const [existing] = await tx
+        .select()
+        .from(organizationMembers)
+        .where(
+          and(
+            eq(organizationMembers.orgId, params.orgId),
+            eq(organizationMembers.userId, params.userId),
+          ),
+        )
+        .limit(1)
+        .for('update');
+      if (existing?.status === 'revocation_pending') {
+        throw new Error('MEMBER_REMOVAL_IN_PROGRESS');
+      }
+
+      if (role === 'owner') {
+        await tx
+          .update(organizations)
+          .set({ ownerUserId: params.userId })
+          .where(eq(organizations.id, params.orgId));
+
+        // Demote previous active owners to admin
+        await tx
+          .update(organizationMembers)
+          .set({ role: 'admin' })
+          .where(
+            and(
+              eq(organizationMembers.orgId, params.orgId),
+              eq(organizationMembers.role, 'owner'),
+              eq(organizationMembers.status, 'active'),
+            ),
+          );
+      }
+
+      if (existing) {
+        const [updated] = await tx
+          .update(organizationMembers)
+          .set({
+            joinedAt: existing.joinedAt ?? new Date(),
+            role,
+            status: 'active',
+          })
+          .where(eq(organizationMembers.id, existing.id))
+          .returning();
+        return updated;
+      }
+
+      const [created] = await tx
+        .insert(organizationMembers)
+        .values({
+          joinedAt: new Date(),
+          orgId: params.orgId,
+          role,
+          status: 'active',
+          userId: params.userId,
+        })
+        .returning();
+      return created;
+    });
+  };
+
+  /** Credits an org wallet directly (topup / manual credit / refund). Amounts must be positive integers. */
+  addManualCredit = async (params: {
+    amountMicroUsd?: number;
+    amountToman: number;
+    createdByAdminId?: string | null;
+    createdByUserId?: string | null;
+    description?: string;
+    fxRateTomanPerUsd?: number;
+    /** Optional client idempotency key — unique in wallet_transactions.gateway_ref_id (FIN-003). */
+    idempotencyKey?: string;
+    orgId: string;
+    type?: 'topup' | 'manual_credit' | 'refund';
+  }) => {
+    if (!Number.isInteger(params.amountToman) || params.amountToman <= 0) {
+      throw new Error('AMOUNT_TOMAN_MUST_BE_POSITIVE_INTEGER');
+    }
+    const amountMicroUsd = params.amountMicroUsd ?? 0;
+    if (!Number.isInteger(amountMicroUsd) || amountMicroUsd <= 0) {
+      throw new Error('AMOUNT_MICRO_USD_MUST_BE_POSITIVE_INTEGER');
+    }
+    const fxRateTomanPerUsd = params.fxRateTomanPerUsd ?? null;
+    const type = params.type ?? 'manual_credit';
+
+    if (params.idempotencyKey) {
+      const existingTx = await this.db.query.walletTransactions.findFirst({
+        where: eq(walletTransactions.gatewayRefId, params.idempotencyKey),
+      });
+      if (existingTx) {
+        if (existingTx.orgId !== params.orgId || existingTx.type !== type) {
+          throw new Error('IDEMPOTENCY_KEY_CONFLICT');
+        }
+        const organization = await this.getById(params.orgId);
+        if (!organization) throw new Error('ORG_NOT_FOUND');
+        return { organization, transaction: existingTx };
+      }
+    }
+
+    const applyCredit = () =>
+      this.db.transaction(async (tx) => {
+        // D1: locked, so the ledger row's before/after figures are the real ones
+        // and a concurrent delete is seen (N9) rather than raced.
+        const [before] = await tx
+          .select()
+          .from(organizations)
+          .where(eq(organizations.id, params.orgId))
+          .limit(1)
+          .for('update');
+        if (!before) throw new Error('ORG_NOT_FOUND');
+        // N9: deletion forfeited the wallet; credit landing on the tombstone can
+        // never be allocated. A suspended org may still be paid up.
+        if (before.status === 'deleted') throw new Error('ORG_DELETED');
+        const balanceBeforeMicroUsd = Number(before.walletBalanceMicroUsd ?? 0);
+        const balanceBeforeToman = Number(before.walletBalanceToman ?? 0);
+
+        const [org] = await tx
+          .update(organizations)
+          .set({
+            walletBalanceMicroUsd: sql`${organizations.walletBalanceMicroUsd} + ${amountMicroUsd}`,
+            walletBalanceToman: sql`${organizations.walletBalanceToman} + ${params.amountToman}`,
+          })
+          .where(eq(organizations.id, params.orgId))
+          .returning();
+        if (!org) throw new Error('ORG_NOT_FOUND');
+
+        const [txRow] = await tx
+          .insert(walletTransactions)
+          .values({
+            amountMicroUsd,
+            amountToman: params.amountToman,
+            balanceAfterMicroUsd: Number(org.walletBalanceMicroUsd ?? 0),
+            balanceAfterToman: Number(org.walletBalanceToman ?? 0),
+            balanceBeforeMicroUsd,
+            balanceBeforeToman,
+            createdByAdminId: params.createdByAdminId ?? null,
+            createdByUserId: params.createdByUserId ?? null,
+            description: params.description,
+            fxRateTomanPerUsd,
+            gatewayRefId: params.idempotencyKey ?? null,
+            orgId: params.orgId,
+            type,
+          })
+          .returning();
+
+        return { organization: org, transaction: txRow };
+      });
+
+    if (!params.idempotencyKey) return applyCredit();
+
+    try {
+      return await applyCredit();
+    } catch (error) {
+      // FIN-013: a concurrent submit carrying the same key won the race. Return
+      // the credit it committed rather than an error the admin would retry into
+      // a second credit.
+      if (!isUniqueConstraintViolation(error)) throw error;
+      const existingTx = await this.db.query.walletTransactions.findFirst({
+        where: eq(walletTransactions.gatewayRefId, params.idempotencyKey),
+      });
+      if (!existingTx) throw error;
+      if (existingTx.orgId !== params.orgId || existingTx.type !== type) {
+        throw new Error('IDEMPOTENCY_KEY_CONFLICT', { cause: error });
+      }
+      const organization = await this.getById(params.orgId);
+      if (!organization) throw new Error('ORG_NOT_FOUND', { cause: error });
+      return { organization, transaction: existingTx };
+    }
+  };
+
+  // ─── Members ───────────────────────────────────────────────────────
+
+  getMemberRole = async (userId: string, orgId: string): Promise<OrgMemberRole | null> => {
+    const row = await this.db.query.organizationMembers.findFirst({
+      where: and(
+        eq(organizationMembers.orgId, orgId),
+        eq(organizationMembers.userId, userId),
+        eq(organizationMembers.status, 'active'),
+      ),
+    });
+    return (row?.role as OrgMemberRole) ?? null;
+  };
+
+  /** Own-membership lookup by (_orgId, userId, active) — replaces listMembers() scans in callers. */
+  getMemberByUser = async (params: { orgId: string; userId: string }) => {
+    return this.db.query.organizationMembers.findFirst({
+      where: and(
+        eq(organizationMembers.orgId, params.orgId),
+        eq(organizationMembers.userId, params.userId),
+        eq(organizationMembers.status, 'active'),
+      ),
+    });
+  };
+
+  /** Tenant-safe member lookup — always join resource id with org id. */
+  getMemberInOrg = async (params: { orgId: string; orgMemberId: string }) => {
+    return this.db.query.organizationMembers.findFirst({
+      where: and(
+        eq(organizationMembers.id, params.orgMemberId),
+        eq(organizationMembers.orgId, params.orgId),
+      ),
+    });
+  };
+
+  /**
+   * Budget load gated by org membership + denormalized orgId (TENANT-003).
+   * Returns null when the member is not in the org or has no budget row.
+   */
+  getMemberBudgetForOrg = async (params: { orgId: string; orgMemberId: string }) => {
+    const member = await this.getMemberInOrg(params);
+    if (!member) return null;
+    return this.db.query.memberBudgets.findFirst({
+      where: and(
+        eq(memberBudgets.orgMemberId, params.orgMemberId),
+        eq(memberBudgets.orgId, params.orgId),
+      ),
+    });
+  };
+
+  listMembers = async (orgId: string) => {
+    return this.db.query.organizationMembers.findMany({
+      where: eq(organizationMembers.orgId, orgId),
+      orderBy: [desc(organizationMembers.createdAt)],
+    });
+  };
+
+  /** Same as {@link listMembers}, joined with public short code + user identity. */
+  listMembersWithPublicCodes = async (
+    orgId: string,
+  ): Promise<
+    Array<
+      OrganizationMemberItem & {
+        email: string | null;
+        publicCode: string | null;
+        username: string | null;
+      }
+    >
+  > => {
+    const rows = await this.db
+      .select({
+        email: users.email,
+        member: organizationMembers,
+        publicCode: aicoUserPublicIds.publicCode,
+        username: users.username,
+      })
+      .from(organizationMembers)
+      .leftJoin(aicoUserPublicIds, eq(aicoUserPublicIds.userId, organizationMembers.userId))
+      .leftJoin(users, eq(users.id, organizationMembers.userId))
+      .where(eq(organizationMembers.orgId, orgId))
+      .orderBy(desc(organizationMembers.createdAt));
+
+    return rows.map((r) => ({
+      ...r.member,
+      email: r.email ?? null,
+      publicCode: r.publicCode ?? null,
+      username: r.username ?? null,
+    }));
+  };
+
+  updateMemberRole = async (params: { memberId: string; orgId: string; role: OrgMemberRole }) => {
+    const member = await this.db.query.organizationMembers.findFirst({
+      where: and(
+        eq(organizationMembers.id, params.memberId),
+        eq(organizationMembers.orgId, params.orgId),
+      ),
+    });
+    if (!member) return null;
+
+    if (member.role === 'owner' && params.role !== 'owner') {
+      const owners = await this.db.query.organizationMembers.findMany({
+        where: and(
+          eq(organizationMembers.orgId, params.orgId),
+          eq(organizationMembers.role, 'owner'),
+          eq(organizationMembers.status, 'active'),
+        ),
+      });
+      if (owners.length <= 1) {
+        throw new Error('Cannot demote the last owner');
+      }
+    }
+
+    // Ownership transfer must demote the incumbent and update organizations.owner_user_id
+    // atomically — same invariant as assignManager (AUTHZ-001).
+    if (params.role === 'owner') {
+      return this.db.transaction(async (tx) => {
+        await tx
+          .update(organizations)
+          .set({ ownerUserId: member.userId })
+          .where(eq(organizations.id, params.orgId));
+
+        await tx
+          .update(organizationMembers)
+          .set({ role: 'admin' })
+          .where(
+            and(
+              eq(organizationMembers.orgId, params.orgId),
+              eq(organizationMembers.role, 'owner'),
+              eq(organizationMembers.status, 'active'),
+            ),
+          );
+
+        const [updated] = await tx
+          .update(organizationMembers)
+          .set({ role: 'owner' })
+          .where(
+            and(
+              eq(organizationMembers.id, params.memberId),
+              eq(organizationMembers.orgId, params.orgId),
+            ),
+          )
+          .returning();
+        return updated ?? null;
+      });
+    }
+
+    const [updated] = await this.db
+      .update(organizationMembers)
+      .set({ role: params.role })
+      .where(
+        and(
+          eq(organizationMembers.id, params.memberId),
+          eq(organizationMembers.orgId, params.orgId),
+        ),
+      )
+      .returning();
+    return updated;
+  };
+
+  /**
+   * Marks a membership `revocation_pending` rather than immediately `disabled`:
+   * OpenRouter key disable / credit reclaim happens out-of-band (key outbox),
+   * so access must not be assumed revoked until that settles.
+   */
+  removeMember = async (params: { memberId: string; orgId: string }) => {
+    const member = await this.db.query.organizationMembers.findFirst({
+      where: and(
+        eq(organizationMembers.id, params.memberId),
+        eq(organizationMembers.orgId, params.orgId),
+      ),
+    });
+    if (!member) return null;
+    if (member.role === 'owner') {
+      throw new Error('Cannot remove the organization owner');
+    }
+
+    const [updated] = await this.db
+      .update(organizationMembers)
+      .set({ status: 'revocation_pending' })
+      .where(
+        and(
+          eq(organizationMembers.id, params.memberId),
+          eq(organizationMembers.orgId, params.orgId),
+        ),
+      )
+      .returning();
+    return updated;
+  };
+
+  /**
+   * Completes a removal once the key outbox has disabled the OpenRouter key and
+   * reclaimed the remaining credit. Only transitions out of `revocation_pending`,
+   * so a retried outbox entry can never resurrect or re-close a membership.
+   */
+  finalizeMemberRevocation = async (orgMemberId: string) => {
+    const [row] = await this.db
+      .update(organizationMembers)
+      .set({ leftAt: new Date(), status: 'left' })
+      .where(
+        and(
+          eq(organizationMembers.id, orgMemberId),
+          eq(organizationMembers.status, 'revocation_pending'),
+        ),
+      )
+      .returning();
+    return row ?? null;
+  };
+
+  // ─── Invites ───────────────────────────────────────────────────────
+
+  createInvite = async (params: {
+    identifierType: InviteIdentifierType;
+    identifierValue: string;
+    invitedByUserId: string;
+    orgId: string;
+    role: OrgInviteRole;
+  }): Promise<OrganizationInviteItem> => {
+    const value =
+      params.identifierType === 'email'
+        ? params.identifierValue.trim().toLowerCase()
+        : params.identifierValue.trim();
+
+    const [invite] = await this.db
+      .insert(organizationInvites)
+      .values({
+        expiresAt: new Date(Date.now() + INVITE_TTL_MS),
+        identifierType: params.identifierType,
+        identifierValue: value,
+        invitedByUserId: params.invitedByUserId,
+        orgId: params.orgId,
+        role: params.role,
+      })
+      .returning();
+    return invite;
+  };
+
+  getInviteByToken = async (token: string) => {
+    return this.db.query.organizationInvites.findFirst({
+      where: eq(organizationInvites.token, token),
+    });
+  };
+
+  getInviteById = async (params: { inviteId: string; orgId: string }) => {
+    return this.db.query.organizationInvites.findFirst({
+      where: and(
+        eq(organizationInvites.id, params.inviteId),
+        eq(organizationInvites.orgId, params.orgId),
+      ),
+    });
+  };
+
+  listPendingInvites = async (orgId: string) => {
+    return this.db.query.organizationInvites.findMany({
+      where: and(eq(organizationInvites.orgId, orgId), eq(organizationInvites.status, 'pending')),
+      orderBy: [desc(organizationInvites.createdAt)],
+    });
+  };
+
+  revokeInvite = async (params: { inviteId: string; orgId: string }) => {
+    const [row] = await this.db
+      .update(organizationInvites)
+      .set({ status: 'revoked' })
+      .where(
+        and(
+          eq(organizationInvites.id, params.inviteId),
+          eq(organizationInvites.orgId, params.orgId),
+          eq(organizationInvites.status, 'pending'),
+        ),
+      )
+      .returning();
+    return row;
+  };
+
+  /**
+   * Accepts an invite. Enforces the platform-wide single-active-org invariant:
+   * rejects if the user already has an active membership in a *different* org.
+   * Rejects if the target org is suspended.
+   */
+  acceptInvite = async (params: {
+    email?: string | null;
+    phone?: string | null;
+    publicUserId?: string | null;
+    token: string;
+    userId: string;
+  }): Promise<{ orgId: string; member: OrganizationMemberItem }> => {
+    const invite = await this.getInviteByToken(params.token);
+    if (!invite) throw new Error('INVITE_NOT_FOUND');
+    if (invite.status !== 'pending') throw new Error('INVITE_NOT_PENDING');
+    if (invite.expiresAt.getTime() < Date.now()) {
+      await this.db
+        .update(organizationInvites)
+        .set({ status: 'expired' })
+        .where(eq(organizationInvites.id, invite.id));
+      throw new Error('INVITE_EXPIRED');
+    }
+
+    const org = await this.getById(invite.orgId);
+    if (!org) throw new Error('ORG_NOT_FOUND');
+    if (org.status !== 'active') throw new Error('ORG_NOT_ACTIVE');
+
+    let identifier: string | null | undefined;
+    if (invite.identifierType === 'email') {
+      identifier = params.email?.trim().toLowerCase();
+    } else if (invite.identifierType === 'phone') {
+      identifier = params.phone?.trim();
+    } else if (invite.identifierType === 'public_user_id') {
+      identifier = params.publicUserId?.trim() ?? (await this.ensureUserPublicCode(params.userId));
+    } else {
+      throw new Error('INVITE_IDENTIFIER_MISMATCH');
+    }
+
+    if (!identifier || identifier !== invite.identifierValue) {
+      throw new Error('INVITE_IDENTIFIER_MISMATCH');
+    }
+
+    const activeElsewhere = await this.db.query.organizationMembers.findFirst({
+      where: and(
+        eq(organizationMembers.userId, params.userId),
+        eq(organizationMembers.status, 'active'),
+        ne(organizationMembers.orgId, invite.orgId),
+      ),
+    });
+    if (activeElsewhere) throw new Error('USER_ALREADY_IN_ORGANIZATION');
+
+    try {
+      return await this.db.transaction(async (tx) => {
+        // Lock the membership row before touching the invite: while a removal
+        // is unsettled (revocation_pending) its queued reclaim would settle
+        // the budget of a re-activated membership. The throw rolls back, so
+        // the invite stays pending and can be accepted once the removal ends.
+        const [existing] = await tx
+          .select()
+          .from(organizationMembers)
+          .where(
+            and(
+              eq(organizationMembers.orgId, invite.orgId),
+              eq(organizationMembers.userId, params.userId),
+            ),
+          )
+          .limit(1)
+          .for('update');
+        if (existing?.status === 'revocation_pending') {
+          throw new Error('MEMBER_REMOVAL_IN_PROGRESS');
+        }
+
+        await tx
+          .update(organizationInvites)
+          .set({ status: 'accepted' })
+          .where(eq(organizationInvites.id, invite.id));
+
+        let member: OrganizationMemberItem;
+        if (existing) {
+          const [updated] = await tx
+            .update(organizationMembers)
+            .set({
+              invitedByUserId: invite.invitedByUserId,
+              joinedAt: new Date(),
+              role: invite.role,
+              status: 'active',
+            })
+            .where(eq(organizationMembers.id, existing.id))
+            .returning();
+          member = updated;
+        } else {
+          const [created] = await tx
+            .insert(organizationMembers)
+            .values({
+              invitedByUserId: invite.invitedByUserId,
+              joinedAt: new Date(),
+              orgId: invite.orgId,
+              role: invite.role,
+              status: 'active',
+              userId: params.userId,
+            })
+            .returning();
+          member = created;
+        }
+
+        const teamMembership = await tx.query.organizationTeamMembers.findFirst({
+          where: eq(organizationTeamMembers.orgMemberId, member.id),
+        });
+        if (!teamMembership) {
+          const defaultTeam = await tx.query.organizationTeams.findFirst({
+            where: and(
+              eq(organizationTeams.orgId, invite.orgId),
+              eq(organizationTeams.isDefault, true),
+            ),
+          });
+          if (defaultTeam) {
+            await tx.insert(organizationTeamMembers).values({
+              orgMemberId: member.id,
+              teamId: defaultTeam.id,
+            });
+          }
+        }
+
+        return { member, orgId: invite.orgId };
+      });
+    } catch (error) {
+      if (isUniqueConstraintViolation(error)) {
+        throw new Error('USER_ALREADY_IN_ORGANIZATION', { cause: error });
+      }
+      throw error;
+    }
+  };
+
+  findUserIdByEmail = async (email: string): Promise<string | null> => {
+    const row = await this.db.query.users.findFirst({
+      where: eq(users.email, email.trim().toLowerCase()),
+    });
+    return row?.id ?? null;
+  };
+
+  // ─── Teams ─────────────────────────────────────────────────────────
+
+  getDefaultTeam = async (orgId: string) => {
+    return this.db.query.organizationTeams.findFirst({
+      where: and(eq(organizationTeams.orgId, orgId), eq(organizationTeams.isDefault, true)),
+    });
+  };
+
+  listTeams = async (orgId: string) => {
+    return this.db.query.organizationTeams.findMany({
+      where: eq(organizationTeams.orgId, orgId),
+      orderBy: [desc(organizationTeams.isDefault), desc(organizationTeams.createdAt)],
+    });
+  };
+
+  createTeam = async (params: {
+    name: string;
+    orgId: string;
+    slug?: string;
+  }): Promise<OrganizationTeamItem> => {
+    let slug = params.slug?.trim() || slugify(params.name);
+    for (let i = 0; i < 5; i++) {
+      const existing = await this.db.query.organizationTeams.findFirst({
+        where: and(eq(organizationTeams.orgId, params.orgId), eq(organizationTeams.slug, slug)),
+      });
+      if (!existing) break;
+      slug = `${slugify(params.name)}-${randomSlug(1)}`;
+    }
+
+    const [team] = await this.db
+      .insert(organizationTeams)
+      .values({
+        isDefault: false,
+        name: params.name.trim(),
+        orgId: params.orgId,
+        slug,
+      })
+      .returning();
+    return team;
+  };
+
+  deleteTeam = async (params: { orgId: string; teamId: string }) => {
+    const team = await this.db.query.organizationTeams.findFirst({
+      where: and(
+        eq(organizationTeams.id, params.teamId),
+        eq(organizationTeams.orgId, params.orgId),
+      ),
+    });
+    if (!team) return null;
+    if (team.isDefault) throw new Error('CANNOT_DELETE_DEFAULT_TEAM');
+
+    const defaultTeam = await this.getDefaultTeam(params.orgId);
+    if (!defaultTeam) throw new Error('DEFAULT_TEAM_MISSING');
+
+    return this.db.transaction(async (tx) => {
+      const members = await tx.query.organizationTeamMembers.findMany({
+        where: eq(organizationTeamMembers.teamId, params.teamId),
+      });
+      for (const m of members) {
+        await tx
+          .update(organizationTeamMembers)
+          .set({ teamId: defaultTeam.id })
+          .where(eq(organizationTeamMembers.id, m.id));
+      }
+      await tx.delete(modelAccessRules).where(eq(modelAccessRules.teamId, params.teamId));
+      await tx.delete(organizationTeams).where(eq(organizationTeams.id, params.teamId));
+      return team;
+    });
+  };
+
+  assignMemberToTeam = async (params: { orgMemberId: string; orgId: string; teamId: string }) => {
+    const team = await this.db.query.organizationTeams.findFirst({
+      where: and(
+        eq(organizationTeams.id, params.teamId),
+        eq(organizationTeams.orgId, params.orgId),
+      ),
+    });
+    if (!team) throw new Error('TEAM_NOT_FOUND');
+
+    const member = await this.db.query.organizationMembers.findFirst({
+      where: and(
+        eq(organizationMembers.id, params.orgMemberId),
+        eq(organizationMembers.orgId, params.orgId),
+      ),
+    });
+    if (!member) throw new Error('MEMBER_NOT_FOUND');
+
+    const existing = await this.db.query.organizationTeamMembers.findFirst({
+      where: eq(organizationTeamMembers.orgMemberId, params.orgMemberId),
+    });
+
+    if (existing) {
+      const [updated] = await this.db
+        .update(organizationTeamMembers)
+        .set({ teamId: params.teamId })
+        .where(eq(organizationTeamMembers.id, existing.id))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await this.db
+      .insert(organizationTeamMembers)
+      .values({ orgMemberId: params.orgMemberId, teamId: params.teamId })
+      .returning();
+    return created;
+  };
+
+  getMemberTeam = async (orgMemberId: string) => {
+    const link = await this.db.query.organizationTeamMembers.findFirst({
+      where: eq(organizationTeamMembers.orgMemberId, orgMemberId),
+    });
+    if (!link) return null;
+    return this.db.query.organizationTeams.findFirst({
+      where: eq(organizationTeams.id, link.teamId),
+    });
+  };
+
+  setTeamModelAccess = async (params: { modelIds: string[]; orgId: string; teamId: string }) => {
+    const team = await this.db.query.organizationTeams.findFirst({
+      where: and(
+        eq(organizationTeams.id, params.teamId),
+        eq(organizationTeams.orgId, params.orgId),
+      ),
+    });
+    if (!team) throw new Error('TEAM_NOT_FOUND');
+
+    return this.db.transaction(async (tx) => {
+      await tx
+        .delete(modelAccessRules)
+        .where(and(eq(modelAccessRules.teamId, params.teamId), eq(modelAccessRules.scope, 'team')));
+      if (params.modelIds.length === 0) return [];
+
+      const rows = await tx
+        .insert(modelAccessRules)
+        .values(
+          params.modelIds.map((modelId) => ({
+            modelId,
+            orgId: params.orgId,
+            scope: 'team' as const,
+            teamId: params.teamId,
+          })),
+        )
+        .returning();
+      return rows;
+    });
+  };
+
+  /**
+   * Switch one model on or off for a team. A rule row means on, no row means
+   * off — the two states the org admin sees.
+   */
+  setTeamModelEnabled = async (params: {
+    enabled: boolean;
+    modelId: string;
+    orgId: string;
+    teamId: string;
+  }) => {
+    const team = await this.db.query.organizationTeams.findFirst({
+      where: and(
+        eq(organizationTeams.id, params.teamId),
+        eq(organizationTeams.orgId, params.orgId),
+      ),
+    });
+    if (!team) throw new Error('TEAM_NOT_FOUND');
+
+    await this.db.transaction(async (tx) => {
+      // No unique index on (team, model): delete first so repeating "on" stays one rule.
+      await tx
+        .delete(modelAccessRules)
+        .where(
+          and(
+            eq(modelAccessRules.teamId, params.teamId),
+            eq(modelAccessRules.scope, 'team'),
+            eq(modelAccessRules.modelId, params.modelId),
+          ),
+        );
+      if (!params.enabled) return;
+
+      await tx.insert(modelAccessRules).values({
+        modelId: params.modelId,
+        orgId: params.orgId,
+        scope: 'team',
+        teamId: params.teamId,
+      });
+    });
+
+    return { enabled: params.enabled, modelId: params.modelId };
+  };
+
+  getTeamModelAccess = async (teamId: string) => {
+    return this.db.query.modelAccessRules.findMany({
+      where: and(eq(modelAccessRules.teamId, teamId), eq(modelAccessRules.scope, 'team')),
+    });
+  };
+
+  /**
+   * Allowed models for a member via their team.
+   * Empty allow-list means no models (fail-closed on org wallet).
+   * `null` means the member has no team — also deny on org wallet.
+   *
+   * Resolved in a single round-trip: this runs on the org-wallet model list and
+   * on every guarded chat request, so it must not fan out into the
+   * member → team → rules lookup chain. `organization_team_members_member_uidx`
+   * makes the member's team link unique, so flat-joining the three tables yields
+   * exactly the rows `getMemberTeam` + `getTeamModelAccess` would return.
+   */
+  getAllowedModelsForMember = async (orgMemberId: string): Promise<string[] | null> => {
+    const rows = await this.db
+      .select({ modelId: modelAccessRules.modelId, teamId: organizationTeams.id })
+      .from(organizationTeamMembers)
+      .innerJoin(organizationTeams, eq(organizationTeams.id, organizationTeamMembers.teamId))
+      .leftJoin(
+        modelAccessRules,
+        and(eq(modelAccessRules.teamId, organizationTeams.id), eq(modelAccessRules.scope, 'team')),
+      )
+      .where(eq(organizationTeamMembers.orgMemberId, orgMemberId));
+
+    // No membership in any team → deny (never "all models").
+    if (rows.length === 0) return null;
+
+    // Team with no rules leaves a single NULL modelId row → empty allow-list.
+    return rows
+      .map((row) => row.modelId)
+      .filter((modelId): modelId is string => typeof modelId === 'string');
+  };
+
+  // ─── Member budgets / credit allocation ────────────────────────────
+
+  getMemberBudget = async (orgMemberId: string) => {
+    return this.db.query.memberBudgets.findFirst({
+      where: eq(memberBudgets.orgMemberId, orgMemberId),
+    });
+  };
+
+  /**
+   * Sets (or creates) a member's period budget cap from the org wallet.
+   * Does not call OpenRouter — caller provisions/updates the key.
+   *
+   * Product rules (AICO-140):
+   * - New allocates must use daily|weekly|monthly (`total` is legacy-only).
+   * - Same period → **set/replace** the recurring cap (debit/credit delta only).
+   * - Mid-period decrease clamps to max(requested, settledUsage).
+   * - Different period → queue via pending*; prepaid once (renewal must not re-debit).
+   *
+   * Money-safety: wallet moves use compare-and-swap so concurrent writers cannot
+   * overspend the org wallet.
+   */
+  allocateMemberCredit = async (params: {
+    createdByUserId: string;
+    /** Optional client idempotency key — unique in wallet_transactions.gateway_ref_id (FIN-003). */
+    idempotencyKey?: string;
+    orgId: string;
+    orgMemberId: string;
+    period: BudgetPeriod;
+    periodAmountMicroUsd: number;
+  }) => {
+    if (!isBudgetPeriod(params.period)) throw new Error('INVALID_PERIOD');
+    if (!isProductBudgetPeriod(params.period)) throw new Error('PERIOD_NOT_ALLOWED');
+    if (!Number.isInteger(params.periodAmountMicroUsd) || params.periodAmountMicroUsd <= 0) {
+      throw new Error('AMOUNT_MUST_BE_POSITIVE_INTEGER_MICRO_USD');
+    }
+    if (params.periodAmountMicroUsd > Number.MAX_SAFE_INTEGER) {
+      throw new Error('AMOUNT_TOO_LARGE');
+    }
+
+    // The transaction already committed under this key (a retry, or the winner
+    // of a race): return what it produced. A key belongs to one member of one
+    // org — reusing it for another is a client bug, never a replay.
+    const replay = async () => {
+      if (!params.idempotencyKey) return null;
+      const existingTx = await this.db.query.walletTransactions.findFirst({
+        where: eq(walletTransactions.gatewayRefId, params.idempotencyKey),
+      });
+      if (!existingTx) return null;
+      if (
+        existingTx.type !== 'allocate' ||
+        existingTx.orgId !== params.orgId ||
+        existingTx.orgMemberId !== params.orgMemberId
+      ) {
+        throw new Error('IDEMPOTENCY_KEY_CONFLICT');
+      }
+      const organization = await this.getById(params.orgId);
+      if (!organization) throw new Error('ORG_NOT_FOUND');
+      const budget = await this.getMemberBudgetForOrg({
+        orgId: params.orgId,
+        orgMemberId: params.orgMemberId,
+      });
+      if (!budget) throw new Error('BUDGET_NOT_FOUND');
+      return { budget, organization, transaction: existingTx };
+    };
+
+    const replayed = await replay();
+    if (replayed) return replayed;
+
+    const apply = () =>
+      this.db.transaction(async (tx) => {
+        const org = await tx.query.organizations.findFirst({
+          where: eq(organizations.id, params.orgId),
+        });
+        if (!org) throw new Error('ORG_NOT_FOUND');
+        if (org.status !== 'active') throw new Error('ORG_NOT_ACTIVE');
+
+        const member = await tx.query.organizationMembers.findFirst({
+          where: and(
+            eq(organizationMembers.id, params.orgMemberId),
+            eq(organizationMembers.orgId, params.orgId),
+          ),
+        });
+        if (!member) throw new Error('MEMBER_NOT_FOUND');
+        // N8: a member who has left (or is being removed) is never renewed, swept or
+        // able to chat. Funding them debits the org for money nobody can spend.
+        if (member.status === 'left' || member.status === 'revocation_pending') {
+          throw new Error('MEMBER_NOT_ACTIVE');
+        }
+
+        const window = computePeriodWindow(params.period);
+        const openrouterLimitReset = periodToOpenRouterLimitReset(params.period);
+        // Row lock: the usage ledger places holds on this row, so the consumed
+        // figure below must not move while the cap is being recomputed.
+        const [existing] = await tx
+          .select()
+          .from(memberBudgets)
+          .where(
+            and(
+              eq(memberBudgets.orgMemberId, params.orgMemberId),
+              eq(memberBudgets.orgId, params.orgId),
+            ),
+          )
+          .for('update')
+          .limit(1);
+
+        let budget: MemberBudgetItem;
+        /** Net wallet debit (>0) or credit via negative tracked separately for ledger. */
+        let walletDebitMicroUsd = 0;
+        let walletCreditMicroUsd = 0;
+
+        const applyWalletDebit = async (amount: number) => {
+          if (amount <= 0) return;
+          const [updatedOrg] = await tx
+            .update(organizations)
+            .set({
+              walletBalanceMicroUsd: sql`${organizations.walletBalanceMicroUsd} - ${amount}`,
+            })
+            .where(
+              and(
+                eq(organizations.id, params.orgId),
+                sql`${organizations.walletBalanceMicroUsd} >= ${amount}`,
+              ),
+            )
+            .returning();
+          if (!updatedOrg) throw new Error('INSUFFICIENT_ORG_BALANCE');
+          walletDebitMicroUsd += amount;
+        };
+
+        const applyWalletCredit = async (amount: number) => {
+          if (amount <= 0) return;
+          await tx
+            .update(organizations)
+            .set({
+              walletBalanceMicroUsd: sql`${organizations.walletBalanceMicroUsd} + ${amount}`,
+            })
+            .where(eq(organizations.id, params.orgId));
+          walletCreditMicroUsd += amount;
+        };
+
+        if (!existing) {
+          await applyWalletDebit(params.periodAmountMicroUsd);
+          [budget] = await tx
+            .insert(memberBudgets)
+            .values({
+              currentPeriodEnd: window.end,
+              currentPeriodStart: window.start,
+              nextRenewalAt: window.nextRenewalAt,
+              openrouterLimitReset,
+              orgId: params.orgId,
+              orgMemberId: params.orgMemberId,
+              period: params.period,
+              periodAmountMicroUsd: params.periodAmountMicroUsd,
+              renewalStatus: 'active',
+              reservedMicroUsd: params.periodAmountMicroUsd,
+            })
+            .returning();
+        } else if (existing.renewalStatus === 'settled') {
+          // R7 (2026-10): a revoke or reclaim settled this budget and refunded what
+          // the closed cycle left. Re-allocating starts a clean cycle: the closed
+          // cycle's usage, checkpoint and holds stay with it (holds placed then
+          // carry the old epoch, so their settle cannot charge this cycle), and
+          // the stale window would otherwise collide with a funded renewal batch.
+          // Carrying the old usage forward debited the org for it a second time
+          // and could leave the member with no spendable headroom at all.
+          const previousPending = Number(existing.pendingPeriodAmountMicroUsd ?? 0);
+          if (previousPending > 0) {
+            await applyWalletCredit(previousPending);
+          }
+          const previousCap = Math.max(0, Number(existing.periodAmountMicroUsd ?? 0));
+          const delta = params.periodAmountMicroUsd - previousCap;
+          if (delta > 0) {
+            await applyWalletDebit(delta);
+          } else if (delta < 0) {
+            await applyWalletCredit(-delta);
+          }
+
+          [budget] = await tx
+            .update(memberBudgets)
+            .set({
+              billedUsageBeforeBaselineMicroUsd: 0,
+              currentPeriodEnd: window.end,
+              currentPeriodStart: window.start,
+              heldMicroUsd: 0,
+              isActive: true,
+              ledgerEpoch: sql`${memberBudgets.ledgerEpoch} + 1`,
+              nextRenewalAt: window.nextRenewalAt,
+              openHolds: 0,
+              openrouterLimitReset,
+              pendingPeriod: null,
+              pendingPeriodAmountMicroUsd: null,
+              period: params.period,
+              periodAmountMicroUsd: params.periodAmountMicroUsd,
+              renewalStatus: 'active',
+              reservedMicroUsd: params.periodAmountMicroUsd,
+              settledUsageMicroUsd: 0,
+              usageBaselineMicroUsd: 0,
+            })
+            .where(eq(memberBudgets.id, existing.id))
+            .returning();
+        } else if (existing.period === params.period) {
+          // Same period: set/replace cap. Clear any queued period change first.
+          const previousPending = Number(existing.pendingPeriodAmountMicroUsd ?? 0);
+          if (previousPending > 0) {
+            await applyWalletCredit(previousPending);
+          }
+
+          const oldCap = Number(existing.periodAmountMicroUsd ?? 0);
+          // Open ledger holds count as consumed: they may still be spent.
+          const consumed =
+            Math.max(0, Number(existing.settledUsageMicroUsd ?? 0)) +
+            Math.max(0, Number(existing.heldMicroUsd ?? 0));
+          // Decrease cannot go below already-consumed spend this cycle.
+          const effectiveCap = Math.max(params.periodAmountMicroUsd, consumed);
+          const delta = effectiveCap - oldCap;
+
+          if (delta > 0) {
+            await applyWalletDebit(delta);
+          } else if (delta < 0) {
+            await applyWalletCredit(-delta);
+          }
+
+          [budget] = await tx
+            .update(memberBudgets)
+            .set({
+              currentPeriodEnd: existing.currentPeriodEnd ?? window.end,
+              currentPeriodStart: existing.currentPeriodStart ?? window.start,
+              isActive: true,
+              nextRenewalAt: existing.nextRenewalAt ?? window.nextRenewalAt,
+              openrouterLimitReset,
+              pendingPeriod: null,
+              pendingPeriodAmountMicroUsd: null,
+              periodAmountMicroUsd: effectiveCap,
+              renewalStatus: 'active',
+              // reserved = current cap only once pending is cleared
+              reservedMicroUsd: effectiveCap,
+            })
+            .where(eq(memberBudgets.id, existing.id))
+            .returning();
+        } else if (existing.period === 'total' && isProductBudgetPeriod(params.period)) {
+          // Legacy total → product period: apply immediately (renewal never selects total).
+          const previousPending = Number(existing.pendingPeriodAmountMicroUsd ?? 0);
+          if (previousPending > 0) {
+            await applyWalletCredit(previousPending);
+          }
+
+          const oldCap = Number(existing.periodAmountMicroUsd ?? 0);
+          const consumed =
+            Math.max(0, Number(existing.settledUsageMicroUsd ?? 0)) +
+            Math.max(0, Number(existing.heldMicroUsd ?? 0));
+          const effectiveCap = Math.max(params.periodAmountMicroUsd, consumed);
+          const delta = effectiveCap - oldCap;
+
+          if (delta > 0) {
+            await applyWalletDebit(delta);
+          } else if (delta < 0) {
+            await applyWalletCredit(-delta);
+          }
+
+          [budget] = await tx
+            .update(memberBudgets)
+            .set({
+              currentPeriodEnd: window.end,
+              currentPeriodStart: window.start,
+              isActive: true,
+              nextRenewalAt: window.nextRenewalAt,
+              openrouterLimitReset,
+              pendingPeriod: null,
+              pendingPeriodAmountMicroUsd: null,
+              period: params.period,
+              periodAmountMicroUsd: effectiveCap,
+              renewalStatus: 'active',
+              reservedMicroUsd: effectiveCap,
+            })
+            .where(eq(memberBudgets.id, existing.id))
+            .returning();
+        } else {
+          // Different product period: queue pending (prepaid once). Active cycle unchanged.
+          const previousPending = Number(existing.pendingPeriodAmountMicroUsd ?? 0);
+          if (previousPending > 0) {
+            await applyWalletCredit(previousPending);
+          }
+          await applyWalletDebit(params.periodAmountMicroUsd);
+
+          const currentCap = Number(existing.periodAmountMicroUsd ?? 0);
+          [budget] = await tx
+            .update(memberBudgets)
+            .set({
+              isActive: true,
+              pendingPeriod: params.period,
+              pendingPeriodAmountMicroUsd: params.periodAmountMicroUsd,
+              // reserved = current cycle + pending next-period hold (FIN-001: OR uses periodAmount only)
+              reservedMicroUsd: currentCap + params.periodAmountMicroUsd,
+              renewalStatus: 'active',
+            })
+            .where(eq(memberBudgets.id, existing.id))
+            .returning();
+        }
+
+        const [freshOrg] = await tx
+          .select()
+          .from(organizations)
+          .where(eq(organizations.id, params.orgId))
+          .limit(1);
+        if (!freshOrg) throw new Error('ORG_NOT_FOUND');
+
+        const balanceAfterMicroUsd = Number(freshOrg.walletBalanceMicroUsd ?? 0);
+        const netDebit = walletDebitMicroUsd - walletCreditMicroUsd;
+        const balanceBeforeMicroUsd = balanceAfterMicroUsd + netDebit;
+        const ledgerAmount = Math.abs(netDebit);
+
+        // Idempotent re-set of the same cap with no pending clear — no ledger row.
+        if (ledgerAmount === 0) {
+          return { budget, organization: freshOrg, transaction: null };
+        }
+
+        const [txRow] = await tx
+          .insert(walletTransactions)
+          .values({
+            amountMicroUsd: ledgerAmount,
+            amountToman: 0,
+            balanceAfterMicroUsd,
+            balanceBeforeMicroUsd,
+            createdByUserId: params.createdByUserId,
+            description:
+              netDebit < 0
+                ? `Reduce period budget for member ${params.orgMemberId}`
+                : `Set period budget for member ${params.orgMemberId}`,
+            gatewayRefId: params.idempotencyKey ?? null,
+            orgId: params.orgId,
+            orgMemberId: params.orgMemberId,
+            type: 'allocate',
+            userId: member.userId,
+          })
+          .returning();
+
+        return { budget, organization: freshOrg, transaction: txRow };
+      });
+
+    if (!params.idempotencyKey) return apply();
+    try {
+      return await apply();
+    } catch (error) {
+      // A concurrent request with the same key committed first (its insert met
+      // the unique `gateway_ref_id`, which also rolled this transaction back).
+      // The caller asked for exactly that allocation: hand back the winner's,
+      // rather than an error the client would retry into confusion (D2).
+      if (!isUniqueConstraintViolation(error)) throw error;
+      const winner = await replay();
+      if (!winner) throw error;
+      return winner;
+    }
+  };
+
+  /**
+   * Reclaims a member's remaining reserved credit back to the org wallet on
+   * revoke/remove, and clears the OpenRouter key material. Only the
+   * OpenRouter-reported `limit_remaining` (plus any pending next-period hold)
+   * is returned — the caller (key service) computes it and passes it in.
+   *
+   * Idempotent (FIN-002): a second reclaim on an already-settled budget is a
+   * no-op and must not credit the org wallet again. A deleted organization
+   * keeps the remainder forfeited — the wallet is not credited.
+   *
+   * The period cap is zeroed alongside the reservation. Leaving a stale
+   * `periodAmountMicroUsd` behind would make a later `allocateMemberCredit` for
+   * the same period compute `delta = 0` and re-activate a fully funded budget
+   * without ever debiting the org wallet. Usage history
+   * (`settledUsageMicroUsd`, multiplier checkpoint) is deliberately preserved.
+   */
+  reclaimMemberRemainingCredit = async (params: {
+    /** Null when reclaim runs from the background key outbox rather than a manager action. */
+    createdByUserId?: string | null;
+    /** Overrides the default ledger description — the bulk sweep stamps its batch id here. */
+    description?: string;
+    /**
+     * N4: the budget `remainingMicroUsd` was read against. When given, a budget
+     * that has changed since (new cycle, new cap, new key) is not settled: the
+     * figure belongs to a state that no longer exists, and settling would
+     * refund a cycle twice or drop an allocation. The caller retries.
+     */
+    expected?: ReclaimBudgetSnapshot;
+    /**
+     * Stamped on the ledger row. The key service sets it when the refund was
+     * estimated from the last synced usage because the key could not be read.
+     */
+    metadata?: Record<string, unknown>;
+    orgId: string;
+    orgMemberId: string;
+    remainingMicroUsd: number;
+    /**
+     * Recompute the refund from ledger columns under the budget row lock
+     * (cycle − settled − held + pending), ignoring `remainingMicroUsd`. Nothing
+     * can place a hold between the read and the refund.
+     */
+    useLedgerRemaining?: boolean;
+  }) => {
+    let remaining =
+      Number.isInteger(params.remainingMicroUsd) && params.remainingMicroUsd > 0
+        ? params.remainingMicroUsd
+        : 0;
+
+    return this.db.transaction(async (tx) => {
+      const member = await tx.query.organizationMembers.findFirst({
+        where: and(
+          eq(organizationMembers.id, params.orgMemberId),
+          eq(organizationMembers.orgId, params.orgId),
+        ),
+      });
+      if (!member) throw new Error('MEMBER_NOT_FOUND');
+
+      const [existingBudget] = await tx
+        .select()
+        .from(memberBudgets)
+        .where(
+          and(
+            eq(memberBudgets.orgMemberId, params.orgMemberId),
+            eq(memberBudgets.orgId, params.orgId),
+          ),
+        )
+        .for('update')
+        .limit(1);
+
+      // What this close counts as used only because a hold is still open. It is
+      // parked in the budget's pool: if the hold settles for less, the
+      // difference goes back to the org from there.
+      let withheldForOpenHolds = 0;
+      if (params.useLedgerRemaining && existingBudget) {
+        const cycle = currentCycleLimitMicroUsd(existingBudget);
+        const settledUsage = Math.max(0, Number(existingBudget.settledUsageMicroUsd ?? 0));
+        const held = Math.max(0, Number(existingBudget.heldMicroUsd ?? 0));
+        remaining =
+          Math.max(0, cycle - settledUsage - held) +
+          Math.max(0, Number(existingBudget.pendingPeriodAmountMicroUsd ?? 0));
+        withheldForOpenHolds = Math.min(held, Math.max(0, cycle - settledUsage));
+      }
+
+      const { expected } = params;
+      if (
+        expected &&
+        !params.useLedgerRemaining &&
+        existingBudget &&
+        existingBudget.renewalStatus !== 'settled' &&
+        (Number(existingBudget.ledgerEpoch ?? 0) !== expected.ledgerEpoch ||
+          (existingBudget.openrouterKeyId ?? null) !== expected.openrouterKeyId ||
+          Number(existingBudget.periodAmountMicroUsd ?? 0) !== expected.periodAmountMicroUsd ||
+          Number(existingBudget.pendingPeriodAmountMicroUsd ?? 0) !==
+            expected.pendingPeriodAmountMicroUsd)
+      ) {
+        throw new Error('BUDGET_CHANGED_DURING_RECLAIM');
+      }
+
+      let budget: MemberBudgetItem | null = existingBudget ?? null;
+      if (existingBudget) {
+        const [casBudget] = await tx
+          .update(memberBudgets)
+          .set({
+            isActive: false,
+            openrouterKeyCiphertext: null,
+            openrouterKeyId: null,
+            pendingPeriod: null,
+            pendingPeriodAmountMicroUsd: null,
+            // Zeroed so a later re-allocation debits the wallet in full (see above).
+            periodAmountMicroUsd: 0,
+            renewalStatus: 'settled',
+            reservedMicroUsd: 0,
+            // A ledger close ends the cycle its open holds belong to: they move
+            // out of the cycle's counters (into the pool) and the epoch moves on,
+            // so their settle is recognised as late (see `settleLate`).
+            ...(params.useLedgerRemaining
+              ? {
+                  closedHoldPoolMicroUsd: sql`${memberBudgets.closedHoldPoolMicroUsd} + ${withheldForOpenHolds}`,
+                  heldMicroUsd: 0,
+                  ledgerEpoch: sql`${memberBudgets.ledgerEpoch} + 1`,
+                  openHolds: 0,
+                }
+              : {}),
+          })
+          .where(
+            and(
+              eq(memberBudgets.id, existingBudget.id),
+              ne(memberBudgets.renewalStatus, 'settled'),
+            ),
+          )
+          .returning();
+
+        if (!casBudget) {
+          // Already settled — return current org balance without inventing money.
+          const organization = await tx.query.organizations.findFirst({
+            where: eq(organizations.id, params.orgId),
+          });
+          if (!organization) throw new Error('ORG_NOT_FOUND');
+          return { budget: existingBudget, organization, transaction: null };
+        }
+        budget = casBudget;
+      }
+
+      // D1: locked after the budget (the order renewal and allocate use), so a
+      // delete committing now is seen below instead of credited over.
+      const [orgBefore] = await tx
+        .select()
+        .from(organizations)
+        .where(eq(organizations.id, params.orgId))
+        .limit(1)
+        .for('update');
+      if (!orgBefore) throw new Error('ORG_NOT_FOUND');
+
+      const balanceBeforeMicroUsd = Number(orgBefore.walletBalanceMicroUsd ?? 0);
+      const balanceBeforeToman = Number(orgBefore.walletBalanceToman ?? 0);
+
+      // Deletion already forfeited the wallet. Returning this member's remainder
+      // would recreate a balance on a tombstone the owner was told is gone.
+      if (orgBefore.status === 'deleted') {
+        let transaction = null;
+        if (remaining > 0) {
+          const [row] = await tx
+            .insert(walletTransactions)
+            .values({
+              amountMicroUsd: 0,
+              amountToman: 0,
+              balanceAfterMicroUsd: balanceBeforeMicroUsd,
+              balanceAfterToman: balanceBeforeToman,
+              balanceBeforeMicroUsd,
+              balanceBeforeToman,
+              createdByUserId: params.createdByUserId ?? null,
+              description:
+                params.description ??
+                'Forfeited remaining member credit because the organization was deleted',
+              metadata: { ...params.metadata, forfeitedMicroUsd: remaining, reason: 'org_deleted' },
+              orgId: params.orgId,
+              orgMemberId: params.orgMemberId,
+              type: 'adjustment',
+              userId: member.userId,
+            })
+            .returning();
+          transaction = row;
+        }
+        return { budget, organization: orgBefore, transaction };
+      }
+
+      const [organization] = await tx
+        .update(organizations)
+        .set({
+          walletBalanceMicroUsd: sql`${organizations.walletBalanceMicroUsd} + ${remaining}`,
+        })
+        .where(eq(organizations.id, params.orgId))
+        .returning();
+      if (!organization) throw new Error('ORG_NOT_FOUND');
+
+      const [transaction] = await tx
+        .insert(walletTransactions)
+        .values({
+          amountMicroUsd: remaining,
+          amountToman: 0,
+          balanceAfterMicroUsd: Number(organization.walletBalanceMicroUsd ?? 0),
+          balanceBeforeMicroUsd,
+          createdByUserId: params.createdByUserId ?? null,
+          description:
+            params.description ?? `Reclaim remaining credit from member ${params.orgMemberId}`,
+          ...(params.metadata ? { metadata: params.metadata } : {}),
+          orgId: params.orgId,
+          orgMemberId: params.orgMemberId,
+          type: 'reclaim',
+          userId: member.userId,
+        })
+        .returning();
+
+      return { budget, organization, transaction };
+    });
+  };
+
+  updateMemberOpenRouterKey = async (params: {
+    /**
+     * Checkpoint fields, written in the same statement as the key.
+     *
+     * A provider whose key limits are immutable serves a budget change by
+     * minting a replacement key whose counter restarts at zero, which means the
+     * baseline has to move to zero at exactly the moment the new key id lands.
+     * Two statements could not both fail: a checkpoint without its key
+     * double-bills usage already carried into `billedUsageBefore…`, and a key
+     * without its checkpoint gives the member free spend up to the old baseline.
+     * Both rows live in `member_budgets`, so one UPDATE removes the choice.
+     */
+    billedUsageBeforeBaselineMicroUsd?: number;
+    ciphertext: string;
+    keyId: string;
+    /**
+     * Mint-time raw limit of the key, for providers that report only what is
+     * left (CheapVibeCode). Omit on OpenRouter, which reports usage directly.
+     * `null` explicitly clears a limit carried over from a retired key.
+     */
+    managedKeyLimitMicroUsd?: number | null;
+    /**
+     * Which gateway minted this key. Written on every mint so a later provider
+     * switch can tell a usable key from one belonging to the previous gateway.
+     */
+    managedKeyProviderId?: string;
+    orgMemberId: string;
+    usageBaselineMicroUsd?: number;
+    /** C7: as on `updateUserOpenRouterKey` — lands only if the budget still holds this key. */
+    expectedKeyId?: string | null;
+  }) => {
+    const existing = await this.getMemberBudget(params.orgMemberId);
+    if (!existing) throw new Error('BUDGET_NOT_FOUND');
+
+    const [row] = await this.db
+      .update(memberBudgets)
+      .set({
+        openrouterKeyCiphertext: params.ciphertext,
+        openrouterKeyId: params.keyId,
+        ...('managedKeyLimitMicroUsd' in params
+          ? { managedKeyLimitMicroUsd: params.managedKeyLimitMicroUsd ?? null }
+          : {}),
+        ...(params.managedKeyProviderId
+          ? { managedKeyProviderId: params.managedKeyProviderId }
+          : {}),
+        ...(params.billedUsageBeforeBaselineMicroUsd == null
+          ? {}
+          : {
+              billedUsageBeforeBaselineMicroUsd: Math.max(
+                0,
+                Math.trunc(params.billedUsageBeforeBaselineMicroUsd),
+              ),
+            }),
+        ...(params.usageBaselineMicroUsd == null
+          ? {}
+          : { usageBaselineMicroUsd: Math.max(0, Math.trunc(params.usageBaselineMicroUsd)) }),
+      })
+      .where(
+        and(
+          eq(memberBudgets.id, existing.id),
+          params.expectedKeyId === undefined
+            ? undefined
+            : sql`${memberBudgets.openrouterKeyId} IS NOT DISTINCT FROM ${params.expectedKeyId}`,
+        ),
+      )
+      .returning();
+    return row;
+  };
+
+  syncMemberBudgetUsage = async (params: {
+    orgMemberId: string;
+    settledUsageMicroUsd: number;
+    /** Why the figure is not fully trusted, when `syncStatus` is `degraded`. */
+    syncError?: string | null;
+    syncStatus?: 'synced' | 'degraded';
+    /**
+     * D5: the `ledger_epoch` the figure was computed against. Renewal and a
+     * revived budget bump it, and a sync that read the key before that would
+     * otherwise write the closed cycle's usage into the new one. Returns
+     * undefined when the budget has moved on; the next sync starts fresh.
+     */
+    expectedLedgerEpoch?: number;
+  }) => {
+    const [row] = await this.db
+      .update(memberBudgets)
+      .set({
+        lastSyncError: params.syncError ?? null,
+        lastSyncStatus: params.syncStatus ?? 'synced',
+        lastSyncedAt: new Date(),
+        settledUsageMicroUsd: params.settledUsageMicroUsd,
+      })
+      .where(
+        and(
+          eq(memberBudgets.orgMemberId, params.orgMemberId),
+          params.expectedLedgerEpoch === undefined
+            ? undefined
+            : eq(memberBudgets.ledgerEpoch, params.expectedLedgerEpoch),
+        ),
+      )
+      .returning();
+    return row;
+  };
+
+  /**
+   * Persist a rebased usage-multiplier checkpoint (AICO-180) so a multiplier
+   * change only affects requests made after it. Scoped to the current cycle —
+   * renewal zeroes these alongside `settledUsageMicroUsd`.
+   */
+  updateMemberBudgetCheckpoint = async (params: {
+    billedUsageBeforeBaselineMicroUsd: number;
+    checkpointMultiplierBp: number;
+    /** D5: as on `syncMemberBudgetUsage` — only lands in the cycle it was computed for. */
+    expectedLedgerEpoch?: number;
+    orgMemberId: string;
+    usageBaselineMicroUsd: number;
+  }) => {
+    const [row] = await this.db
+      .update(memberBudgets)
+      .set({
+        billedUsageBeforeBaselineMicroUsd: params.billedUsageBeforeBaselineMicroUsd,
+        checkpointMultiplierBp: params.checkpointMultiplierBp,
+        usageBaselineMicroUsd: params.usageBaselineMicroUsd,
+      })
+      .where(
+        and(
+          eq(memberBudgets.orgMemberId, params.orgMemberId),
+          params.expectedLedgerEpoch === undefined
+            ? undefined
+            : eq(memberBudgets.ledgerEpoch, params.expectedLedgerEpoch),
+        ),
+      )
+      .returning();
+    return row;
+  };
+
+  // ─── Public short codes ─────────────────────────────────────────────
+
+  getUserPublicCode = async (userId: string): Promise<string | null> => {
+    const row = await this.db.query.aicoUserPublicIds.findFirst({
+      where: eq(aicoUserPublicIds.userId, userId),
+    });
+    return row?.publicCode ?? null;
+  };
+
+  /** Idempotently assigns a public short code to a user (e.g. `USR8F3K2Q`). */
+  ensureUserPublicCode = async (userId: string): Promise<string> => {
+    const existing = await this.getUserPublicCode(userId);
+    if (existing) return existing;
+
+    const [created] = await this.db
+      .insert(aicoUserPublicIds)
+      .values({ userId })
+      .onConflictDoNothing({ target: aicoUserPublicIds.userId })
+      .returning();
+    if (created) return created.publicCode;
+
+    return (await this.getUserPublicCode(userId))!;
+  };
+
+  getUserIdByPublicCode = async (publicCode: string): Promise<string | null> => {
+    const row = await this.db.query.aicoUserPublicIds.findFirst({
+      where: eq(aicoUserPublicIds.publicCode, publicCode.trim().toUpperCase()),
+    });
+    return row?.userId ?? null;
+  };
+
+  getOrgByPublicCode = async (publicCode: string) => {
+    return this.db.query.organizations.findFirst({
+      where: eq(organizations.publicCode, publicCode.trim().toUpperCase()),
+    });
+  };
+
+  /** Batch lookup for listings (e.g. platform admin wallet table) — returns a userId → code map. */
+  getUserPublicCodesByIds = async (userIds: string[]): Promise<Map<string, string>> => {
+    if (userIds.length === 0) return new Map();
+    const rows = await this.db
+      .select({ publicCode: aicoUserPublicIds.publicCode, userId: aicoUserPublicIds.userId })
+      .from(aicoUserPublicIds)
+      .where(inArray(aicoUserPublicIds.userId, userIds));
+    return new Map(rows.map((r) => [r.userId, r.publicCode]));
+  };
+
+  /** Batch lookup of email + username for admin listings. */
+  getUserIdentitiesByIds = async (
+    userIds: string[],
+  ): Promise<
+    Map<
+      string,
+      {
+        banReason: string | null;
+        banned: boolean;
+        email: string | null;
+        username: string | null;
+      }
+    >
+  > => {
+    if (userIds.length === 0) return new Map();
+    const rows = await this.db
+      .select({
+        banReason: users.banReason,
+        banned: users.banned,
+        email: users.email,
+        id: users.id,
+        username: users.username,
+      })
+      .from(users)
+      .where(inArray(users.id, userIds));
+    return new Map(
+      rows.map((r) => [
+        r.id,
+        {
+          banReason: r.banReason ?? null,
+          banned: Boolean(r.banned),
+          email: r.email ?? null,
+          username: r.username ?? null,
+        },
+      ]),
+    );
+  };
+
+  // ─── Dashboard ───────────────────────────────────────────────────────
+
+  getOrgDashboardStats = async (orgId: string) => {
+    const org = await this.getById(orgId);
+    if (!org) throw new Error('ORG_NOT_FOUND');
+
+    const members = await this.listMembersWithPublicCodes(orgId);
+    const activeMembers = members.filter((m) => m.status === 'active');
+
+    const memberStats = await Promise.all(
+      activeMembers.map(async (m) => {
+        const [budget, team] = await Promise.all([
+          this.getMemberBudget(m.id),
+          this.getMemberTeam(m.id),
+        ]);
+        const periodAmountMicroUsd = Number(budget?.periodAmountMicroUsd ?? 0);
+        const settledUsageMicroUsd = Number(budget?.settledUsageMicroUsd ?? 0);
+        const reservedMicroUsd = Number(budget?.reservedMicroUsd ?? 0);
+        return {
+          email: m.email,
+          memberId: m.id,
+          nextRenewalAt: budget?.nextRenewalAt ?? null,
+          period: (budget?.period as BudgetPeriod | undefined) ?? 'total',
+          periodAmountMicroUsd,
+          publicCode: m.publicCode,
+          // Spendable remaining for the active cycle (excludes pending next-period hold).
+          remainingMicroUsd: cycleRemainingMicroUsd({
+            periodAmountMicroUsd,
+            reservedMicroUsd,
+            settledUsageMicroUsd,
+          }),
+          pendingPeriod: budget?.pendingPeriod ?? null,
+          pendingPeriodAmountMicroUsd: Number(budget?.pendingPeriodAmountMicroUsd ?? 0),
+          renewalStatus: budget?.renewalStatus ?? null,
+          reservedMicroUsd,
+          role: m.role as OrgMemberRole,
+          settledUsageMicroUsd,
+          status: m.status as OrgMemberStatus,
+          teamName: team?.name ?? null,
+          userId: m.userId,
+          username: m.username,
+        };
+      }),
+    );
+
+    const allocatedMicroUsd = memberStats.reduce((sum, m) => sum + m.periodAmountMicroUsd, 0);
+    const settledUsageMicroUsd = memberStats.reduce((sum, m) => sum + m.settledUsageMicroUsd, 0);
+    const balanceMicroUsd = Number(org.walletBalanceMicroUsd);
+
+    // Renewal forecast: wallet still needed at the next renewal boundary.
+    // Prepaid pending already debited the org wallet, so contribute
+    // max(0, nextCap - prepaid) (0 when pending equals next cap).
+    // `total`-period budgets never renew automatically and are excluded.
+    const recurringMembers = memberStats.filter((m) => m.period !== 'total');
+    const grossNextRenewalMicroUsd = recurringMembers.reduce((sum, m) => {
+      const prepaid = Math.max(0, m.pendingPeriodAmountMicroUsd ?? 0);
+      const nextCap = prepaid > 0 ? prepaid : m.periodAmountMicroUsd;
+      return sum + Math.max(0, nextCap - prepaid);
+    }, 0);
+    const shortfallMicroUsd = Math.max(0, grossNextRenewalMicroUsd - balanceMicroUsd);
+    const nextRenewalAt =
+      recurringMembers
+        .map((m) => m.nextRenewalAt)
+        .filter((d): d is Date => Boolean(d))
+        .sort((a, b) => a.getTime() - b.getTime())[0] ?? null;
+
+    return {
+      allocatedMicroUsd,
+      balanceMicroUsd,
+      balanceToman: org.walletBalanceToman,
+      grossNextRenewalMicroUsd,
+      memberCount: activeMembers.length,
+      members: memberStats,
+      nextRenewalAt,
+      publicCode: org.publicCode,
+      settledUsageMicroUsd,
+      shortfallMicroUsd,
+      unallocatedMicroUsd: balanceMicroUsd,
+    };
+  };
+
+  // ─── Transaction history & usage charts ────────────────────────────
+
+  /**
+   * Org wallet ledger for a closed date range (inclusive UTC days).
+   * `from` / `to` are UTC calendar dates (`YYYY-MM-DD`).
+   */
+  getTransactionHistory = async (params: {
+    from: string;
+    limit?: number;
+    orgId: string;
+    to: string;
+  }) => {
+    const { fromDate, toDate } = parseInclusiveUtcDateRange(params.from, params.to);
+    const limit = Math.min(Math.max(params.limit ?? 200, 1), 500);
+
+    return this.db.query.walletTransactions.findMany({
+      where: and(
+        eq(walletTransactions.orgId, params.orgId),
+        gte(walletTransactions.createdAt, fromDate),
+        lte(walletTransactions.createdAt, toDate),
+      ),
+      orderBy: [desc(walletTransactions.createdAt)],
+      limit,
+    });
+  };
+
+  /**
+   * Daily org usage buckets from `usage_logs` (inclusive UTC date range).
+   * Days with no spend are filled with zeros so charts stay continuous.
+   */
+  getOrgUsageChart = async (params: { from: string; orgId: string; to: string }) => {
+    return this.getUsageChartPoints({
+      from: params.from,
+      orgId: params.orgId,
+      to: params.to,
+    });
+  };
+
+  /**
+   * Daily usage buckets for one org member (inclusive UTC date range).
+   */
+  getMemberUsageChart = async (params: {
+    from: string;
+    orgId: string;
+    orgMemberId: string;
+    to: string;
+  }) => {
+    const member = await this.db.query.organizationMembers.findFirst({
+      where: and(
+        eq(organizationMembers.id, params.orgMemberId),
+        eq(organizationMembers.orgId, params.orgId),
+      ),
+    });
+    if (!member) throw new Error('MEMBER_NOT_FOUND');
+
+    return this.getUsageChartPoints({
+      from: params.from,
+      orgId: params.orgId,
+      orgMemberId: params.orgMemberId,
+      to: params.to,
+    });
+  };
+
+  private getUsageChartPoints = async (params: {
+    from: string;
+    orgId: string;
+    orgMemberId?: string;
+    to: string;
+  }): Promise<Array<{ costMicroUsd: number; date: string; totalTokens: number }>> => {
+    const { fromDate, toDate, days } = parseInclusiveUtcDateRange(params.from, params.to);
+
+    const conditions = [
+      eq(usageLogs.orgId, params.orgId),
+      gte(usageLogs.createdAt, fromDate),
+      lte(usageLogs.createdAt, toDate),
+    ];
+    if (params.orgMemberId) {
+      conditions.push(eq(usageLogs.orgMemberId, params.orgMemberId));
+    }
+
+    const rows = await this.db
+      .select({
+        // N10: measured spend; a shadow call with no usage figure is only an upper bound.
+        costMicroUsd: sql<number>`COALESCE(SUM(${measuredCostSql()}), 0)`,
+        date: sql<string>`to_char(date_trunc('day', ${usageLogs.createdAt} AT TIME ZONE 'UTC'), 'YYYY-MM-DD')`,
+        totalTokens: sql<number>`COALESCE(SUM(${usageLogs.totalTokens}), 0)`,
+      })
+      .from(usageLogs)
+      .leftJoin(usageHolds, eq(usageHolds.id, usageLogs.holdId))
+      .where(and(...conditions))
+      .groupBy(sql`date_trunc('day', ${usageLogs.createdAt} AT TIME ZONE 'UTC')`)
+      .orderBy(sql`date_trunc('day', ${usageLogs.createdAt} AT TIME ZONE 'UTC')`);
+
+    const byDate = new Map(
+      rows.map((row) => [
+        row.date,
+        {
+          costMicroUsd: Number(row.costMicroUsd) || 0,
+          totalTokens: Number(row.totalTokens) || 0,
+        },
+      ]),
+    );
+
+    return days.map((date) => {
+      const hit = byDate.get(date);
+      return {
+        costMicroUsd: hit?.costMicroUsd ?? 0,
+        date,
+        totalTokens: hit?.totalTokens ?? 0,
+      };
+    });
+  };
+}
+
+/** Inclusive UTC calendar-day range helpers for org statements / charts. */
+const UTC_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_USAGE_RANGE_DAYS = 366;
+
+const parseInclusiveUtcDateRange = (
+  from: string,
+  to: string,
+): { days: string[]; fromDate: Date; toDate: Date } => {
+  if (!UTC_DATE_RE.test(from) || !UTC_DATE_RE.test(to)) {
+    throw new Error('INVALID_DATE_RANGE');
+  }
+  if (from > to) throw new Error('INVALID_DATE_RANGE');
+
+  const fromDate = new Date(`${from}T00:00:00.000Z`);
+  const toDate = new Date(`${to}T23:59:59.999Z`);
+  if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) {
+    throw new Error('INVALID_DATE_RANGE');
+  }
+
+  const days: string[] = [];
+  for (let t = fromDate.getTime(); t <= toDate.getTime(); t += DAY_MS) {
+    days.push(new Date(t).toISOString().slice(0, 10));
+    if (days.length > MAX_USAGE_RANGE_DAYS) throw new Error('DATE_RANGE_TOO_LARGE');
+  }
+
+  return { days, fromDate, toDate };
+};

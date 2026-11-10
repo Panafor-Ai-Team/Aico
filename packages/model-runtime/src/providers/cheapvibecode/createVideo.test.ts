@@ -1,0 +1,265 @@
+// @vitest-environment node
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { CreateVideoOptions } from '../../core/openaiCompatibleFactory';
+import {
+  createCheapVibeCodeVideo,
+  DEFAULT_CVC_VIDEO_BASE_URL,
+  pollCheapVibeCodeVideoStatus,
+} from './createVideo';
+
+vi.mock('debug', () => ({
+  default: vi.fn(() => vi.fn()),
+}));
+
+const mockOptions: CreateVideoOptions = {
+  apiKey: 'test-api-key',
+  // The chat host: video must NOT be sent here, it only lives on `ru.`.
+  baseURL: 'https://cheapvibecode.ru/v1',
+  provider: 'cheapvibecode',
+};
+
+const jsonResponse = (body: unknown) => ({ json: async () => body, ok: true });
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  delete process.env.CHEAPVIBECODE_VIDEO_BASE_URL;
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('createCheapVibeCodeVideo', () => {
+  it('posts to the ru host with snake_case fields and returns the request_id', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-1' }));
+
+    const result = await createCheapVibeCodeVideo(
+      {
+        model: 'grok-imagine-video',
+        params: {
+          aspectRatio: '16:9',
+          duration: 6.4,
+          prompt: 'A cinematic flight over frozen Lake Baikal',
+          resolution: '720p',
+        },
+      },
+      mockOptions,
+    );
+
+    expect(result).toEqual({ inferenceId: 'req-1' });
+    const [url, init] = (global.fetch as any).mock.calls[0];
+    expect(url).toBe(`${DEFAULT_CVC_VIDEO_BASE_URL}/videos/generations`);
+    expect(JSON.parse(init.body)).toEqual({
+      aspect_ratio: '16:9',
+      duration: 6,
+      model: 'grok-imagine-video',
+      prompt: 'A cinematic flight over frozen Lake Baikal',
+      resolution: '720p',
+    });
+    expect(init.headers.Authorization).toBe('Bearer test-api-key');
+  });
+
+  it('sends an attached start frame in the xAI image shape', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-3' }));
+
+    await createCheapVibeCodeVideo(
+      {
+        model: 'grok-imagine-video',
+        params: { imageUrl: 'https://s3.example.com/frame.png', prompt: 'Make it move' },
+      },
+      mockOptions,
+    );
+
+    expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).toEqual({
+      image: { url: 'https://s3.example.com/frame.png' },
+      model: 'grok-imagine-video',
+      prompt: 'Make it move',
+    });
+  });
+
+  it('sends a single uploaded image as the start frame', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-4' }));
+
+    await createCheapVibeCodeVideo(
+      {
+        model: 'grok-imagine-video',
+        params: { imageUrls: ['https://s3.example.com/a.png'], prompt: 'Make it move' },
+      },
+      mockOptions,
+    );
+
+    expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).toEqual({
+      image: { url: 'https://s3.example.com/a.png' },
+      model: 'grok-imagine-video',
+      prompt: 'Make it move',
+    });
+  });
+
+  it('never sends reference_images, which CheapVibeCode rejects; the first image is the start frame', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-5' }));
+
+    await createCheapVibeCodeVideo(
+      {
+        model: 'grok-imagine-video',
+        params: {
+          imageUrls: ['', 'https://s3.example.com/a.png', 'https://s3.example.com/b.png'],
+          prompt: 'Both characters dance',
+        },
+      },
+      mockOptions,
+    );
+
+    expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).toEqual({
+      image: { url: 'https://s3.example.com/a.png' },
+      model: 'grok-imagine-video',
+      prompt: 'Both characters dance',
+    });
+  });
+
+  it('sends Kling first/last frames and the audio opt-out', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-6' }));
+
+    await createCheapVibeCodeVideo(
+      {
+        model: 'kling-video-v3',
+        params: {
+          duration: 5,
+          endImageUrl: 'https://s3.example.com/last.png',
+          generateAudio: false,
+          imageUrl: 'https://s3.example.com/first.png',
+          prompt: 'Door opens',
+          resolution: '1080p',
+        },
+      },
+      mockOptions,
+    );
+
+    expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).toEqual({
+      duration: 5,
+      enable_audio: false,
+      image: { url: 'https://s3.example.com/first.png' },
+      last_image: { url: 'https://s3.example.com/last.png' },
+      model: 'kling-video-v3',
+      prompt: 'Door opens',
+      resolution: '1080p',
+    });
+  });
+
+  it('leaves audio at its default when not turned off', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-7' }));
+
+    await createCheapVibeCodeVideo(
+      { model: 'kling-video-v3', params: { generateAudio: true, prompt: 'Rain' } },
+      mockOptions,
+    );
+
+    expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).not.toHaveProperty(
+      'enable_audio',
+    );
+  });
+
+  it('sends up to 4 MiniMax reference images when no frame is set', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-8' }));
+    const refs = [1, 2, 3, 4, 5].map((n) => `https://s3.example.com/r${n}.png`);
+
+    await createCheapVibeCodeVideo(
+      { model: 'minimax-video-h3', params: { imageUrls: refs, prompt: 'Group dance' } },
+      mockOptions,
+    );
+
+    const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+    expect(body.reference_images).toEqual(refs.slice(0, 4).map((url) => ({ url })));
+    expect(body).not.toHaveProperty('image');
+  });
+
+  it('never mixes MiniMax frames with reference images', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-9' }));
+
+    await createCheapVibeCodeVideo(
+      {
+        model: 'minimax-video-h3',
+        params: {
+          imageUrl: 'https://s3.example.com/first.png',
+          imageUrls: ['https://s3.example.com/r1.png'],
+          prompt: 'Walk in',
+        },
+      },
+      mockOptions,
+    );
+
+    const body = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+    expect(body.image).toEqual({ url: 'https://s3.example.com/first.png' });
+    expect(body).not.toHaveProperty('reference_images');
+  });
+
+  it('honours CHEAPVIBECODE_VIDEO_BASE_URL', async () => {
+    process.env.CHEAPVIBECODE_VIDEO_BASE_URL = 'https://mirror.cheapvibecode.ru/';
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ request_id: 'req-2' }));
+
+    await createCheapVibeCodeVideo(
+      { model: 'grok-imagine-video', params: { prompt: 'x' } },
+      mockOptions,
+    );
+
+    expect((global.fetch as any).mock.calls[0][0]).toBe(
+      'https://mirror.cheapvibecode.ru/v1/videos/generations',
+    );
+  });
+
+  it('surfaces an upstream error with its status', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: async () => '{"error":{"message":"The prompt field is required."}}',
+    });
+
+    await expect(
+      createCheapVibeCodeVideo(
+        { model: 'grok-imagine-video', params: { prompt: '' } },
+        mockOptions,
+      ),
+    ).rejects.toThrow('Video generation failed (400)');
+  });
+});
+
+describe('pollCheapVibeCodeVideoStatus', () => {
+  it('is pending until the task carries a video url', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ status: 'processing' }));
+
+    await expect(pollCheapVibeCodeVideoStatus('req-1', { apiKey: 'k' })).resolves.toEqual({
+      status: 'pending',
+    });
+    expect((global.fetch as any).mock.calls[0][0]).toBe(
+      `${DEFAULT_CVC_VIDEO_BASE_URL}/videos/req-1`,
+    );
+  });
+
+  it('succeeds once video.url exists, sending the key only to cheapvibecode hosts', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ video: { url: 'https://ru.cheapvibecode.ru/v.mp4' } }))
+      .mockResolvedValueOnce(jsonResponse({ video: { url: 'https://cdn.example.com/v.mp4' } }));
+
+    await expect(pollCheapVibeCodeVideoStatus('req-1', { apiKey: 'k' })).resolves.toEqual({
+      headers: { Authorization: 'Bearer k' },
+      status: 'success',
+      videoUrl: 'https://ru.cheapvibecode.ru/v.mp4',
+    });
+    await expect(pollCheapVibeCodeVideoStatus('req-1', { apiKey: 'k' })).resolves.toEqual({
+      status: 'success',
+      videoUrl: 'https://cdn.example.com/v.mp4',
+    });
+  });
+
+  it('fails when the task reports failure', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: { message: 'moderation' }, status: 'failed' }));
+
+    await expect(pollCheapVibeCodeVideoStatus('req-1', { apiKey: 'k' })).resolves.toEqual({
+      error: 'moderation',
+      status: 'failed',
+    });
+  });
+});

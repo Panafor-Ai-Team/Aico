@@ -8,21 +8,15 @@ import {
   MemoryExtractionWorkflowService,
   normalizeMemoryExtractionPayload,
 } from '@/server/services/memory/userMemory/extract';
+import { verifyMemoryWebhookHeaders } from '@/server/services/memory/userMemory/webhookAuth';
 
 export const POST = async (req: Request) => {
-  const { webhook, upstashWorkflowExtraHeaders } = parseMemoryExtractionConfig();
-
-  if (webhook.headers && Object.keys(webhook.headers).length > 0) {
-    for (const [key, value] of Object.entries(webhook.headers)) {
-      const headerValue = req.headers.get(key);
-      if (headerValue !== value) {
-        return NextResponse.json(
-          { error: `Unauthorized: Missing or invalid header '${key}'` },
-          { status: 403 },
-        );
-      }
-    }
+  const authFailure = verifyMemoryWebhookHeaders(req.headers);
+  if (authFailure) {
+    return NextResponse.json({ error: authFailure.error }, { status: authFailure.status });
   }
+
+  const { upstashWorkflowExtraHeaders } = parseMemoryExtractionConfig();
 
   try {
     const json = await req.json();

@@ -4,6 +4,22 @@ import { describe, expect, it } from 'vitest';
 import { findNextUnconnectedSpec, getProviderMeta } from './providerMeta';
 
 describe('getProviderMeta', () => {
+  it('resolves a lobehub-sourced GitHub spec through Composio when Composio is preferred', () => {
+    const meta = getProviderMeta(
+      { identifier: 'github', source: 'lobehub' },
+      { preferComposio: true },
+    );
+    expect(meta).toMatchObject({ identifier: 'github', label: 'GitHub', source: 'composio' });
+  });
+
+  it('keeps lobehub-only providers on the lobehub source when Composio is preferred', () => {
+    const meta = getProviderMeta(
+      { identifier: 'posthog', source: 'lobehub' },
+      { preferComposio: true },
+    );
+    expect(meta).toMatchObject({ identifier: 'posthog', source: 'lobehub' });
+  });
+
   it('resolves lobehub source via LOBEHUB_SKILL_PROVIDERS', () => {
     const meta = getProviderMeta({ identifier: 'github', source: 'lobehub' });
     expect(meta).toMatchObject({ identifier: 'github', label: 'GitHub', source: 'lobehub' });
@@ -86,5 +102,11 @@ describe('findNextUnconnectedSpec', () => {
     ];
     const result = findNextUnconnectedSpec(specs, noneConnected);
     expect(result?.identifier).toBe('notion');
+  });
+
+  it('returns the composio source for a lobehub-tagged spec when Composio is preferred', () => {
+    const specs: TaskTemplateConnectorReference[] = [{ identifier: 'github', source: 'lobehub' }];
+    const result = findNextUnconnectedSpec(specs, noneConnected, { preferComposio: true });
+    expect(result).toMatchObject({ identifier: 'github', source: 'composio' });
   });
 });

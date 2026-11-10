@@ -10,7 +10,7 @@ import {
   AsyncTaskStatus,
   AsyncTaskType,
 } from '@lobechat/types';
-import { and, eq, inArray, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, or, sql } from 'drizzle-orm';
 
 import type { AsyncTaskSelectItem, NewAsyncTaskItem } from '../schemas';
 import { asyncTasks } from '../schemas';
@@ -80,6 +80,13 @@ export class AsyncTaskModel {
     });
   };
 
+  findLatestByType = async (type: AsyncTaskType) => {
+    return this.db.query.asyncTasks.findFirst({
+      orderBy: desc(asyncTasks.createdAt),
+      where: and(this.ownership(), eq(asyncTasks.type, type)),
+    });
+  };
+
   incrementUserMemoryExtractionProgress = async (taskId: string) => {
     const completedExpr = sql<number>`COALESCE(((${asyncTasks.metadata}) -> 'progress' ->> 'completedTopics')::int, 0) + 1`;
     const totalExpr = sql<
@@ -102,6 +109,11 @@ export class AsyncTaskModel {
             true
           )
         `,
+        // Verified on pg_search 0.15.26: `UPDATE … SET`, SELECT lists and ORDER
+        // BY all survive a null test over an extracted jsonb value; only quals
+        // (WHERE / JOIN ON / HAVING) crash the planner. `async_tasks` carries no
+        // bm25 index either. See the block comment above `TopicModel`.
+        // jsonb-null-test-safe: SET target list, not a qual
         status: sql`
           CASE
             WHEN ${asyncTasks.status} = ${AsyncTaskStatus.Error} OR ${asyncTasks.error} IS NOT NULL

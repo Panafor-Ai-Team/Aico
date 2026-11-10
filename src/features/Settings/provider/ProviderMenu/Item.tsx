@@ -1,0 +1,77 @@
+import { BRANDING_NAME, BRANDING_PROVIDER } from '@lobechat/business-const';
+import { Avatar, Center } from '@lobehub/ui';
+import { Badge } from 'antd';
+import { memo, useMemo } from 'react';
+import { useLocation } from 'react-router';
+
+import { isBrandedOpenRouterProvider } from '@/components/Branding/brandedModelId';
+import { BrandedProviderIcon } from '@/components/Branding/BrandedProviderIcon';
+import { isBrandedProviderRouteSegment } from '@/components/Branding/brandedProviderRoute';
+import { ProductLogo } from '@/components/Branding/ProductLogo';
+import NavItem from '@/features/NavPanel/components/NavItem';
+import { type AiProviderListItem } from '@/types/aiProvider';
+import { AiProviderSourceEnum } from '@/types/aiProvider';
+
+interface ProviderItemProps extends AiProviderListItem {
+  onClick: (id: string) => void;
+}
+
+const ProviderItem = memo<ProviderItemProps>(
+  ({ id, name, source, enabled, logo, onClick = () => {} }) => {
+    const location = useLocation();
+
+    // Extract providerId from pathname: /settings/provider/xxx -> xxx
+    const activeKey = useMemo(() => {
+      const pathParts = location.pathname.split('/');
+      // pathname is like /settings/provider/all or /settings/provider/openai
+      if (pathParts.length >= 4 && pathParts[2] === 'provider') {
+        return pathParts[3];
+      }
+      return null;
+    }, [location.pathname]);
+
+    const isCustom = source === AiProviderSourceEnum.Custom;
+    const useBrandLogo = isBrandedOpenRouterProvider(id) || id === BRANDING_PROVIDER;
+    const providerIcon =
+      isCustom && logo ? (
+        <Avatar
+          alt={name || id}
+          avatar={logo}
+          shape={'square'}
+          size={22}
+          style={{ borderRadius: 4 }}
+        />
+      ) : useBrandLogo ? (
+        <ProductLogo size={22} type={'flat'} />
+      ) : (
+        <BrandedProviderIcon
+          provider={id}
+          shape={'square'}
+          size={22}
+          style={{ borderRadius: 4 }}
+          type={'avatar'}
+        />
+      );
+
+    return (
+      <NavItem
+        // The branded slot's URL carries the product slug, not its stored id, so
+        // a plain `activeKey === id` would leave the menu item unhighlighted.
+        active={activeKey === id || (useBrandLogo && isBrandedProviderRouteSegment(activeKey))}
+        icon={() => providerIcon}
+        title={useBrandLogo ? BRANDING_NAME : name}
+        extra={
+          enabled ? (
+            <Center width={24}>
+              <Badge status="success" />
+            </Center>
+          ) : undefined
+        }
+        onClick={() => {
+          onClick(id);
+        }}
+      />
+    );
+  },
+);
+export default ProviderItem;

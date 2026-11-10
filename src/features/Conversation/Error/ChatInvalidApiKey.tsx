@@ -1,16 +1,22 @@
-import { ProviderIcon } from '@lobehub/icons';
 import { Button } from '@lobehub/ui/base-ui';
 import { ModelProvider } from 'model-bank';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import urlJoin from 'url-join';
 
+import { extractErrorCodeCandidate } from '@/business/client/resolveAicoErrorMessage';
+import { BrandedProviderIcon } from '@/components/Branding/BrandedProviderIcon';
+import { isAicoManagedRuntimeProvider } from '@/features/AicoBilling/isManagedRuntimeProvider';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { useProviderName } from '@/hooks/useProviderName';
+import { useClientDataSWR } from '@/libs/swr';
+import { lambdaClient } from '@/libs/trpc/client';
 import { type GlobalLLMProviderKey } from '@/types/user/settings/modelProvider';
 
-import { useConversationStore } from '../store';
+import { dataSelectors, useConversationStore } from '../store';
 import BaseErrorForm from './BaseErrorForm';
+import { isAicoManagedProviderMode } from './isAicoManagedProviderMode';
+import ManagedKeyError from './ManagedKeyError';
 
 interface ChatInvalidAPIKeyProps {
   id: string;
@@ -20,11 +26,29 @@ const ChatInvalidAPIKey = memo<ChatInvalidAPIKeyProps>(({ id, provider }) => {
   const { t } = useTranslation(['modelProvider', 'error']);
   const navigate = useWorkspaceAwareNavigate();
   const [deleteMessage] = useConversationStore((s) => [s.deleteMessage]);
+  const messageError = useConversationStore(dataSelectors.getDisplayMessageById(id))?.error;
+  const serverErrorCode = extractErrorCodeCandidate(messageError);
   const providerName = useProviderName(provider as GlobalLLMProviderKey);
+
+  const { data: managedStatus } = useClientDataSWR('aico-provider-status', () =>
+    lambdaClient.aicoBilling.getManagedProviderStatus.query(),
+  );
+  if (isAicoManagedProviderMode(managedStatus?.managed)) {
+    // Native openai/google/… selections do not use the wallet key — prompt a
+    // model switch instead of the misleading “top up wallet” card.
+    const reason = provider && !isAicoManagedRuntimeProvider(provider) ? 'wrongProvider' : 'funds';
+    return (
+      <ManagedKeyError
+        reason={reason}
+        serverErrorCode={serverErrorCode || undefined}
+        onNavigate={() => deleteMessage(id)}
+      />
+    );
+  }
 
   return (
     <BaseErrorForm
-      avatar={<ProviderIcon provider={provider} shape={'square'} size={40} />}
+      avatar={<BrandedProviderIcon provider={provider} shape={'square'} size={40} />}
       title={t(`unlock.apiKey.title`, { name: providerName, ns: 'error' })}
       action={
         <Button

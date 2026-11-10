@@ -3,6 +3,7 @@ import type OpenAI from 'openai';
 import type { Stream } from 'openai/streaming';
 
 import { AgentRuntimeErrorType } from '../../../types/error';
+import { serializeScopedSignature } from '../../../utils/signatureScope';
 import { convertOpenAIResponseUsage } from '../../usageConverters';
 import type {
   ChatPayloadForTransformStream,
@@ -21,9 +22,22 @@ import {
 } from '../protocol';
 import type { OpenAIStreamOptions } from './openai';
 
+/**
+ * Drop citations without a valid url. Some providers emit empty citation objects
+ * which would otherwise break downstream rendering and persistence.
+ * See https://github.com/lobehub/lobehub/issues/15043
+ */
+const filterValidCitations = (citations: ChatCitationItem[]): ChatCitationItem[] =>
+  citations.filter((citation) => !!citation?.url);
+
 const transformOpenAIStream = (
   chunk:
     | OpenAI.Responses.ResponseStreamEvent
+    | {
+        delta: string;
+        item_id: string;
+        type: 'response.reasoning_text.delta';
+      }
     | {
         annotation: {
           end_index: number;
@@ -127,7 +141,8 @@ const transformOpenAIStream = (
         }
       }
 
-      case 'response.reasoning_summary_text.delta': {
+      case 'response.reasoning_summary_text.delta':
+      case 'response.reasoning_text.delta': {
         return { data: chunk.delta, id: chunk.item_id, type: 'reasoning' };
       }
 
@@ -135,28 +150,62 @@ const transformOpenAIStream = (
         // OpenAI SDK v6 types the annotation payload as `unknown`; narrow to the URL-citation shape we read.
         const citations = chunk.annotation as { title?: string; url?: string };
 
-        if (streamContext.returnedCitationArray) {
+        if (streamContext.returnedCitationArray && citations.url) {
           streamContext.returnedCitationArray.push({
             title: citations.title,
             url: citations.url,
-          } as ChatCitationItem);
+          });
         }
 
         return { data: null, id: chunk.item_id, type: 'text' };
       }
 
       case 'response.output_item.done': {
-        if (chunk.item.type === 'reasoning' && chunk.item.encrypted_content) {
-          return {
-            data: chunk.item.encrypted_content,
-            id: chunk.item.id,
-            type: 'reasoning_signature',
-          };
+        if (chunk.item.type === 'reasoning') {
+          const scopedEncryptedContent = chunk.item.encrypted_content
+            ? serializeScopedSignature(
+                chunk.item.encrypted_content,
+                payload?.reasoningSignatureScope,
+                'reasoning',
+              )
+            : undefined;
+          const hasSummaryText = chunk.item.summary?.some(({ text }) => !!text);
+
+          // Encrypted reasoning without a verifiable scope stays fail-closed (#17694):
+          // never expose the raw provider payload to persistence.
+          if (!scopedEncryptedContent && !hasSummaryText)
+            return { data: null, id: chunk.item.id, type: 'text' };
+
+          const chunks: StreamProtocolChunk[] = [
+            {
+              data: {
+                ...chunk.item,
+                encrypted_content: scopedEncryptedContent,
+              },
+              id: chunk.item.id,
+              type: 'reasoning_response_item',
+            },
+          ];
+
+          /**
+           * Dual-emit the scope-serialized payload on the legacy string-only event so
+           * already-released clients keep single-item reasoning continuation. New clients
+           * prefer `responseItems` on replay, so the redundancy is harmless.
+           */
+          if (scopedEncryptedContent)
+            chunks.push({
+              data: scopedEncryptedContent,
+              id: chunk.item.id,
+              type: 'reasoning_signature',
+            });
+
+          return chunks;
         }
 
-        if (streamContext.returnedCitationArray?.length) {
+        const validCitations = filterValidCitations(streamContext.returnedCitationArray ?? []);
+        if (validCitations.length) {
           return {
-            data: { citations: streamContext.returnedCitationArray },
+            data: { citations: validCitations },
             id: chunk.item.id,
             type: 'grounding',
           };

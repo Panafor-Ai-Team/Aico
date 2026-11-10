@@ -1,7 +1,7 @@
 'use client';
 
-import { Alert, Flexbox, Tag } from '@lobehub/ui';
-import { Button } from '@lobehub/ui/base-ui';
+import { Flexbox, Tag } from '@lobehub/ui';
+import { Alert, Button } from '@lobehub/ui/base-ui';
 import { Form as AntdForm, type FormInstance } from 'antd';
 import { createStaticStyles } from 'antd-style';
 import { RefreshCw, Trash2 } from 'lucide-react';
@@ -275,7 +275,15 @@ const Footer = memo<FooterProps>(
                   components={{ bold: <strong /> }}
                   i18nKey="channel.endpointUrlHint"
                   ns="agent"
-                  values={{ fieldName: 'Event Subscription URL', name: platformDef.name }}
+                  // i18next types `values` as an intersection of every key's
+                  // params in the namespace, so a per-key object never satisfies
+                  // it. This key only interpolates fieldName and name.
+                  values={
+                    {
+                      fieldName: 'Event Subscription URL',
+                      name: platformDef.name,
+                    } as never
+                  }
                 />
               }
             />

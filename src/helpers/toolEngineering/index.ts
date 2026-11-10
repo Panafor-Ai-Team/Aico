@@ -3,12 +3,20 @@
  */
 import { BrowserManifest } from '@lobechat/builtin-tool-browser';
 import { CloudSandboxManifest } from '@lobechat/builtin-tool-cloud-sandbox';
+import { GoalIdentifier } from '@lobechat/builtin-tool-goal';
 import { ImageGenerationManifest } from '@lobechat/builtin-tool-image-generation';
 import { KnowledgeBaseManifest } from '@lobechat/builtin-tool-knowledge-base';
 import { LocalSystemManifest } from '@lobechat/builtin-tool-local-system';
 import { MemoryManifest } from '@lobechat/builtin-tool-memory';
+import { VideoGenerationManifest } from '@lobechat/builtin-tool-video-generation';
 import { WebBrowsingManifest } from '@lobechat/builtin-tool-web-browsing';
-import { alwaysOnToolIds, chatModeAllowedToolIds, defaultToolIds } from '@lobechat/builtin-tools';
+import {
+  alwaysOnToolIds,
+  chatModeAllowedToolIds,
+  defaultToolIds,
+  type MediaGenerationOffer,
+  resolveMediaGenerationOffer,
+} from '@lobechat/builtin-tools';
 import { createEnableChecker, type PluginEnableChecker } from '@lobechat/context-engine';
 import { ToolsEngine } from '@lobechat/context-engine';
 import {
@@ -16,16 +24,18 @@ import {
   type BuiltinToolResolveContext,
   type ChatCompletionTool,
   type ToolManifest,
+  type UIChatMessage,
   type WorkingModel,
 } from '@lobechat/types';
 
 import type { ConnectorToolPermission } from '@/database/schemas';
 import { applyToolNameMaxLength } from '@/helpers/applyToolNameMaxLength';
+import { resolveToolMode } from '@/helpers/executionTarget';
 import { isToolAvailableInCurrentEnv } from '@/helpers/toolAvailability';
 import { patchManifestWithPermissions } from '@/libs/mcp/patchManifestPermissions';
 import { getAgentStoreState } from '@/store/agent';
 import { agentChatConfigSelectors, agentSelectors } from '@/store/agent/selectors';
-import { aiModelSelectors, getAiInfraStoreState } from '@/store/aiInfra';
+import { isClientCapabilityEnabled } from '@/store/serverConfig';
 import { getToolStoreState } from '@/store/tool';
 import {
   composioStoreSelectors,
@@ -195,10 +205,15 @@ export const createToolsEngine = (config: ToolsEngineConfig = {}): ToolsEngine =
   // enableChecker rules) — a plugin, skill, connector, or user-toggleable
   // builtin tool the agent has explicitly disabled must not be discoverable/
   // activatable at all, matching the server-side (aiAgent gateway) treatment.
+  // Aico capability gate: the Goal tool is never offered while `goals` is off.
+  const goalsEnabled = isClientCapabilityEnabled('goals');
+  const excludedIdentifiers = goalsEnabled
+    ? disabledPluginIds
+    : [...disabledPluginIds, GoalIdentifier];
   const allManifests =
-    disabledPluginIds.length === 0
+    excludedIdentifiers.length === 0
       ? combinedManifests
-      : combinedManifests.filter((m) => !disabledPluginIds.includes(m.identifier));
+      : combinedManifests.filter((m) => !excludedIdentifiers.includes(m.identifier));
 
   return new ToolsEngine({
     defaultToolIds,
@@ -214,6 +229,15 @@ export const createAgentToolsEngine = (
   pluginIds?: string[],
   /** Conversation context for context-aware builtin manifests (scope, isSubAgent). */
   manifestContext?: BuiltinToolResolveContext,
+  /**
+   * Optional turn context for media-tool offer gating. Pass messages (or a
+   * precomputed offer) so text turns skip image/video schemas; omit for
+   * context-free callers (token estimation) → offer stays off.
+   */
+  options?: {
+    mediaGenerationOffer?: MediaGenerationOffer;
+    messages?: UIChatMessage[] | null;
+  },
 ) => {
   const searchConfig = getSearchConfig(workingModel.model, workingModel.provider);
   const agentState = getAgentStoreState();
@@ -221,9 +245,10 @@ export const createAgentToolsEngine = (
   // entries never reach the tools-engine whitelist.
   const userPlugins = agentSelectors.currentAgentPlugins(agentState);
   const disabledPluginIds = agentSelectors.currentAgentDisabledPlugins(agentState);
-  const isChatMode =
-    agentChatConfigSelectors.currentChatConfig(agentState).enableAgentMode === false ||
-    !isCanUseFC(workingModel.model, workingModel.provider);
+  const chatConfig = agentChatConfigSelectors.currentChatConfig(agentState);
+  const modelCanUseTools = isCanUseFC(workingModel.model, workingModel.provider);
+  const toolMode = resolveToolMode(chatConfig);
+  const isChatMode = toolMode === 'chat' || !modelCanUseTools;
 
   // Each entry below still respects its own runtime gate; in chat mode this
   // is the entire whitelist. `allowExplicitActivation` and user plugins /
@@ -231,22 +256,33 @@ export const createAgentToolsEngine = (
   // can't smuggle additional tools in.
   const kbEnabled = agentSelectors.hasEnabledKnowledgeBases(agentState);
   const memoryEnabled =
-    agentChatConfigSelectors.currentChatConfig(agentState).memory?.enabled ??
-    settingsSelectors.memoryEnabled(useUserStore.getState());
+    chatConfig.memory?.enabled ?? settingsSelectors.memoryEnabled(useUserStore.getState());
   const webBrowsingEnabled = searchConfig.useApplicationBuiltinSearchTool;
-  const imageGenerationEnabled =
-    isCanUseFC(workingModel.model, workingModel.provider) &&
-    !aiModelSelectors.isModelSupportImageOutput(
-      workingModel.model,
-      workingModel.provider,
-    )(getAiInfraStoreState());
+  // Deployment-level gate: the server reports `false` when neither an Onlyboxes
+  // console nor Market Trusted Client credentials are configured (see
+  // `isCloudSandboxConfigured`). Only an explicit `false` disables the tool —
+  // `undefined` (config not hydrated yet, or a server that predates the flag)
+  // stays permissive so a working deployment never loses the tool mid-session.
+  const cloudSandboxConfigured =
+    window.global_serverConfigStore?.getState()?.serverConfig?.enableCloudSandbox !== false;
+  // Intent/pin gate — same helper as the server AgentToolsEngine. Clear
+  // photo/video asks still run via directToolCalls without being offered.
+  const mediaGenerationOffer =
+    options?.mediaGenerationOffer ??
+    resolveMediaGenerationOffer({
+      messages: options?.messages,
+      modelCanUseTools,
+      plugins: [...userPlugins, ...(pluginIds ?? [])],
+      toolMode: isChatMode ? 'chat' : toolMode,
+    });
+  const imageGenerationEnabled = modelCanUseTools && mediaGenerationOffer.image;
+  const videoGenerationEnabled = modelCanUseTools && mediaGenerationOffer.video;
 
   const chatModeRules = {
-    // Example: Claude can call tools but lacks native imageOutput, so expose the
-    // image-generation fallback; image-output models should use their native path.
     [ImageGenerationManifest.identifier]: imageGenerationEnabled,
     [KnowledgeBaseManifest.identifier]: kbEnabled,
     [MemoryManifest.identifier]: memoryEnabled,
+    [VideoGenerationManifest.identifier]: videoGenerationEnabled,
     [WebBrowsingManifest.identifier]: webBrowsingEnabled,
   };
 
@@ -266,11 +302,18 @@ export const createAgentToolsEngine = (
     [BrowserManifest.identifier]:
       agentChatConfigSelectors.isLocalSystemEnabled(agentState) &&
       labPreferSelectors.enableInAppBrowser(useUserStore.getState()),
-    [CloudSandboxManifest.identifier]: agentChatConfigSelectors.isCloudSandboxEnabled(agentState),
+    // Cloud sandbox needs both the agent's cloud runtime AND a sandbox backend
+    // configured on the deployment (`enableCloudSandbox`). Without a backend the
+    // tool would be proposed, approved, and then dead-end in a Market 401 that
+    // the client surfaces as a LobeHub sign-in popup.
+    [CloudSandboxManifest.identifier]:
+      agentChatConfigSelectors.isCloudSandboxEnabled(agentState) && cloudSandboxConfigured,
     [KnowledgeBaseManifest.identifier]: kbEnabled,
     [LocalSystemManifest.identifier]: agentChatConfigSelectors.isLocalSystemEnabled(agentState),
     [MemoryManifest.identifier]: memoryEnabled,
     [WebBrowsingManifest.identifier]: webBrowsingEnabled,
+    [ImageGenerationManifest.identifier]: imageGenerationEnabled,
+    [VideoGenerationManifest.identifier]: videoGenerationEnabled,
   };
 
   return createToolsEngine({

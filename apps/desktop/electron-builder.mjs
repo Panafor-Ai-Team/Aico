@@ -61,13 +61,14 @@ const getPublishConfig = () => {
     ];
   }
 
-  // 本地开发无 S3 时回退到 GitHub
-  console.info(`📦 ${channelPath} channel: No UPDATE_SERVER_URL, falling back to GitHub provider`);
+  // Without UPDATE_SERVER_URL, releases are published to GitHub Releases on the Panachat repo.
+  // Keep in sync with GITHUB_UPDATE_REPO in src/main/modules/updater/configs.ts.
+  console.info(`📦 ${channelPath} channel: No UPDATE_SERVER_URL, using GitHub provider`);
   return [
     {
-      owner: 'lobehub',
+      owner: 'Panafor-Ai-Team',
       provider: 'github',
-      repo: 'lobehub',
+      repo: 'Aico',
     },
   ];
 };
@@ -81,9 +82,9 @@ if (!hasAppleCertificate) {
 
 // 根据版本类型确定协议 scheme
 const getProtocolScheme = () => {
-  if (isCanary) return 'lobehub-canary';
-  if (isNightly) return 'lobehub-nightly';
-  return 'lobehub';
+  if (isCanary) return 'panachat-canary';
+  if (isNightly) return 'panachat-nightly';
+  return 'panachat';
 };
 
 const protocolScheme = getProtocolScheme();
@@ -167,7 +168,7 @@ const config = {
     }
   },
   afterSign: verifyFontListSignature,
-  appId: 'com.lobehub.lobehub-desktop',
+  appId: 'com.panafor.panachat',
   appImage: {
     artifactName: '${productName}-${version}.${ext}',
   },
@@ -225,7 +226,7 @@ const config = {
   linux: {
     category: 'Utility',
     icon: 'build/icon.png',
-    maintainer: 'electronjs.org',
+    maintainer: 'Panafor AI Team',
     target: ['AppImage', 'snap', 'deb', 'rpm', 'tar.gz'],
   },
   mac: {
@@ -236,7 +237,7 @@ const config = {
       CFBundleIconName: 'AppIcon',
       CFBundleURLTypes: [
         {
-          CFBundleURLName: 'LobeHub Protocol',
+          CFBundleURLName: 'Panachat Protocol',
           CFBundleURLSchemes: [protocolScheme],
         },
       ],
@@ -274,7 +275,7 @@ const config = {
   },
   protocols: [
     {
-      name: 'LobeHub Protocol',
+      name: 'Panachat Protocol',
       schemes: [protocolScheme],
     },
   ],
@@ -290,10 +291,33 @@ const config = {
   extraResources: [
     { from: 'resources/bin', to: 'bin' },
     { from: 'resources/cli-package.json', to: 'package.json' },
+    // Local Sandbox helper binaries. The sandbox spawns these by path, so they
+    // must be real files — not entries inside app.asar, and not something the
+    // user is expected to install separately.
+    //
+    // Shipped as a resource rather than by externalizing
+    // `@anthropic-ai/sandbox-runtime`: its JavaScript bundles into the main
+    // process perfectly well, and making it a production dependency instead
+    // drags four transitive packages into electron-builder's node_modules
+    // traversal, which pnpm's layout does not satisfy (`@pondwader/socks5-server
+    // not found`). Only the binaries need to exist on disk.
+    {
+      from: 'node_modules/@anthropic-ai/sandbox-runtime/vendor',
+      to: 'sandbox-runtime/vendor',
+    },
+    // Carried alongside the binaries so the staging directory stays keyed on the
+    // backend's real version. Without it the version lookup falls back to the
+    // binary's size — which still works, but would defeat the per-version
+    // isolation in exactly the case it exists for: an installed app being
+    // updated.
+    {
+      from: 'node_modules/@anthropic-ai/sandbox-runtime/package.json',
+      to: 'sandbox-runtime/package.json',
+    },
   ],
 
   win: {
-    executableName: 'LobeHub',
+    executableName: 'Panachat',
   },
 };
 

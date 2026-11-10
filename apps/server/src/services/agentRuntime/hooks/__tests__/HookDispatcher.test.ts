@@ -36,10 +36,14 @@ describe('HookDispatcher', () => {
   beforeEach(() => {
     dispatcher = new HookDispatcher();
     vi.mocked(isQueueAgentRuntimeEnabled).mockReturnValue(false);
+    // Fixtures deliver to https://example.com — treat it as the app origin.
+    vi.stubEnv('APP_URL', 'https://example.com');
+    vi.stubEnv('INTERNAL_APP_URL', '');
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   describe('register', () => {
@@ -315,7 +319,7 @@ describe('HookDispatcher', () => {
       expect(global.fetch).not.toHaveBeenCalled();
     });
 
-    it('dispatch surfaces a no-fallback delivery failure without breaking other hooks', async () => {
+    it('dispatch rejects a no-fallback delivery failure after delivering other hooks', async () => {
       vi.mocked(isQueueAgentRuntimeEnabled).mockReturnValue(true);
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -337,7 +341,7 @@ describe('HookDispatcher', () => {
       const serialized = dispatcher.getSerializedHooks(operationId);
       await expect(
         dispatcher.dispatch(operationId, 'onComplete', makeEvent(), serialized),
-      ).resolves.toBeUndefined();
+      ).rejects.toThrow('Critical webhook delivery failed: critical-hook');
 
       // The failure is escalated to production logs, and the sibling webhook
       // still gets delivered.
@@ -349,6 +353,53 @@ describe('HookDispatcher', () => {
         'https://example.com/normal',
         expect.objectContaining({ method: 'POST' }),
       );
+    });
+  });
+
+  describe('webhook origin boundary', () => {
+    beforeEach(() => {
+      global.fetch = vi.fn().mockResolvedValue({ status: 200 }) as any;
+    });
+
+    it('delivers relative hook paths to the app origin', async () => {
+      await deliverWebhook({ url: '/api/agent/webhooks/bot-callback' }, { a: 1 });
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://example.com/api/agent/webhooks/bot-callback',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    it('prefers INTERNAL_APP_URL as an allowed origin', async () => {
+      vi.stubEnv('INTERNAL_APP_URL', 'http://app:3210');
+
+      await deliverWebhook({ url: '/api/hook' }, { a: 1 });
+
+      expect(global.fetch).toHaveBeenCalledWith('http://app:3210/api/hook', expect.anything());
+    });
+
+    it.each([
+      'https://attacker.example.net/collect',
+      'http://169.254.169.254/latest/meta-data',
+      'http://localhost:3020/internal',
+      'https://example.com.attacker.net/hook',
+    ])('refuses to deliver to %s', async (url) => {
+      await expect(deliverWebhook({ url }, { a: 1 })).rejects.toThrow(/outside the app origin/);
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('refuses persisted foreign hooks during dispatch without breaking siblings', async () => {
+      vi.mocked(isQueueAgentRuntimeEnabled).mockReturnValue(true);
+
+      await expect(
+        dispatcher.dispatch(operationId, 'onComplete', makeEvent(), [
+          { id: 'foreign', type: 'onComplete', webhook: { url: 'https://attacker.example.net' } },
+          { id: 'own', type: 'onComplete', webhook: { url: '/api/hook' } },
+        ]),
+      ).resolves.toBeUndefined();
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(global.fetch).toHaveBeenCalledWith('https://example.com/api/hook', expect.anything());
     });
   });
 

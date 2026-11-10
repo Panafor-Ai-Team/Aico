@@ -21,6 +21,8 @@ const enabledImageModelList = (s: AIProviderStoreState) => s.enabledImageModelLi
 
 const enabledVideoModelList = (s: AIProviderStoreState) => s.enabledVideoModelList || [];
 
+const hiddenBuiltinModels = (s: AIProviderStoreState) => s.hiddenBuiltinModels;
+
 const isProviderEnabled = (id: string) => (s: AIProviderStoreState) =>
   enabledAiProviderList(s).some((i) => i.id === id);
 
@@ -118,8 +120,11 @@ const isProviderHasBuiltinSearch = (provider: string) => (s: AIProviderStoreStat
 
 const isProviderHasBuiltinSearchConfig = (id: string) => (s: AIProviderStoreState) => {
   const providerCfg = providerConfigById(id)(s);
+  const searchMode = providerCfg?.settings.searchMode;
 
-  return !!providerCfg?.settings.searchMode && providerCfg?.settings.searchMode !== 'internal';
+  // Only `params` exposes a user toggle between app vs model-native search.
+  // `internal` / `tool` always prefer native search while search is enabled.
+  return searchMode === 'params';
 };
 
 const isProviderEnableResponseApi = (id: string) => (s: AIProviderStoreState) => {
@@ -142,6 +147,7 @@ export const aiProviderSelectors = {
   enabledEmbeddingModelList,
   enabledImageModelList,
   enabledVideoModelList,
+  hiddenBuiltinModels,
   isActiveProviderApiKeyNotEmpty,
   isActiveProviderEndpointNotEmpty,
   isAiProviderConfigLoading,

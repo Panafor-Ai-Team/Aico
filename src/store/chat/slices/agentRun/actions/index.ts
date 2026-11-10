@@ -11,6 +11,8 @@ import { type ChatMemoryAction } from './state/memory';
 import { ChatMemoryActionImpl } from './state/memory';
 import { type StreamingStatesAction } from './state/streamingStates';
 import { StreamingStatesActionImpl } from './state/streamingStates';
+import { type ToolApprovalAction } from './state/toolApproval';
+import { ToolApprovalActionImpl } from './state/toolApproval';
 import { type ClientToolExecutionAction } from './transports/client/clientToolExecution';
 import { ClientToolExecutionActionImpl } from './transports/client/clientToolExecution';
 import { type StreamingExecutorAction } from './transports/client/streamingExecutor';
@@ -24,7 +26,8 @@ export type ChatAgentRunAction = ChatMemoryAction &
   ConversationControlAction &
   GatewayAction &
   StreamingExecutorAction &
-  StreamingStatesAction;
+  StreamingStatesAction &
+  ToolApprovalAction;
 
 export const chatAgentRun: StateCreator<
   ChatStore,
@@ -44,4 +47,5 @@ export const chatAgentRun: StateCreator<
     new GatewayActionImpl(...params),
     new StreamingExecutorActionImpl(...params),
     new StreamingStatesActionImpl(...params),
+    new ToolApprovalActionImpl(...params),
   ]);

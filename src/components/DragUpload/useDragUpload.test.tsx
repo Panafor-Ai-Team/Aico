@@ -1,35 +1,23 @@
+import { toast } from '@lobehub/ui/base-ui';
 import { act, renderHook } from '@testing-library/react';
-import { App } from 'antd';
 import { type Mock } from 'vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useVisualMediaUploadAbility } from '@/hooks/useVisualMediaUploadAbility';
+import type * as mediaUploadAbilityModule from '@/hooks/useMediaUploadAbility';
+import { useMediaUploadAbility } from '@/hooks/useMediaUploadAbility';
 import { useAgentStore } from '@/store/agent';
 import { agentSelectors } from '@/store/agent/selectors';
 
 import { getContainer, useDragUpload } from './useDragUpload';
 
 // Mock the hooks and components
-vi.mock('@/hooks/useVisualMediaUploadAbility');
+vi.mock('@/hooks/useMediaUploadAbility', async (importOriginal) => ({
+  ...(await importOriginal<typeof mediaUploadAbilityModule>()),
+  useMediaUploadAbility: vi.fn(),
+}));
 vi.mock('@/store/agent');
-vi.mock('antd', async () => {
-  const actual = (await vi.importActual('antd')) as { App: Record<string, unknown> } & Record<
-    string,
-    unknown
-  >;
-  const mockWarning = vi.fn();
-
-  return {
-    ...actual,
-    App: {
-      ...actual.App,
-      useApp: () => ({
-        message: {
-          warning: mockWarning,
-        },
-      }),
-    },
-  };
+vi.mock('@lobehub/ui/base-ui', () => {
+  return { toast: { warning: vi.fn() } };
 });
 
 describe('useDragUpload', () => {
@@ -41,7 +29,9 @@ describe('useDragUpload', () => {
     document.body.innerHTML = '';
 
     // Mock the hooks
-    (useVisualMediaUploadAbility as Mock).mockReturnValue({
+    (useMediaUploadAbility as Mock).mockReturnValue({
+      canUploadAudio: false,
+      canUploadDocument: true,
       canUploadImage: false,
       canUploadVideo: false,
     });
@@ -209,7 +199,7 @@ describe('useDragUpload', () => {
   });
 
   it('should allow image files when vision is supported', async () => {
-    (useVisualMediaUploadAbility as Mock).mockReturnValue({
+    (useMediaUploadAbility as Mock).mockReturnValue({
       canUploadImage: true,
       canUploadVideo: false,
     });
@@ -239,11 +229,11 @@ describe('useDragUpload', () => {
     });
 
     expect(mockOnUploadFiles).toHaveBeenCalledWith([mockImageFile]);
-    expect(App.useApp().message.warning).not.toHaveBeenCalled();
+    expect(toast.warning).not.toHaveBeenCalled();
   });
 
   it('should allow image files when visual understanding fallback is enabled', async () => {
-    (useVisualMediaUploadAbility as Mock).mockReturnValue({
+    (useMediaUploadAbility as Mock).mockReturnValue({
       canUploadImage: true,
       canUploadVideo: true,
     });
@@ -269,7 +259,77 @@ describe('useDragUpload', () => {
     });
 
     expect(mockOnUploadFiles).toHaveBeenCalledWith([mockImageFile]);
-    expect(App.useApp().message.warning).not.toHaveBeenCalled();
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it('should warn and block dropping an audio file when the model does not support audio', async () => {
+    (useMediaUploadAbility as Mock).mockReturnValue({
+      canUploadAudio: false,
+      canUploadDocument: true,
+      canUploadImage: false,
+      canUploadVideo: false,
+    });
+
+    renderHook(() => useDragUpload(mockOnUploadFiles));
+
+    const mockAudioFile = new File([''], 'test.mp3', { type: 'audio/mpeg' });
+    const dropEvent = new Event('drop') as DragEvent;
+    Object.defineProperty(dropEvent, 'dataTransfer', {
+      value: {
+        items: [
+          {
+            kind: 'file',
+            getAsFile: () => mockAudioFile,
+            webkitGetAsEntry: () => ({
+              isFile: true,
+              file: (cb: (file: File) => void) => cb(mockAudioFile),
+            }),
+          },
+        ],
+        types: ['Files'],
+      },
+    });
+
+    await act(async () => {
+      window.dispatchEvent(dropEvent);
+    });
+
+    // Regression: this path previously never checked audio at all, so an
+    // unsupported audio file silently reached onUploadFiles with no warning.
+    expect(mockOnUploadFiles).not.toHaveBeenCalled();
+    expect(toast.warning).toHaveBeenCalled();
+  });
+
+  it('should warn and block pasting a document when the model has files: false', async () => {
+    (useMediaUploadAbility as Mock).mockReturnValue({
+      canUploadAudio: false,
+      canUploadDocument: false,
+      canUploadImage: false,
+      canUploadVideo: false,
+    });
+
+    renderHook(() => useDragUpload(mockOnUploadFiles));
+
+    const mockDocFile = new File([''], 'report.pdf', { type: 'application/pdf' });
+    const pasteEvent = new Event('paste') as ClipboardEvent;
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      value: {
+        items: [
+          {
+            kind: 'file',
+            getAsFile: () => mockDocFile,
+            webkitGetAsEntry: () => null,
+          },
+        ],
+      },
+    });
+
+    await act(async () => {
+      window.dispatchEvent(pasteEvent);
+    });
+
+    expect(mockOnUploadFiles).not.toHaveBeenCalled();
+    expect(toast.warning).toHaveBeenCalled();
   });
 });
 

@@ -1,7 +1,6 @@
 'use client';
 
-import { type AgentItem } from '@lobechat/types';
-import { ModelIcon } from '@lobehub/icons';
+import { agentDisplayName, type AgentItem } from '@lobechat/types';
 import { ActionIcon, Flexbox, Icon, Popover, Skeleton, Text } from '@lobehub/ui';
 import { SkillsIcon } from '@lobehub/ui/icons';
 import { createStaticStyles } from 'antd-style';
@@ -10,6 +9,8 @@ import { memo, type PropsWithChildren, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 
+import { BrandedModelIcon } from '@/components/Branding/BrandedModelIcon';
+import { formatBrandedModelId } from '@/components/Branding/brandedModelId';
 import ModelSelect from '@/features/ModelSelect';
 import { useResourceAccess } from '@/features/ResourcePermission/useResourceAccess';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
@@ -52,7 +53,7 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 
 type AgentPreview = Pick<
   AgentItem,
-  'avatar' | 'backgroundColor' | 'description' | 'model' | 'provider' | 'title'
+  'avatar' | 'backgroundColor' | 'description' | 'model' | 'name' | 'provider' | 'title'
 >;
 
 interface FetchedAgent extends Partial<AgentPreview> {
@@ -101,6 +102,7 @@ const AgentProfilePopup = memo<AgentProfilePopupProps>(
       backgroundColor: fetched?.backgroundColor ?? agent?.backgroundColor,
       description: fetched?.description ?? agent?.description,
       model: fetched?.model ?? agent?.model,
+      name: fetched?.name ?? agent?.name,
       provider: fetched?.provider ?? agent?.provider,
       title: fetched?.title ?? agent?.title,
     };
@@ -130,7 +132,7 @@ const AgentProfilePopup = memo<AgentProfilePopupProps>(
       navigate(`/agent/${agentId}/profile`);
     };
 
-    const hasDisplay = Boolean(merged.title || merged.avatar || merged.description);
+    const hasDisplay = Boolean(agentDisplayName(merged) || merged.avatar || merged.description);
     const showSkeleton = !hasDisplay && isLoading;
 
     const pluginCount = fetched?.plugins?.length ?? 0;
@@ -161,9 +163,9 @@ const AgentProfilePopup = memo<AgentProfilePopupProps>(
         <Flexbox horizontal align={'center'} className={styles.footer} gap={14} wrap={'wrap'}>
           {merged.model && (
             <Flexbox horizontal align={'center'} className={styles.statItem} gap={6}>
-              <ModelIcon model={merged.model} size={14} />
+              <BrandedModelIcon model={merged.model} size={14} />
               <Text fontSize={12} type={'secondary'}>
-                {merged.model}
+                {formatBrandedModelId(merged.model)}
               </Text>
             </Flexbox>
           )}
@@ -204,7 +206,7 @@ const AgentProfilePopup = memo<AgentProfilePopupProps>(
         backgroundColor={merged.backgroundColor}
         description={merged.description}
         loading={isLoading && !merged.description}
-        title={merged.title || t('defaultSession', { ns: 'common' })}
+        title={agentDisplayName(merged, t('defaultSession', { ns: 'common' }))}
         headerAction={
           groupId && canConfigure ? (
             <Flexbox horizontal align="center" justify="flex-end" style={{ paddingBlockStart: 0 }}>

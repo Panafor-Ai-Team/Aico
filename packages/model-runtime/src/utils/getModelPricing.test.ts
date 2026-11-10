@@ -1,3 +1,4 @@
+import type { Pricing } from 'model-bank';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const loadModelsMock = vi.hoisted(() => vi.fn());
@@ -70,11 +71,77 @@ describe('getModelPricing', () => {
     });
   });
 
+  it('marks the reported cost up by the platform multiplier', async () => {
+    const result = await getModelPricing('gpt-4o', 'openai', {
+      costMultiplierBp: 12_500,
+      plan: 'aico',
+      scope: 'personal',
+    });
+
+    expect(result?.units[0]).toMatchObject({ rate: 3.125 });
+  });
+
+  it('composes a per-model correction on top, so the cost chip matches the picker', async () => {
+    const result = await getModelPricing('gpt-4o', 'openai', {
+      costMultiplierBp: 12_500,
+      modelCostMultiplierBp: { 'gpt-4o': 14_400 },
+      plan: 'aico',
+      scope: 'personal',
+    });
+
+    // 2.5 x (1.25 x 1.44) = 4.5
+    expect(result?.units[0]).toMatchObject({ rate: 4.5 });
+  });
+
+  it('leaves another model untouched by an override', async () => {
+    const result = await getModelPricing('gpt-4o', 'openai', {
+      costMultiplierBp: 12_500,
+      modelCostMultiplierBp: { 'some-other-model': 14_400 },
+      plan: 'aico',
+      scope: 'personal',
+    });
+
+    expect(result?.units[0]).toMatchObject({ rate: 3.125 });
+  });
+
   it('should pass explicit pricing context to loadModels', async () => {
     await getModelPricing('gpt-4o', 'openai', { plan: 'premium', scope: 'personal' });
 
     expect(loadModelsMock).toHaveBeenCalledWith({
       pricingContext: { plan: 'premium', scope: 'personal' },
     });
+  });
+
+  it('prefers catalog-resolved pricing for models missing from the static bank', async () => {
+    const catalogPricing: Pricing = {
+      units: [
+        { name: 'textInput', rate: 0.0132, strategy: 'fixed', unit: 'millionTokens' },
+        { name: 'textOutput', rate: 0.0132, strategy: 'fixed', unit: 'millionTokens' },
+      ],
+    };
+
+    const result = await getModelPricing('dynamic-catalog-model', 'openrouter', {
+      plan: 'aico',
+      resolvedPricing: { modelId: 'dynamic-catalog-model', pricing: catalogPricing },
+      scope: 'personal',
+    });
+
+    expect(result).toEqual(catalogPricing);
+    expect(loadModelsMock).not.toHaveBeenCalled();
+  });
+
+  it('ignores catalog-resolved pricing for a different model id', async () => {
+    const result = await getModelPricing('gpt-4o', 'openai', {
+      plan: 'aico',
+      resolvedPricing: {
+        modelId: 'other-model',
+        pricing: {
+          units: [{ name: 'textInput', rate: 99, strategy: 'fixed', unit: 'millionTokens' }],
+        } as Pricing,
+      },
+      scope: 'personal',
+    });
+
+    expect(result?.units[0]).toMatchObject({ rate: 2.5 });
   });
 });

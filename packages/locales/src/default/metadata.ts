@@ -18,7 +18,7 @@ export default {
     'Explore charts, academic tools, image/video/voice generation, and workflows—add Skills to your Agents.',
   'discover.plugins.title': 'Skill Community',
   'discover.providers.description':
-    'Explore leading model providers OpenAI / Qwen / Ollama / Anthropic / DeepSeek / Google Gemini / OpenRouter',
+    'Explore leading model providers OpenAI / Qwen / Ollama / Anthropic / DeepSeek / Google Gemini',
   'discover.providers.title': 'Provider Community',
   'discover.search': 'Search',
   'discover.title': 'Discover',

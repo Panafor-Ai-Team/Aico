@@ -1,16 +1,16 @@
-import { type ConversationContext, type UIChatMessage } from '@lobechat/types';
-import { ModelTag } from '@lobehub/icons';
+import { BRANDING_INBOX_NAME, BRANDING_SITE_URL } from '@lobechat/business-const';
+import { agentDisplayName, type ConversationContext, type UIChatMessage } from '@lobechat/types';
 import { Avatar, Flexbox, Markdown, Text } from '@lobehub/ui';
 import { cx } from 'antd-style';
 import { memo } from 'react';
 
 import { ProductLogo } from '@/components/Branding';
+import { BrandedModelTag } from '@/components/Branding/BrandedModelTag';
 import PluginTag from '@/features/PluginTag';
 import { filterToolIds } from '@/helpers/toolFilters';
 import { useAgentStore } from '@/store/agent';
 import { agentByIdSelectors, agentSelectors, builtinAgentSelectors } from '@/store/agent/selectors';
 
-import pkg from '../../../../package.json';
 import { containerStyles } from '../style';
 import ChatList from './ChatList';
 import { styles } from './style';
@@ -59,7 +59,7 @@ const Preview = memo<PreviewProps>(
         agentSelectors.displayableAgentPlugins(s),
         agentSelectors.currentAgentSystemRole(s),
         builtinAgentSelectors.isInboxAgent(s),
-        agentSelectors.currentAgentTitle(s),
+        agentSelectors.currentAgentDisplayName(s),
         agentSelectors.currentAgentAvatar(s),
         agentSelectors.currentAgentBackgroundColor(s),
         resolvedHeaderAgentId
@@ -78,7 +78,9 @@ const Preview = memo<PreviewProps>(
     });
 
     const displayTitle =
-      (isHeaderInbox ?? isInbox) ? 'Lobe AI' : headerMeta?.title || title || currentTitle;
+      (isHeaderInbox ?? isInbox)
+        ? BRANDING_INBOX_NAME
+        : agentDisplayName(headerMeta) || title || currentTitle;
     const displayAvatar = headerMeta?.avatar || currentAvatar;
     const displayBackgroundColor = headerMeta?.backgroundColor || currentBackgroundColor;
     const displayModel = headerModel || currentModel;
@@ -111,7 +113,7 @@ const Preview = memo<PreviewProps>(
                   {displayTitle}
                 </Text>
                 <Flexbox horizontal gap={4}>
-                  <ModelTag model={displayModel} />
+                  <BrandedModelTag model={displayModel} />
                   {withPluginInfo && displayPlugins?.length > 0 && (
                     <PluginTag plugins={displayPlugins} />
                   )}
@@ -127,7 +129,7 @@ const Preview = memo<PreviewProps>(
             {withFooter ? (
               <Flexbox align={'center'} className={styles.footer} gap={4}>
                 <ProductLogo type={'combine'} />
-                <div className={styles.url}>{pkg.homepage}</div>
+                {BRANDING_SITE_URL ? <div className={styles.url}>{BRANDING_SITE_URL}</div> : null}
               </Flexbox>
             ) : (
               <div />

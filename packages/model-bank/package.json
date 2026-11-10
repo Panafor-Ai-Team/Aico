@@ -4,6 +4,9 @@
   "private": true,
   "exports": {
     ".": "./src/index.ts",
+    "./aiModel": "./src/types/aiModel.ts",
+    "./aiProvider": "./src/types/aiProvider.ts",
+    "./modelProvider": "./src/const/modelProvider.ts",
     "./modelProviders": "./src/modelProviders/index.ts",
     "./modelProviders/lobehub": "./src/modelProviders/lobehub.ts",
     "./ai21": "./src/aiModels/ai21.ts",
@@ -21,6 +24,7 @@
     "./bfl": "./src/aiModels/bfl.ts",
     "./cerebras": "./src/aiModels/cerebras.ts",
     "./chatGPT": "./src/aiModels/chatGPT.ts",
+    "./cheapvibecode": "./src/aiModels/cheapvibecode.ts",
     "./cloudflare": "./src/aiModels/cloudflare.ts",
     "./cohere": "./src/aiModels/cohere.ts",
     "./cometapi": "./src/aiModels/cometapi.ts",
@@ -56,6 +60,7 @@
     "./ollamacloud": "./src/aiModels/ollamacloud.ts",
     "./openai": "./src/aiModels/openai.ts",
     "./imageParameters": "./src/const/imageParameters.ts",
+    "./videoParameters": "./src/const/videoParameters.ts",
     "./opencodeCodingPlan": "./src/aiModels/opencodeCodingPlan.ts",
     "./opencodeZen": "./src/aiModels/opencodeZen.ts",
     "./openrouter": "./src/aiModels/openrouter.ts",
@@ -90,6 +95,7 @@
     "./zenmux": "./src/aiModels/zenmux.ts",
     "./zeroone": "./src/aiModels/zeroone.ts",
     "./zhipu": "./src/aiModels/zhipu.ts",
+    "./standardParameters": "./src/standard-parameters/index.ts",
     "./types": "./src/types/index.ts"
   },
   "scripts": {

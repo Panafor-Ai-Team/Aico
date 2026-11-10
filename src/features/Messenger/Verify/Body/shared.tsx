@@ -1,8 +1,8 @@
 'use client';
 
+import { BRANDING_NAME } from '@lobechat/business-const';
 import { Block, Flexbox, Icon, Text } from '@lobehub/ui';
-import { Button, Select } from '@lobehub/ui/base-ui';
-import { App } from 'antd';
+import { Button, Select, toast } from '@lobehub/ui/base-ui';
 import { createStaticStyles } from 'antd-style';
 import { AlertTriangleIcon, CheckCircle2Icon, LinkIcon } from 'lucide-react';
 import { memo, useEffect, useMemo, useState } from 'react';
@@ -163,7 +163,7 @@ export interface ConfirmCardProps {
 export const ConfirmCard = memo<ConfirmCardProps>(
   ({ blockingNotice, infoRows, onSuccess, platform, randomId, userAvatar }) => {
     const { t } = useTranslation('messenger');
-    const { message } = App.useApp();
+
     const enableWorkspaceScopes = useServerConfigStore(
       (s) =>
         serverConfigSelectors.enableBusinessFeatures(s) && s.featureFlags.enableWorkspace === true,
@@ -232,7 +232,7 @@ export const ConfirmCard = memo<ConfirmCardProps>(
         await messengerService.confirmLink({ initialAgentId: selectedAgentId, randomId });
         onSuccess();
       } catch (error) {
-        message.error(getMessengerErrorMessage(error, t, 'verify.error.generic'));
+        toast.error(getMessengerErrorMessage(error, t, 'verify.error.generic'));
       } finally {
         setConfirming(false);
       }
@@ -361,7 +361,7 @@ export const SuccessCard = memo<SuccessCardProps>(({ openBotUrl, platform, platf
           size="large"
           type={openBotUrl ? 'default' : 'primary'}
         >
-          {t('verify.success.backToLobeHub')}
+          {t('verify.success.backToApp', { appName: BRANDING_NAME })}
         </Button>
       </Flexbox>
     </Flexbox>

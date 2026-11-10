@@ -2,11 +2,14 @@
 
 import { CheckCircleFilled, CloseCircleFilled, DownloadOutlined } from '@ant-design/icons';
 import type { BuiltinRenderProps } from '@lobechat/types';
-import { ActionIcon, Flexbox, Text } from '@lobehub/ui';
+import { Flexbox, Text } from '@lobehub/ui';
+import { Button } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { memo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import type { ExportFileState } from '../../../types';
+import { triggerFileDownload } from './triggerDownload';
 
 const styles = createStaticStyles(({ css }) => ({
   container: css`
@@ -24,31 +27,14 @@ interface ExportFileParams {
 
 const ExportFile = memo<BuiltinRenderProps<ExportFileParams, ExportFileState>>(
   ({ args, pluginState }) => {
+    const { t } = useTranslation('plugin');
     const isSuccess = pluginState?.success;
+    const filename = pluginState?.filename || args.path;
 
-    const handleDownload = useCallback(async () => {
+    const handleDownload = useCallback(() => {
       if (!pluginState?.downloadUrl || !pluginState?.filename) return;
 
-      try {
-        // Fetch the file content to bypass cross-origin download restrictions
-        const response = await fetch(pluginState.downloadUrl);
-        const blob = await response.blob();
-
-        // Create a blob URL and trigger download
-        const blobUrl = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = pluginState.filename;
-        document.body.append(link);
-        link.click();
-        link.remove();
-
-        // Clean up the blob URL
-        URL.revokeObjectURL(blobUrl);
-      } catch {
-        // Fallback: open in new tab if fetch fails
-        window.open(pluginState.downloadUrl, '_blank');
-      }
+      void triggerFileDownload(pluginState.downloadUrl, pluginState.filename);
     }, [pluginState?.downloadUrl, pluginState?.filename]);
 
     return (
@@ -64,16 +50,13 @@ const ExportFile = memo<BuiltinRenderProps<ExportFileParams, ExportFileState>>(
           )}
           <Text code as={'span'} fontSize={12}>
             {isSuccess
-              ? `Exported: ${pluginState?.filename || args.path}`
-              : `Failed to export ${args.path}`}
+              ? t('builtins.lobe-cloud-sandbox.exportFile.exported', { filename })
+              : t('builtins.lobe-cloud-sandbox.exportFile.failed', { path: args.path })}
           </Text>
           {isSuccess && pluginState?.downloadUrl && (
-            <ActionIcon
-              icon={DownloadOutlined}
-              size={'small'}
-              title="Download"
-              onClick={handleDownload}
-            />
+            <Button icon={<DownloadOutlined />} size={'small'} onClick={handleDownload}>
+              {t('builtins.lobe-cloud-sandbox.exportFile.download')}
+            </Button>
           )}
         </Flexbox>
       </Flexbox>

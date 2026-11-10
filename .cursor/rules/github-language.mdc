@@ -1,0 +1,19 @@
+---
+description: Aico GitHub language + shipping; point agents at aico-ship
+alwaysApply: true
+---
+
+# GitHub language
+
+- **GitHub** (issues, PR titles/bodies, commit messages, code review comments): write in **English**.
+
+# Shipping / issues / PRs
+
+For creating issues, finish-job closeout, and Aico PR linking, follow the **`aico-ship`** skill (do not patch upstream `pr` / `linear` skills).
+
+Short rules (details in `aico-ship`):
+
+- “Create an issue” → GitHub issue (EN)
+- **No duplicate search** — create from this Cursor session; reuse only an `#n` already in this chat
+- PR that finishes the work → one `Fixes #n` line **per** GitHub issue it closes (multiple issues → multiple `Fixes #n` lines)
+- Auto-run closeout when the user asks to ship/PR/workflow, or the change is a clear product fix/feature; otherwise suggest once

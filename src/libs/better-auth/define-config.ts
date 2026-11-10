@@ -1,5 +1,6 @@
 import { expo } from '@better-auth/expo';
 import { passkey } from '@better-auth/passkey';
+import { BRANDING_NAME } from '@lobechat/business-const';
 import { createNanoId, idGenerator, serverDB } from '@lobechat/database';
 import * as schema from '@lobechat/database/schemas';
 import bcrypt from 'bcryptjs';
@@ -7,7 +8,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { verifyPassword as defaultVerifyPassword } from 'better-auth/crypto';
 import { type BetterAuthOptions } from 'better-auth/minimal';
 import { betterAuth } from 'better-auth/minimal';
-import { admin, emailOTP, genericOAuth, magicLink } from 'better-auth/plugins';
+import { admin, emailOTP, genericOAuth, magicLink, phoneNumber } from 'better-auth/plugins';
 import { type BetterAuthPlugin } from 'better-auth/types';
 import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici';
 
@@ -20,11 +21,23 @@ import {
   getVerificationEmailTemplate,
   getVerificationOTPEmailTemplate,
 } from '@/libs/better-auth/email-templates';
+import { isValidIranianPhoneNumber, normalizeIranianPhoneNumber } from '@/libs/better-auth/phone';
+import { hashPhoneOtpVerificationValue, phoneOtpEquals } from '@/libs/better-auth/phoneOtpHash';
+import { aicoBanMessage } from '@/libs/better-auth/plugins/aico-ban-message';
+import { authAbuseSignal } from '@/libs/better-auth/plugins/auth-abuse-signal';
+import { deferredSessionRefresh } from '@/libs/better-auth/plugins/deferred-session-refresh';
 import { emailWhitelist } from '@/libs/better-auth/plugins/email-whitelist';
+import { forceChangePasswordRevoke } from '@/libs/better-auth/plugins/force-change-password-revoke';
+import { PASSWORD_MIN_LENGTH, passwordPolicy } from '@/libs/better-auth/plugins/password-policy';
+import { phoneLoginGate } from '@/libs/better-auth/plugins/phone-login-gate';
+import { sessionOptions } from '@/libs/better-auth/session-options';
 import { initBetterAuthSSOProviders } from '@/libs/better-auth/sso';
 import { createSecondaryStorage, getTrustedOrigins } from '@/libs/better-auth/utils/config';
+import { expireLegacyHostOnlyCookies } from '@/libs/better-auth/utils/host-only-cookies';
 import { parseSSOProviders } from '@/libs/better-auth/utils/server';
+import { clearMismatchedOIDCSession } from '@/libs/oidc-provider/session-cleanup';
 import { EmailService } from '@/server/services/email';
+import { SmsService } from '@/server/services/sms';
 import { UserService } from '@/server/services/user';
 
 const LOCAL_NO_PROXY_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
@@ -93,6 +106,25 @@ const getPasskeyOrigins = (): string[] | undefined => {
     return undefined;
   }
 };
+/**
+ * Browsers silently drop a cookie whose `Domain` the current host is not a member of.
+ * Applying a production domain on a preview deployment (`*.vercel.app`) or localhost would
+ * therefore erase every auth cookie instead of widening it, so fall back to host-only there.
+ */
+const resolveCookieDomain = (cookieDomain?: string): string | undefined => {
+  if (!cookieDomain) return undefined;
+
+  const base = cookieDomain.replace(/^\./, '');
+  try {
+    const { hostname } = new URL(appEnv.APP_URL);
+    if (hostname !== base && !hostname.endsWith(`.${base}`)) return undefined;
+  } catch {
+    return undefined;
+  }
+
+  return cookieDomain;
+};
+
 const MAGIC_LINK_EXPIRES_IN = 900;
 // OTP expiration time (in seconds) - 5 minutes for mobile OTP verification
 const OTP_EXPIRES_IN = 300;
@@ -102,10 +134,19 @@ const enabledSSOProviders = parseSSOProviders(authEnv.AUTH_SSO_PROVIDERS);
 const { socialProviders, genericOAuthProviders } = initBetterAuthSSOProviders();
 
 interface CustomBetterAuthOptions {
+  /**
+   * Share auth cookies across every subdomain of this domain (e.g. `.example.com`).
+   * Omit to keep cookies host-only.
+   */
+  cookieDomain?: string;
+  /** Namespace every Better Auth cookie so colocated deployments cannot overwrite each other. */
+  cookiePrefix?: string;
   plugins: BetterAuthPlugin[];
 }
 
 export function defineConfig(customOptions: CustomBetterAuthOptions) {
+  const cookieDomain = resolveCookieDomain(customOptions.cookieDomain);
+
   const options = {
     account: {
       accountLinking: {
@@ -124,7 +165,7 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
       disableSignUp: authEnv.AUTH_DISABLE_EMAIL_PASSWORD,
       enabled: !authEnv.AUTH_DISABLE_EMAIL_PASSWORD,
       maxPasswordLength: 64,
-      minPasswordLength: 8,
+      minPasswordLength: PASSWORD_MIN_LENGTH,
       requireEmailVerification: authEnv.AUTH_EMAIL_VERIFICATION,
       revokeSessionsOnPasswordReset: true,
 
@@ -188,14 +229,7 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
     onAPIError: {
       errorURL: '/auth-error',
     },
-    session: {
-      cookieCache: {
-        enabled: true,
-        maxAge: 2 * 60, // Cache duration in seconds
-      },
-      // Keep a DB-backed fallback when Redis secondary storage entries are unexpectedly missing.
-      storeSessionInDatabase: true,
-    },
+    session: sessionOptions,
     database: drizzleAdapter(serverDB, {
       provider: 'pg',
       // experimental joins feature needs schema to pass full relation
@@ -215,6 +249,36 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
      * Ref: https://www.better-auth.com/docs/reference/options#databasehooks
      */
     databaseHooks: {
+      session: {
+        create: {
+          before: async (session, context) => {
+            try {
+              await clearMismatchedOIDCSession(serverDB, session.userId, context);
+            } catch (error) {
+              /**
+               * OIDC cleanup is a provider-specific recovery guard. Its failure must not prevent
+               * Better Auth from creating the primary application session.
+               */
+              console.error('[Better Auth] Failed to clear a stale OIDC session:', error);
+            }
+          },
+        },
+      },
+      /**
+       * DATA-001: Better Auth phone plugin stores OTP plaintext. Hash digit OTPs at insert
+       * so `verifications.value` is never a usable code. Email OTPs use `storeOTP: "hashed"`
+       * and do not match the plain-digit pattern.
+       */
+      verification: {
+        create: {
+          before: async (verification) => ({
+            data: {
+              ...verification,
+              value: hashPhoneOtpVerificationValue(String(verification.value ?? '')),
+            },
+          }),
+        },
+      },
       user: {
         create: {
           after: async (user) => {
@@ -224,7 +288,8 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
               id: user.id,
               username: user.username as string | null,
               createdAt: user.createdAt,
-              // TODO: if add phone plugin, we should fill phone here
+              // Better Auth logical field is phoneNumber; our users.phone column is remapped below
+              phone: (user as { phoneNumber?: string | null }).phoneNumber ?? null,
             });
           },
         },
@@ -240,16 +305,31 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
           type: 'string',
         },
       },
+      // `fields` is typed against better-auth's base User columns only, so the
+      // phoneNumber plugin's field is not in the allowed key union even though
+      // the mapping is honoured at runtime.
       fields: {
         image: 'avatar',
         // NOTE: use drizzle filed instead of db field, so use fullName instead of full_name
         name: 'fullName',
-      },
+        // phoneNumber plugin field → existing users.phone column (see migration 0055)
+        phoneNumber: 'phone',
+      } as Record<string, string>,
       modelName: 'users',
     },
 
     socialProviders,
     advanced: {
+      // Plain-HTTP control-plane / moz: browsers reject __Secure- cookies on http://
+      ...(process.env.AICO_INSECURE_AUTH_COOKIES === '1' ||
+      (process.env.AICO_IS_CONTROL_PLANE === '1' &&
+        (process.env.APP_URL || '').startsWith('http://'))
+        ? { useSecureCookies: false }
+        : {}),
+      ...(cookieDomain && {
+        crossSubDomainCookies: { domain: cookieDomain, enabled: true },
+      }),
+      ...(customOptions.cookiePrefix && { cookiePrefix: customOptions.cookiePrefix }),
       database: {
         /**
          * Align Better Auth user IDs with our shared idGenerator for consistency.
@@ -271,18 +351,32 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
       customRules: {
         '/request-password-reset': { max: 3, window: 60 },
         '/send-verification-email': { max: 3, window: 60 },
+        // Phone OTP send — matches plugin pathMatcher (/phone-number/*) with a tighter send cap
+        '/phone-number/send-otp': { max: 3, window: 60 },
+        '/phone-number/verify': { max: 10, window: 60 },
       },
     },
     plugins: [
       ...customOptions.plugins,
+      deferredSessionRefresh(),
       emailWhitelist(),
+      phoneLoginGate(),
+      passwordPolicy(),
+      forceChangePasswordRevoke(),
+      authAbuseSignal(),
       expo(),
-      admin(),
+      aicoBanMessage(),
+      admin({
+        bannedUserMessage:
+          'Your account has been deactivated. Please contact support if you believe this is an error.',
+      }),
       // Email OTP plugin for mobile verification
       emailOTP({
         expiresIn: OTP_EXPIRES_IN,
         otpLength: 6,
         allowedAttempts: 3,
+        // DATA-002: never persist usable OTP plaintext in `verifications`
+        storeOTP: 'hashed',
         // Don't automatically send OTP on sign up - let mobile client manually trigger it
         sendVerificationOnSignUp: false,
         async sendVerificationOTP({ email, otp }) {
@@ -302,9 +396,69 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
           });
         },
       }),
+      // Aico Phase 1: phone OTP sign-in for previously verified numbers + optional verify for trial
+      phoneNumber({
+        allowedAttempts: 3,
+        expiresIn: OTP_EXPIRES_IN,
+        otpLength: 6,
+        // Do not block email/OAuth sign-in when phone is unverified
+        requireVerification: false,
+        // Map Better Auth logical field → users.phone (column already exists)
+        schema: {
+          user: {
+            fields: {
+              phoneNumber: 'phone',
+            },
+          },
+        },
+        phoneNumberValidator: async (value) => isValidIranianPhoneNumber(value),
+        // Await so SMS provider failures surface to the client (not silent fire-and-forget)
+        sendOTP: async ({ phoneNumber: rawPhone, code }) => {
+          const phone = normalizeIranianPhoneNumber(rawPhone) ?? rawPhone;
+          const smsService = new SmsService();
+          try {
+            await smsService.sendOtp(phone, code);
+          } catch (error) {
+            // Redact phone PII for log aggregators (MON-005) — keep last 4 digits only
+            const phoneFingerprint = phone.length > 4 ? `***${phone.slice(-4)}` : '***';
+            console.error('[sms] failed to send OTP', { phone: phoneFingerprint, error });
+            throw error;
+          }
+        },
+        /**
+         * DATA-001: compare against hashed OTP (see verification.create before-hook).
+         * Replaces BA plaintext equality while preserving attempt limits.
+         */
+        verifyOTP: async ({ phoneNumber: rawPhone, code }, ctx) => {
+          if (!ctx) return false;
+          const phone = normalizeIranianPhoneNumber(rawPhone) ?? rawPhone;
+          const row = await ctx.context.internalAdapter.findVerificationValue(phone);
+          if (!row || row.expiresAt < new Date()) return false;
+
+          const colon = row.value.lastIndexOf(':');
+          const storedHash = colon === -1 ? row.value : row.value.slice(0, colon);
+          const attemptsRaw = colon === -1 ? '0' : row.value.slice(colon + 1);
+          const attempts = Number.parseInt(attemptsRaw || '0', 10);
+          const allowedAttempts = 3;
+
+          if (Number.isFinite(attempts) && attempts >= allowedAttempts) {
+            await ctx.context.internalAdapter.deleteVerificationByIdentifier(phone);
+            return false;
+          }
+
+          if (!phoneOtpEquals(code, storedHash)) {
+            await ctx.context.internalAdapter.updateVerificationByIdentifier(phone, {
+              value: `${storedHash}:${attempts + 1}`,
+            });
+            return false;
+          }
+
+          return true;
+        },
+      }),
       passkey({
-        rpName: 'LobeHub',
-        // Extract rpID from auth URL (e.g., 'lobehub.com' from 'https://lobehub.com')
+        rpName: BRANDING_NAME,
+        // Extract rpID from auth URL (e.g., hostname from 'https://example.com')
         // Returns undefined if AUTH_URL is not set (e.g., in e2e tests)
         rpID: getPasskeyRpID(),
         // Support multiple origins: web + Android APK key hashes
@@ -341,5 +495,12 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
     ],
   } satisfies BetterAuthOptions;
 
-  return betterAuth(options);
+  const instance = betterAuth(options);
+  if (!cookieDomain) return instance;
+
+  const handleRequest = instance.handler;
+  instance.handler = async (request) =>
+    expireLegacyHostOnlyCookies(request, await handleRequest(request), cookieDomain);
+
+  return instance;
 }

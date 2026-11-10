@@ -1,10 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   filterToolIdsByCurrentEnv,
   isInstalledPluginAvailableInCurrentEnv,
   isToolAvailableInCurrentEnv,
 } from './toolAvailability';
+
+const setCloudSandboxBackend = (enableCloudSandbox?: boolean) => {
+  (window as any).global_serverConfigStore = {
+    getState: () => ({ serverConfig: { enableCloudSandbox } }),
+  };
+};
+
+afterEach(() => {
+  delete (window as any).global_serverConfigStore;
+});
 
 describe('toolAvailability', () => {
   it('should hide desktop-only builtin skills in web', () => {
@@ -49,5 +59,20 @@ describe('toolAvailability', () => {
         isDesktop: false,
       }),
     ).toBe(false);
+  });
+
+  // Regression: on a deployment with no sandbox backend every cloud sandbox
+  // call 401s, and the activator resolves tools through this same check — so an
+  // unavailable sandbox must be dropped here or it stays discoverable.
+  it('should drop the cloud sandbox tool when the deployment has no sandbox backend', () => {
+    setCloudSandboxBackend(false);
+
+    expect(isToolAvailableInCurrentEnv('lobe-cloud-sandbox')).toBe(false);
+  });
+
+  it('should keep the cloud sandbox tool when the deployment has a sandbox backend', () => {
+    setCloudSandboxBackend(true);
+
+    expect(isToolAvailableInCurrentEnv('lobe-cloud-sandbox')).toBe(true);
   });
 });

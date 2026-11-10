@@ -1,6 +1,7 @@
 'use client';
 
 import { ExclamationCircleOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { BRANDING_EMAIL } from '@lobechat/business-const';
 import { FluentEmoji, Text } from '@lobehub/ui';
 import { Button } from '@lobehub/ui/base-ui';
 import { Result } from 'antd';
@@ -23,6 +24,12 @@ const StatusPage = memo<StatusPageProps>(({ status }) => {
 
   // Under review status
   if (status === 'unpublished') {
+    const supportEmail = BRANDING_EMAIL.support || 'support';
+    const supportLink = BRANDING_EMAIL.support ? (
+      <a href={`mailto:${BRANDING_EMAIL.support}`}>{BRANDING_EMAIL.support}</a>
+    ) : (
+      <span>{supportEmail}</span>
+    );
     return (
       <div
         style={{
@@ -47,7 +54,7 @@ const StatusPage = memo<StatusPageProps>(({ status }) => {
                 i18nKey="assistants.status.unpublished.subtitle"
                 ns="discover"
                 components={{
-                  email: <a href="mailto:support@lobehub.com">support@lobehub.com</a>,
+                  email: supportLink,
                 }}
               />
             </Text>
@@ -102,7 +109,11 @@ const StatusPage = memo<StatusPageProps>(({ status }) => {
                 i18nKey="assistants.status.support"
                 ns="discover"
                 components={{
-                  email: <a href="mailto:support@lobehub.com">support@lobehub.com</a>,
+                  email: BRANDING_EMAIL.support ? (
+                    <a href={`mailto:${BRANDING_EMAIL.support}`}>{BRANDING_EMAIL.support}</a>
+                  ) : (
+                    <span>support</span>
+                  ),
                 }}
               />
             </p>

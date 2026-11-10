@@ -86,6 +86,32 @@ describe('AiInfraRepos', () => {
       );
     });
 
+    it('should hide preference-only shells without a builtin card', async () => {
+      const mockUserModels = [
+        // Preference-only shell (e.g. left after clearRemoteModels demoted a
+        // remote row with a saved reasoning preference): no identity at all
+        {
+          config: { chatConfig: { reasoningEffort: 'high' } },
+          id: 'gone-remote-model',
+          type: 'chat' as const,
+        },
+        // Preference row for a builtin model keeps merging onto its card
+        {
+          config: { chatConfig: { reasoningEffort: 'low' } },
+          id: 'gpt-4',
+          type: 'chat' as const,
+        },
+      ] as AiProviderModelListItem[];
+      const mockBuiltinModels = [{ displayName: 'GPT-4', enabled: true, id: 'gpt-4' }];
+
+      vi.spyOn(repo.aiModelModel, 'getModelListByProviderId').mockResolvedValue(mockUserModels);
+      vi.spyOn(repo as any, 'fetchBuiltinModels').mockResolvedValue(mockBuiltinModels);
+
+      const result = await repo.getAiProviderModelList('openai');
+
+      expect(result.map((m) => m.id)).toEqual(['gpt-4']);
+    });
+
     it('should use builtin models', async () => {
       const providerId = 'ai21';
 
@@ -149,6 +175,38 @@ describe('AiInfraRepos', () => {
       const result = await repo.getAiProviderModelList(providerId, { limit: 1, offset: 0 });
 
       expect(result.map((i) => i.id)).toEqual(['deepseek-v4-pro']);
+    });
+
+    it('should filter free models before applying pagination', async () => {
+      const providerId = 'openrouter';
+      const builtinModels = [
+        {
+          displayName: 'Llama 3.3 70B Instruct',
+          enabled: false,
+          id: 'meta-llama/llama-3.3-70b-instruct:free',
+          type: 'chat',
+        },
+        {
+          displayName: 'Gemma 2 9B (free)',
+          enabled: false,
+          id: 'google/gemma-2-9b-it',
+          type: 'chat',
+        },
+        { displayName: 'GPT-4o', enabled: false, id: 'openai/gpt-4o', type: 'chat' },
+        {
+          displayName: 'Claude Sonnet',
+          enabled: false,
+          id: 'anthropic/claude-sonnet',
+          type: 'chat',
+        },
+      ] as AiProviderModelListItem[];
+
+      vi.spyOn(repo.aiModelModel, 'getModelListByProviderId').mockResolvedValue([]);
+      vi.spyOn(repo as any, 'fetchBuiltinModels').mockResolvedValue(builtinModels);
+
+      const result = await repo.getAiProviderModelList(providerId, { limit: 1, offset: 0 });
+
+      expect(result.map((i) => i.id)).toEqual(['openai/gpt-4o']);
     });
 
     it('should support enabled filter with pagination', async () => {

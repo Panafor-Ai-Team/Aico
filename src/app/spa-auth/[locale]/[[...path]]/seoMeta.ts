@@ -1,4 +1,4 @@
-import { BRANDING_NAME, ORG_NAME } from '@lobechat/business-const';
+import { APPLE_APP_STORE_ID, BRANDING_NAME, ORG_NAME } from '@lobechat/business-const';
 import { OG_URL } from '@lobechat/const';
 import urlJoin from 'url-join';
 
@@ -33,6 +33,20 @@ export async function buildAuthSeoEntry(locale: string, pathname: string): Promi
         title: t('betterAuth.signup.title'),
       };
     }
+    case '/terms': {
+      return {
+        canonicalPath: '/terms',
+        description: t('legal.terms.intro', { appName: BRANDING_NAME, orgName: ORG_NAME }),
+        title: t('legal.terms.title'),
+      };
+    }
+    case '/privacy': {
+      return {
+        canonicalPath: '/privacy',
+        description: t('legal.privacy.intro', { appName: BRANDING_NAME, orgName: ORG_NAME }),
+        title: t('legal.privacy.title'),
+      };
+    }
     default: {
       return {
         description: t('signin.subtitle', { appName: BRANDING_NAME }),
@@ -46,21 +60,28 @@ export async function buildSeoMeta(locale: string, pathname: string): Promise<st
   const lng = normalizeLocale(locale);
   const { title, description, canonicalPath } = await buildAuthSeoEntry(lng, pathname);
   const ogUrl = canonicalPath ? urlJoin(OFFICIAL_URL, canonicalPath) : OFFICIAL_URL;
+  const ogImage = urlJoin(OFFICIAL_URL, OG_URL);
 
-  return [
+  const metas = [
     `<title>${title}</title>`,
     `<meta name="description" content="${description}" />`,
     `<meta property="og:title" content="${title}" />`,
     `<meta property="og:description" content="${description}" />`,
     `<meta property="og:type" content="website" />`,
     `<meta property="og:url" content="${ogUrl}" />`,
-    `<meta property="og:image" content="${OG_URL}" />`,
+    `<meta property="og:image" content="${ogImage}" />`,
     `<meta property="og:site_name" content="${BRANDING_NAME}" />`,
     `<meta property="og:locale" content="${lng}" />`,
     `<meta name="twitter:card" content="summary_large_image" />`,
     `<meta name="twitter:title" content="${title}" />`,
     `<meta name="twitter:description" content="${description}" />`,
-    `<meta name="twitter:image" content="${OG_URL}" />`,
+    `<meta name="twitter:image" content="${ogImage}" />`,
     `<meta name="twitter:site" content="${isCustomORG ? `@${ORG_NAME}` : '@lobehub'}" />`,
-  ].join('\n    ');
+  ];
+
+  if (APPLE_APP_STORE_ID) {
+    metas.push(`<meta name="apple-itunes-app" content="app-id=${APPLE_APP_STORE_ID}" />`);
+  }
+
+  return metas.join('\n    ');
 }

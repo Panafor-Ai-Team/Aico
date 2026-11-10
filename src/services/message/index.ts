@@ -14,11 +14,63 @@ import {
   type UpdateMessageRAGParams,
   type UpdateMessageResult,
 } from '@lobechat/types';
+import { ChatErrorType } from '@lobechat/types';
 import { type HeatmapsProps } from '@lobehub/charts';
 
 import { lambdaClient } from '@/libs/trpc/client';
 
 import { abortableRequest } from '../utils/abortableRequest';
+
+/**
+ * Always return a plain object for tRPC + superjson.
+ *
+ * Stream / runtime paths often Object.assign ChatMessageError fields onto an
+ * `Error` instance. Superjson's Error serializer only keeps `name`/`message`,
+ * so `type` (and body/classification) would otherwise arrive as `undefined`
+ * and fail `ChatMessageErrorSchema` on `message.update`.
+ */
+export const toPlainChatMessageError = (
+  value: ChatMessageError | null | undefined,
+): ChatMessageError | null | undefined => {
+  if (value == null) return value;
+
+  const raw = value as ChatMessageError & { errorType?: unknown };
+  const type =
+    (typeof raw.type === 'string' || typeof raw.type === 'number' ? raw.type : undefined) ??
+    (typeof raw.errorType === 'string' || typeof raw.errorType === 'number'
+      ? (raw.errorType as ChatMessageError['type'])
+      : undefined);
+
+  if (!type) {
+    return {
+      body: value instanceof Error ? { message: value.message, name: value.name } : value,
+      message: typeof raw.message === 'string' ? raw.message : undefined,
+      // 'ApplicationRuntimeError' was not a member of ChatErrorType — it exists
+      // nowhere else in the codebase, so this fallback emitted a type no consumer
+      // could match. UnknownChatFetchError is the canonical catch-all.
+      type: ChatErrorType.UnknownChatFetchError,
+    };
+  }
+
+  return {
+    attribution: raw.attribution,
+    body:
+      raw.body !== undefined
+        ? raw.body
+        : value instanceof Error
+          ? { message: value.message, name: value.name }
+          : undefined,
+    category: raw.category,
+    countAsFailure: raw.countAsFailure,
+    httpStatus: raw.httpStatus,
+    isFallback: raw.isFallback,
+    message: typeof raw.message === 'string' ? raw.message : undefined,
+    numericId: raw.numericId,
+    retryable: raw.retryable,
+    severity: raw.severity,
+    type,
+  };
+};
 
 /**
  * Query context for message operations
@@ -195,14 +247,10 @@ export class MessageService {
   };
 
   updateMessageError = async (id: string, value: ChatMessageError, ctx?: MessageQueryContext) => {
-    const error = value.type
-      ? value
-      : { body: value, message: value.message, type: 'ApplicationRuntimeError' };
-
     return lambdaClient.message.update.mutate({
       ...ctx,
       id,
-      value: { error },
+      value: { error: toPlainChatMessageError(value) },
     });
   };
 
@@ -232,10 +280,13 @@ export class MessageService {
     value: Partial<UpdateMessageParams>,
     ctx?: MessageQueryContext,
   ): Promise<UpdateMessageResult> => {
+    const nextValue =
+      'error' in value ? { ...value, error: toPlainChatMessageError(value.error) } : value;
+
     return lambdaClient.message.update.mutate({
       ...ctx,
       id,
-      value,
+      value: nextValue,
     });
   };
 

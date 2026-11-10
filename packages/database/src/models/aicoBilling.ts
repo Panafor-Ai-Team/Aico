@@ -1,0 +1,1279 @@
+import { createHash } from 'node:crypto';
+
+import { MANAGED_PROVIDER_ID } from '@lobechat/business-const';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  notInArray,
+  sql,
+} from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
+
+import {
+  organizations,
+  platformAdminUsers,
+  platformFxConfig,
+  platformModelMultiplierOverrides,
+  platformTrialConfig,
+  platformUsageMultiplierConfig,
+  trialAbuseBlocklist,
+  usageHolds,
+  usageLogs,
+  userTrials,
+  userWallets,
+  walletTransactions,
+} from '../schemas/aicoOrganization';
+import { users } from '../schemas/user';
+import type { LobeChatDatabase } from '../type';
+import {
+  assertValidModelMultiplierBp,
+  assertValidMultiplierBp,
+  defaultMultiplierBpForProvider,
+  FALLBACK_MULTIPLIER_CONFIG_ID,
+  mulDivFloor,
+  rawCapacityFromDeposit,
+} from '../utils/aicoMoney';
+import { measuredCostSql, unmeasuredCostSql, unmeasuredShadowSql } from './aicoUsageLedger';
+
+/**
+ * Iranian mobile → E.164 normalization, duplicated (not imported) from
+ * `src/libs/better-auth/phone.ts` — the database package cannot depend on
+ * app-level `src/` code. Keep this in lockstep with that file.
+ *
+ * Fingerprints MUST be derived from a single canonical form, or distinct raw
+ * inputs (`09121234567`, `+989121234567`, Persian digits, …) for the same
+ * underlying number would produce distinct fingerprints and defeat trial
+ * abuse detection / the unique phone-fingerprint constraint.
+ */
+const IR_MOBILE_E164 = /^\+989\d{9}$/;
+const PERSIAN_DIGITS = '۰۱۲۳۴۵۶۷۸۹';
+const ARABIC_INDIC_DIGITS = '٠١٢٣٤٥٦٧٨٩';
+
+// Mirrors `toAsciiDigits` in src/libs/better-auth/phone.ts so a number accepted at sign-in
+// fingerprints to the same E.164 value (NFKC folds fullwidth digits and `＋`).
+const toAsciiDigits = (value: string): string =>
+  [...value.normalize('NFKC')]
+    .map((ch) => {
+      const persian = PERSIAN_DIGITS.indexOf(ch);
+      if (persian >= 0) return String(persian);
+      const arabic = ARABIC_INDIC_DIGITS.indexOf(ch);
+      return arabic >= 0 ? String(arabic) : ch;
+    })
+    .join('');
+
+const stripPhoneNoise = (value: string): string =>
+  toAsciiDigits(value)
+    .replaceAll(/[\s\-()]/g, '')
+    .trim();
+
+/**
+ * Reason written onto the admin credits recorded before a reason was required
+ * (2026-09-23 backfill). It explains old rows and is never offered for new ones.
+ */
+export const LEGACY_MANUAL_CREDIT_REASON =
+  'Legacy manual credit — reason not recorded at the time (backfilled 2026-09-23)';
+
+/**
+ * Filled in by `manualCreditUser` when no reason is passed. Admins could leave
+ * the reason empty before it was required, so old user credits carry it; it
+ * says nothing about why and is never offered as a reason.
+ */
+export const DEFAULT_MANUAL_CREDIT_REASON = 'Manual credit';
+
+/** Normalizes an Iranian mobile number to E.164. Throws `INVALID_PHONE` if implausible. */
+export const normalizeIranianPhoneForFingerprint = (raw: string): string => {
+  const cleaned = stripPhoneNoise(raw);
+  if (!cleaned) throw new Error('INVALID_PHONE');
+
+  if (IR_MOBILE_E164.test(cleaned)) return cleaned;
+
+  if (/^\+98/.test(cleaned)) {
+    const digits = cleaned.slice(1);
+    if (/^989\d{9}$/.test(digits)) return `+${digits}`;
+    throw new Error('INVALID_PHONE');
+  }
+
+  if (/^989\d{9}$/.test(cleaned)) return `+${cleaned}`;
+
+  const digits = cleaned.replaceAll(/\D/g, '');
+  if (/^0?9\d{9}$/.test(digits)) {
+    const national = digits.startsWith('0') ? digits.slice(1) : digits;
+    return `+98${national}`;
+  }
+
+  throw new Error('INVALID_PHONE');
+};
+
+/**
+ * Postgres unique_violation. Drizzle wraps driver errors in a `Failed query:`
+ * Error and hangs the original off `cause`, so the code is not always on the
+ * error we are handed.
+ */
+const isUniqueConstraintViolation = (error: unknown): boolean => {
+  let current = error;
+  for (let depth = 0; current && typeof current === 'object' && depth < 5; depth += 1) {
+    if ((current as { code?: string }).code === '23505') return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+};
+
+export const fingerprintPhone = (phone: string): string =>
+  createHash('sha256')
+    .update(`phone:${normalizeIranianPhoneForFingerprint(phone)}`)
+    .digest('hex');
+
+export const fingerprintEmail = (email: string): string =>
+  createHash('sha256').update(`email:${email.trim().toLowerCase()}`).digest('hex');
+
+export class AicoBillingModel {
+  private readonly db: LobeChatDatabase;
+
+  constructor(db: LobeChatDatabase) {
+    this.db = db;
+  }
+
+  // ─── FX / wallets ──────────────────────────────────────────────────
+
+  getOrCreateUserWallet = async (userId: string) => {
+    const existing = await this.db.query.userWallets.findFirst({
+      where: eq(userWallets.userId, userId),
+    });
+    if (existing) return existing;
+
+    const [created] = await this.db
+      .insert(userWallets)
+      .values({ userId })
+      .onConflictDoNothing({ target: userWallets.userId })
+      .returning();
+    if (created) return created;
+
+    return (await this.db.query.userWallets.findFirst({
+      where: eq(userWallets.userId, userId),
+    }))!;
+  };
+
+  getUserWallet = async (userId: string) => {
+    return this.db.query.userWallets.findFirst({
+      where: eq(userWallets.userId, userId),
+    });
+  };
+
+  /**
+   * Platform-admin manual credit onto a B2C user wallet.
+   * Amounts must be positive integers; FX rate is stored for audit.
+   */
+  manualCreditUser = async (params: {
+    amountMicroUsd: number;
+    amountToman: number;
+    createdByAdminId?: string | null;
+    createdByUserId?: string | null;
+    description?: string;
+    fxRateTomanPerUsd: number;
+    /** Optional client idempotency key — unique in wallet_transactions.gateway_ref_id (FIN-003). */
+    idempotencyKey?: string;
+    userId: string;
+  }) => {
+    if (!Number.isInteger(params.amountToman) || params.amountToman <= 0) {
+      throw new Error('AMOUNT_TOMAN_MUST_BE_POSITIVE_INTEGER');
+    }
+    if (!Number.isInteger(params.amountMicroUsd) || params.amountMicroUsd <= 0) {
+      throw new Error('AMOUNT_MICRO_USD_MUST_BE_POSITIVE_INTEGER');
+    }
+    if (!Number.isInteger(params.fxRateTomanPerUsd) || params.fxRateTomanPerUsd <= 0) {
+      throw new Error('INVALID_FX_RATE');
+    }
+
+    if (params.idempotencyKey) {
+      const existingTx = await this.db.query.walletTransactions.findFirst({
+        where: eq(walletTransactions.gatewayRefId, params.idempotencyKey),
+      });
+      if (existingTx) {
+        if (existingTx.userId !== params.userId || existingTx.type !== 'manual_credit') {
+          throw new Error('IDEMPOTENCY_KEY_CONFLICT');
+        }
+        const wallet = await this.getOrCreateUserWallet(params.userId);
+        return { transaction: existingTx, wallet };
+      }
+    }
+
+    const applyCredit = () =>
+      this.db.transaction(async (tx) => {
+        await tx.insert(userWallets).values({ userId: params.userId }).onConflictDoNothing({
+          target: userWallets.userId,
+        });
+
+        // D1: locked so the ledger row's balance_before is the real one and the
+        // isActive check cannot miss a freeze committing alongside.
+        const [before] = await tx
+          .select()
+          .from(userWallets)
+          .where(eq(userWallets.userId, params.userId))
+          .limit(1)
+          .for('update');
+        // FIN-015: crediting used to flip `isActive` back on, silently
+        // resurrecting a soft-deleted or deactivated wallet — and, before the
+        // capacity fix, handing back its pre-freeze spend limit for free.
+        // Restoring an account is now an explicit, ledgered step.
+        if (before && !before.isActive) throw new Error('WALLET_INACTIVE');
+        const balanceBeforeMicroUsd = Number(before?.balanceMicroUsd ?? 0);
+        const balanceBeforeToman = Number(before?.balanceToman ?? 0);
+
+        // AICO-184: the deposit buys raw upstream spend once, at the rate in
+        // force right now. Read inside the transaction so a concurrent
+        // multiplier change either applies to this top-up or does not.
+        const multiplierBp = await this.getUsageMultiplierBp(MANAGED_PROVIDER_ID, tx);
+        const rawCapacityAdded = rawCapacityFromDeposit(params.amountMicroUsd, multiplierBp);
+
+        const [wallet] = await tx
+          .update(userWallets)
+          .set({
+            balanceMicroUsd: sql`${userWallets.balanceMicroUsd} + ${params.amountMicroUsd}`,
+            balanceToman: sql`${userWallets.balanceToman} + ${params.amountToman}`,
+            rawCapacityMicroUsd: sql`${userWallets.rawCapacityMicroUsd} + ${rawCapacityAdded}`,
+          })
+          .where(eq(userWallets.userId, params.userId))
+          .returning();
+
+        const [txRow] = await tx
+          .insert(walletTransactions)
+          .values({
+            amountMicroUsd: params.amountMicroUsd,
+            amountToman: params.amountToman,
+            balanceAfterMicroUsd: Number(wallet?.balanceMicroUsd ?? 0),
+            balanceAfterToman: Number(wallet?.balanceToman ?? 0),
+            balanceBeforeMicroUsd,
+            balanceBeforeToman,
+            createdByAdminId: params.createdByAdminId ?? null,
+            createdByUserId: params.createdByUserId ?? null,
+            description: params.description ?? DEFAULT_MANUAL_CREDIT_REASON,
+            fxRateTomanPerUsd: params.fxRateTomanPerUsd,
+            gatewayRefId: params.idempotencyKey ?? null,
+            // The rate this money was bought at — a later multiplier change
+            // must never be able to re-derive it.
+            metadata: { multiplierBp, rawCapacityAddedMicroUsd: rawCapacityAdded },
+            type: 'manual_credit',
+            userId: params.userId,
+          })
+          .returning();
+
+        return { transaction: txRow, wallet };
+      });
+
+    if (!params.idempotencyKey) return applyCredit();
+
+    try {
+      return await applyCredit();
+    } catch (error) {
+      // FIN-013: a concurrent submit carrying the same key won the race. The
+      // credit it committed is the one this caller asked for, so return it —
+      // surfacing an error here is what makes an admin retry into a double credit.
+      if (!isUniqueConstraintViolation(error)) throw error;
+      const existingTx = await this.db.query.walletTransactions.findFirst({
+        where: eq(walletTransactions.gatewayRefId, params.idempotencyKey),
+      });
+      if (!existingTx) throw error;
+      if (existingTx.userId !== params.userId || existingTx.type !== 'manual_credit') {
+        throw new Error('IDEMPOTENCY_KEY_CONFLICT', { cause: error });
+      }
+      return { transaction: existingTx, wallet: await this.getOrCreateUserWallet(params.userId) };
+    }
+  };
+
+  /**
+   * Platform-admin reduction of a B2C wallet — the ledgered inverse of
+   * {@link manualCreditUser}, for taking back a grant that was never paid for.
+   *
+   * Only unspent money can be taken: the amount must not exceed
+   * `balance − settled usage`. Balance, capacity and the toman mirror all fall
+   * by the same fraction, so the wallet keeps the rate its money was bought at
+   * and billed usage re-derived from capacity is unchanged. The caller shrinks
+   * the managed key afterwards; until then the pre-flight gate refuses spend
+   * past the new balance.
+   */
+  manualDebitUser = async (params: {
+    amountMicroUsd: number;
+    createdByAdminId?: string | null;
+    description: string;
+    /** Unique in wallet_transactions.gateway_ref_id — a retry returns the first debit. */
+    idempotencyKey: string;
+    userId: string;
+  }) => {
+    if (!Number.isInteger(params.amountMicroUsd) || params.amountMicroUsd <= 0) {
+      throw new Error('AMOUNT_MICRO_USD_MUST_BE_POSITIVE_INTEGER');
+    }
+    if (!params.description.trim()) throw new Error('DESCRIPTION_REQUIRED');
+
+    const replay = async () => {
+      const existingTx = await this.db.query.walletTransactions.findFirst({
+        where: eq(walletTransactions.gatewayRefId, params.idempotencyKey),
+      });
+      if (!existingTx) return null;
+      if (existingTx.userId !== params.userId || existingTx.type !== 'manual_debit') {
+        throw new Error('IDEMPOTENCY_KEY_CONFLICT');
+      }
+      return { transaction: existingTx, wallet: (await this.getUserWallet(params.userId))! };
+    };
+
+    const existing = await replay();
+    if (existing) return existing;
+
+    const applyDebit = () =>
+      this.db.transaction(async (tx) => {
+        const [before] = await tx
+          .select()
+          .from(userWallets)
+          .where(eq(userWallets.userId, params.userId))
+          .limit(1)
+          .for('update');
+        if (!before) throw new Error('WALLET_NOT_FOUND');
+        if (!before.isActive) throw new Error('WALLET_INACTIVE');
+
+        const balance = Number(before.balanceMicroUsd ?? 0);
+        const settled = Math.max(0, Number(before.settledUsageMicroUsd ?? 0));
+        const available = balance - settled;
+        if (params.amountMicroUsd > available) throw new Error('DEBIT_EXCEEDS_AVAILABLE');
+
+        const rawCapacity = Number(before.rawCapacityMicroUsd ?? 0);
+        const balanceToman = Number(before.balanceToman ?? 0);
+        // Same fraction off every figure the balance was bought with. Floor the
+        // removed capacity so rounding can only ever leave the user a hair more.
+        const rawRemoved = mulDivFloor(rawCapacity, params.amountMicroUsd, balance);
+        const tomanRemoved = mulDivFloor(balanceToman, params.amountMicroUsd, balance);
+
+        // The key limit is `rawCapacity − rawUsageBeforeKey`, and enforce holds
+        // count against capacity too — neither may be pushed below zero.
+        const rawFloor = Math.max(
+          Number(before.rawUsageBeforeKeyMicroUsd ?? 0),
+          Number(before.rawUsedMicroUsd ?? 0) + Number(before.rawHeldMicroUsd ?? 0),
+        );
+        if (rawCapacity - rawRemoved < rawFloor) throw new Error('DEBIT_EXCEEDS_AVAILABLE');
+
+        const [wallet] = await tx
+          .update(userWallets)
+          .set({
+            balanceMicroUsd: sql`${userWallets.balanceMicroUsd} - ${params.amountMicroUsd}`,
+            balanceToman: sql`${userWallets.balanceToman} - ${tomanRemoved}`,
+            rawCapacityMicroUsd: sql`${userWallets.rawCapacityMicroUsd} - ${rawRemoved}`,
+          })
+          .where(eq(userWallets.userId, params.userId))
+          .returning();
+
+        const [transaction] = await tx
+          .insert(walletTransactions)
+          .values({
+            // Negative, so `balance_after − balance_before == amount` holds.
+            amountMicroUsd: -params.amountMicroUsd,
+            amountToman: -tomanRemoved,
+            balanceAfterMicroUsd: Number(wallet.balanceMicroUsd),
+            balanceAfterToman: Number(wallet.balanceToman),
+            balanceBeforeMicroUsd: balance,
+            balanceBeforeToman: balanceToman,
+            createdByAdminId: params.createdByAdminId ?? null,
+            description: params.description,
+            gatewayRefId: params.idempotencyKey,
+            metadata: {
+              availableBeforeMicroUsd: available,
+              rawCapacityRemovedMicroUsd: rawRemoved,
+              settledUsageMicroUsd: settled,
+            },
+            type: 'manual_debit',
+            userId: params.userId,
+          })
+          .returning();
+
+        return { transaction, wallet };
+      });
+
+    try {
+      return await applyDebit();
+    } catch (error) {
+      // A concurrent submit with the same key committed first: return its debit
+      // rather than an error an admin would answer with a second debit.
+      if (!isUniqueConstraintViolation(error)) throw error;
+      const raced = await replay();
+      if (!raced) throw error;
+      return raced;
+    }
+  };
+
+  /**
+   * Park a personal balance and the capacity it bought while the account is
+   * disabled, and record the move on the ledger.
+   *
+   * Balance and capacity must travel together: `rawCapacityMicroUsd` is pushed
+   * to OpenRouter as the key limit, so capacity left behind on a zeroed wallet
+   * is handed back free by the next credit (FIN-015). `balanceToman` is a
+   * paid-in mirror and deliberately untouched, as it was before.
+   */
+  freezePersonalWallet = async (params: {
+    createdByAdminId?: string | null;
+    createdByUserId?: string | null;
+    description?: string;
+    userId: string;
+  }) => {
+    return this.db.transaction(async (tx) => {
+      // N1: lock the row, and park what the row holds when it is written — not
+      // a figure read earlier. An unlocked read let a concurrent credit vanish
+      // (balance set to 0 over it) and a concurrent debit be parked a second time.
+      const [before] = await tx
+        .select()
+        .from(userWallets)
+        .where(eq(userWallets.userId, params.userId))
+        .limit(1)
+        .for('update');
+      if (!before) return null;
+
+      const [wallet] = await tx
+        .update(userWallets)
+        .set({
+          balanceMicroUsd: 0,
+          frozenMicroUsd: sql`${userWallets.frozenMicroUsd} + ${userWallets.balanceMicroUsd}`,
+          frozenRawCapacityMicroUsd: sql`${userWallets.frozenRawCapacityMicroUsd} + ${userWallets.rawCapacityMicroUsd}`,
+          isActive: false,
+          rawCapacityMicroUsd: 0,
+        })
+        .where(eq(userWallets.userId, params.userId))
+        .returning();
+
+      const balanceMicroUsd =
+        Number(wallet?.frozenMicroUsd ?? 0) - Number(before.frozenMicroUsd ?? 0);
+      const rawCapacityMicroUsd =
+        Number(wallet?.frozenRawCapacityMicroUsd ?? 0) -
+        Number(before.frozenRawCapacityMicroUsd ?? 0);
+
+      if (balanceMicroUsd === 0) return { transaction: null, wallet };
+
+      const [transaction] = await tx
+        .insert(walletTransactions)
+        .values({
+          // Negative, so `balance_after - balance_before == amount` still holds
+          // for anyone reconstructing a wallet from its ledger.
+          amountMicroUsd: -balanceMicroUsd,
+          // `balanceToman` is a paid-in mirror and does not move on a freeze.
+          amountToman: 0,
+          balanceAfterMicroUsd: 0,
+          balanceBeforeMicroUsd: balanceMicroUsd,
+          createdByAdminId: params.createdByAdminId ?? null,
+          createdByUserId: params.createdByUserId ?? null,
+          description: params.description ?? 'Personal balance frozen',
+          // C1: `balance_micro_usd` counts deposits; what the user can still
+          // spend is that minus the usage already settled. Both figures are kept so
+          // a later refund decision does not have to reconstruct the second.
+          metadata: {
+            frozenRawCapacityMicroUsd: rawCapacityMicroUsd,
+            unspentMicroUsd: Math.max(
+              0,
+              balanceMicroUsd - Math.max(0, Number(before.settledUsageMicroUsd ?? 0)),
+            ),
+          },
+          type: 'personal_freeze',
+          userId: params.userId,
+        })
+        .returning();
+
+      return { transaction, wallet };
+    });
+  };
+
+  /** Reverse of {@link freezePersonalWallet}: return parked funds and capacity. */
+  unfreezePersonalWallet = async (params: {
+    createdByAdminId?: string | null;
+    createdByUserId?: string | null;
+    description?: string;
+    userId: string;
+  }) => {
+    return this.db.transaction(async (tx) => {
+      // N1: lock the row, and restore only the parked figures still there when
+      // writing. Two unlocked unfreezes (an admin double-click) both read the
+      // same frozen amount and each paid it out.
+      const [before] = await tx
+        .select()
+        .from(userWallets)
+        .where(eq(userWallets.userId, params.userId))
+        .limit(1)
+        .for('update');
+      if (!before) return null;
+
+      const frozenMicroUsd = Number(before.frozenMicroUsd ?? 0);
+      const frozenRawCapacityMicroUsd = Number(before.frozenRawCapacityMicroUsd ?? 0);
+      const balanceBeforeMicroUsd = Number(before.balanceMicroUsd ?? 0);
+
+      const [wallet] = await tx
+        .update(userWallets)
+        .set({
+          balanceMicroUsd: sql`${userWallets.balanceMicroUsd} + ${frozenMicroUsd}`,
+          frozenMicroUsd: 0,
+          frozenRawCapacityMicroUsd: 0,
+          isActive: true,
+          rawCapacityMicroUsd: sql`${userWallets.rawCapacityMicroUsd} + ${frozenRawCapacityMicroUsd}`,
+        })
+        .where(
+          and(
+            eq(userWallets.userId, params.userId),
+            eq(userWallets.frozenMicroUsd, frozenMicroUsd),
+            eq(userWallets.frozenRawCapacityMicroUsd, frozenRawCapacityMicroUsd),
+          ),
+        )
+        .returning();
+
+      // Someone else restored it first: nothing is left to restore.
+      if (!wallet) {
+        const [current] = await tx
+          .select()
+          .from(userWallets)
+          .where(eq(userWallets.userId, params.userId))
+          .limit(1);
+        return { transaction: null, wallet: current };
+      }
+
+      if (frozenMicroUsd === 0) return { transaction: null, wallet };
+
+      const [transaction] = await tx
+        .insert(walletTransactions)
+        .values({
+          amountMicroUsd: frozenMicroUsd,
+          amountToman: 0,
+          balanceAfterMicroUsd: Number(wallet?.balanceMicroUsd ?? 0),
+          balanceBeforeMicroUsd,
+          createdByAdminId: params.createdByAdminId ?? null,
+          createdByUserId: params.createdByUserId ?? null,
+          description: params.description ?? 'Personal balance restored',
+          metadata: { restoredRawCapacityMicroUsd: frozenRawCapacityMicroUsd },
+          type: 'personal_unfreeze',
+          userId: params.userId,
+        })
+        .returning();
+
+      return { transaction, wallet };
+    });
+  };
+
+  /**
+   * UX-only preference for which wallet the SPA pre-selects. Authorization always
+   * re-derives the billing context from the request — never from this column.
+   */
+  setBillingPreference = async (params: {
+    organizationId?: string | null;
+    source: 'personal' | 'organization';
+    userId: string;
+  }) => {
+    await this.getOrCreateUserWallet(params.userId);
+    const [row] = await this.db
+      .update(userWallets)
+      .set({
+        preferredBillingSource: params.source,
+        preferredOrganizationId:
+          params.source === 'organization' ? (params.organizationId ?? null) : null,
+      })
+      .where(eq(userWallets.userId, params.userId))
+      .returning();
+    return row;
+  };
+
+  updateUserOpenRouterKey = async (params: {
+    ciphertext: string;
+    keyId: string;
+    /**
+     * Mint-time raw limit of the key, for providers that report only what is
+     * left (CheapVibeCode). Omit on OpenRouter, which reports usage directly.
+     * `null` explicitly clears a limit carried over from a retired key.
+     */
+    managedKeyLimitMicroUsd?: number | null;
+    /**
+     * Which gateway minted this key. Written on every mint so a later provider
+     * switch can tell a usable key from one belonging to the previous gateway.
+     */
+    managedKeyProviderId?: string;
+    /**
+     * Raw spend carried over from keys this wallet has already retired. Written
+     * only on a rotation; omitting it leaves the running total alone.
+     */
+    rawUsageBeforeKeyMicroUsd?: number;
+    /**
+     * C7: the key id the caller saw when it decided to mint (`null` for none).
+     * When given, the write only lands if the wallet still holds that key —
+     * another instance may have persisted its own since, and last-write-wins
+     * would orphan one of the two keys while both can spend. Returns undefined
+     * when it lost.
+     */
+    expectedKeyId?: string | null;
+    userId: string;
+  }) => {
+    await this.getOrCreateUserWallet(params.userId);
+    const [row] = await this.db
+      .update(userWallets)
+      .set({
+        openrouterKeyCiphertext: params.ciphertext,
+        openrouterKeyId: params.keyId,
+        ...('managedKeyLimitMicroUsd' in params
+          ? { managedKeyLimitMicroUsd: params.managedKeyLimitMicroUsd ?? null }
+          : {}),
+        ...(params.managedKeyProviderId
+          ? { managedKeyProviderId: params.managedKeyProviderId }
+          : {}),
+        ...(params.rawUsageBeforeKeyMicroUsd == null
+          ? {}
+          : {
+              rawUsageBeforeKeyMicroUsd: Math.max(0, Math.trunc(params.rawUsageBeforeKeyMicroUsd)),
+            }),
+      })
+      .where(
+        and(
+          eq(userWallets.userId, params.userId),
+          params.expectedKeyId === undefined
+            ? undefined
+            : sql`${userWallets.openrouterKeyId} IS NOT DISTINCT FROM ${params.expectedKeyId}`,
+        ),
+      )
+      .returning();
+    return row;
+  };
+
+  /**
+   * FIN-018. Persist the derived billed usage for a personal wallet, mirroring
+   * `OrganizationModel.syncMemberBudgetUsage`. A `degraded` status means the
+   * figure is the last one we could trust, not a fresh reading — callers must
+   * surface that rather than presenting it as current.
+   *
+   * A degraded sync deliberately does not move `settledUsageMicroUsd`: the
+   * whole point is to hold the last known usage instead of implying that none
+   * has happened since.
+   */
+  syncUserWalletUsage = async (params: {
+    settledUsageMicroUsd?: number;
+    syncError?: string | null;
+    syncStatus: 'synced' | 'degraded';
+    userId: string;
+  }) => {
+    await this.getOrCreateUserWallet(params.userId);
+    const [row] = await this.db
+      .update(userWallets)
+      .set({
+        lastSyncError: params.syncError ?? null,
+        lastSyncStatus: params.syncStatus,
+        lastSyncedAt: new Date(),
+        ...(params.settledUsageMicroUsd == null
+          ? {}
+          : { settledUsageMicroUsd: params.settledUsageMicroUsd }),
+      })
+      .where(eq(userWallets.userId, params.userId))
+      .returning();
+    return row;
+  };
+
+  /**
+   * Persist a rebased usage-multiplier checkpoint (AICO-180). Called when the
+   * platform multiplier changed since this wallet was last synced, so usage up
+   * to `usageBaselineMicroUsd` keeps the rate it was billed at.
+   */
+  listUserTransactions = async (userId: string, limit = 50) => {
+    return this.db.query.walletTransactions.findMany({
+      // Personal wallet only: org rows written for this member (allocations,
+      // reclaims) are the organization's ledger, not this wallet's.
+      where: and(eq(walletTransactions.userId, userId), isNull(walletTransactions.orgId)),
+      orderBy: [desc(walletTransactions.createdAt)],
+      limit,
+    });
+  };
+
+  /**
+   * `costMeasured` is false for a shadow call settled without a usage figure:
+   * its `costMicroUsd` is the hold, an upper bound, not something spent (N10).
+   */
+  listUserUsage = async (userId: string, limit = 50) => {
+    return this.db
+      .select({
+        ...getTableColumns(usageLogs),
+        costMeasured: sql<boolean>`NOT ${unmeasuredShadowSql()}`,
+      })
+      .from(usageLogs)
+      .leftJoin(usageHolds, eq(usageHolds.id, usageLogs.holdId))
+      .where(eq(usageLogs.userId, userId))
+      .orderBy(desc(usageLogs.createdAt))
+      .limit(limit);
+  };
+
+  recordUsage = async (params: {
+    billingSource: 'personal' | 'organization';
+    completionTokens: number;
+    costMicroUsd: number;
+    modelId: string;
+    /** Multiplier in force; resolved from platform config when omitted. */
+    multiplierBp?: number;
+    orgId?: string | null;
+    orgMemberId?: string | null;
+    promptTokens: number;
+    totalTokens: number;
+    userId: string;
+  }) => {
+    const multiplierBp = params.multiplierBp ?? (await this.getUsageMultiplierBp());
+    const [row] = await this.db
+      .insert(usageLogs)
+      .values({
+        billingSource: params.billingSource,
+        completionTokens: params.completionTokens,
+        costMicroUsd: params.costMicroUsd,
+        modelId: params.modelId,
+        multiplierBp,
+        orgId: params.orgId ?? null,
+        orgMemberId: params.orgMemberId ?? null,
+        promptTokens: params.promptTokens,
+        totalTokens: params.totalTokens,
+        userId: params.userId,
+      })
+      .returning();
+    return row;
+  };
+
+  // ─── FX config ─────────────────────────────────────────────────────
+
+  getFxConfig = async () => {
+    const existing = await this.db.query.platformFxConfig.findFirst({
+      where: eq(platformFxConfig.id, 'default'),
+    });
+    if (existing) return existing;
+
+    const [created] = await this.db
+      .insert(platformFxConfig)
+      .values({ id: 'default', tomanPerUsd: 187_400 })
+      .onConflictDoNothing()
+      .returning();
+    return (
+      created ??
+      (await this.db.query.platformFxConfig.findFirst({
+        where: eq(platformFxConfig.id, 'default'),
+      }))!
+    );
+  };
+
+  updateFxConfig = async (params: { tomanPerUsd: number; updatedByUserId?: string | null }) => {
+    const rate = Math.trunc(params.tomanPerUsd);
+    if (!Number.isFinite(rate) || rate <= 0) {
+      throw new Error('INVALID_FX_RATE');
+    }
+    await this.getFxConfig();
+    const [row] = await this.db
+      .update(platformFxConfig)
+      .set({
+        tomanPerUsd: rate,
+        updatedByUserId: params.updatedByUserId,
+      })
+      .where(eq(platformFxConfig.id, 'default'))
+      .returning();
+    return row;
+  };
+
+  // ─── Usage multiplier config (AICO-180, per-provider AICO-186) ─────
+  //
+  // Rows are keyed by managed provider id. The legacy `'default'` row is kept
+  // as the fallback so a deployment whose provider has no row of its own still
+  // resolves to a configured rate rather than a compiled-in constant.
+
+  /**
+   * Read-or-create the multiplier row for `providerId`.
+   *
+   * Resolution order: the provider's own row, then the legacy `'default'` row,
+   * then create the provider row seeded from that fallback (or from the
+   * provider's seed rate when there is no fallback either).
+   */
+  getUsageMultiplierConfig = async (
+    providerId: string = MANAGED_PROVIDER_ID,
+    db: LobeChatDatabase = this.db,
+  ) => {
+    const existing = await db.query.platformUsageMultiplierConfig.findFirst({
+      where: eq(platformUsageMultiplierConfig.id, providerId),
+    });
+    if (existing) return existing;
+
+    const fallback =
+      providerId === FALLBACK_MULTIPLIER_CONFIG_ID
+        ? undefined
+        : await db.query.platformUsageMultiplierConfig.findFirst({
+            where: eq(platformUsageMultiplierConfig.id, FALLBACK_MULTIPLIER_CONFIG_ID),
+          });
+
+    const seedBp = Number(fallback?.multiplierBp ?? defaultMultiplierBpForProvider(providerId));
+
+    const [created] = await db
+      .insert(platformUsageMultiplierConfig)
+      .values({ id: providerId, multiplierBp: seedBp })
+      .onConflictDoNothing()
+      .returning();
+    return (
+      created ??
+      (await db.query.platformUsageMultiplierConfig.findFirst({
+        where: eq(platformUsageMultiplierConfig.id, providerId),
+      }))!
+    );
+  };
+
+  /**
+   * Basis-point multiplier in force right now.
+   *
+   * Read-only on purpose. `getUsageMultiplierBp` runs on the money path, and
+   * `creditWallet` calls it with an open transaction handle — seeding a missing
+   * row there would put a write inside a wallet transaction, and a failed write
+   * aborts that transaction even though the error is swallowed below. Rows are
+   * seeded by migration `0151` and, for anything it missed, by the admin paths
+   * (`getUsageMultiplierConfig` / `listUsageMultipliers`).
+   *
+   * Lookup order: the provider's own row, then the legacy `'default'` row (so a
+   * deployment whose rate was tuned before `0151` keeps it even if the
+   * per-provider row is somehow absent), then the compiled-in constant.
+   *
+   * Never throws — billing must not wedge on a config read.
+   */
+  getUsageMultiplierBp = async (
+    providerId: string = MANAGED_PROVIDER_ID,
+    db: LobeChatDatabase = this.db,
+  ): Promise<number> => {
+    const fallbackBp = defaultMultiplierBpForProvider(providerId);
+    try {
+      const row =
+        (await db.query.platformUsageMultiplierConfig.findFirst({
+          where: eq(platformUsageMultiplierConfig.id, providerId),
+        })) ??
+        (providerId === FALLBACK_MULTIPLIER_CONFIG_ID
+          ? undefined
+          : await db.query.platformUsageMultiplierConfig.findFirst({
+              where: eq(platformUsageMultiplierConfig.id, FALLBACK_MULTIPLIER_CONFIG_ID),
+            }));
+
+      const bp = Number(row?.multiplierBp ?? fallbackBp);
+      return Number.isFinite(bp) && bp > 0 ? bp : fallbackBp;
+    } catch {
+      return fallbackBp;
+    }
+  };
+
+  /**
+   * Every configured provider rate, for the platform admin table. Ensures a row
+   * exists for each known managed provider so the panel can always edit them.
+   */
+  listUsageMultipliers = async (providerIds: string[]) => {
+    for (const providerId of providerIds) await this.getUsageMultiplierConfig(providerId);
+
+    return this.db.query.platformUsageMultiplierConfig.findMany({
+      orderBy: [asc(platformUsageMultiplierConfig.id)],
+      where: inArray(platformUsageMultiplierConfig.id, providerIds),
+    });
+  };
+
+  updateUsageMultiplier = async (params: {
+    multiplierBp: number;
+    providerId?: string;
+    updatedByUserId?: string | null;
+  }) => {
+    const providerId = params.providerId ?? MANAGED_PROVIDER_ID;
+    const bp = assertValidMultiplierBp(params.multiplierBp);
+    await this.getUsageMultiplierConfig(providerId);
+    const [row] = await this.db
+      .update(platformUsageMultiplierConfig)
+      .set({
+        multiplierBp: bp,
+        updatedByUserId: params.updatedByUserId,
+        updatedAt: new Date(),
+      })
+      .where(eq(platformUsageMultiplierConfig.id, providerId))
+      .returning();
+    return row;
+  };
+
+  // ─── Per-model coefficient overrides (AICO-187) ────────────────────
+  //
+  // These correct a published coefficient we have measured to be wrong. They
+  // move the model picker price and the per-message cost estimate only — the
+  // wallet debit stays balance-delta derived. See the table's doc comment.
+
+  listModelMultiplierOverrides = async (providerId: string = MANAGED_PROVIDER_ID) =>
+    this.db.query.platformModelMultiplierOverrides.findMany({
+      orderBy: [asc(platformModelMultiplierOverrides.modelId)],
+      where: eq(platformModelMultiplierOverrides.providerId, providerId),
+    });
+
+  /**
+   * `modelId` → bp map for the serve path. Never throws: a failure here must
+   * degrade to published coefficients, not blank the model list.
+   */
+  getModelMultiplierOverrideMap = async (
+    providerId: string = MANAGED_PROVIDER_ID,
+  ): Promise<Record<string, number>> => {
+    try {
+      const rows = await this.listModelMultiplierOverrides(providerId);
+      const map: Record<string, number> = {};
+      for (const row of rows) {
+        const bp = Number(row.multiplierBp);
+        if (Number.isFinite(bp) && bp > 0) map[row.modelId] = bp;
+      }
+      return map;
+    } catch {
+      return {};
+    }
+  };
+
+  setModelMultiplierOverride = async (params: {
+    modelId: string;
+    multiplierBp: number;
+    note?: string | null;
+    providerId?: string;
+    updatedByUserId?: string | null;
+  }) => {
+    const providerId = params.providerId ?? MANAGED_PROVIDER_ID;
+    const bp = assertValidModelMultiplierBp(params.multiplierBp);
+    const [row] = await this.db
+      .insert(platformModelMultiplierOverrides)
+      .values({
+        modelId: params.modelId,
+        multiplierBp: bp,
+        note: params.note ?? null,
+        providerId,
+        updatedByUserId: params.updatedByUserId ?? null,
+      })
+      .onConflictDoUpdate({
+        set: {
+          multiplierBp: bp,
+          note: params.note ?? null,
+          updatedAt: new Date(),
+          updatedByUserId: params.updatedByUserId ?? null,
+        },
+        target: [
+          platformModelMultiplierOverrides.providerId,
+          platformModelMultiplierOverrides.modelId,
+        ],
+      })
+      .returning();
+    return row;
+  };
+
+  /** Drop an override so the model falls back to its published coefficient. */
+  clearModelMultiplierOverride = async (params: { modelId: string; providerId?: string }) => {
+    const providerId = params.providerId ?? MANAGED_PROVIDER_ID;
+    await this.db
+      .delete(platformModelMultiplierOverrides)
+      .where(
+        and(
+          eq(platformModelMultiplierOverrides.providerId, providerId),
+          eq(platformModelMultiplierOverrides.modelId, params.modelId),
+        ),
+      );
+  };
+
+  // ─── Trial config ──────────────────────────────────────────────────
+
+  getTrialConfig = async () => {
+    const existing = await this.db.query.platformTrialConfig.findFirst({
+      where: eq(platformTrialConfig.id, 'default'),
+    });
+    if (existing) return existing;
+
+    const [created] = await this.db
+      .insert(platformTrialConfig)
+      .values({ id: 'default' })
+      .onConflictDoNothing()
+      .returning();
+    return (
+      created ??
+      (await this.db.query.platformTrialConfig.findFirst({
+        where: eq(platformTrialConfig.id, 'default'),
+      }))!
+    );
+  };
+
+  updateTrialConfig = async (params: {
+    allowedModelIds?: string[];
+    durationDays?: number;
+    enabled?: boolean;
+    maxRequests?: number | null;
+    trialBudgetMicroUsd?: number;
+    updatedByUserId?: string | null;
+  }) => {
+    await this.getTrialConfig();
+    const [row] = await this.db
+      .update(platformTrialConfig)
+      .set({
+        ...(params.enabled !== undefined ? { enabled: params.enabled } : {}),
+        ...(params.durationDays !== undefined ? { durationDays: params.durationDays } : {}),
+        ...(params.allowedModelIds !== undefined
+          ? { allowedModelIds: JSON.stringify(params.allowedModelIds) }
+          : {}),
+        ...(params.maxRequests !== undefined ? { maxRequests: params.maxRequests } : {}),
+        ...(params.trialBudgetMicroUsd !== undefined
+          ? { trialBudgetMicroUsd: params.trialBudgetMicroUsd }
+          : {}),
+        updatedByUserId: params.updatedByUserId,
+      })
+      .where(eq(platformTrialConfig.id, 'default'))
+      .returning();
+    return row;
+  };
+
+  getUserTrial = async (userId: string) => {
+    return this.db.query.userTrials.findFirst({
+      where: eq(userTrials.userId, userId),
+    });
+  };
+
+  isPhoneBlockedForTrial = async (phone: string) => {
+    const fp = fingerprintPhone(phone);
+    const row = await this.db.query.trialAbuseBlocklist.findFirst({
+      where: and(
+        eq(trialAbuseBlocklist.fingerprintType, 'phone'),
+        eq(trialAbuseBlocklist.fingerprintValue, fp),
+      ),
+    });
+    return Boolean(row);
+  };
+
+  /**
+   * Activates a trial. Pre-checks both uniqueness constraints (per-user,
+   * per-phone-fingerprint) for a clean error message, then relies on the DB's
+   * unique indexes (`user_trials_user_id_uidx`,
+   * `user_trials_phone_fingerprint_uidx`) as the actual race-safe guard —
+   * concurrent activations can never create two trials for the same phone.
+   */
+  activateTrial = async (params: { phone: string; userId: string }) => {
+    const config = await this.getTrialConfig();
+    if (!config.enabled) throw new Error('TRIAL_DISABLED');
+
+    const existing = await this.getUserTrial(params.userId);
+    if (existing) throw new Error('TRIAL_ALREADY_USED');
+
+    if (await this.isPhoneBlockedForTrial(params.phone)) {
+      throw new Error('TRIAL_PHONE_BLOCKED');
+    }
+
+    const phoneFingerprint = fingerprintPhone(params.phone);
+    const byPhone = await this.db.query.userTrials.findFirst({
+      where: eq(userTrials.phoneFingerprint, phoneFingerprint),
+    });
+    if (byPhone) throw new Error('TRIAL_PHONE_ALREADY_USED');
+
+    const startedAt = new Date();
+    const expiresAt = new Date(startedAt.getTime() + config.durationDays * 24 * 60 * 60 * 1000);
+
+    try {
+      const [trial] = await this.db
+        .insert(userTrials)
+        .values({
+          expiresAt,
+          phoneFingerprint,
+          startedAt,
+          status: 'active',
+          userId: params.userId,
+        })
+        .returning();
+      return trial;
+    } catch (error) {
+      if (!isUniqueConstraintViolation(error)) throw error;
+      const constraint = (error as { constraint?: string }).constraint ?? '';
+      throw new Error(
+        constraint.includes('user_id') ? 'TRIAL_ALREADY_USED' : 'TRIAL_PHONE_ALREADY_USED',
+        { cause: error },
+      );
+    }
+  };
+
+  /**
+   * Reserves one Trial request (AICO-P1-010). A single conditional UPDATE: the row is
+   * counted only while the trial is active, unexpired and under the platform cap
+   * (`platform_trial_config.max_requests`, NULL = unlimited). Postgres re-checks the
+   * condition on the locked row, so concurrent callers for the last unit get exactly one
+   * row back. `undefined` means no unit is left: refuse before calling the provider.
+   */
+  incrementTrialRequest = async (userId: string) => {
+    const maxRequests = sql`(SELECT ${platformTrialConfig.maxRequests} FROM ${platformTrialConfig} WHERE ${platformTrialConfig.id} = 'default')`;
+    const [row] = await this.db
+      .update(userTrials)
+      .set({ requestCount: sql`${userTrials.requestCount} + 1` })
+      .where(
+        and(
+          eq(userTrials.userId, userId),
+          eq(userTrials.status, 'active'),
+          sql`${userTrials.expiresAt} > now()`,
+          sql`(${maxRequests} IS NULL OR ${userTrials.requestCount} < ${maxRequests})`,
+        ),
+      )
+      .returning();
+    return row;
+  };
+
+  /**
+   * Gives back a unit reserved by `incrementTrialRequest` when the provider call never
+   * started (e.g. the runtime failed to build). Never below zero.
+   */
+  releaseTrialRequest = async (userId: string) => {
+    const [row] = await this.db
+      .update(userTrials)
+      .set({ requestCount: sql`GREATEST(${userTrials.requestCount} - 1, 0)` })
+      .where(and(eq(userTrials.userId, userId), eq(userTrials.status, 'active')))
+      .returning();
+    return row;
+  };
+
+  isTrialActive = async (userId: string): Promise<boolean> => {
+    const trial = await this.getUserTrial(userId);
+    if (!trial || trial.status !== 'active') return false;
+    if (trial.expiresAt.getTime() < Date.now()) {
+      await this.db
+        .update(userTrials)
+        .set({ status: 'expired' })
+        .where(eq(userTrials.id, trial.id));
+      return false;
+    }
+    return true;
+  };
+
+  addAbuseBlocklist = async (params: {
+    email?: string | null;
+    phone?: string | null;
+    reason?: string;
+  }) => {
+    const rows: Array<{ fingerprintType: string; fingerprintValue: string; reason?: string }> = [];
+    if (params.phone) {
+      rows.push({
+        fingerprintType: 'phone',
+        fingerprintValue: fingerprintPhone(params.phone),
+        reason: params.reason,
+      });
+    }
+    if (params.email) {
+      rows.push({
+        fingerprintType: 'email',
+        fingerprintValue: fingerprintEmail(params.email),
+        reason: params.reason,
+      });
+    }
+    if (rows.length === 0) return [];
+
+    return this.db.insert(trialAbuseBlocklist).values(rows).onConflictDoNothing().returning();
+  };
+
+  listAllWallets = async () => {
+    return this.db.query.userWallets.findMany({
+      orderBy: [desc(userWallets.updatedAt)],
+      limit: 200,
+    });
+  };
+
+  listRecentTransactions = async (limit = 100) => {
+    const actorUser = alias(users, 'tx_actor_user');
+    const targetUser = alias(users, 'tx_target_user');
+
+    return this.db
+      .select({
+        actorAdminEmail: platformAdminUsers.email,
+        actorUserEmail: actorUser.email,
+        amountMicroUsd: walletTransactions.amountMicroUsd,
+        amountToman: walletTransactions.amountToman,
+        balanceAfterMicroUsd: walletTransactions.balanceAfterMicroUsd,
+        balanceBeforeMicroUsd: walletTransactions.balanceBeforeMicroUsd,
+        createdAt: walletTransactions.createdAt,
+        createdByAdminId: walletTransactions.createdByAdminId,
+        createdByUserId: walletTransactions.createdByUserId,
+        description: walletTransactions.description,
+        id: walletTransactions.id,
+        orgId: walletTransactions.orgId,
+        orgName: organizations.name,
+        type: walletTransactions.type,
+        userId: walletTransactions.userId,
+        userEmail: targetUser.email,
+      })
+      .from(walletTransactions)
+      .leftJoin(platformAdminUsers, eq(walletTransactions.createdByAdminId, platformAdminUsers.id))
+      .leftJoin(actorUser, eq(walletTransactions.createdByUserId, actorUser.id))
+      .leftJoin(targetUser, eq(walletTransactions.userId, targetUser.id))
+      .leftJoin(organizations, eq(walletTransactions.orgId, organizations.id))
+      .orderBy(desc(walletTransactions.createdAt))
+      .limit(limit);
+  };
+
+  /**
+   * Reasons platform admins have already given for a manual credit (org or
+   * user) or debit, most recently used first, for the admin forms to offer
+   * again. A new reason joins the list as soon as a transaction records it.
+   */
+  listManualReasons = async (kind: 'credit' | 'debit', limit = 50): Promise<string[]> => {
+    const reason = sql<string>`btrim(${walletTransactions.description})`;
+    const rows = await this.db
+      .select({ reason })
+      .from(walletTransactions)
+      .where(
+        and(
+          eq(walletTransactions.type, kind === 'credit' ? 'manual_credit' : 'manual_debit'),
+          isNotNull(walletTransactions.createdByAdminId),
+          ne(reason, ''),
+          notInArray(reason, [LEGACY_MANUAL_CREDIT_REASON, DEFAULT_MANUAL_CREDIT_REASON]),
+        ),
+      )
+      .groupBy(reason)
+      .orderBy(desc(sql`max(${walletTransactions.createdAt})`))
+      .limit(limit);
+    return rows.map((row) => row.reason);
+  };
+
+  /**
+   * C6: totals over every personal wallet. The platform panel summed
+   * `listAllWallets()` in memory, which is capped at 200 rows — with a 201st
+   * wallet every figure on the page was silently wrong.
+   */
+  sumWalletBalances = async (): Promise<{ balanceMicroUsd: number; count: number }> => {
+    const [row] = await this.db
+      .select({
+        balance: sql<number>`COALESCE(SUM(${userWallets.balanceMicroUsd}), 0)`,
+        count: sql<number>`COUNT(*)::int`,
+      })
+      .from(userWallets);
+    return { balanceMicroUsd: Number(row?.balance ?? 0), count: Number(row?.count ?? 0) };
+  };
+
+  /**
+   * C6: everything ever paid in (and taken back by admin debits), over the whole
+   * ledger rather than its newest 200 rows.
+   */
+  sumPaidInTotals = async (): Promise<{ creditedMicroUsd: number; revenueToman: number }> => {
+    const [row] = await this.db
+      .select({
+        credited: sql<number>`COALESCE(SUM(${walletTransactions.amountMicroUsd}), 0)`,
+        revenue: sql<number>`COALESCE(SUM(${walletTransactions.amountToman}), 0)`,
+      })
+      .from(walletTransactions)
+      .where(inArray(walletTransactions.type, ['topup', 'manual_credit', 'manual_debit']));
+    return {
+      creditedMicroUsd: Number(row?.credited ?? 0),
+      revenueToman: Number(row?.revenue ?? 0),
+    };
+  };
+
+  /**
+   * Measured spend across all B2C + B2B traffic. Shadow calls settled without a
+   * usage figure are left out (N10) — see {@link sumUnmeasuredUsageCostMicroUsd}.
+   */
+  sumUsageCostMicroUsd = async (): Promise<number> => {
+    const [row] = await this.db
+      .select({ total: sql<number>`COALESCE(SUM(${measuredCostSql()}), 0)` })
+      .from(usageLogs)
+      .leftJoin(usageHolds, eq(usageHolds.id, usageLogs.holdId));
+    return Number(row?.total ?? 0);
+  };
+
+  /**
+   * What shadow calls without a usage figure were logged at: an upper bound, not
+   * spend. Add it to {@link sumUsageCostMicroUsd} for a deliberately conservative
+   * figure (the low-balance monitor), never for a margin or a chart.
+   */
+  sumUnmeasuredUsageCostMicroUsd = async (): Promise<number> => {
+    const [row] = await this.db
+      .select({ total: sql<number>`COALESCE(SUM(${unmeasuredCostSql()}), 0)` })
+      .from(usageLogs)
+      .leftJoin(usageHolds, eq(usageHolds.id, usageLogs.holdId));
+    return Number(row?.total ?? 0);
+  };
+}

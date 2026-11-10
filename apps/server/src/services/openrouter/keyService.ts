@@ -1,0 +1,2680 @@
+import { and, eq } from 'drizzle-orm';
+
+import { AicoBillingModel } from '@/database/models/aicoBilling';
+import { OrganizationModel, type ReclaimBudgetSnapshot } from '@/database/models/organization';
+import { users } from '@/database/schemas';
+import { aicoKeyOutbox, organizationMembers } from '@/database/schemas/aicoOrganization';
+import type { LobeChatDatabase } from '@/database/type';
+import {
+  applyMultiplierMicroUsd,
+  billedUsageFromCapacity,
+  billedUsageFromRaw,
+  blendedMultiplierBp,
+  type BudgetPeriod,
+  confirmedUnusedMicro,
+  currentCycleLimitMicroUsd,
+  DEFAULT_USAGE_MULTIPLIER_BP,
+  hasValidManagedKeyId,
+  isPeriodScopedBudget,
+  isStaleManagedKeyId,
+  keyLimitFromBilled,
+  microUsdToDecimalString,
+  openRouterUsdToMicroFloor,
+  periodToOpenRouterLimitReset,
+  rawUsageFromRemaining,
+  rebaseCheckpoint,
+  removeMultiplierMicroUsd,
+  rotateCheckpointToNewKey,
+  type UsageMultiplierCheckpoint,
+} from '@/database/utils/aicoMoney';
+import { aicoEnv } from '@/envs/aico';
+import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
+import { isSharedInferenceKey } from '@/server/services/aico/ledger/config';
+import { isLedgerAuthoritative } from '@/server/services/aico/ledger/state';
+import { sendSecurityAlert } from '@/server/services/aico/securityAlert';
+import {
+  CheapVibeCodeAmbiguousEditError,
+  CheapVibeCodeApiError,
+  createManagedProviderClient,
+  type ManagedKeyCredential,
+  type ManagedKeyInfo,
+  type ManagedProviderClient,
+  OpenRouterManagedProviderClient,
+} from '@/server/services/managedProvider';
+
+import type { OpenRouterKeyLimitReset, OpenRouterManagementClient } from './management';
+
+const MISSING_PERIOD_COUNTER =
+  'The gateway reported no period usage counter for this budget; usage held at the last settled value';
+
+/**
+ * Thrown into `getUserRemaining`'s degraded path when a provider that reports
+ * only a key's *remaining* allowance has no recorded mint-time limit to measure
+ * it against. Holding the last settled figure is right; reporting zero spend
+ * would hand the wallet its whole balance back.
+ */
+const MANAGED_KEY_LIMIT_UNKNOWN =
+  'Managed key has no recorded mint-time limit; spend cannot be derived from the remaining allowance';
+
+const STALE_MANAGED_KEY =
+  'Wallet carries a placeholder gateway key id; usage cannot be read and is held at the last settled value';
+
+const FROZEN_READ_NO_REMAINING =
+  'managed key freeze returned no remaining; cannot settle the period';
+
+/**
+ * The gateway refused the read through the freeze or answered it without a
+ * remaining figure — the only failures R1's reclaim settles from the last
+ * synced usage. (With `AICO_FIX_SA_RECLAIM_GUARD` off, a refused freeze edit
+ * itself also counts — see `isKeyGoneUpstream`.)
+ * Directly from CheapVibeCode this is a 4xx `CheapVibeCodeApiError`; through the
+ * control-plane proxy it is a 4xx carrying CVC's code, never the proxy's own
+ * `unauthorized` (a misconfigured service token must fail, not estimate).
+ */
+const isFreezeReadFailure = (error: unknown): boolean => {
+  if (error instanceof CheapVibeCodeAmbiguousEditError) return false;
+  if (error instanceof Error && error.message === FROZEN_READ_NO_REMAINING) return true;
+  if (error instanceof CheapVibeCodeApiError) return error.status >= 400 && error.status < 500;
+  const { gatewayCode, status } = (error ?? {}) as { gatewayCode?: unknown; status?: unknown };
+  return (
+    typeof status === 'number' &&
+    status >= 400 &&
+    status < 500 &&
+    typeof gatewayCode === 'string' &&
+    gatewayCode !== 'unauthorized'
+  );
+};
+
+/**
+ * N2: the freeze edit failed because the key no longer exists upstream (a CVC
+ * 404, directly or relayed by the control plane). Nothing can be spent on a key
+ * that is gone, so reclaim may settle it as it would a frozen one.
+ */
+const isKeyGoneUpstream = (error: unknown): boolean => {
+  if (error instanceof CheapVibeCodeApiError) return error.status === 404;
+  const { gatewayCode, status } = (error ?? {}) as { gatewayCode?: unknown; status?: unknown };
+  return status === 404 && typeof gatewayCode === 'string' && gatewayCode !== 'unauthorized';
+};
+
+/** What an estimated reclaim refunded, and from which figures. */
+export interface ReclaimEstimate {
+  capMicroUsd: number;
+  error: string;
+  lastSyncedAt: string | null;
+  pendingMicroUsd: number;
+  refundedMicroUsd: number;
+  settledUsageMicroUsd: number;
+}
+
+const locks = new Map<string, Promise<unknown>>();
+const runExclusive = <T>(key: string, fn: () => Promise<T>): Promise<T> => {
+  const tail = locks.get(key) ?? Promise.resolve();
+  const result = tail.then(fn, fn);
+  locks.set(
+    key,
+    result.catch(() => undefined),
+  );
+  return result;
+};
+
+const microToOpenRouterLimitUsd = (micro: number): number => Number(microUsdToDecimalString(micro));
+
+/** HTTP status carried in a management client error message, when there is one. */
+const managedErrorStatus = (error: unknown): number | null => {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = /\b(?:API|proxy) (\d{3})\b/.exec(message);
+  return match ? Number(match[1]) : null;
+};
+
+/** What ensuring a subject's key did. `unverified`: see {@link ReissueOutcome.unverified}. */
+export interface EnsuredKey {
+  created: boolean;
+  keyId: string | null;
+  unverified?: true;
+}
+
+/** What an admin key operation did to one subject — ids only, never secrets. */
+export interface ReissueOutcome {
+  keyId: string | null;
+  status:
+    | 'ambiguous'
+    | 'kept'
+    | 'migrated'
+    | 'no_key'
+    | 'reissued'
+    | 'resized'
+    | 'shared'
+    | 'unsupported';
+  /**
+   * The key could not be read or its edit's outcome is unknown, so the limit
+   * upstream is not known to match the wallet. The caller queues a retry.
+   */
+  unverified?: boolean;
+}
+
+/**
+ * Provisions / updates OpenRouter keys for B2C wallets and B2B member budgets.
+ * Plaintext keys are encrypted with KeyVaultsGateKeeper and never returned to SPA.
+ */
+export class AicoOpenRouterKeyService {
+  private readonly _client: OpenRouterManagementClient | null | undefined;
+  private _managed: ManagedProviderClient | null = null;
+  private readonly decryptOnly: boolean;
+  private readonly orgModel: OrganizationModel;
+  private readonly billingModel: AicoBillingModel;
+
+  /**
+   * @param client Injected management client (tests). Pass `null` for decrypt-only
+   *   usage so the OpenRouter management client is never constructed. A
+   *   `ManagedProviderClient` may be passed instead to drive a provider other
+   *   than OpenRouter — the only way to exercise the immutable-limit paths,
+   *   since which provider is live is otherwise an env-level decision.
+   */
+  constructor(
+    private readonly db: LobeChatDatabase,
+    client?: OpenRouterManagementClient | ManagedProviderClient | null,
+  ) {
+    this.decryptOnly = client === null;
+    if (client && 'capabilities' in client) {
+      this._client = undefined;
+      this._managed = client;
+    } else {
+      this._client = client;
+    }
+    this.orgModel = new OrganizationModel(db);
+    this.billingModel = new AicoBillingModel(db);
+  }
+
+  /**
+   * The managed provider behind this deployment.
+   *
+   * An injected OpenRouter client is *wrapped* in the adapter rather than used
+   * directly, so the existing OpenRouter suites drive the same code path
+   * production takes. If the adapter is faithful, those suites are the proof
+   * that this migration left the OpenRouter path unchanged.
+   */
+  private get managed(): ManagedProviderClient {
+    if (this.decryptOnly) {
+      throw new Error('AicoOpenRouterKeyService is decrypt-only — management client unavailable');
+    }
+    if (this._managed) return this._managed;
+    const created = this._client
+      ? new OpenRouterManagedProviderClient(this._client)
+      : createManagedProviderClient();
+    this._managed = created;
+    return created;
+  }
+
+  /**
+   * How this provider addresses one of our keys.
+   *
+   * OpenRouter needs only the hash. CheapVibeCode authenticates *as* the key, so
+   * the stored ciphertext is decrypted — but only when the provider actually
+   * needs it, because `getUserRemaining` runs on the chat hot path and a decrypt
+   * per request for a provider that ignores it is pure cost.
+   */
+  private managedCredential = async (row: {
+    managedKeyLimitMicroUsd?: number | null;
+    openrouterKeyCiphertext?: string | null;
+    openrouterKeyId: string;
+  }): Promise<ManagedKeyCredential> => {
+    const apiKey =
+      this.managed.capabilities.readKeyBySecret && row.openrouterKeyCiphertext
+        ? ((await this.decryptKey(row.openrouterKeyCiphertext)) ?? undefined)
+        : undefined;
+
+    return {
+      apiKey,
+      hash: row.openrouterKeyId,
+      limitUsd:
+        row.managedKeyLimitMicroUsd == null
+          ? undefined
+          : microToOpenRouterLimitUsd(row.managedKeyLimitMicroUsd),
+    };
+  };
+
+  /**
+   * Raw spend recorded on the key itself, in micro-USD, or `null` when it cannot
+   * be known. Never 0 on an unknown — that reads as "nothing spent".
+   */
+  private rawUsageOnKeyMicro = (
+    row: { managedKeyLimitMicroUsd?: number | null },
+    info: { limitRemaining?: number | null; usage?: number | null },
+  ): number | null => {
+    if (!this.managed.capabilities.readKeyBySecret) {
+      // OpenRouter reports cumulative spend directly. A null counter is the
+      // "this key could not be read" marker (`unreadableKeyInfo`) and must stay
+      // unknown — zero would read as "nothing spent".
+      if (info.usage == null) return null;
+      return Number(openRouterUsdToMicroFloor(info.usage));
+    }
+
+    return rawUsageFromRemaining({
+      limitMicroUsd: row.managedKeyLimitMicroUsd,
+      remainingMicroUsd:
+        info.limitRemaining == null ? null : Number(openRouterUsdToMicroFloor(info.limitRemaining)),
+    });
+  };
+
+  private async encryptKey(plaintext: string): Promise<string> {
+    const gateKeeper = await KeyVaultsGateKeeper.initWithEnvKey();
+    return gateKeeper.encrypt(plaintext);
+  }
+
+  async decryptKey(encrypted: string): Promise<string | null> {
+    const gateKeeper = await KeyVaultsGateKeeper.initWithEnvKey();
+    const { plaintext, wasAuthentic } = await gateKeeper.decrypt(encrypted);
+    return wasAuthentic ? plaintext : null;
+  }
+
+  /**
+   * Best-effort retire a managed key (FIN-004).
+   *
+   * A provider with neither revoke nor update cannot retire anything upstream.
+   * Neither can one that addresses keys by secret (CheapVibeCode) when the
+   * secret is missing. Retiring then means ceasing to hand the key to a
+   * runtime, which is only safe because managed keys never reach the browser
+   * (`disableBrowserRequest: true`) and every request passes
+   * `AicoManagedPolicy.authorize()` first. The key is recorded rather than
+   * silently forgotten, so the inventory of live-but-unused keys stays visible.
+   */
+  /**
+   * A create-key response without a secret or an id cannot back a spendable key. The real
+   * gateway clients already reject one; checking again before anything is persisted keeps
+   * every client honest, and retires whatever the gateway did create.
+   */
+  private async assertUsableCreatedKey(
+    created: Awaited<ReturnType<ManagedProviderClient['createKey']>>,
+  ): Promise<void> {
+    if (created?.key && created?.hash) return;
+
+    if (created?.hash) {
+      await this.retireManagedKey({ apiKey: created.key || undefined, hash: created.hash });
+    }
+    throw new Error('Managed provider createKey response is missing the key or its id');
+  }
+
+  private async retireManagedKey(credential: { apiKey?: string; hash: string }): Promise<void> {
+    const { hash } = credential;
+    const { readKeyBySecret, revoke, updateLimit } = this.managed.capabilities;
+    const reachable = !readKeyBySecret || Boolean(credential.apiKey);
+
+    if ((!revoke && !updateLimit) || !reachable) {
+      console.warn('[aico] managed key cannot be retired upstream; key abandoned in place', {
+        hash,
+        providerId: this.managed.providerId,
+      });
+      await this.recordAbandonedKey(
+        hash,
+        reachable ? 'PROVIDER_HAS_NO_REVOKE' : 'KEY_SECRET_UNAVAILABLE',
+      );
+      return;
+    }
+
+    if (updateLimit && this.managed.updateKey) {
+      try {
+        await this.managed.updateKey({ apiKey: credential.apiKey, disabled: true, hash });
+      } catch (error) {
+        console.warn('[aico] failed to disable stale managed key before recreate', error);
+      }
+    }
+
+    if (revoke && this.managed.deleteKey) {
+      try {
+        await this.managed.deleteKey({ apiKey: credential.apiKey, hash });
+      } catch (error) {
+        console.warn('[aico] failed to delete stale managed key', {
+          hash,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        // Without a delete the key is live and unused: keep it on the inventory.
+        if (readKeyBySecret) await this.recordAbandonedKey(hash, 'DELETE_FAILED');
+      }
+    }
+  }
+
+  /** {@link retireManagedKey} for a stored row, decrypting its secret if needed. */
+  private retireStoredKey = async (row: {
+    openrouterKeyCiphertext?: string | null;
+    openrouterKeyId: string;
+  }): Promise<void> => this.retireManagedKey(await this.managedCredential(row));
+
+  /**
+   * Record a key we stopped using but could not revoke.
+   *
+   * The row is the inventory: without it an abandoned key exists only in a log
+   * line, and there would be nothing to drain if the provider ever ships a
+   * delete route. Best-effort by design — failing to file the record must not
+   * fail the operation that was retiring the key.
+   */
+  private recordAbandonedKey = async (hash: string, reason: string): Promise<void> => {
+    try {
+      await this.db.insert(aicoKeyOutbox).values({
+        action: 'revoke_managed_key',
+        nextAttemptAt: new Date(),
+        openrouterKeyId: hash,
+        payload: { providerId: this.managed.providerId, reason },
+        status: 'pending',
+      });
+    } catch (error) {
+      console.error('[aico] failed to record abandoned managed key', hash, error);
+    }
+  };
+
+  /**
+   * Delete a key upstream by id.
+   *
+   * `'deferred'`: the provider has no delete route yet, so the job is still owed.
+   * `'unsupported'`: the provider deletes by secret (CheapVibeCode) and the
+   * outbox holds only the id, so this job can never succeed. Only the provider's
+   * support can remove such a key.
+   */
+  revokeManagedKeyById = async (hash: string): Promise<'done' | 'deferred' | 'unsupported'> => {
+    const { readKeyBySecret, revoke } = this.managed.capabilities;
+    if (!revoke || !this.managed.deleteKey) return 'deferred';
+    if (readKeyBySecret) return 'unsupported';
+    await this.managed.deleteKey({ hash });
+    return 'done';
+  };
+
+  /**
+   * Disable a key upstream, or report that the provider has no such operation.
+   * Callers treat `null` as "nothing to do upstream" — the pre-flight gate is
+   * what actually stops spend in that case.
+   */
+  private disableManagedKey = async (
+    hash: string,
+    keyProviderId?: string | null,
+    ciphertext?: string | null,
+  ) => {
+    // A key minted by the previous gateway is not ours to disable through this
+    // one: the hash means nothing to it. It is also deliberately left alive so a
+    // rollback is an env change rather than a restore, and it is unreachable
+    // meanwhile — `AicoManagedPolicy.authorize()` refuses a foreign stamp.
+    if (keyProviderId !== undefined && !this.isCurrentProviderKey(keyProviderId)) {
+      console.warn('[aico] managed key belongs to another gateway; left untouched', {
+        activeProvider: this.managed.providerId,
+        hash,
+        keyProvider: keyProviderId ?? 'openrouter',
+      });
+      return null;
+    }
+    const { readKeyBySecret, revoke, updateLimit } = this.managed.capabilities;
+    const credential = await this.managedCredential({
+      openrouterKeyCiphertext: ciphertext,
+      openrouterKeyId: hash,
+    });
+    if (
+      (!updateLimit && !revoke) ||
+      !this.managed.updateKey ||
+      (readKeyBySecret && !credential.apiKey)
+    ) {
+      console.warn('[aico] managed key cannot be disabled upstream; relying on the gate', {
+        hash,
+        providerId: this.managed.providerId,
+      });
+      return null;
+    }
+    return this.managed.updateKey({ apiKey: credential.apiKey, disabled: true, hash });
+  };
+
+  /**
+   * Freeze or unfreeze a live key on a provider whose limits are fixed at mint
+   * (CheapVibeCode). Best-effort: the pre-flight gate is still what refuses an
+   * unfunded or inactive subject, so a failure here is logged, never thrown.
+   * Unfreezing an active key is a no-op upstream, which is what lets the ensure
+   * paths call it without tracking whether the key was frozen.
+   */
+  /**
+   * `AICO_CVC_RESIZE_IN_PLACE`: move a live key to `targetMicro` on its own
+   * counter instead of minting a replacement.
+   *
+   * Usage on CVC is `stored limit − remaining`, so the stored limit must never
+   * sit below the live one — that would under-read spend. A raise therefore
+   * persists the target *before* the edit and a reduction only after it; the
+   * live limit from CVC's answer is persisted last either way.
+   *
+   * - `'resized'`: done.
+   * - `'ambiguous'`: the edit may or may not have landed. Nothing is retried;
+   *   the stored limit is healed from a live read when one succeeds, and the
+   *   caller keeps the key — rotating would size the replacement from a limit
+   *   we cannot vouch for. The next ensure call converges.
+   * - `'unavailable'`: flag off, no secret, or CVC refused. Nothing changed
+   *   upstream, so the caller's mint-then-delete rotation is still safe.
+   */
+  private resizeFixedLimitKey = async (
+    row: {
+      managedKeyLimitMicroUsd?: number | null;
+      openrouterKeyCiphertext?: string | null;
+      openrouterKeyId: string;
+    },
+    params: {
+      active: boolean;
+      persistLimit: (micro: number) => Promise<unknown>;
+      targetMicro: number;
+    },
+  ): Promise<'ambiguous' | 'resized' | 'unavailable'> => {
+    if (!aicoEnv.AICO_CVC_RESIZE_IN_PLACE || !this.managed.resizeKey) return 'unavailable';
+    if (row.managedKeyLimitMicroUsd == null) return 'unavailable';
+    const credential = await this.managedCredential(row);
+    if (!credential.apiKey) return 'unavailable';
+
+    const storedMicro = Number(row.managedKeyLimitMicroUsd);
+    const targetMicro = Math.max(0, Math.trunc(params.targetMicro));
+    const raising = targetMicro > storedMicro;
+    const hash = row.openrouterKeyId;
+    if (raising) await params.persistLimit(targetMicro);
+
+    let info: ManagedKeyInfo;
+    try {
+      info = await this.managed.resizeKey({
+        active: params.active,
+        apiKey: credential.apiKey,
+        hash,
+        limitUsd: microToOpenRouterLimitUsd(targetMicro),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!(error instanceof CheapVibeCodeAmbiguousEditError)) {
+        console.warn('[aico] managed key resize refused; falling back to rotation', {
+          hash,
+          message,
+        });
+        if (raising) await params.persistLimit(storedMicro);
+        return 'unavailable';
+      }
+      console.error('[aico] managed key resize outcome unknown; not retried', { hash });
+      try {
+        const live = await this.managed.updateKey?.({
+          apiKey: credential.apiKey,
+          disabled: !params.active,
+          hash,
+        });
+        if (live?.limit != null) {
+          await params.persistLimit(Number(openRouterUsdToMicroFloor(live.limit)));
+        }
+      } catch (readError) {
+        // The stored limit is the target (raise) or the old one (reduction) —
+        // both at or above the live limit, so spend is over-read, never under.
+        console.warn('[aico] managed key live limit not re-read after ambiguous resize', {
+          hash,
+          message: readError instanceof Error ? readError.message : String(readError),
+        });
+      }
+      return 'ambiguous';
+    }
+
+    if (info.limit == null) throw new Error('Managed key resize returned no limit');
+    await params.persistLimit(Number(openRouterUsdToMicroFloor(info.limit)));
+    return 'resized';
+  };
+
+  private setFixedLimitKeyActive = async (
+    row: { openrouterKeyCiphertext?: string | null; openrouterKeyId: string },
+    active: boolean,
+  ): Promise<void> => {
+    if (!this.managed.capabilities.revoke || !this.managed.updateKey) return;
+    try {
+      const credential = await this.managedCredential(row);
+      if (!credential.apiKey) return;
+      await this.managed.updateKey({
+        apiKey: credential.apiKey,
+        disabled: !active,
+        hash: row.openrouterKeyId,
+      });
+    } catch (error) {
+      console.warn('[aico] managed key freeze state not updated', {
+        active,
+        hash: row.openrouterKeyId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  /**
+   * The raw OpenRouter counter that the member key's limit is enforced against.
+   * Keys with a `limit_reset` are metered on the period counter, so the
+   * multiplier checkpoint baseline must be period-scoped too — using lifetime
+   * `info.usage` here would leave the baseline and the metered value in
+   * different units and corrupt every subsequent conversion.
+   *
+   * Returns `null` when a period-scoped budget has no period counter to read.
+   * OpenRouter genuinely omits `usage_daily`/`usage_weekly`/`usage_monthly` for
+   * some key shapes, and substituting lifetime usage there is what corrupted
+   * the checkpoint and pushed key limits far above the funded cap. Callers must
+   * degrade rather than guess.
+   */
+  private rawMeteredUsageMicro = (
+    budget: { managedKeyLimitMicroUsd?: number | null; period?: string | null },
+    info: {
+      limitRemaining?: number | null;
+      usage?: number | null;
+      usageDaily?: number | null;
+      usageMonthly?: number | null;
+      usageWeekly?: number | null;
+    },
+  ): number | null => {
+    // A provider without native periodic limits has exactly one counter and it
+    // never resets, so there is no period counter to choose between. The
+    // checkpoint baseline is what makes the reading period-scoped — renewal
+    // moves the baseline at each boundary — which makes the lifetime counter the
+    // correct source whatever the budget's period.
+    if (!this.managed.capabilities.nativePeriodicLimits) {
+      return this.rawUsageOnKeyMicro(budget, info);
+    }
+
+    // A `total` budget has no `limit_reset`, so OpenRouter meters it on the
+    // lifetime counter and that counter is the correct source.
+    if (!isPeriodScopedBudget(budget.period)) {
+      if (info.usage == null) return null;
+      return Number(openRouterUsdToMicroFloor(info.usage));
+    }
+
+    const periodUsageUsd =
+      budget.period === 'daily'
+        ? info.usageDaily
+        : budget.period === 'weekly'
+          ? info.usageWeekly
+          : info.usageMonthly;
+
+    if (periodUsageUsd == null) return null;
+    return Number(openRouterUsdToMicroFloor(periodUsageUsd));
+  };
+
+  /**
+   * AICO-180 lazy rebase for member budgets. A budget is an allowance rather
+   * than a payment, so it has no purchased capacity to fall back on: freeze
+   * usage-to-date at the old rate and restart the meter at the new one.
+   */
+  private syncMemberCheckpoint = async (params: {
+    checkpoint: UsageMultiplierCheckpoint;
+    /** D5: the epoch the checkpoint was read at; the write only lands in that cycle. */
+    expectedLedgerEpoch?: number;
+    orgMemberId: string;
+    rawUsage: number | null;
+  }): Promise<{ bp: number; checkpoint: UsageMultiplierCheckpoint; degraded: boolean }> => {
+    const bp = await this.billingModel.getUsageMultiplierBp();
+    const currentBp = Number(params.checkpoint.checkpointMultiplierBp ?? bp);
+    if (currentBp === bp) {
+      return { bp, checkpoint: params.checkpoint, degraded: params.rawUsage === null };
+    }
+
+    // The rebase stamps the baseline with the raw counter, and the key limit is
+    // derived from that baseline. Rebasing against an unknown counter is what
+    // let a lifetime figure become the baseline of a daily budget and push a
+    // limit orders of magnitude above the funded cap — hold the old checkpoint
+    // (and its rate, since usage is still expressed in it) until a real counter
+    // arrives.
+    if (params.rawUsage === null) {
+      return { bp: currentBp, checkpoint: params.checkpoint, degraded: true };
+    }
+
+    const rebased = rebaseCheckpoint({
+      checkpoint: params.checkpoint,
+      nextBp: bp,
+      rawUsage: params.rawUsage,
+    });
+    await this.orgModel.updateMemberBudgetCheckpoint({
+      billedUsageBeforeBaselineMicroUsd: rebased.billedUsageBeforeBaselineMicroUsd,
+      checkpointMultiplierBp: bp,
+      expectedLedgerEpoch: params.expectedLedgerEpoch,
+      orgMemberId: params.orgMemberId,
+      usageBaselineMicroUsd: rebased.usageBaselineMicroUsd,
+    });
+
+    return { bp, checkpoint: { ...rebased, checkpointMultiplierBp: bp }, degraded: false };
+  };
+
+  /**
+   * What a key that cannot be read reports: nothing, in every field.
+   *
+   * Every counter is `null` rather than `0`, which is the difference between
+   * "we do not know what this key spent" and "this key spent nothing". The
+   * callers' degraded branches hold the last settled figure on the former; the
+   * latter would refund a member money they have already spent.
+   */
+  private unreadableKeyInfo = (hash: string): ManagedKeyInfo => ({
+    disabled: false,
+    hash,
+    limit: null,
+    limitRemaining: null,
+    name: null,
+    // Deliberately outside `ManagedKeyInfo`'s contract, which promises a number:
+    // no provider returns this, only we do, and only here.
+    usage: null as unknown as number,
+    usageDaily: null,
+    usageMonthly: null,
+    usageWeekly: null,
+  });
+
+  /**
+   * A member key's state, degraded to {@link unreadableKeyInfo} when the key was
+   * minted by a gateway that is no longer active.
+   *
+   * Asking the live gateway about another gateway's key is not an informative
+   * failure — it is an auth error, which on the settlement path would surface as
+   * a failed renewal. Degrading here keeps a cutover from blocking every period
+   * boundary until each member has been re-keyed.
+   */
+  private readMemberKeyInfo = async (budget: {
+    managedKeyLimitMicroUsd?: number | null;
+    managedKeyProviderId?: string | null;
+    openrouterKeyCiphertext?: string | null;
+    openrouterKeyId: string;
+  }): Promise<ManagedKeyInfo> => {
+    if (!this.isCurrentProviderKey(budget.managedKeyProviderId)) {
+      console.warn('[aico] member key belongs to another gateway; usage held at the last value', {
+        activeProvider: this.managed.providerId,
+        keyId: budget.openrouterKeyId,
+        keyProvider: budget.managedKeyProviderId ?? 'openrouter',
+      });
+      return this.unreadableKeyInfo(budget.openrouterKeyId);
+    }
+
+    return this.managed.getKey(
+      await this.managedCredential({
+        managedKeyLimitMicroUsd: budget.managedKeyLimitMicroUsd,
+        openrouterKeyCiphertext: budget.openrouterKeyCiphertext,
+        openrouterKeyId: budget.openrouterKeyId,
+      }),
+    );
+  };
+
+  /**
+   * {@link readMemberKeyInfo} for a key that renewal has just frozen.
+   *
+   * CheapVibeCode refuses `/v1/balance` to a frozen key (401), so on a gateway
+   * that freezes by secret the key is read through the freeze itself: a
+   * same-state `{key, active: false}` edit answers with its live limit and use.
+   * If the freeze at renewal start did not land, this one applies it — the
+   * state settlement wants anyway.
+   */
+  private readFrozenMemberKeyInfo = async (budget: {
+    managedKeyLimitMicroUsd?: number | null;
+    managedKeyProviderId?: string | null;
+    openrouterKeyCiphertext?: string | null;
+    openrouterKeyId: string;
+  }): Promise<ManagedKeyInfo> => {
+    const { readKeyBySecret, revoke } = this.managed.capabilities;
+    if (
+      !readKeyBySecret ||
+      !revoke ||
+      !this.managed.updateKey ||
+      !this.isCurrentProviderKey(budget.managedKeyProviderId)
+    ) {
+      return this.readMemberKeyInfo(budget);
+    }
+
+    const credential = await this.managedCredential(budget);
+    if (!credential.apiKey) return this.readMemberKeyInfo(budget);
+
+    const info = await this.managed.updateKey({
+      apiKey: credential.apiKey,
+      disabled: true,
+      hash: credential.hash,
+    });
+    // Never settle a period on a guess: an edit without `meta` is a failed read.
+    if (info.limitRemaining == null) {
+      throw new Error(FROZEN_READ_NO_REMAINING);
+    }
+    return info;
+  };
+
+  /**
+   * Read a managed key's state, or `null` when the provider would not answer.
+   *
+   * A failed read is not an empty key. Rotation is the one path that mints a
+   * second spendable, unrevokable key, so it must never be taken on a guess.
+   */
+  private readManagedKey = async (row: {
+    managedKeyLimitMicroUsd?: number | null;
+    openrouterKeyCiphertext?: string | null;
+    openrouterKeyId: string;
+  }): Promise<{ rawUsedMicro: number; remainingMicro: number } | null> => {
+    let info;
+    try {
+      info = await this.managed.getKey(await this.managedCredential(row));
+    } catch (error) {
+      console.warn('[aico] managed key read failed; keeping the existing key', {
+        hash: row.openrouterKeyId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+
+    const rawUsedMicro = this.rawUsageOnKeyMicro(row, info);
+    if (rawUsedMicro === null || info.limitRemaining == null) {
+      console.warn('[aico] managed key reports no usable limit; keeping the existing key', {
+        hash: row.openrouterKeyId,
+      });
+      return null;
+    }
+
+    return {
+      rawUsedMicro,
+      remainingMicro: Number(openRouterUsdToMicroFloor(info.limitRemaining)),
+    };
+  };
+
+  /**
+   * The wallet path for a provider whose key limits are fixed at mint.
+   *
+   * A top-up cannot raise the existing key, so it is served by minting a
+   * replacement sized to the capacity that is still unspent, and carrying the
+   * retired key's spend forward in `rawUsageBeforeKeyMicroUsd` — without it the
+   * wallet would forget what it had already spent and hand the money out twice.
+   *
+   * The key is kept whenever its own headroom still covers the unspent capacity.
+   * That bounds two opposite risks at once: allowance stranded on a key that can
+   * never be revoked, and a key minted larger than the wallet can actually spend.
+   */
+  private rotateUserKeyIfUnderfunded = async (params: {
+    /** Mint a replacement even when the key still covers the wallet (reissue). */
+    force?: boolean;
+    rawCapacityMicro: number;
+    userId: string;
+    wallet: {
+      managedKeyLimitMicroUsd?: number | null;
+      openrouterKeyCiphertext?: string | null;
+      openrouterKeyId: string;
+      rawUsageBeforeKeyMicroUsd?: number | null;
+    };
+  }): Promise<{ created: boolean; keyId: string | null; unverified?: true }> => {
+    const keep = { created: false, keyId: params.wallet.openrouterKeyId };
+    const read = await this.readManagedKey(params.wallet);
+    if (!read) {
+      // W2 gap: a forced reissue after a debit that left no capacity needs no
+      // reading — nothing is spendable, so the key is frozen on the spot. Left
+      // live and unread it would carry its pre-debit limit upstream.
+      if (params.force && params.rawCapacityMicro <= 0) {
+        await this.disableManagedKey(
+          params.wallet.openrouterKeyId,
+          this.managed.providerId,
+          params.wallet.openrouterKeyCiphertext,
+        );
+        return keep;
+      }
+      // Not read, so not changed — and not vouched for either (N7).
+      return { ...keep, unverified: true as const };
+    }
+
+    const usedBeforeMicro = Math.max(0, Number(params.wallet.rawUsageBeforeKeyMicroUsd ?? 0));
+    const unspentMicro = Math.max(
+      0,
+      params.rawCapacityMicro - (usedBeforeMicro + read.rawUsedMicro),
+    );
+
+    // Still able to spend everything the wallet has left — nothing to mint. This
+    // also covers an exhausted wallet, where `unspentMicro` is 0, which even a
+    // forced reissue leaves alone: a key with nothing to spend buys nothing.
+    if (unspentMicro <= 0) {
+      // W1 (2026-10): a forced reissue after an admin debit that took the whole
+      // unspent balance. A new key would buy nothing, but the old one still
+      // carries its pre-debit limit upstream — keeping it live lets the user
+      // spend exactly what was taken back. Freeze it instead.
+      if (params.force && read.remainingMicro > 0) {
+        await this.disableManagedKey(
+          params.wallet.openrouterKeyId,
+          this.managed.providerId,
+          params.wallet.openrouterKeyCiphertext,
+        );
+      }
+      return keep;
+    }
+    if (!params.force && read.remainingMicro >= unspentMicro) return keep;
+
+    // Mint and persist first, retire second: if the mint fails (the account's
+    // key limit, a CVC outage) the wallet keeps a working key instead of
+    // pointing at a deleted one.
+    const created = await this.createAndPersistUserKey({
+      limitUsd: microToOpenRouterLimitUsd(unspentMicro),
+      managedKeyLimitMicroUsd: unspentMicro,
+      name: `aico-user-${params.userId}`,
+      rawUsageBeforeKeyMicroUsd: usedBeforeMicro + read.rawUsedMicro,
+      replacing: params.wallet.openrouterKeyId,
+      userId: params.userId,
+    });
+    // C7: lost the race — the other instance's rotation already retired it.
+    if (!created.created) return created;
+    await this.retireStoredKey(params.wallet);
+    return created;
+  };
+
+  /**
+   * The member-budget counterpart of {@link rotateUserKeyIfUnderfunded}.
+   *
+   * The replacement key's counter restarts at zero, so the checkpoint baseline
+   * moves to zero with it and the usage it had already metered is frozen into
+   * `billedUsageBeforeBaselineMicroUsd` at the rate it was billed at. That is
+   * the same arithmetic a multiplier change performs, and it is why a member
+   * budget needs no carried raw figure of its own.
+   */
+  /**
+   * The member-budget counterpart of {@link migrateUserKeyToActiveProvider}.
+   *
+   * Identical in shape to {@link rotateMemberKeyIfUnderfunded}, except the final
+   * raw counter of the retired key cannot be read — it lives on a gateway that
+   * is no longer active. The checkpoint's own baseline is used instead, which is
+   * the last raw figure a sync did manage to record, so usage already billed is
+   * carried forward and only the unsynced tail is forgiven.
+   *
+   * The old key is left alive upstream so a rollback stays an env change.
+   */
+  private migrateMemberKeyToActiveProvider = async (params: {
+    bp: number;
+    budget: UsageMultiplierCheckpoint & {
+      managedKeyProviderId?: string | null;
+      openrouterKeyId?: string | null;
+    };
+    cycleCapMicro: number;
+    orgMemberId: string;
+    /** Last synced billed usage for this cycle, from `member_budgets`. */
+    settledUsageMicroUsd?: number | null;
+  }): Promise<{ created: boolean; keyId: string | null }> => {
+    console.warn('[aico] member managed key belongs to another gateway; minting a replacement', {
+      activeProvider: this.managed.providerId,
+      keyProvider: params.budget.managedKeyProviderId ?? 'openrouter',
+      orgMemberId: params.orgMemberId,
+    });
+
+    const rotated = rotateCheckpointToNewKey({
+      checkpoint: params.budget,
+      finalRawUsage: Math.max(0, Number(params.budget.usageBaselineMicroUsd ?? 0)),
+    });
+
+    // The checkpoint's baseline only moves when the multiplier changes, so on a
+    // steady rate it lags the key's real counter. The last synced cycle usage
+    // does not, and it is already billed — take whichever is larger, because the
+    // one thing this must not do is bill less than what was settled.
+    const billedBeforeMicro = Math.max(
+      rotated.billedUsageBeforeBaselineMicroUsd,
+      Math.max(0, Number(params.settledUsageMicroUsd ?? 0)),
+    );
+
+    const nextLimitMicro = keyLimitFromBilled({
+      balance: params.cycleCapMicro,
+      baselineRaw: rotated.usageBaselineMicroUsd,
+      billedBefore: billedBeforeMicro,
+      bp: params.bp,
+    });
+    // The cycle is already spent out. Minting would buy nothing, and the
+    // pre-flight gate refuses the request anyway.
+    if (nextLimitMicro <= 0) return { created: false, keyId: null };
+
+    this.assertMintAllowed();
+    const created = await this.managed.createKey({
+      // The gateway we are moving to may have no native periodic reset, and the
+      // checkpoint this rotation just wrote is what accounts the period either
+      // way. Asking for a reset here would double-count the boundary.
+      limitReset: null,
+      limitUsd: microToOpenRouterLimitUsd(nextLimitMicro),
+      name: `aico-member-${params.orgMemberId}`,
+    });
+    await this.assertUsableCreatedKey(created);
+
+    try {
+      const encrypted = await this.encryptKey(created.key);
+      await this.orgModel.updateMemberOpenRouterKey({
+        billedUsageBeforeBaselineMicroUsd: billedBeforeMicro,
+        ciphertext: encrypted,
+        keyId: created.hash,
+        managedKeyLimitMicroUsd: this.managed.capabilities.readKeyBySecret ? nextLimitMicro : null,
+        managedKeyProviderId: this.managed.providerId,
+        orgMemberId: params.orgMemberId,
+        usageBaselineMicroUsd: rotated.usageBaselineMicroUsd,
+      });
+    } catch (error) {
+      // OR-002: the key exists upstream and can spend; it must not outlive a
+      // failed persist.
+      console.error('[aico] member managed key persist failed; retiring orphan key', error);
+      await this.retireManagedKey({ apiKey: created.key, hash: created.hash });
+      throw error;
+    }
+
+    return { created: true, keyId: created.hash };
+  };
+
+  private rotateMemberKeyIfUnderfunded = async (params: {
+    bp: number;
+    /** Mint a replacement even when the key still covers the cycle (reissue). */
+    force?: boolean;
+    budget: UsageMultiplierCheckpoint & {
+      managedKeyLimitMicroUsd?: number | null;
+      openrouterKeyCiphertext?: string | null;
+      openrouterKeyId: string;
+    };
+    cycleCapMicro: number;
+    orgMemberId: string;
+    /**
+     * R8: also replace a key that holds noticeably more than the cycle needs.
+     * Set where the limit could not be cut in place, so a lowered cap would
+     * otherwise leave refunded headroom spendable upstream.
+     */
+    shrinkOversized?: boolean;
+  }): Promise<{ created: boolean; keyId: string | null; unverified?: true }> => {
+    const keep = { created: false, keyId: params.budget.openrouterKeyId };
+    const read = await this.readManagedKey(params.budget);
+    if (!read) return { ...keep, unverified: true as const };
+
+    const rotated = rotateCheckpointToNewKey({
+      checkpoint: params.budget,
+      finalRawUsage: read.rawUsedMicro,
+    });
+
+    // What a replacement would be minted with: the raw headroom left in this
+    // cycle once everything already billed is taken off the funded cap.
+    const nextLimitMicro = keyLimitFromBilled({
+      balance: params.cycleCapMicro,
+      baselineRaw: rotated.usageBaselineMicroUsd,
+      billedBefore: rotated.billedUsageBeforeBaselineMicroUsd,
+      bp: params.bp,
+    });
+
+    // The key still covers the rest of the cycle — including an exhausted cycle,
+    // where the headroom is zero and a new key would buy nothing (forced or not).
+    if (nextLimitMicro <= 0) return keep;
+    // More than a percent over what the cycle needs (integer comparison): the
+    // difference was refunded to the org and must not stay spendable.
+    const oversized =
+      aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY &&
+      Boolean(params.shrinkOversized) &&
+      read.remainingMicro * 100 > nextLimitMicro * 101;
+    if (!params.force && !oversized && read.remainingMicro >= nextLimitMicro) return keep;
+
+    // As on the wallet path, the old key is retired only once its replacement
+    // is persisted.
+    this.assertMintAllowed();
+    const created = await this.managed.createKey({
+      // A provider reaching this branch has no native periodic reset; asking for
+      // one would be a lie the checkpoint then has to work around.
+      limitReset: null,
+      limitUsd: microToOpenRouterLimitUsd(nextLimitMicro),
+      name: `aico-member-${params.orgMemberId}`,
+    });
+    await this.assertUsableCreatedKey(created);
+
+    try {
+      const encrypted = await this.encryptKey(created.key);
+      const row = await this.orgModel.updateMemberOpenRouterKey({
+        billedUsageBeforeBaselineMicroUsd: rotated.billedUsageBeforeBaselineMicroUsd,
+        ciphertext: encrypted,
+        ...(aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY
+          ? { expectedKeyId: params.budget.openrouterKeyId }
+          : {}),
+        keyId: created.hash,
+        managedKeyLimitMicroUsd: nextLimitMicro,
+        managedKeyProviderId: this.managed.providerId,
+        orgMemberId: params.orgMemberId,
+        usageBaselineMicroUsd: rotated.usageBaselineMicroUsd,
+      });
+      if (!row && aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY) {
+        // C7: another instance rotated this key first.
+        await this.retireManagedKey({ apiKey: created.key, hash: created.hash });
+        const current = await this.orgModel.getMemberBudget(params.orgMemberId);
+        return { created: false, keyId: current?.openrouterKeyId ?? null };
+      }
+    } catch (error) {
+      // OR-002: the key exists upstream and can spend; it must not outlive a
+      // failed persist.
+      console.error('[aico] member managed key persist failed; retiring orphan key', error);
+      await this.retireManagedKey({ apiKey: created.key, hash: created.hash });
+      throw error;
+    }
+
+    await this.retireStoredKey(params.budget);
+    return { created: true, keyId: created.hash };
+  };
+
+  /**
+   * Whether a stored key belongs to the gateway that is currently active.
+   *
+   * A key minted by the previous provider is not a usable key: its secret means
+   * nothing to the new gateway, so reusing it would fail every request in a way
+   * that looks like an outage. Treating it as absent instead mints a replacement
+   * sized from the subject's *billed* balance — no money revalued — and leaves
+   * the old key alive upstream so flipping `AICO_MANAGED_PROVIDER` back is a
+   * working rollback rather than a restore.
+   *
+   * A null stamp is a row written before migration 0154 backfilled it, which can
+   * only be OpenRouter — it was the sole managed provider until then.
+   */
+  private isCurrentProviderKey = (stamp: string | null | undefined): boolean =>
+    (stamp ?? 'openrouter') === this.managed.providerId;
+
+  /**
+   * Backstop for shared-key mode: every managed call runs on one inference key
+   * and the usage ledger is the brake, so no path may mint a per-subject key.
+   */
+  private assertMintAllowed() {
+    if (isSharedInferenceKey()) throw new Error('SHARED_INFERENCE_KEY_MODE');
+  }
+
+  ensureUserKey = async (userId: string): Promise<EnsuredKey> => {
+    if (isSharedInferenceKey()) return { created: false, keyId: null };
+    return runExclusive(`user-key:${userId}`, async () => {
+      const wallet = await this.billingModel.getOrCreateUserWallet(userId);
+      const balanceMicro = Number(wallet.balanceMicroUsd ?? 0);
+
+      // AICO-184: every top-up already converted itself to raw spend at the
+      // rate in force when it was paid, so the key limit is simply the
+      // capacity bought. The current multiplier does not enter here — that is
+      // what stops a rate change from revaluing money already paid.
+      const limitMicro = Number(wallet.rawCapacityMicroUsd ?? 0);
+      const limitUsd = microToOpenRouterLimitUsd(limitMicro);
+
+      const hasLiveKey =
+        wallet.openrouterKeyId &&
+        wallet.openrouterKeyCiphertext &&
+        !isStaleManagedKeyId(wallet.openrouterKeyId) &&
+        this.isCurrentProviderKey(wallet.managedKeyProviderId);
+
+      // A key from the previous gateway must not fall through to the mint path
+      // below: that one sizes the key at the wallet's *whole* capacity, which
+      // after a cutover would hand back everything already spent.
+      if (
+        !hasLiveKey &&
+        hasValidManagedKeyId(wallet.openrouterKeyId) &&
+        !this.isCurrentProviderKey(wallet.managedKeyProviderId)
+      ) {
+        const trial = await this.billingModel.isTrialActive(userId).catch(() => false);
+        const trialBudgetMicroUsd = trial
+          ? Number((await this.billingModel.getTrialConfig()).trialBudgetMicroUsd)
+          : 0;
+        return this.migrateUserKeyToActiveProvider({ trialBudgetMicroUsd, userId, wallet });
+      }
+
+      if (hasLiveKey && !this.managed.capabilities.updateLimit) {
+        const liveWallet = {
+          managedKeyLimitMicroUsd: wallet.managedKeyLimitMicroUsd,
+          openrouterKeyCiphertext: wallet.openrouterKeyCiphertext,
+          openrouterKeyId: wallet.openrouterKeyId as string,
+        };
+        // A top-up raises the key it already has. Only ever upward on this
+        // path: an unfunded or trial wallet keeps its key exactly as it is.
+        const keyTargetMicro =
+          limitMicro - Math.max(0, Number(wallet.rawUsageBeforeKeyMicroUsd ?? 0));
+        if (balanceMicro > 0 && keyTargetMicro > Number(wallet.managedKeyLimitMicroUsd ?? 0)) {
+          const outcome = await this.resizeFixedLimitKey(liveWallet, {
+            active: true,
+            persistLimit: (micro) =>
+              this.billingModel.updateUserOpenRouterKey({
+                ciphertext: wallet.openrouterKeyCiphertext as string,
+                keyId: wallet.openrouterKeyId as string,
+                managedKeyLimitMicroUsd: micro,
+                userId,
+              }),
+            targetMicro: keyTargetMicro,
+          });
+          if (outcome !== 'unavailable') {
+            // An unknown outcome may have left the key short of the wallet (N7).
+            return {
+              created: false,
+              keyId: wallet.openrouterKeyId,
+              ...(outcome === 'ambiguous' && aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY
+                ? { unverified: true as const }
+                : {}),
+            };
+          }
+        }
+        // A funded wallet must not be left behind a key frozen while it was empty.
+        if (balanceMicro > 0) {
+          await this.setFixedLimitKeyActive(
+            {
+              openrouterKeyCiphertext: wallet.openrouterKeyCiphertext,
+              openrouterKeyId: wallet.openrouterKeyId as string,
+            },
+            true,
+          );
+        }
+        // The key's limit is fixed at mint, so a top-up is served by minting a
+        // replacement rather than raising this one.
+        const rotated = await this.rotateUserKeyIfUnderfunded({
+          rawCapacityMicro: limitMicro,
+          userId,
+          wallet: {
+            managedKeyLimitMicroUsd: wallet.managedKeyLimitMicroUsd,
+            openrouterKeyCiphertext: wallet.openrouterKeyCiphertext,
+            openrouterKeyId: wallet.openrouterKeyId as string,
+            rawUsageBeforeKeyMicroUsd: wallet.rawUsageBeforeKeyMicroUsd,
+          },
+        });
+        // An unfunded wallet's key is frozen and cannot be read: not a failure
+        // to follow any money, so nothing to retry.
+        if (rotated.unverified && (balanceMicro <= 0 || !aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY)) {
+          return { created: rotated.created, keyId: rotated.keyId };
+        }
+        return rotated;
+      }
+
+      if (hasLiveKey && this.managed.updateKey) {
+        try {
+          await this.managed.updateKey({
+            disabled: balanceMicro <= 0,
+            hash: wallet.openrouterKeyId as string,
+            limitReset: null,
+            limitUsd: Math.max(limitUsd, 0),
+          });
+          return { created: false, keyId: wallet.openrouterKeyId };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!/OpenRouter Management API (?:403|404)/.test(message)) throw error;
+          console.warn('[aico] user OpenRouter key update failed; recreating', message);
+          await this.retireStoredKey({
+            openrouterKeyCiphertext: wallet.openrouterKeyCiphertext,
+            openrouterKeyId: wallet.openrouterKeyId as string,
+          });
+        }
+      }
+
+      if (balanceMicro <= 0) {
+        return { created: false, keyId: null };
+      }
+
+      return this.createAndPersistUserKey({
+        limitUsd,
+        // Only meaningful to a provider that reports remaining rather than
+        // usage; the OpenRouter path leaves the column alone.
+        managedKeyLimitMicroUsd: this.managed.capabilities.readKeyBySecret ? limitMicro : undefined,
+        name: `aico-user-${userId}`,
+        replacing: wallet.openrouterKeyId ?? null,
+        userId,
+      });
+    });
+  };
+
+  /**
+   * Bring a wallet's live key down to what it can still spend, after an admin
+   * debit took capacity away. {@link ensureUserKey} only ever raises a key, so
+   * without this the old, larger limit would stay spendable upstream and only
+   * the pre-flight gate would stand between the user and the removed money.
+   *
+   * Resizes in place where the gateway allows it and otherwise reissues, which
+   * mints the replacement at the reduced size and retires the old key.
+   */
+  shrinkUserKey = async (userId: string): Promise<ReissueOutcome> => {
+    if (isSharedInferenceKey()) return { keyId: null, status: 'shared' };
+    const wallet = await this.billingModel.getUserWallet(userId);
+    if (!wallet?.openrouterKeyId || !this.isCurrentProviderKey(wallet.managedKeyProviderId)) {
+      return this.ensureUserKey(userId).then(({ created, keyId, ...rest }) => ({
+        keyId,
+        status: created ? 'migrated' : 'kept',
+        ...('unverified' in rest ? { unverified: true } : {}),
+      }));
+    }
+
+    // OpenRouter limits are mutable: the ensure path pushes the lower capacity.
+    if (this.managed.capabilities.updateLimit) {
+      const { keyId } = await this.ensureUserKey(userId);
+      return { keyId, status: 'resized' };
+    }
+
+    const outcome = await runExclusive(`user-key:${userId}`, async () => {
+      const row = await this.billingModel.getUserWallet(userId);
+      if (!row?.openrouterKeyId || !row.openrouterKeyCiphertext) return 'unavailable' as const;
+      const targetMicro =
+        Number(row.rawCapacityMicroUsd ?? 0) -
+        Math.max(0, Number(row.rawUsageBeforeKeyMicroUsd ?? 0));
+      return this.resizeFixedLimitKey(
+        {
+          managedKeyLimitMicroUsd: row.managedKeyLimitMicroUsd,
+          openrouterKeyCiphertext: row.openrouterKeyCiphertext,
+          openrouterKeyId: row.openrouterKeyId,
+        },
+        {
+          active: Number(row.balanceMicroUsd ?? 0) > 0,
+          persistLimit: (micro) =>
+            this.billingModel.updateUserOpenRouterKey({
+              ciphertext: row.openrouterKeyCiphertext as string,
+              keyId: row.openrouterKeyId as string,
+              managedKeyLimitMicroUsd: micro,
+              userId,
+            }),
+          targetMicro: Math.max(0, targetMicro),
+        },
+      );
+    });
+    if (outcome === 'resized') return { keyId: wallet.openrouterKeyId, status: 'resized' };
+    // An unknown outcome is healed from a live read; reissuing on top of it
+    // would size the replacement from a limit we cannot vouch for.
+    if (outcome === 'ambiguous') return { keyId: wallet.openrouterKeyId, status: 'ambiguous' };
+    return this.reissueUserKey(userId);
+  };
+
+  /**
+   * Replace a wallet's managed key with a freshly minted one carrying the same
+   * remaining allowance — for a changed secret prefix, or a suspected leak.
+   *
+   * Mint and persist first, retire second, exactly as a top-up rotation does:
+   * a failed mint leaves the old key working. A key from the previous gateway
+   * takes the ordinary migration path instead.
+   */
+  reissueUserKey = async (userId: string): Promise<ReissueOutcome> => {
+    if (isSharedInferenceKey()) return { keyId: null, status: 'shared' };
+    const wallet = await this.billingModel.getUserWallet(userId);
+    if (!wallet?.openrouterKeyId) return { keyId: null, status: 'no_key' };
+    if (!this.isCurrentProviderKey(wallet.managedKeyProviderId)) {
+      const { created, keyId } = await this.ensureUserKey(userId);
+      return { keyId, status: created ? 'migrated' : 'kept' };
+    }
+    // An OpenRouter key's secret never changes shape; nothing to reissue for.
+    if (this.managed.capabilities.updateLimit) {
+      return { keyId: wallet.openrouterKeyId, status: 'unsupported' };
+    }
+
+    return runExclusive(`user-key:${userId}`, async () => {
+      const row = await this.billingModel.getUserWallet(userId);
+      if (!row?.openrouterKeyId || !row.openrouterKeyCiphertext) {
+        return { keyId: null, status: 'no_key' } as const;
+      }
+      const { created, keyId, unverified } = await this.rotateUserKeyIfUnderfunded({
+        force: true,
+        rawCapacityMicro: Number(row.rawCapacityMicroUsd ?? 0),
+        userId,
+        wallet: {
+          managedKeyLimitMicroUsd: row.managedKeyLimitMicroUsd,
+          openrouterKeyCiphertext: row.openrouterKeyCiphertext,
+          openrouterKeyId: row.openrouterKeyId,
+          rawUsageBeforeKeyMicroUsd: row.rawUsageBeforeKeyMicroUsd,
+        },
+      });
+      return {
+        keyId,
+        status: created ? 'reissued' : 'kept',
+        ...(unverified && aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY ? { unverified: true } : {}),
+      };
+    });
+  };
+
+  /** The member-budget counterpart of {@link reissueUserKey}. */
+  reissueMemberKey = async (orgMemberId: string): Promise<ReissueOutcome> => {
+    if (isSharedInferenceKey()) return { keyId: null, status: 'shared' };
+    const budget = await this.orgModel.getMemberBudget(orgMemberId);
+    if (!budget?.openrouterKeyId) return { keyId: null, status: 'no_key' };
+    if (!this.isCurrentProviderKey(budget.managedKeyProviderId)) {
+      const { created, keyId } = await this.ensureMemberKey(orgMemberId);
+      return { keyId, status: created ? 'migrated' : 'kept' };
+    }
+    if (this.managed.capabilities.updateLimit) {
+      return { keyId: budget.openrouterKeyId, status: 'unsupported' };
+    }
+
+    return runExclusive(`member-key:${orgMemberId}`, async () => {
+      const row = await this.orgModel.getMemberBudget(orgMemberId);
+      if (!row?.openrouterKeyId || !row.openrouterKeyCiphertext) {
+        return { keyId: null, status: 'no_key' } as const;
+      }
+      // A frozen key cannot be read (`/v1/balance` answers 401), and minting a
+      // spendable replacement for a budget that must not spend is backwards.
+      const inactive =
+        !row.isActive ||
+        row.renewalStatus === 'renewal_pending' ||
+        row.renewalStatus === 'renewal_failed';
+      if (inactive) return { keyId: row.openrouterKeyId, status: 'kept' } as const;
+
+      const { created, keyId } = await this.rotateMemberKeyIfUnderfunded({
+        bp: await this.billingModel.getUsageMultiplierBp(),
+        budget: {
+          billedUsageBeforeBaselineMicroUsd: row.billedUsageBeforeBaselineMicroUsd,
+          checkpointMultiplierBp: row.checkpointMultiplierBp,
+          managedKeyLimitMicroUsd: row.managedKeyLimitMicroUsd,
+          openrouterKeyCiphertext: row.openrouterKeyCiphertext,
+          openrouterKeyId: row.openrouterKeyId,
+          usageBaselineMicroUsd: row.usageBaselineMicroUsd,
+        },
+        cycleCapMicro: currentCycleLimitMicroUsd(row),
+        force: true,
+        orgMemberId,
+      });
+      return { keyId, status: created ? 'reissued' : 'kept' };
+    });
+  };
+
+  ensureTrialKey = async (userId: string, budgetMicroUsd: number) => {
+    if (isSharedInferenceKey()) return { created: false, keyId: null };
+    const budgetMicro =
+      Number.isFinite(budgetMicroUsd) && budgetMicroUsd > 0 ? Math.trunc(budgetMicroUsd) : 0;
+    if (budgetMicro <= 0) {
+      return { created: false, keyId: null };
+    }
+
+    return runExclusive(`user-key:${userId}`, async () => {
+      const wallet = await this.billingModel.getOrCreateUserWallet(userId);
+
+      if (wallet.openrouterKeyId && wallet.openrouterKeyCiphertext) {
+        if (this.isCurrentProviderKey(wallet.managedKeyProviderId)) {
+          return { created: false, keyId: wallet.openrouterKeyId };
+        }
+        // Re-activating a trial after a provider cutover: the grant is what is
+        // left of it, not a fresh one.
+        return this.migrateUserKeyToActiveProvider({
+          trialBudgetMicroUsd: budgetMicro,
+          userId,
+          wallet,
+        });
+      }
+
+      // AICO-180: the trial budget is a billed figure like a wallet balance, so
+      // a $1 trial buys $1/M of raw spend.
+      const bp = await this.billingModel.getUsageMultiplierBp();
+      const limitMicro = keyLimitFromBilled({
+        balance: budgetMicro,
+        baselineRaw: 0,
+        billedBefore: 0,
+        bp,
+      });
+
+      return this.createAndPersistUserKey({
+        limitUsd: microToOpenRouterLimitUsd(limitMicro),
+        managedKeyLimitMicroUsd: this.managed.capabilities.readKeyBySecret ? limitMicro : undefined,
+        name: `aico-trial-${userId}`,
+        replacing: wallet.openrouterKeyId ?? null,
+        userId,
+      });
+    });
+  };
+
+  /**
+   * Ensure member OpenRouter key matches funded period amount + limit_reset.
+   * Never creates a key when reserved/period amount ≤ 0.
+   */
+  ensureMemberKey = async (orgMemberId: string): Promise<EnsuredKey> => {
+    if (isSharedInferenceKey()) return { created: false, keyId: null };
+    return runExclusive(`member-key:${orgMemberId}`, async () => {
+      const budget = await this.orgModel.getMemberBudget(orgMemberId);
+      if (!budget) throw new Error('BUDGET_NOT_FOUND');
+
+      const [subjectOrg, subjectMember] = await Promise.all([
+        this.orgModel.getById(budget.orgId),
+        this.orgModel.getMemberInOrg({ orgId: budget.orgId, orgMemberId }),
+      ]);
+      // A suspended/deleted org or a member who is leaving keeps the key frozen,
+      // whichever path asked (renewal retry, outbox backstop, reactivation).
+      // A banned user's key stays frozen too (deactivateUser froze it).
+      const [subjectUser] = subjectMember
+        ? await this.db
+            .select({ banned: users.banned })
+            .from(users)
+            .where(eq(users.id, subjectMember.userId))
+            .limit(1)
+        : [];
+      const subjectInactive =
+        subjectOrg?.status !== 'active' ||
+        subjectMember?.status !== 'active' ||
+        Boolean(subjectUser?.banned);
+
+      const period = (budget.period || 'total') as BudgetPeriod;
+      const limitReset: OpenRouterKeyLimitReset = periodToOpenRouterLimitReset(period);
+      // FIN-001: never use reservedMicroUsd here — it may include pending next-period funds.
+      const cycleCapMicro = currentCycleLimitMicroUsd(budget);
+      // AICO-180: the funded cap is billed; the key limit is the raw spend it buys.
+      const bp = await this.billingModel.getUsageMultiplierBp();
+      const limitMicro = keyLimitFromBilled({
+        balance: cycleCapMicro,
+        baselineRaw: Number(budget.usageBaselineMicroUsd ?? 0),
+        billedBefore: Number(budget.billedUsageBeforeBaselineMicroUsd ?? 0),
+        bp,
+      });
+      const limitUsd = microToOpenRouterLimitUsd(limitMicro);
+      const shouldDisable =
+        subjectInactive ||
+        !budget.isActive ||
+        cycleCapMicro <= 0 ||
+        budget.renewalStatus === 'renewal_pending' ||
+        budget.renewalStatus === 'renewal_failed';
+
+      const hasLiveKey =
+        budget.openrouterKeyId &&
+        budget.openrouterKeyCiphertext &&
+        !isStaleManagedKeyId(budget.openrouterKeyId) &&
+        this.isCurrentProviderKey(budget.managedKeyProviderId);
+
+      // Same reason as the personal path: the mint at the bottom of this method
+      // adds `usageBaselineMicroUsd` back into the limit, which is only correct
+      // for a key whose counter already carries that baseline. A replacement on
+      // a different gateway starts at zero, so it needs the rotation treatment.
+      if (
+        !hasLiveKey &&
+        hasValidManagedKeyId(budget.openrouterKeyId) &&
+        !this.isCurrentProviderKey(budget.managedKeyProviderId)
+      ) {
+        if (shouldDisable) return { created: false, keyId: null };
+        return this.migrateMemberKeyToActiveProvider({
+          bp,
+          budget,
+          cycleCapMicro,
+          orgMemberId,
+          settledUsageMicroUsd: budget.settledUsageMicroUsd,
+        });
+      }
+
+      if (hasLiveKey && !this.managed.capabilities.updateLimit) {
+        // The limit cannot be raised. `shouldDisable` is honoured by the
+        // pre-flight gate in `AicoManagedPolicy.authorize()`, which refuses an
+        // inactive or unfunded budget before the key is ever handed to a
+        // runtime; freezing the key upstream is defence in depth behind it, and
+        // unfreezing is what a renewed or reactivated budget needs.
+        const liveKey = {
+          openrouterKeyCiphertext: budget.openrouterKeyCiphertext,
+          openrouterKeyId: budget.openrouterKeyId as string,
+        };
+        await this.setFixedLimitKeyActive(liveKey, !shouldDisable);
+        if (shouldDisable) return { created: false, keyId: budget.openrouterKeyId };
+
+        // The key's counter is continuous, and renewal re-bases the checkpoint
+        // on it, so `limitMicro` is already the absolute limit this cycle needs —
+        // up for a renewal or a raised cap, down for a cut one.
+        const outcome = await this.resizeFixedLimitKey(
+          { ...liveKey, managedKeyLimitMicroUsd: budget.managedKeyLimitMicroUsd },
+          {
+            active: true,
+            persistLimit: (micro) =>
+              this.orgModel.updateMemberOpenRouterKey({
+                ciphertext: budget.openrouterKeyCiphertext as string,
+                keyId: budget.openrouterKeyId as string,
+                managedKeyLimitMicroUsd: micro,
+                orgMemberId,
+              }),
+            targetMicro: limitMicro,
+          },
+        );
+        if (outcome !== 'unavailable') {
+          return {
+            created: false,
+            keyId: budget.openrouterKeyId,
+            ...(outcome === 'ambiguous' && aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY
+              ? { unverified: true as const }
+              : {}),
+          };
+        }
+
+        const rotatedMember = await this.rotateMemberKeyIfUnderfunded({
+          bp,
+          budget: {
+            billedUsageBeforeBaselineMicroUsd: budget.billedUsageBeforeBaselineMicroUsd,
+            checkpointMultiplierBp: budget.checkpointMultiplierBp,
+            managedKeyLimitMicroUsd: budget.managedKeyLimitMicroUsd,
+            openrouterKeyCiphertext: budget.openrouterKeyCiphertext,
+            openrouterKeyId: budget.openrouterKeyId as string,
+            usageBaselineMicroUsd: budget.usageBaselineMicroUsd,
+          },
+          cycleCapMicro,
+          orgMemberId,
+          shrinkOversized: true,
+        });
+        return aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY
+          ? rotatedMember
+          : { created: rotatedMember.created, keyId: rotatedMember.keyId };
+      }
+
+      if (hasLiveKey && this.managed.updateKey) {
+        try {
+          await this.managed.updateKey({
+            disabled: shouldDisable,
+            hash: budget.openrouterKeyId as string,
+            limitReset,
+            limitUsd: Math.max(limitUsd, 0),
+          });
+          return { created: false, keyId: budget.openrouterKeyId };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!/OpenRouter Management API (?:403|404)/.test(message)) throw error;
+          console.warn('[aico] member OpenRouter key update failed; recreating', message);
+          await this.retireStoredKey({
+            openrouterKeyCiphertext: budget.openrouterKeyCiphertext,
+            openrouterKeyId: budget.openrouterKeyId as string,
+          });
+        }
+      }
+
+      if (cycleCapMicro <= 0 || shouldDisable) {
+        return { created: false, keyId: null };
+      }
+
+      // R6 (2026-10): a fresh key's counter starts at zero. On a provider whose
+      // counter never resets, the stored baseline is the *old* key's lifetime
+      // counter (renewal moves it there), and minting with it gave the new key
+      // `oldBaseline + cap/M` of headroom metered as zero — free spend after a
+      // reclaim and re-allocation. Restart the checkpoint at the new key's zero
+      // and carry what this cycle already spent as billed usage instead.
+      const freshCheckpoint = this.managed.capabilities.nativePeriodicLimits
+        ? null
+        : {
+            billedUsageBeforeBaselineMicroUsd: Math.min(
+              cycleCapMicro,
+              Math.max(
+                Number(budget.billedUsageBeforeBaselineMicroUsd ?? 0),
+                Number(budget.settledUsageMicroUsd ?? 0),
+              ),
+            ),
+            usageBaselineMicroUsd: 0,
+          };
+      const mintLimitMicro = freshCheckpoint
+        ? keyLimitFromBilled({
+            balance: cycleCapMicro,
+            baselineRaw: 0,
+            billedBefore: freshCheckpoint.billedUsageBeforeBaselineMicroUsd,
+            bp,
+          })
+        : limitMicro;
+      if (mintLimitMicro <= 0) return { created: false, keyId: null };
+
+      this.assertMintAllowed();
+      const created = await this.managed.createKey({
+        limitReset,
+        limitUsd: freshCheckpoint ? microToOpenRouterLimitUsd(mintLimitMicro) : limitUsd,
+        name: `aico-member-${orgMemberId}`,
+      });
+      await this.assertUsableCreatedKey(created);
+      try {
+        const encrypted = await this.encryptKey(created.key);
+        const row = await this.orgModel.updateMemberOpenRouterKey({
+          ...freshCheckpoint,
+          ciphertext: encrypted,
+          ...(aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY
+            ? { expectedKeyId: budget.openrouterKeyId ?? null }
+            : {}),
+          keyId: created.hash,
+          managedKeyLimitMicroUsd: this.managed.capabilities.readKeyBySecret
+            ? mintLimitMicro
+            : undefined,
+          managedKeyProviderId: this.managed.providerId,
+          orgMemberId,
+        });
+        if (!row && aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY) {
+          // C7: another instance minted for this budget first.
+          await this.retireManagedKey({ apiKey: created.key, hash: created.hash });
+          const current = await this.orgModel.getMemberBudget(orgMemberId);
+          return { created: false, keyId: current?.openrouterKeyId ?? null };
+        }
+      } catch (error) {
+        // OR-002: OR create succeeded but DB persist failed — retire orphan spendable key.
+        console.error('[aico] member OpenRouter key persist failed; retiring orphan key', error);
+        await this.retireManagedKey({ apiKey: created.key, hash: created.hash });
+        throw error;
+      }
+      return { created: true, keyId: created.hash };
+    });
+  };
+
+  /**
+   * Replace a personal key that belongs to the gateway we have switched away
+   * from (`AICO_MANAGED_PROVIDER` flipped).
+   *
+   * The old key cannot be read: `GET /v1/balance` and `GET /keys/{hash}` each
+   * only answer for their own gateway, so whatever was spent after the last
+   * successful sync is unmeasurable. The wallet's last settled usage is
+   * therefore the figure the replacement is sized against — it under-bills by at
+   * most one sync interval, which is the right direction to err when the
+   * alternative is charging a user for spend we cannot evidence.
+   *
+   * The old key is deliberately left alive upstream. Rolling the env var back
+   * has to be an env change, not a restore, and the key is unreachable while the
+   * other gateway is inactive: managed keys never leave the server, and every
+   * request passes `AicoManagedPolicy.authorize()`, which refuses a key whose
+   * provider stamp is not the active one.
+   */
+  private migrateUserKeyToActiveProvider = async (params: {
+    /** Billed allowance of an active trial, when the wallet itself is unfunded. */
+    trialBudgetMicroUsd?: number;
+    userId: string;
+    wallet: {
+      balanceMicroUsd?: number | string | null;
+      managedKeyProviderId?: string | null;
+      openrouterKeyId?: string | null;
+      rawCapacityMicroUsd?: number | string | null;
+      settledUsageMicroUsd?: number | string | null;
+    };
+  }): Promise<{ created: boolean; keyId: string | null }> => {
+    console.warn('[aico] personal managed key belongs to another gateway; minting a replacement', {
+      activeProvider: this.managed.providerId,
+      keyProvider: params.wallet.managedKeyProviderId ?? 'openrouter',
+      userId: params.userId,
+    });
+
+    const balanceMicro = Math.max(0, Math.trunc(Number(params.wallet.balanceMicroUsd ?? 0)));
+    const settledMicro = Math.max(0, Math.trunc(Number(params.wallet.settledUsageMicroUsd ?? 0)));
+    const bp = await this.billingModel.getUsageMultiplierBp();
+
+    // A funded wallet is sized from the capacity its own top-ups bought; a trial
+    // wallet has no capacity at all (the trial budget is a billed grant, never a
+    // deposit), so it is sized from the grant at the current rate.
+    const isTrialOnly = balanceMicro <= 0;
+    const billedEntitlement = isTrialOnly
+      ? Math.max(0, Math.trunc(Number(params.trialBudgetMicroUsd ?? 0)))
+      : balanceMicro;
+    if (billedEntitlement <= 0) return { created: false, keyId: null };
+
+    const rawCapacityMicro = isTrialOnly
+      ? removeMultiplierMicroUsd(billedEntitlement, bp)
+      : Math.max(0, Math.trunc(Number(params.wallet.rawCapacityMicroUsd ?? 0)));
+
+    // Raw spend the old key is known to have made, expressed in the units of the
+    // capacity this wallet bought. `billedUsageFromCapacity` is the forward map
+    // `getUserRemaining` uses; this is its inverse, through the same blend, so
+    // the two agree on what is left.
+    const rawUsedMicro = Math.min(
+      rawCapacityMicro,
+      removeMultiplierMicroUsd(
+        Math.min(settledMicro, billedEntitlement),
+        blendedMultiplierBp({
+          balanceMicroUsd: billedEntitlement,
+          fallbackBp: bp,
+          rawCapacityMicroUsd: rawCapacityMicro,
+        }),
+      ),
+    );
+    const nextLimitMicro = Math.max(0, rawCapacityMicro - rawUsedMicro);
+    if (nextLimitMicro <= 0) return { created: false, keyId: null };
+
+    return this.createAndPersistUserKey({
+      limitUsd: microToOpenRouterLimitUsd(nextLimitMicro),
+      managedKeyLimitMicroUsd: this.managed.capabilities.readKeyBySecret
+        ? nextLimitMicro
+        : undefined,
+      name: isTrialOnly ? `aico-trial-${params.userId}` : `aico-user-${params.userId}`,
+      rawUsageBeforeKeyMicroUsd: rawUsedMicro,
+      replacing: params.wallet.openrouterKeyId ?? null,
+      userId: params.userId,
+    });
+  };
+
+  /**
+   * OR-002: create on OpenRouter then persist ciphertext. If DB write fails after
+   * createKey, immediately retire the orphan so it cannot spend against the master account.
+   */
+  private async createAndPersistUserKey(params: {
+    limitUsd: number;
+    /** Mint-time raw limit, for providers that report only what is left. */
+    managedKeyLimitMicroUsd?: number;
+    name: string;
+    /** Raw spend carried over from the key this one replaces. */
+    rawUsageBeforeKeyMicroUsd?: number;
+    /**
+     * C7: the key id the wallet held when the decision to mint was made (`null`
+     * for none). The new key is only persisted if the wallet still holds it;
+     * otherwise another instance minted first and this one's key is retired.
+     */
+    replacing?: string | null;
+    userId: string;
+  }): Promise<{ created: boolean; keyId: string | null }> {
+    this.assertMintAllowed();
+    const created = await this.managed.createKey({
+      limitReset: null,
+      limitUsd: params.limitUsd,
+      name: params.name,
+    });
+    await this.assertUsableCreatedKey(created);
+    try {
+      const encrypted = await this.encryptKey(created.key);
+      const compare = aicoEnv.AICO_FIX_SC_KEY_FOLLOWS_MONEY && params.replacing !== undefined;
+      const row = await this.billingModel.updateUserOpenRouterKey({
+        ciphertext: encrypted,
+        ...(compare ? { expectedKeyId: params.replacing } : {}),
+        keyId: created.hash,
+        // One statement on `user_wallets`: the new key id, the limit it was
+        // minted with and the spend carried over from its predecessor all land
+        // together or not at all. The limit is always written — a fresh key
+        // must not inherit the recorded limit of the one it replaces.
+        managedKeyLimitMicroUsd: params.managedKeyLimitMicroUsd ?? null,
+        managedKeyProviderId: this.managed.providerId,
+        ...(params.rawUsageBeforeKeyMicroUsd == null
+          ? {}
+          : { rawUsageBeforeKeyMicroUsd: params.rawUsageBeforeKeyMicroUsd }),
+        userId: params.userId,
+      });
+      if (!row && compare) {
+        await this.retireManagedKey({ apiKey: created.key, hash: created.hash });
+        const current = await this.billingModel.getUserWallet(params.userId);
+        return { created: false, keyId: current?.openrouterKeyId ?? null };
+      }
+    } catch (error) {
+      console.error('[aico] user OpenRouter key persist failed; retiring orphan key', error);
+      await this.retireManagedKey({ apiKey: created.key, hash: created.hash });
+      throw error;
+    }
+    return { created: true, keyId: created.hash };
+  }
+
+  disableMemberKey = async (orgMemberId: string) => {
+    const budget = await this.orgModel.getMemberBudget(orgMemberId);
+    if (!budget?.openrouterKeyId) return null;
+    return this.disableManagedKey(
+      budget.openrouterKeyId,
+      budget.managedKeyProviderId,
+      budget.openrouterKeyCiphertext,
+    );
+  };
+
+  disableUserKey = async (userId: string) => {
+    const wallet = await this.billingModel.getUserWallet(userId);
+    if (!wallet?.openrouterKeyId) return null;
+    return this.disableManagedKey(
+      wallet.openrouterKeyId,
+      wallet.managedKeyProviderId,
+      wallet.openrouterKeyCiphertext,
+    );
+  };
+
+  disableAllOrgMemberKeys = async (orgId: string) => {
+    const members = await this.orgModel.listMembers(orgId);
+    return Promise.allSettled(members.map((m) => this.disableMemberKey(m.id)));
+  };
+
+  /**
+   * Undo `disableAllOrgMemberKeys` when an org is re-activated. Each active
+   * member with a live budget is put back in the state its budget implies;
+   * a member whose key could not be synced gets a `sync_member_key` retry row.
+   */
+  ensureAllOrgMemberKeys = async (orgId: string): Promise<{ queued: number; synced: number }> => {
+    const members = await this.orgModel.listMembers(orgId);
+    const tally = { queued: 0, synced: 0 };
+    for (const m of members) {
+      if (m.status !== 'active') continue;
+      await this.syncMemberKeyOrQueue({
+        orgId,
+        orgMemberId: m.id,
+        reason: 'ORG_REACTIVATED',
+        tally,
+      });
+    }
+    return tally;
+  };
+
+  /** Puts a member's key back in the state its budget implies, or queues a retry row. */
+  private syncMemberKeyOrQueue = async (params: {
+    orgId: string;
+    orgMemberId: string;
+    reason: string;
+    tally: { queued: number; synced: number };
+  }): Promise<void> => {
+    const budget = await this.orgModel.getMemberBudget(params.orgMemberId);
+    if (!budget || budget.renewalStatus === 'settled') return;
+    try {
+      const ensured = await this.ensureMemberKey(params.orgMemberId);
+      if (ensured?.unverified) throw new Error('KEY_SYNC_UNVERIFIED');
+      params.tally.synced += 1;
+    } catch (error) {
+      console.warn('[aico] member key sync failed; queued', params.orgMemberId, error);
+      await this.db.insert(aicoKeyOutbox).values({
+        action: 'sync_member_key',
+        nextAttemptAt: new Date(),
+        orgId: params.orgId,
+        orgMemberId: params.orgMemberId,
+        payload: { reason: params.reason },
+        status: 'pending',
+      });
+      params.tally.queued += 1;
+    }
+  };
+
+  private activeMembershipsOfUser = (userId: string) =>
+    this.db
+      .select({ id: organizationMembers.id, orgId: organizationMembers.orgId })
+      .from(organizationMembers)
+      .where(and(eq(organizationMembers.userId, userId), eq(organizationMembers.status, 'active')));
+
+  /**
+   * Freeze every org-funded key of a user who was deactivated. A freeze that
+   * fails is queued (a `disable_member_key` row without a batch key always runs).
+   */
+  disableAllUserMemberKeys = async (userId: string): Promise<{ queued: number }> => {
+    let queued = 0;
+    for (const m of await this.activeMembershipsOfUser(userId)) {
+      try {
+        await this.disableMemberKey(m.id);
+      } catch (error) {
+        console.warn('[aico] member key freeze on deactivation failed; queued', m.id, error);
+        await this.db.insert(aicoKeyOutbox).values({
+          action: 'disable_member_key',
+          nextAttemptAt: new Date(),
+          orgId: m.orgId,
+          orgMemberId: m.id,
+          payload: { reason: 'USER_DEACTIVATED' },
+          status: 'pending',
+        });
+        queued += 1;
+      }
+    }
+    return { queued };
+  };
+
+  /** Undo {@link disableAllUserMemberKeys} when the user is reactivated. */
+  ensureAllUserMemberKeys = async (userId: string): Promise<{ queued: number; synced: number }> => {
+    const tally = { queued: 0, synced: 0 };
+    for (const m of await this.activeMembershipsOfUser(userId)) {
+      await this.syncMemberKeyOrQueue({
+        orgId: m.orgId,
+        orgMemberId: m.id,
+        reason: 'USER_REACTIVATED',
+        tally,
+      });
+    }
+    return tally;
+  };
+
+  /**
+   * Read-only half of {@link reclaimMemberKey}: what a reclaim *would* return,
+   * without disabling the key. Used by the org budget sweep preview, which must
+   * never leave a key disabled for a sweep the manager then cancels.
+   * Requires orgId so a foreign orgMemberId cannot read another tenant's key.
+   */
+  peekMemberRemaining = async (params: {
+    orgId: string;
+    orgMemberId: string;
+  }): Promise<{
+    /** `null` for a keyless budget under the authoritative ledger. */
+    keyId: string | null;
+    /** Gateway that minted the key, so a caller does not disable a foreign one. */
+    keyProviderId: string | null;
+    remainingMicroUsd: number;
+    usageMicroUsd: number;
+  } | null> => {
+    const budget = await this.orgModel.getMemberBudgetForOrg(params);
+    if (!budget) return null;
+
+    // Under the ledger, spend is settled per call and open holds are committed,
+    // so the key (if any) is not the source of truth.
+    if (await isLedgerAuthoritative(this.db)) {
+      const { remainingMicroUsd, usageMicroUsd } = this.ledgerCycleFigures(budget);
+      return {
+        keyId: budget.openrouterKeyId ?? null,
+        keyProviderId: budget.managedKeyProviderId ?? null,
+        remainingMicroUsd:
+          remainingMicroUsd + Math.max(0, Number(budget.pendingPeriodAmountMicroUsd ?? 0)),
+        usageMicroUsd,
+      };
+    }
+
+    if (!budget.openrouterKeyId) return null;
+
+    return this.memberRemainingFromKey(
+      { ...budget, openrouterKeyId: budget.openrouterKeyId },
+      'live',
+    );
+  };
+
+  /**
+   * What a member's key says is left of the cycle, in billed micro-USD.
+   *
+   * `frozen` reads through the freeze edit: CheapVibeCode refuses `/v1/balance`
+   * to a frozen key (401), so a key that removal or renewal already froze can
+   * only be read that way.
+   */
+  private memberRemainingFromKey = async (
+    budget: NonNullable<Awaited<ReturnType<OrganizationModel['getMemberBudgetForOrg']>>> & {
+      openrouterKeyId: string;
+    },
+    read: 'frozen' | 'live',
+  ) => {
+    const keyRow = {
+      managedKeyLimitMicroUsd: budget.managedKeyLimitMicroUsd,
+      managedKeyProviderId: budget.managedKeyProviderId,
+      openrouterKeyCiphertext: budget.openrouterKeyCiphertext,
+      openrouterKeyId: budget.openrouterKeyId,
+    };
+    const info =
+      read === 'frozen'
+        ? await this.readFrozenMemberKeyInfo(keyRow)
+        : await this.readMemberKeyInfo(keyRow);
+    return this.memberRemainingFromInfo(budget, info);
+  };
+
+  /**
+   * {@link memberRemainingFromKey} for key state already in hand. Given
+   * {@link unreadableKeyInfo} it falls back to the last settled usage: the
+   * cycle cap minus that usage, plus any pending next-period hold.
+   */
+  private memberRemainingFromInfo = async (
+    budget: NonNullable<Awaited<ReturnType<OrganizationModel['getMemberBudgetForOrg']>>> & {
+      openrouterKeyId: string;
+    },
+    info: ManagedKeyInfo,
+    /** Set when the figure is about to be refunded: a clamp then raises an alert. */
+    settling?: { orgId: string; orgMemberId: string },
+  ) => {
+    // AICO-180: OpenRouter reports raw spend; the org wallet this refunds into
+    // is denominated in billed micro-USD, so convert before returning. Read the
+    // same counter the key limit is enforced against, since the checkpoint
+    // baseline is expressed in those units.
+    const bp = await this.billingModel.getUsageMultiplierBp();
+    const rawUsage = this.rawMeteredUsageMicro(budget, info);
+    // With no period counter the last settled figure is the most we can honestly
+    // claim was spent; lifetime usage would over-state it and under-refund the org.
+    const usageMicro =
+      rawUsage === null
+        ? Math.max(0, Number(budget.settledUsageMicroUsd ?? 0))
+        : billedUsageFromRaw({
+            baselineRaw: Number(budget.usageBaselineMicroUsd ?? 0),
+            billedBefore: Number(budget.billedUsageBeforeBaselineMicroUsd ?? 0),
+            bp: Number(budget.checkpointMultiplierBp ?? bp),
+            rawUsage,
+          });
+    const currentCycle = currentCycleLimitMicroUsd(budget);
+    const pendingHeld = Math.max(0, Number(budget.pendingPeriodAmountMicroUsd ?? 0));
+    const remainingFromOr =
+      info.limitRemaining == null
+        ? Math.max(0, currentCycle - usageMicro)
+        : applyMultiplierMicroUsd(
+            Number(openRouterUsdToMicroFloor(info.limitRemaining)),
+            Number(budget.checkpointMultiplierBp ?? bp),
+          );
+
+    // N3: never refund more than this cycle funded and has not spent — the
+    // cap renewal already applies. A key left bigger than its cycle (a shrink
+    // that never landed) reports headroom the org was already refunded. Its
+    // limit-minus-remaining usage is then wrong too, so the last synced usage
+    // is the floor of what was spent.
+    const knownUsageMicro = Math.max(
+      0,
+      usageMicro,
+      Math.max(0, Number(budget.settledUsageMicroUsd ?? 0)),
+    );
+    const unusedMicro = Number(confirmedUnusedMicro(BigInt(currentCycle), BigInt(knownUsageMicro)));
+    let refundableMicro = Math.max(0, remainingFromOr);
+    if (aicoEnv.AICO_FIX_SA_RECLAIM_GUARD && refundableMicro > unusedMicro) {
+      if (settling) {
+        await sendSecurityAlert(this.db, {
+          dedupeKey: `reclaim.refund_over_cap:${settling.orgMemberId}`,
+          details: {
+            capMicroUsd: unusedMicro,
+            keyId: budget.openrouterKeyId,
+            orgId: settling.orgId,
+            orgMemberId: settling.orgMemberId,
+            reportedMicroUsd: refundableMicro,
+          },
+          severity: 'warning',
+          summary: `Reclaim of member ${settling.orgMemberId} clamped a refund above the funded cycle cap`,
+          type: 'reclaim.refund_over_cap',
+        });
+      }
+      refundableMicro = unusedMicro;
+    }
+
+    // Pending next-period reservation was never spendable on the OR key (FIN-001) —
+    // reclaim it from the wallet reservation in full.
+    return {
+      keyId: budget.openrouterKeyId,
+      keyProviderId: budget.managedKeyProviderId ?? null,
+      remainingMicroUsd: refundableMicro + pendingHeld,
+      usageMicroUsd: usageMicro,
+    };
+  };
+
+  /**
+   * Authoritative settlement helpers for removal / period close.
+   * Returns micro-USD usage/remaining from OpenRouter (floored).
+   * Requires orgId so a foreign orgMemberId cannot disable another tenant's key.
+   */
+  reclaimMemberKey = async (params: {
+    orgId: string;
+    orgMemberId: string;
+  }): Promise<{
+    /** Set when the refund was estimated because the frozen key could not be read. */
+    estimated?: ReclaimEstimate;
+    /**
+     * N4: the budget these figures were read against. Pass it to
+     * `reclaimMemberRemainingCredit`, which refuses to settle a budget that has
+     * changed since (a renewal or allocation committed in between).
+     */
+    expected?: ReclaimBudgetSnapshot;
+    remainingMicroUsd: number;
+    usageMicroUsd: number;
+  } | null> => {
+    // R1 (2026-10): freeze first, then settle through the freeze. Removal has
+    // usually frozen the key already, and CheapVibeCode will not read a frozen
+    // key's balance — so peeking first failed every attempt and the member was
+    // never settled. Reading after the freeze also means spend that lands
+    // between the two calls is not credited back (FIN-031).
+    if (aicoEnv.AICO_FIX_R1_FROZEN_RECLAIM && !(await isLedgerAuthoritative(this.db))) {
+      const budget = await this.orgModel.getMemberBudgetForOrg(params);
+      if (!budget?.openrouterKeyId) return null;
+      const keyed = { ...budget, openrouterKeyId: budget.openrouterKeyId };
+      const expected: ReclaimBudgetSnapshot | undefined = aicoEnv.AICO_FIX_SA_RECLAIM_GUARD
+        ? {
+            ledgerEpoch: Number(budget.ledgerEpoch ?? 0),
+            openrouterKeyId: budget.openrouterKeyId,
+            pendingPeriodAmountMicroUsd: Number(budget.pendingPeriodAmountMicroUsd ?? 0),
+            periodAmountMicroUsd: Number(budget.periodAmountMicroUsd ?? 0),
+          }
+        : undefined;
+
+      const freeze = () =>
+        this.disableManagedKey(
+          budget.openrouterKeyId!,
+          budget.managedKeyProviderId ?? null,
+          this.managed.capabilities.readKeyBySecret ? budget.openrouterKeyCiphertext : undefined,
+        );
+      // N2: a refused freeze proves nothing about the key — it may still be
+      // live. Estimating then refunds money the member can go on spending, and
+      // settling drops the secret needed to freeze it later, so the refusal
+      // goes back to the outbox. Only a key gone upstream is settled anyway.
+      if (aicoEnv.AICO_FIX_SA_RECLAIM_GUARD) {
+        try {
+          await freeze();
+        } catch (error) {
+          if (!isKeyGoneUpstream(error)) throw error;
+        }
+      }
+
+      let info: ManagedKeyInfo;
+      let readFailure: string | null = null;
+      try {
+        if (!aicoEnv.AICO_FIX_SA_RECLAIM_GUARD) await freeze();
+        info = await this.readFrozenMemberKeyInfo({
+          managedKeyLimitMicroUsd: budget.managedKeyLimitMicroUsd,
+          managedKeyProviderId: budget.managedKeyProviderId,
+          openrouterKeyCiphertext: budget.openrouterKeyCiphertext,
+          openrouterKeyId: budget.openrouterKeyId,
+        });
+      } catch (error) {
+        // Only a gateway refusing the freeze edit or answering it without a
+        // remaining figure is settled from the last sync. Anything else (a
+        // timeout with an unknown outcome, a database error) stays a failure
+        // the outbox retries.
+        if (!isFreezeReadFailure(error)) throw error;
+        readFailure = error instanceof Error ? error.message : String(error);
+        if (!budget.lastSyncedAt) {
+          await sendSecurityAlert(this.db, {
+            dedupeKey: `reclaim.manual_settlement:${params.orgMemberId}`,
+            details: { error: readFailure, orgId: params.orgId, orgMemberId: params.orgMemberId },
+            severity: 'critical',
+            summary: `Reclaim of member ${params.orgMemberId} needs manual settlement: the key cannot be read and its usage was never synced`,
+            type: 'reclaim.manual_settlement_required',
+          });
+          throw new Error('RECLAIM_USAGE_NEVER_SYNCED', { cause: error });
+        }
+        info = this.unreadableKeyInfo(budget.openrouterKeyId);
+      }
+
+      const figures = await this.memberRemainingFromInfo(keyed, info, params);
+      if (readFailure === null) {
+        return {
+          expected,
+          remainingMicroUsd: figures.remainingMicroUsd,
+          usageMicroUsd: figures.usageMicroUsd,
+        };
+      }
+
+      // Estimated from the last synced usage. Spend after that sync is refunded
+      // too; the chat path syncs after every managed request, so that is at most
+      // the last unsynced request(s).
+      const estimate = {
+        capMicroUsd: currentCycleLimitMicroUsd(budget),
+        error: readFailure,
+        lastSyncedAt: budget.lastSyncedAt?.toISOString() ?? null,
+        pendingMicroUsd: Math.max(0, Number(budget.pendingPeriodAmountMicroUsd ?? 0)),
+        refundedMicroUsd: figures.remainingMicroUsd,
+        settledUsageMicroUsd: Math.max(0, Number(budget.settledUsageMicroUsd ?? 0)),
+      };
+      await sendSecurityAlert(this.db, {
+        dedupeKey: `reclaim.estimated:${params.orgMemberId}`,
+        details: { ...estimate, orgId: params.orgId, orgMemberId: params.orgMemberId },
+        severity: 'warning',
+        summary: `Reclaim of member ${params.orgMemberId} was estimated from the last synced usage because the key could not be read`,
+        type: 'reclaim.estimated',
+      });
+      return {
+        estimated: estimate,
+        expected,
+        remainingMicroUsd: figures.remainingMicroUsd,
+        usageMicroUsd: figures.usageMicroUsd,
+      };
+    }
+
+    const peeked = await this.peekMemberRemaining(params);
+    if (!peeked) return null;
+
+    if (peeked.keyId) {
+      // CheapVibeCode freezes a key by its secret, which the peek does not return.
+      const ciphertext = this.managed.capabilities.readKeyBySecret
+        ? (await this.orgModel.getMemberBudgetForOrg(params))?.openrouterKeyCiphertext
+        : undefined;
+      if (await isLedgerAuthoritative(this.db)) {
+        // The legacy key no longer carries traffic; failing to disable it must
+        // not block the refund the ledger has already computed.
+        await this.disableManagedKey(peeked.keyId, peeked.keyProviderId, ciphertext).catch(
+          (error) =>
+            console.warn('[aico] legacy member key disable failed during reclaim', {
+              message: error instanceof Error ? error.message : String(error),
+              orgMemberId: params.orgMemberId,
+            }),
+        );
+      } else {
+        await this.disableManagedKey(peeked.keyId, peeked.keyProviderId, ciphertext);
+      }
+    }
+
+    return { remainingMicroUsd: peeked.remainingMicroUsd, usageMicroUsd: peeked.usageMicroUsd };
+  };
+
+  /**
+   * Period-aware usage read for dashboards / billing sources.
+   * Never writes lifetime `info.usage` into `settledUsageMicroUsd`.
+   */
+  private computeCycleUsageFromKeyInfo = (
+    budget: UsageMultiplierCheckpoint & {
+      managedKeyLimitMicroUsd?: number | null;
+      period?: string | null;
+      settledUsageMicroUsd?: number | null;
+    },
+    info: {
+      limit?: number | null;
+      limitRemaining?: number | null;
+      usage?: number | null;
+      usageDaily?: number | null;
+      usageMonthly?: number | null;
+      usageWeekly?: number | null;
+    },
+    /** AICO-180 multiplier in force; defaults to the budget's own checkpoint rate. */
+    multiplierBp?: number,
+  ): { remainingMicroUsd: number; usageMicroUsd: number } => {
+    const currentCycle = currentCycleLimitMicroUsd(budget);
+    const priorSettled = Math.max(0, Number(budget.settledUsageMicroUsd ?? 0));
+
+    // AICO-180: everything OpenRouter reports is RAW spend, while `currentCycle`
+    // and `priorSettled` are BILLED. Convert before any comparison or clamp —
+    // the `looksReset` heuristic below compares the two directly, so converting
+    // late would silently misfire the cycle-boundary over-refund guard.
+    const bp = multiplierBp ?? Number(budget.checkpointMultiplierBp ?? DEFAULT_USAGE_MULTIPLIER_BP);
+    const baselineRaw = Number(budget.usageBaselineMicroUsd ?? 0);
+    const billedBefore = Number(budget.billedUsageBeforeBaselineMicroUsd ?? 0);
+    const toBilledUsage = (rawUsage: number) =>
+      billedUsageFromRaw({ baselineRaw, billedBefore, bp, rawUsage });
+
+    // A counter that never resets cannot look "reset", and a key's remaining
+    // allowance spans the whole funded life of that key rather than this cycle —
+    // so neither the `looksReset` guard nor the `limitRemaining` branch below
+    // applies. The baseline-offset reading is the whole story here, and renewal
+    // is what moves the baseline on to the next cycle.
+    if (!this.managed.capabilities.nativePeriodicLimits) {
+      const rawUsage = this.rawUsageOnKeyMicro(budget, info);
+
+      // No usable counter: hold the last settled figure rather than claim the
+      // cycle is untouched.
+      const usage =
+        rawUsage === null
+          ? Math.min(currentCycle, priorSettled)
+          : Math.min(currentCycle, Math.max(0, toBilledUsage(rawUsage)));
+
+      return { remainingMicroUsd: Math.max(0, currentCycle - usage), usageMicroUsd: usage };
+    }
+
+    const periodUsageUsd =
+      budget.period === 'daily'
+        ? info.usageDaily
+        : budget.period === 'weekly'
+          ? info.usageWeekly
+          : budget.period === 'monthly'
+            ? info.usageMonthly
+            : null;
+
+    const periodUsageMicro =
+      periodUsageUsd == null
+        ? null
+        : toBilledUsage(Number(openRouterUsdToMicroFloor(periodUsageUsd)));
+
+    const limitMicro =
+      info.limit == null
+        ? currentCycle
+        : toBilledUsage(Number(openRouterUsdToMicroFloor(info.limit)));
+    // Remaining is a pure delta (limit − usage), so it scales by M directly
+    // rather than through the baseline-offset usage formula.
+    const remainingFromOr =
+      info.limitRemaining == null
+        ? null
+        : applyMultiplierMicroUsd(Number(openRouterUsdToMicroFloor(info.limitRemaining)), bp);
+
+    const looksReset =
+      priorSettled > 0 &&
+      ((periodUsageMicro != null && periodUsageMicro < priorSettled / 2) ||
+        (remainingFromOr != null &&
+          limitMicro > 0 &&
+          remainingFromOr >= Math.floor(limitMicro * 0.95) &&
+          priorSettled > Math.floor(currentCycle * 0.05)));
+
+    let usageMicro: number;
+    let remainingMicro: number;
+
+    if (looksReset) {
+      usageMicro = Math.min(priorSettled, currentCycle);
+      remainingMicro = Math.max(0, currentCycle - usageMicro);
+    } else if (remainingFromOr != null) {
+      remainingMicro = Math.max(0, remainingFromOr);
+      usageMicro = Math.max(0, currentCycle - remainingMicro);
+      if (periodUsageMicro != null) {
+        usageMicro = Math.min(currentCycle, Math.max(usageMicro, periodUsageMicro));
+        remainingMicro = Math.max(0, currentCycle - usageMicro);
+      }
+    } else if (periodUsageMicro != null) {
+      usageMicro = Math.min(currentCycle, Math.max(0, periodUsageMicro));
+      remainingMicro = Math.max(0, currentCycle - usageMicro);
+    } else if (isPeriodScopedBudget(budget.period)) {
+      // Neither `limit_remaining` nor the period counter is available. Lifetime
+      // `info.usage` spans earlier cycles, so converting it here saturates
+      // usage at the cap and strands the member for the rest of the period —
+      // which is also what the docstring above promises never to do. Hold the
+      // last settled figure until a real counter arrives.
+      usageMicro = Math.min(currentCycle, priorSettled);
+      remainingMicro = Math.max(0, currentCycle - usageMicro);
+    } else if (info.usage == null) {
+      // Nothing was readable at all — an unreadable key, not an unused one.
+      usageMicro = Math.min(currentCycle, priorSettled);
+      remainingMicro = Math.max(0, currentCycle - usageMicro);
+    } else {
+      // A `total` budget is metered on the lifetime counter, so it is correct here.
+      usageMicro = toBilledUsage(Number(openRouterUsdToMicroFloor(info.usage)));
+      usageMicro = Math.min(currentCycle, Math.max(0, usageMicro));
+      remainingMicro = Math.max(0, currentCycle - usageMicro);
+    }
+
+    return { remainingMicroUsd: remainingMicro, usageMicroUsd: usageMicro };
+  };
+
+  /**
+   * Authoritative period settlement read for renewal.
+   * Does not itself enable/disable the OpenRouter key — renewal already
+   * disables keys at the start of `renewal_pending` and re-enables only after
+   * the next period is funded.
+   *
+   * Boundary safety (AICO-140): prefer `limit_remaining` and period usage
+   * counters. If OpenRouter has already reset for the new cycle (period usage
+   * near 0 / remaining ≈ full limit while Aico still has closing-cycle
+   * settledUsage), use Aico's last settled usage so we do not over-refund.
+   */
+  /**
+   * Where the next cycle's checkpoint baseline has to start.
+   *
+   * A provider with native periodic limits resets the key's counter at the
+   * boundary, so the new cycle meters from zero. A provider without one carries
+   * the same counter across the boundary, and zeroing the baseline there would
+   * re-meter every request the closing cycle already settled — the member would
+   * open the new cycle already over cap.
+   */
+  private nextCycleBaselineMicro = (
+    budget: { managedKeyLimitMicroUsd?: number | null; usageBaselineMicroUsd?: number | null },
+    rawUsage: number | null,
+  ): number => {
+    if (this.managed.capabilities.nativePeriodicLimits) return 0;
+    if (rawUsage !== null) return Math.max(0, rawUsage);
+
+    // The counter could not be read. Assuming the key is spent gives the member
+    // a free cycle bounded by whatever that key can still spend upstream, and
+    // the next successful read rotates onto a fresh key with an exact baseline.
+    // Assuming the opposite would bill the closing cycle's usage a second time.
+    if (budget.managedKeyLimitMicroUsd != null) return Number(budget.managedKeyLimitMicroUsd);
+    return Math.max(0, Number(budget.usageBaselineMicroUsd ?? 0));
+  };
+
+  /**
+   * Cycle figures from ledger columns: settled spend plus open holds count as
+   * used, so a refund never hands back money an in-flight call may still spend.
+   */
+  private ledgerCycleFigures = (budget: {
+    heldMicroUsd?: number | null;
+    periodAmountMicroUsd?: number | null;
+    reservedMicroUsd?: number | null;
+    settledUsageMicroUsd?: number | null;
+  }): { remainingMicroUsd: number; usageMicroUsd: number } => {
+    const cycle = currentCycleLimitMicroUsd(budget);
+    const committed =
+      Math.max(0, Number(budget.settledUsageMicroUsd ?? 0)) +
+      Math.max(0, Number(budget.heldMicroUsd ?? 0));
+    return {
+      remainingMicroUsd: Math.max(0, cycle - committed),
+      usageMicroUsd: Math.min(cycle, committed),
+    };
+  };
+
+  settleMemberPeriod = async (
+    orgMemberId: string,
+  ): Promise<{
+    /** What `usageBaselineMicroUsd` must become when the period rolls over. */
+    nextCycleBaselineMicroUsd: number;
+    remainingMicroUsd: number;
+    usageMicroUsd: number;
+  } | null> => {
+    const budget = await this.orgModel.getMemberBudget(orgMemberId);
+    if (!budget) return null;
+
+    if (await isLedgerAuthoritative(this.db)) {
+      const figures = this.ledgerCycleFigures(budget);
+      // The money figures are the ledger's, but the key is still the thing that
+      // meters the next cycle. A provider whose counters do not reset (CVC) keeps
+      // counting across the boundary, so the new cycle has to start from where the
+      // counter is — a zero baseline would size it against the key's lifetime usage.
+      if (
+        isSharedInferenceKey() ||
+        this.managed.capabilities.nativePeriodicLimits ||
+        !budget.openrouterKeyId
+      ) {
+        return { nextCycleBaselineMicroUsd: 0, ...figures };
+      }
+      const info = await this.readFrozenMemberKeyInfo({
+        managedKeyLimitMicroUsd: budget.managedKeyLimitMicroUsd,
+        managedKeyProviderId: budget.managedKeyProviderId,
+        openrouterKeyCiphertext: budget.openrouterKeyCiphertext,
+        openrouterKeyId: budget.openrouterKeyId,
+      }).catch(() => null);
+      const rawUsage = info ? this.rawMeteredUsageMicro(budget, info) : null;
+      return {
+        nextCycleBaselineMicroUsd: this.nextCycleBaselineMicro(budget, rawUsage),
+        ...figures,
+      };
+    }
+
+    if (!budget.openrouterKeyId) return null;
+
+    const info = await this.readFrozenMemberKeyInfo({
+      managedKeyLimitMicroUsd: budget.managedKeyLimitMicroUsd,
+      managedKeyProviderId: budget.managedKeyProviderId,
+      openrouterKeyCiphertext: budget.openrouterKeyCiphertext,
+      openrouterKeyId: budget.openrouterKeyId,
+    });
+    const rawUsage = this.rawMeteredUsageMicro(budget, info);
+    const { bp, checkpoint, degraded } = await this.syncMemberCheckpoint({
+      checkpoint: budget,
+      expectedLedgerEpoch: Number(budget.ledgerEpoch ?? 0),
+      orgMemberId,
+      rawUsage,
+    });
+    const { remainingMicroUsd, usageMicroUsd } = this.computeCycleUsageFromKeyInfo(
+      { ...budget, ...checkpoint },
+      info,
+      bp,
+    );
+
+    await this.orgModel.syncMemberBudgetUsage({
+      expectedLedgerEpoch: Number(budget.ledgerEpoch ?? 0),
+      orgMemberId,
+      settledUsageMicroUsd: usageMicroUsd,
+      syncError: degraded ? MISSING_PERIOD_COUNTER : null,
+      syncStatus: degraded ? 'degraded' : 'synced',
+    });
+
+    return {
+      nextCycleBaselineMicroUsd: this.nextCycleBaselineMicro(
+        { ...budget, ...checkpoint },
+        rawUsage,
+      ),
+      remainingMicroUsd,
+      usageMicroUsd,
+    };
+  };
+
+  /**
+   * @deprecated Prefer explicit billing context via AicoManagedPolicy.
+   * Kept only for transitional non-managed diagnostics — returns null always
+   * so silent first-match billing cannot occur.
+   */
+  resolveUserApiKey = async (_userId: string): Promise<string | null> => null;
+
+  /**
+   * Spendable remaining for a personal wallet, derived from the managed key's
+   * OpenRouter usage.
+   *
+   * FIN-018: every failure here used to collapse to "you have spent nothing" —
+   * the full deposited balance, `usageMicroUsd: null`, and no log. Five distinct
+   * paths produced that, and none was distinguishable from a genuinely unspent
+   * wallet. Now the reading carries `usageKnown`, a degraded read holds the last
+   * persisted usage instead of forgetting it, and the failure is logged.
+   *
+   * `persist` is opt-in because the chat hot path calls this per request and
+   * must not take a write; dashboards pass it so the fallback figure stays
+   * fresh and operators can see the sync status.
+   */
+  getUserRemaining = async (
+    userId: string,
+    options?: { live?: boolean; persist?: boolean },
+  ): Promise<{
+    remainingMicroUsd: number;
+    /** Last known billed usage. `null` only when nothing has ever been metered. */
+    usageMicroUsd: number | null;
+    /** False when the figure is a fallback, not a live reading. Never present it as current. */
+    usageKnown: boolean;
+  }> => {
+    const wallet = await this.billingModel.getOrCreateUserWallet(userId);
+    const balanceMicroUsd = Number(wallet.balanceMicroUsd ?? 0);
+    const lastSettledMicroUsd = Math.max(0, Number(wallet.settledUsageMicroUsd ?? 0));
+
+    // Under the ledger the wallet's own columns are exact: settled raw spend
+    // plus open holds, billed at the blend its top-ups bought. Never persisted
+    // here; every settle keeps `settled_usage_micro_usd` current.
+    if (await isLedgerAuthoritative(this.db)) {
+      const fallbackBp = await this.billingModel.getUsageMultiplierBp();
+      const rawCapacityMicroUsd = Number(wallet.rawCapacityMicroUsd ?? 0);
+      const used = Math.max(0, Number(wallet.rawUsedMicroUsd ?? 0));
+      const held = Math.max(0, Number(wallet.rawHeldMicroUsd ?? 0));
+      const usageMicroUsd = billedUsageFromCapacity({
+        balanceMicroUsd,
+        fallbackBp,
+        rawCapacityMicroUsd,
+        rawUsageMicroUsd: used,
+      });
+      const committed = billedUsageFromCapacity({
+        balanceMicroUsd,
+        fallbackBp,
+        rawCapacityMicroUsd,
+        rawUsageMicroUsd: used + held,
+      });
+      return {
+        remainingMicroUsd: Math.max(0, balanceMicroUsd - committed),
+        usageKnown: true,
+        usageMicroUsd,
+      };
+    }
+
+    // No key was ever provisioned, so no spend was ever possible through us.
+    // That is a known zero, not an unknown — the wallet is fully spendable.
+    if (!wallet.openrouterKeyId) {
+      return {
+        remainingMicroUsd: Math.max(0, balanceMicroUsd),
+        usageKnown: true,
+        usageMicroUsd: 0,
+      };
+    }
+
+    // A `mock_` hash cannot authenticate upstream, so usage is unreadable —
+    // and the wallet may well have spent against a real key before the hash
+    // was replaced. Unknown, not zero. A key belonging to a gateway that is no
+    // longer active is unreadable for the same reason: its secret means nothing
+    // to the current one, and whatever was spent on it still happened.
+    if (
+      isStaleManagedKeyId(wallet.openrouterKeyId) ||
+      !this.isCurrentProviderKey(wallet.managedKeyProviderId)
+    ) {
+      console.warn('[aico] personal remaining is degraded: key is stale or from another provider', {
+        keyId: wallet.openrouterKeyId,
+        keyProvider: wallet.managedKeyProviderId ?? 'openrouter',
+        userId,
+      });
+      if (options?.persist) {
+        await this.billingModel
+          .syncUserWalletUsage({ syncError: STALE_MANAGED_KEY, syncStatus: 'degraded', userId })
+          .catch(() => null);
+      }
+      return {
+        remainingMicroUsd: Math.max(0, balanceMicroUsd - lastSettledMicroUsd),
+        usageKnown: false,
+        usageMicroUsd: lastSettledMicroUsd,
+      };
+    }
+
+    // Chat allow-gate / other latency-sensitive callers: skip the management-API
+    // round trip and hold the last settled wallet reading. Server placeHold remains
+    // the authoritative funds check.
+    if (options?.live === false) {
+      return {
+        remainingMicroUsd: Math.max(0, balanceMicroUsd - lastSettledMicroUsd),
+        usageKnown: false,
+        usageMicroUsd: lastSettledMicroUsd,
+      };
+    }
+
+    try {
+      const info = await this.managed.getKey(
+        await this.managedCredential({
+          managedKeyLimitMicroUsd: wallet.managedKeyLimitMicroUsd,
+          openrouterKeyCiphertext: wallet.openrouterKeyCiphertext,
+          openrouterKeyId: wallet.openrouterKeyId,
+        }),
+      );
+
+      // Spend on keys this wallet has already retired. Always 0 unless a
+      // rotation happened, which only an immutable-limit provider forces.
+      const usedBeforeMicro = Math.max(0, Number(wallet.rawUsageBeforeKeyMicroUsd ?? 0));
+      const usedOnKeyMicro = this.rawUsageOnKeyMicro(wallet, info);
+      // Unknown spend is not zero spend. Fall into the degraded path below,
+      // which holds the last settled figure and says plainly that it is stale.
+      if (usedOnKeyMicro === null) throw new Error(MANAGED_KEY_LIMIT_UNKNOWN);
+      const rawUsageMicro = usedBeforeMicro + usedOnKeyMicro;
+
+      // AICO-184: bill raw usage at the blend of the rates this wallet's
+      // top-ups actually bought at, not at whatever the platform rate is now.
+      const rawCapacityMicro = Number(wallet.rawCapacityMicroUsd ?? 0);
+      const usageMicro = billedUsageFromCapacity({
+        balanceMicroUsd,
+        fallbackBp: await this.billingModel.getUsageMultiplierBp(),
+        rawCapacityMicroUsd: rawCapacityMicro,
+        rawUsageMicroUsd: rawUsageMicro,
+      });
+      if (options?.persist) {
+        await this.billingModel
+          .syncUserWalletUsage({
+            settledUsageMicroUsd: usageMicro,
+            syncStatus: 'synced',
+            userId,
+          })
+          .catch(() => null);
+      }
+
+      // `balance − usage` is exact here: both sides are cumulative and usage
+      // reaches the balance precisely when raw usage reaches capacity.
+      return {
+        remainingMicroUsd: Math.max(0, balanceMicroUsd - usageMicro),
+        usageKnown: true,
+        usageMicroUsd: usageMicro,
+      };
+    } catch (error) {
+      // Do not report the full balance as spendable. Hold the last figure we
+      // could trust and say plainly that it is stale.
+      console.warn('[aico] personal remaining is degraded: OpenRouter key read failed', {
+        error,
+        keyId: wallet.openrouterKeyId,
+        userId,
+      });
+      if (options?.persist) {
+        await this.billingModel
+          .syncUserWalletUsage({
+            syncError: error instanceof Error ? error.message : String(error),
+            syncStatus: 'degraded',
+            userId,
+          })
+          .catch(() => null);
+      }
+      return {
+        remainingMicroUsd: Math.max(0, balanceMicroUsd - lastSettledMicroUsd),
+        usageKnown: false,
+        usageMicroUsd: lastSettledMicroUsd,
+      };
+    }
+  };
+
+  /**
+   * Cumulative raw spend of a wallet read from its legacy managed key, for the
+   * ledger cutover snapshot.
+   *
+   * `degraded` marks a figure that could not be read live and was derived from
+   * the last settled usage instead. A permanent key failure (401/403/404)
+   * degrades; anything transient (429, 5xx, network) throws so the snapshot
+   * stops and resumes rather than committing a guess.
+   */
+  readWalletRawUsage = async (
+    userId: string,
+  ): Promise<{ degraded: boolean; rawUsedMicroUsd: number }> => {
+    const wallet = await this.billingModel.getOrCreateUserWallet(userId);
+    const before = Math.max(0, Number(wallet.rawUsageBeforeKeyMicroUsd ?? 0));
+    if (!wallet.openrouterKeyId) return { degraded: false, rawUsedMicroUsd: before };
+
+    const balance = Number(wallet.balanceMicroUsd ?? 0);
+    const rawCapacity = Number(wallet.rawCapacityMicroUsd ?? 0);
+    const settled = Math.max(0, Number(wallet.settledUsageMicroUsd ?? 0));
+    const fallback = {
+      degraded: true,
+      rawUsedMicroUsd:
+        balance > 0 ? Math.max(before, Math.ceil((settled * rawCapacity) / balance)) : before,
+    };
+
+    if (
+      isStaleManagedKeyId(wallet.openrouterKeyId) ||
+      !this.isCurrentProviderKey(wallet.managedKeyProviderId)
+    ) {
+      return fallback;
+    }
+
+    let info: ManagedKeyInfo;
+    try {
+      info = await this.managed.getKey(
+        await this.managedCredential({
+          managedKeyLimitMicroUsd: wallet.managedKeyLimitMicroUsd,
+          openrouterKeyCiphertext: wallet.openrouterKeyCiphertext,
+          openrouterKeyId: wallet.openrouterKeyId,
+        }),
+      );
+    } catch (error) {
+      const status = managedErrorStatus(error);
+      if (status === 401 || status === 403 || status === 404) return fallback;
+      throw error;
+    }
+
+    const onKey = this.rawUsageOnKeyMicro(wallet, info);
+    if (onKey === null) return fallback;
+    return { degraded: false, rawUsedMicroUsd: before + onKey };
+  };
+
+  /**
+   * Period-aware sync for billing dashboards — prefers cycle counters over
+   * lifetime OpenRouter usage so remaining balance stays accurate.
+   */
+  syncMemberCycleUsage = async (orgMemberId: string) => {
+    // Settles write ledger usage directly; a key read would overwrite it.
+    if (await isLedgerAuthoritative(this.db)) return null;
+    const budget = await this.orgModel.getMemberBudget(orgMemberId);
+    if (
+      !budget?.openrouterKeyId ||
+      isStaleManagedKeyId(budget.openrouterKeyId) ||
+      // Reading a key minted by the previous gateway would authenticate against
+      // the wrong API; `ensureMemberKey` replaces it on the next pass.
+      !this.isCurrentProviderKey(budget.managedKeyProviderId)
+    ) {
+      return null;
+    }
+
+    const info = await this.readMemberKeyInfo({
+      managedKeyLimitMicroUsd: budget.managedKeyLimitMicroUsd,
+      managedKeyProviderId: budget.managedKeyProviderId,
+      openrouterKeyCiphertext: budget.openrouterKeyCiphertext,
+      openrouterKeyId: budget.openrouterKeyId,
+    });
+    const { bp, checkpoint, degraded } = await this.syncMemberCheckpoint({
+      checkpoint: budget,
+      expectedLedgerEpoch: Number(budget.ledgerEpoch ?? 0),
+      orgMemberId,
+      rawUsage: this.rawMeteredUsageMicro(budget, info),
+    });
+    const { usageMicroUsd } = this.computeCycleUsageFromKeyInfo(
+      { ...budget, ...checkpoint },
+      info,
+      bp,
+    );
+    return this.orgModel.syncMemberBudgetUsage({
+      expectedLedgerEpoch: Number(budget.ledgerEpoch ?? 0),
+      orgMemberId,
+      settledUsageMicroUsd: usageMicroUsd,
+      syncError: degraded ? MISSING_PERIOD_COUNTER : null,
+      syncStatus: degraded ? 'degraded' : 'synced',
+    });
+  };
+
+  /** @deprecated Prefer `syncMemberCycleUsage`. */
+  syncMemberUsage = async (orgMemberId: string) => this.syncMemberCycleUsage(orgMemberId);
+}

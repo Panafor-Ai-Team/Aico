@@ -1,5 +1,8 @@
 import { type GoogleGenAIOptions } from '@google/genai';
+import { MANAGED_PROVIDER_ID } from '@lobechat/business-const';
 import {
+  AgentRuntimeError,
+  AgentRuntimeErrorType,
   mergeModelRuntimeHooks,
   ModelRuntime,
   type ModelRuntimeHooks,
@@ -8,6 +11,7 @@ import { LobeVertexAI } from '@lobechat/model-runtime/vertexai';
 import {
   type AWSBedrockKeyVault,
   type AzureOpenAIKeyVault,
+  ChatErrorType,
   type ClientSecretPayload,
   type CloudflareKeyVault,
   type ComfyUIKeyVault,
@@ -19,14 +23,21 @@ import {
 } from '@lobechat/types';
 import { safeParseJSON } from '@lobechat/utils';
 import { ModelProvider } from 'model-bank';
+import { AiProviderBaseURLSchema } from 'model-bank/aiProvider';
 import { DEFAULT_MODEL_PROVIDER_LIST } from 'model-bank/modelProviders';
 
 import { getBusinessModelRuntimeHooks } from '@/business/server/model-runtime';
+import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { AiProviderModel } from '@/database/models/aiProvider';
 import { type LobeChatDatabase } from '@/database/type';
+import { aicoEnv } from '@/envs/aico';
 import { getLLMConfig } from '@/envs/llm';
+import { assertManagedTrafficAllowed } from '@/server/services/aico/ledger/gate';
+import { createManagedBillingHooks } from '@/server/services/aico/ledger/managedBillingHooks';
+import { AicoManagedPolicy, AicoManagedPolicyError } from '@/server/services/aico/managedPolicy';
 import { createLLMGenerationTracingHook } from '@/server/services/llmGenerationTracing/hook';
 import { ensureFreshOAuthToken } from '@/server/services/oauthDeviceFlow/refresh';
+import { AicoOpenRouterKeyService } from '@/server/services/openrouter/keyService';
 
 import { KeyVaultsGateKeeper } from '../KeyVaultsEncrypt';
 import apiKeyManager from './apiKeyManager';
@@ -181,6 +192,14 @@ export const buildPayloadFromKeyVaults = (
   }
 };
 
+// Deployment credentials are only valid for the deployment-owned provider and endpoint.
+// A custom provider's SDK type does not grant access to that SDK provider's secrets.
+const canUseServerProviderConfig = (provider: string, payload: ClientSecretPayload) =>
+  Object.values(ModelProvider).includes(provider as ModelProvider) &&
+  (!payload.runtimeProvider || payload.runtimeProvider === provider) &&
+  !payload.baseURL &&
+  !payload.cloudflareBaseURLOrAccountID;
+
 /**
  * Retrieves the options object from environment and apikeymanager
  * based on the provider and payload.
@@ -190,9 +209,11 @@ export const buildPayloadFromKeyVaults = (
  * @returns The options object.
  */
 const getParamsFromPayload = (provider: string, payload: ClientSecretPayload) => {
-  const llmConfig = getLLMConfig() as Record<string, any>;
+  const useServerConfig = canUseServerProviderConfig(provider, payload);
+  const llmConfig = (useServerConfig ? getLLMConfig() : {}) as Record<string, any>;
+  const runtimeProvider = payload.runtimeProvider ?? provider;
 
-  switch (provider) {
+  switch (runtimeProvider) {
     case ModelProvider.LobeHub: {
       return { apikey: payload.apiKey, baseURL: payload.baseURL, ...payload };
     }
@@ -202,20 +223,19 @@ const getParamsFromPayload = (provider: string, payload: ClientSecretPayload) =>
     }
 
     default: {
-      let upperProvider = provider.toUpperCase();
-
-      if (!(`${upperProvider}_API_KEY` in llmConfig)) {
-        upperProvider = ModelProvider.OpenAI.toUpperCase(); // Use OpenAI options as default
-      }
+      const upperProvider = runtimeProvider.toUpperCase();
 
       const apiKey = apiKeyManager.pick(payload?.apiKey || llmConfig[`${upperProvider}_API_KEY`]);
-      const baseURL = payload?.baseURL || process.env[`${upperProvider}_PROXY_URL`];
+      const baseURL =
+        payload?.baseURL ||
+        (useServerConfig ? process.env[`${upperProvider}_PROXY_URL`] : undefined);
 
       return baseURL ? { apiKey, baseURL } : { apiKey };
     }
 
     case ModelProvider.Ollama: {
-      const baseURL = payload?.baseURL || process.env.OLLAMA_PROXY_URL;
+      const baseURL =
+        payload?.baseURL || (useServerConfig ? process.env.OLLAMA_PROXY_URL : undefined);
 
       return { baseURL };
     }
@@ -266,9 +286,7 @@ const getParamsFromPayload = (provider: string, payload: ClientSecretPayload) =>
 
       const apiKey = apiKeyManager.pick(payload?.apiKey || CLOUDFLARE_API_KEY);
       const baseURLOrAccountID =
-        payload.apiKey && payload.cloudflareBaseURLOrAccountID
-          ? payload.cloudflareBaseURLOrAccountID
-          : CLOUDFLARE_BASE_URL_OR_ACCOUNT_ID;
+        payload.cloudflareBaseURLOrAccountID || CLOUDFLARE_BASE_URL_OR_ACCOUNT_ID;
 
       return { apiKey, baseURLOrAccountID };
     }
@@ -366,23 +384,30 @@ const getParamsFromPayload = (provider: string, payload: ClientSecretPayload) =>
 
 const buildVertexOptions = (
   payload: ClientSecretPayload,
-  params: Partial<GoogleGenAIOptions> = {},
+  params: Partial<GoogleGenAIOptions>,
+  useServerConfig: boolean,
 ): GoogleGenAIOptions => {
-  const rawCredentials = payload.apiKey || process.env.VERTEXAI_CREDENTIALS || '';
+  const rawCredentials =
+    payload.apiKey || (useServerConfig ? process.env.VERTEXAI_CREDENTIALS : undefined) || '';
   const credentials = safeParseJSON<Record<string, string>>(rawCredentials);
 
   const projectFromParams = params.project as string | undefined;
   const projectFromCredentials = credentials?.project_id;
-  const projectFromEnv = process.env.VERTEXAI_PROJECT;
+  const projectFromEnv = useServerConfig ? process.env.VERTEXAI_PROJECT : undefined;
 
   const project = projectFromParams || projectFromCredentials || projectFromEnv;
   const location =
     (params.location as string | undefined) ||
     payload.vertexAIRegion ||
-    process.env.VERTEXAI_LOCATION ||
+    (useServerConfig ? process.env.VERTEXAI_LOCATION : undefined) ||
     undefined;
 
   const googleAuthOptions = params.googleAuthOptions || (credentials ? { credentials } : undefined);
+
+  // Without explicit user credentials Google auth would load the server's ambient credentials.
+  if (!useServerConfig && !googleAuthOptions && !params.apiKey) {
+    throw AgentRuntimeError.createError(AgentRuntimeErrorType.InvalidProviderAPIKey);
+  }
 
   const options: GoogleGenAIOptions = {
     ...params,
@@ -411,8 +436,23 @@ export const initModelRuntimeWithUserPayload = (
 ) => {
   const runtimeProvider = payload.runtimeProvider ?? provider;
 
+  /**
+   * User-configured endpoints can come from older clients or persisted rows that predate
+   * input validation. Reject them before an SDK appends a request path and throws an
+   * unclassified ERR_INVALID_URL, which would otherwise surface as a server-side 500.
+   */
+  if (payload.baseURL && !AiProviderBaseURLSchema.safeParse(payload.baseURL).success) {
+    throw AgentRuntimeError.createError(ChatErrorType.BadRequest, {
+      message: 'Invalid provider baseURL',
+    });
+  }
+
   if (runtimeProvider === ModelProvider.VertexAI) {
-    const vertexOptions = buildVertexOptions(payload, params);
+    const vertexOptions = buildVertexOptions(
+      payload,
+      params,
+      canUseServerProviderConfig(provider, payload),
+    );
     const runtime = LobeVertexAI.initFromVertexAI(vertexOptions);
 
     return new ModelRuntime(runtime, hooks);
@@ -421,7 +461,7 @@ export const initModelRuntimeWithUserPayload = (
   return ModelRuntime.initializeWithProvider(
     runtimeProvider,
     {
-      ...getParamsFromPayload(runtimeProvider, payload),
+      ...getParamsFromPayload(provider, payload),
       ...params,
     },
     hooks,
@@ -451,20 +491,24 @@ export const initModelRuntimeFromDB = async (
   userId: string,
   provider: string,
   workspaceId?: string,
+  options?: { billingContext?: unknown; modelId?: string },
 ): Promise<ModelRuntime> => {
+  const managed = AicoManagedPolicy.isManagedProvider(provider);
+  const runtimeLookupProvider = AicoManagedPolicy.resolveRuntimeProvider(provider);
+
   // 1. Get user's provider configuration from database
   const aiProviderModel = new AiProviderModel(db, userId, workspaceId);
 
   // Use getAiProviderById with KeyVaultsGateKeeper.getUserKeyVaults as decryptor
   const providerConfig = await aiProviderModel.getAiProviderById(
-    provider,
+    runtimeLookupProvider,
     KeyVaultsGateKeeper.getUserKeyVaults,
   );
 
   // 2. Resolve the runtime provider for custom providers
   // For custom providers, use sdkType from settings (defaults to 'openai')
   const sdkType = providerConfig?.settings?.sdkType;
-  const runtimeProvider = resolveRuntimeProvider(provider, sdkType);
+  const runtimeProvider = resolveRuntimeProvider(runtimeLookupProvider, sdkType);
 
   // 3. Build ClientSecretPayload from keyVaults based on runtimeProvider
   // This ensures provider-specific fields (e.g., cloudflareBaseURLOrAccountID) are included
@@ -475,30 +519,136 @@ export const initModelRuntimeFromDB = async (
   // the payload. Mounted here because every server-side LLM call path (webapi
   // chat, agent runtime transport, async image/video, lambda routers)
   // converges on this function.
-  const oauthDeviceFlowConfig = DEFAULT_MODEL_PROVIDER_LIST.find((p) => p.id === provider)?.settings
-    ?.oauthDeviceFlow;
+  const oauthDeviceFlowConfig = DEFAULT_MODEL_PROVIDER_LIST.find(
+    (p) => p.id === runtimeLookupProvider,
+  )?.settings?.oauthDeviceFlow;
   if (oauthDeviceFlowConfig?.refreshTokenGrant) {
     const freshKeyVaults = await ensureFreshOAuthToken({
       config: oauthDeviceFlowConfig,
       db,
       keyVaults,
-      providerId: provider,
+      providerId: runtimeLookupProvider,
       userId,
       workspaceId,
     });
     keyVaults = { ...keyVaults, ...freshKeyVaults } as ProviderKeyVaults;
   }
 
-  const payload = buildPayloadFromKeyVaults(keyVaults, runtimeProvider);
+  // Aico: every managed path must pass the centralized policy boundary.
+  // Explicit billing context is mandatory — no first-match / env / BYOK fallback.
+  let billingHooks: ModelRuntimeHooks | undefined;
+  // Set when authorize reserved a Trial request unit (AICO-P1-010).
+  let trialRequestReserved = false;
+  if (managed) {
+    if (options?.billingContext === undefined) {
+      throw new AicoManagedPolicyError('BILLING_CONTEXT_REQUIRED');
+    }
+    // Usage ledger gate: refuses all managed traffic while paused or misconfigured.
+    const ledgerGate = await assertManagedTrafficAllowed(db);
+    // Decrypt-only by default. Management client is created only if authorize
+    // needs to repair a funded member budget that is missing a managed key.
+    const decryptKeyService = new AicoOpenRouterKeyService(db, null);
+    const policy = new AicoManagedPolicy(
+      db,
+      (ciphertext) => decryptKeyService.decryptKey(ciphertext),
+      {
+        ensureMemberKey: (orgMemberId) =>
+          new AicoOpenRouterKeyService(db).ensureMemberKey(orgMemberId),
+        ensureUserKey: (userId_) => new AicoOpenRouterKeyService(db).ensureUserKey(userId_),
+      },
+      ledgerGate,
+    );
+    const authorized = await policy.authorize({
+      billing: options.billingContext,
+      modelId: options.modelId,
+      userId,
+    });
+    trialRequestReserved = authorized.trialRequestReserved === true;
+    keyVaults = { ...keyVaults, apiKey: authorized.apiKey };
+    try {
+      billingHooks = createManagedBillingHooks({ authorized, db, gate: ledgerGate });
+    } catch (error) {
+      await releaseUnstartedTrialRequest(db, userId, trialRequestReserved);
+      throw error;
+    }
+  }
 
-  // 4. Get business hooks (billing in cloud, undefined in OSS)
-  const businessHooks = getBusinessModelRuntimeHooks(userId, provider, workspaceId);
+  try {
+    const payload = buildPayloadFromKeyVaults(keyVaults, runtimeProvider);
 
-  // 5. Compose with the per-call llm_generation_tracing hook (no-op when the
-  //    service is unconfigured, so OSS / self-hosted setups pay nothing for it).
-  const tracingHooks = createLLMGenerationTracingHook(userId, provider, workspaceId);
-  const hooks = mergeModelRuntimeHooks(businessHooks, tracingHooks);
+    // 4. Get business hooks (billing in cloud, undefined in OSS)
+    const businessHooks = getBusinessModelRuntimeHooks(userId, runtimeLookupProvider, workspaceId);
 
-  // 6. Initialize ModelRuntime with the payload and hooks
-  return initModelRuntimeWithUserPayload(provider, payload, { userId }, hooks);
+    // 5. Compose with the per-call llm_generation_tracing hook (no-op when the
+    //    service is unconfigured, so OSS / self-hosted setups pay nothing for it).
+    const tracingHooks = createLLMGenerationTracingHook(userId, runtimeLookupProvider, workspaceId);
+    // Ledger billing goes first: a merged hook only runs the next one if it resolves.
+    const hooks = mergeModelRuntimeHooks(
+      billingHooks,
+      mergeModelRuntimeHooks(businessHooks, tracingHooks),
+    );
+
+    // 6. Initialize ModelRuntime with the payload and hooks
+    return await initModelRuntimeWithUserPayload(runtimeLookupProvider, payload, { userId }, hooks);
+  } catch (error) {
+    await releaseUnstartedTrialRequest(db, userId, trialRequestReserved);
+    throw error;
+  }
+};
+
+/**
+ * A Trial unit reserved by `AicoManagedPolicy.authorize` counts once the runtime exists
+ * (the provider call starts right after). If building the runtime failed, no call was
+ * made: give the unit back. Best-effort — the original error is what the caller sees.
+ */
+const releaseUnstartedTrialRequest = async (
+  db: LobeChatDatabase,
+  userId: string,
+  reserved: boolean,
+) => {
+  if (!reserved) return;
+  await new AicoBillingModel(db).releaseTrialRequest(userId).catch((error) => {
+    console.warn('[aico] failed to release an unstarted trial request', error);
+  });
+};
+
+/**
+ * Runtime for an embedding call.
+ *
+ * Embeddings stay on OpenRouter whatever the managed chat provider is, because
+ * CheapVibeCode serves no embeddings route (see `DEFAULT_EMBEDDING_PROVIDER`).
+ * `initModelRuntimeFromDB` cannot do that: it treats `openrouter` as a managed
+ * provider id and rewrites it to the active gateway, so the request would go to
+ * CheapVibeCode with a member key and 404.
+ *
+ * While the managed provider is something else, this builds an unmanaged
+ * OpenRouter runtime from `AICO_EMBEDDING_OPENROUTER_API_KEY`. The platform pays
+ * for these calls; they are not held or settled against a member wallet. On any
+ * other provider, or when OpenRouter is itself the managed one, it defers to
+ * `initModelRuntimeFromDB` unchanged.
+ */
+export const initEmbeddingRuntimeFromDB = async (
+  db: LobeChatDatabase,
+  userId: string,
+  provider: string,
+  workspaceId?: string,
+  options?: { billingContext?: unknown; modelId?: string },
+): Promise<ModelRuntime> => {
+  if (provider !== ModelProvider.OpenRouter || MANAGED_PROVIDER_ID === ModelProvider.OpenRouter) {
+    return initModelRuntimeFromDB(db, userId, provider, workspaceId, options);
+  }
+
+  const apiKey = aicoEnv.AICO_EMBEDDING_OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      'EMBEDDING_PROVIDER_NOT_CONFIGURED: no embedding gateway key is configured on the server',
+    );
+  }
+
+  return initModelRuntimeWithUserPayload(
+    ModelProvider.OpenRouter,
+    buildPayloadFromKeyVaults({ apiKey }, ModelProvider.OpenRouter),
+    { userId },
+    createLLMGenerationTracingHook(userId, ModelProvider.OpenRouter, workspaceId),
+  );
 };

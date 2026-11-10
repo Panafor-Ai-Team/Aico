@@ -35,11 +35,11 @@ export const AgentManagementManifest: BuiltinToolManifest = {
           },
           model: {
             description:
-              'The AI model to use (e.g., "gpt-4o", "gpt-4o-mini", "claude-3-5-sonnet-20241022")',
+              'Optional. Leave unset to use the default model; set it only to a model id the user named.',
             type: 'string',
           },
           provider: {
-            description: 'The AI provider (e.g., "openai", "anthropic", "google")',
+            description: 'Optional. Leave unset to use the default provider; set it only with a model the user named.',
             type: 'string',
           },
           plugins: {

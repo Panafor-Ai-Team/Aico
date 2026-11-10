@@ -2,6 +2,10 @@ const content = `# lh gen - Content Generation
 
 Generate text, images, videos, and audio. Alias: \`lh generate\`.
 
+## Video in chat
+
+When the user asks for a video in chat, call the \`lobe-video-generation\` tool's \`generateVideo\` API. Do **not** use \`lh gen video\`, skill-store, or a sandbox for that.
+
 ## Subcommands
 
 - \`lh gen text <prompt> [-m <model>] [-p <provider>] [--stream] [--temperature <t>]\` - Generate text

@@ -24,6 +24,7 @@ interface RenderProps {
   result?: ChatToolResult;
   showCustomToolRender?: boolean;
   toolCallId: string;
+  toolCallStartTime?: number;
   toolMessageId?: string;
   type?: string;
 }
@@ -37,6 +38,7 @@ interface RenderProps {
 const Render = memo<RenderProps>(
   ({
     toolCallId,
+    toolCallStartTime,
     messageId,
     arguments: requestArgs,
     disableEditing,
@@ -56,7 +58,13 @@ const Render = memo<RenderProps>(
     }
 
     if (intervention?.status === 'rejected') {
-      return <RejectedResponse reason={intervention.rejectedReason} />;
+      return (
+        <RejectedResponse
+          apiName={apiName}
+          reason={intervention.rejectedReason}
+          skipped={intervention.skipped}
+        />
+      );
     }
 
     if (intervention?.status === 'aborted') {
@@ -93,6 +101,7 @@ const Render = memo<RenderProps>(
         identifier={identifier}
         messageId={messageId}
         requestArgs={requestArgs}
+        startTime={toolCallStartTime}
         toolCallId={toolCallId}
       />
     );

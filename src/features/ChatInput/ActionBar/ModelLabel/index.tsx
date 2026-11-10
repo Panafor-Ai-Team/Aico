@@ -1,20 +1,30 @@
-import { Center, Flexbox } from '@lobehub/ui';
+import { Center, Flexbox, Tooltip } from '@lobehub/ui';
 import { createStaticStyles, cx } from 'antd-style';
 import { ChevronDownIcon } from 'lucide-react';
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useState } from 'react';
 
+import {
+  formatBrandedModelId,
+  isBrandedOpenRouterModelId,
+} from '@/components/Branding/brandedModelId';
 import ModelSwitchPanel from '@/features/ModelSwitchPanel';
+import { MODEL_SWITCH_PANEL_DEFAULTS } from '@/features/ModelSwitchPanel/defaults';
 import { aiModelSelectors, useAiInfraStore } from '@/store/aiInfra';
 import { useChatStore } from '@/store/chat';
 import { topicSelectors } from '@/store/chat/slices/topic/selectors';
 
 import { useAgentId } from '../../hooks/useAgentId';
 import { useAgentModelSelection } from '../../hooks/useAgentModelSelection';
+import { useModelLockTooltip } from '../../hooks/useModelLockTooltip';
 import { useActionBarContext } from '../context';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   chevron: css`
     color: ${cssVar.colorTextQuaternary};
+    transition: transform 150ms ${cssVar.motionEaseOut};
+  `,
+  chevronOpen: css`
+    transform: rotate(180deg);
   `,
   name: css`
     overflow: hidden;
@@ -45,12 +55,14 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 
 const ModelLabel = memo(() => {
   const { dropdownPlacement } = useActionBarContext();
+  const [open, setOpen] = useState(false);
   const agentId = useAgentId();
   const {
     canDisplayModel,
     canSelectModel,
     model: agentModel,
     provider: agentProvider,
+    selectionLockReason,
     selectModel,
   } = useAgentModelSelection(agentId);
   // Topic-scoped model: a topic pins its own model (top-level `topics.model`
@@ -64,7 +76,10 @@ const ModelLabel = memo(() => {
   const provider = topicModel?.model ? topicModel.provider : agentProvider;
 
   const enabledModel = useAiInfraStore(aiModelSelectors.getEnabledModelById(model, provider));
-  const displayName = enabledModel?.displayName || model;
+  const displayName = isBrandedOpenRouterModelId(model)
+    ? formatBrandedModelId(model)
+    : enabledModel?.displayName || model;
+  const lockTooltip = useModelLockTooltip(displayName, selectionLockReason);
 
   const handleModelChange = useCallback(
     async (params: { model: string; provider: string }) => {
@@ -86,21 +101,28 @@ const ModelLabel = memo(() => {
     >
       <Flexbox horizontal align={'center'} gap={2}>
         <span className={styles.name}>{displayName}</span>
-        {canSelectModel ? <ChevronDownIcon className={styles.chevron} size={12} /> : null}
+        {canSelectModel ? (
+          <ChevronDownIcon className={cx(styles.chevron, open && styles.chevronOpen)} size={12} />
+        ) : null}
       </Flexbox>
     </Center>
   );
 
   if (!canDisplayModel) return null;
-  if (!canSelectModel) return trigger;
+  // Locked: the chevron is gone and clicking does nothing, so the tooltip is the
+  // only place that can say why the model is pinned here.
+  if (!canSelectModel)
+    return lockTooltip ? <Tooltip title={lockTooltip}>{trigger}</Tooltip> : trigger;
 
   return (
     <ModelSwitchPanel
       model={model}
+      open={open}
       openOnHover={false}
-      placement={dropdownPlacement}
+      placement={dropdownPlacement ?? MODEL_SWITCH_PANEL_DEFAULTS.placement}
       provider={provider}
       onModelChange={handleModelChange}
+      onOpenChange={setOpen}
     >
       {trigger}
     </ModelSwitchPanel>

@@ -29,12 +29,17 @@ import { dbMessageSelectors } from '@/store/chat/slices/message/selectors';
 import type { ChatStore } from '@/store/chat/store';
 import { notifyDesktopHumanApprovalRequired } from '@/store/chat/utils/desktopNotification';
 import { messageMapKey } from '@/store/chat/utils/messageMapKey';
+import { resolveGroupTopicScope } from '@/store/chat/utils/topicMapKey';
 
 // `agent_runtime_end` reasons that are NOT a clean completion: a mid-stream
 // cancel and a deferred-tool park. These must NOT mark the topic unread, and
 // must take the non-success branch in `onSessionComplete` so the run clears
 // back to 'active' rather than persisting as an unread completion.
-const NON_COMPLETION_RUNTIME_END_REASONS = new Set(['interrupted', 'waiting_for_async_tool']);
+const NON_COMPLETION_RUNTIME_END_REASONS = new Set([
+  'error',
+  'interrupted',
+  'waiting_for_async_tool',
+]);
 
 /**
  * Whether an `agent_runtime_end` event represents a clean completion (vs. a
@@ -51,6 +56,7 @@ export const isCompletedRuntimeEnd = (reason?: string | null): boolean =>
 //   mid-evaluation, so the class binding is undefined.
 const loadGetExecutor = async () => {
   const mod = await import('@/store/tool/slices/builtin/executors');
+  await mod.registerBuiltinToolExecutors();
   return mod.getExecutor;
 };
 
@@ -603,8 +609,11 @@ export const createGatewayEventHandler = (
       return;
     }
 
-    if (event.type === 'agent_runtime_end' || event.type === 'error') {
-      terminalState = event.type === 'error' ? 'error' : 'completed';
+    if (event.type === 'error') {
+      terminalState = 'error';
+    } else if (event.type === 'agent_runtime_end') {
+      const reason = (event.data as { reason?: string } | undefined)?.reason;
+      terminalState = reason === 'error' ? 'error' : 'completed';
     }
 
     switch (event.type) {
@@ -629,7 +638,7 @@ export const createGatewayEventHandler = (
             // dispatches on a missing id are silent no-ops, so without an
             // insert here the whole step renders nothing until the next DB
             // refetch — and the final step has none before agent_runtime_end,
-            // which is how "loading cleared but no text" happened (LOBE-11501).
+            // which is how "loading cleared but no text" happened.
             const stored = dbMessageSelectors.getDbMessageById(newAssistantMessageId)(get());
             if (!stored) {
               const seed = data?.assistantMessage;
@@ -871,7 +880,7 @@ export const createGatewayEventHandler = (
           // Guard: only clear visible loading when the streamed content has
           // actually landed in the store. If the message shell is missing (or
           // text streamed but never applied), clearing here would show
-          // "loading done" with the answer still invisible (LOBE-11501) —
+          // "loading done" with the answer still invisible —
           // skip the hint instead and let agent_runtime_end reconcile content
           // and loading in the same frame, i.e. the pre-early-hint behavior.
           const stored = dbMessageSelectors.getDbMessageById(currentAssistantMessageId)(get());
@@ -1083,7 +1092,13 @@ export const createGatewayEventHandler = (
 
       case 'agent_runtime_end': {
         enqueue(async () => {
-          const data = event.data as { reason?: string; uiMessages?: UIChatMessage[] } | undefined;
+          const data = event.data as
+            | {
+                finalState?: { error?: unknown };
+                reason?: string;
+                uiMessages?: UIChatMessage[];
+              }
+            | undefined;
 
           void emitClientAgentSignalSourceEvent({
             payload: {
@@ -1160,7 +1175,39 @@ export const createGatewayEventHandler = (
           //     notification (skipped if a queued follow-up was scheduled).
           //   • cancelled → completeRun only completes the op (no unread badge,
           //     no queue drain, no notification) — same as the old inline path.
+          //   • error → failed run with persisted inline error card.
           if (runtimeType === 'gateway' && runLifecycle) {
+            if (data?.reason === 'error') {
+              const messageError = toChatMessageError(data.finalState?.error ?? data);
+
+              await runLifecycle.completeRun({ ...lifecycleEventBase, status: 'failed' });
+
+              const updateResult = await messageService
+                .updateMessageError(currentAssistantMessageId, messageError, {
+                  agentId: context.agentId,
+                  groupId: context.groupId,
+                  threadId: context.threadId,
+                  topicId: context.topicId,
+                })
+                .catch(console.error);
+
+              if (updateResult?.success && updateResult.messages) {
+                get().replaceMessages(updateResult.messages, { context });
+              } else {
+                await fetchAndReplaceMessages(get, context).catch(console.error);
+              }
+
+              get().internal_dispatchMessage(
+                {
+                  id: currentAssistantMessageId,
+                  type: 'updateMessage',
+                  value: { error: messageError },
+                },
+                dispatchContext,
+              );
+              return;
+            }
+
             const status = isCompletedRuntimeEnd(data?.reason) ? 'completed' : 'cancelled';
             const { requeued } = await runLifecycle.completeRun({
               ...lifecycleEventBase,
@@ -1201,6 +1248,7 @@ export const createGatewayEventHandler = (
               get().markTopicUnread({
                 agentId: completedOp.context.agentId,
                 groupId: completedOp.context.groupId,
+                scope: resolveGroupTopicScope(completedOp.context.scope),
                 topicId: completedOp.context.topicId,
               });
             }

@@ -4,7 +4,7 @@ import { Center, Flexbox, Icon, Popover } from '@lobehub/ui';
 import { Divider } from 'antd';
 import { cssVar } from 'antd-style';
 import { BadgeCent, CoinsIcon } from 'lucide-react';
-import { memo } from 'react';
+import { memo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import InfoTooltip from '@/components/InfoTooltip';
@@ -15,6 +15,7 @@ import { formatNumber, formatShortenNumber } from '@/utils/format';
 
 import AnimatedNumber from './AnimatedNumber';
 import ModelCard from './ModelCard';
+import { resolveStableModelCard } from './resolveStableModelCard';
 import type { TokenProgressItem } from './TokenProgress';
 import TokenProgress from './TokenProgress';
 import { getDetailsToken } from './tokens';
@@ -33,7 +34,16 @@ const TokenDetail = memo<TokenDetailProps>(({ usage, performance, model, provide
   const isShortFormat = useGlobalStore(systemStatusSelectors.tokenDisplayFormatShort);
   const updateSystemStatus = useGlobalStore((s) => s.updateSystemStatus);
 
-  const modelCard = useAiInfraStore(aiModelSelectors.getModelCard(model, provider));
+  const liveModelCard = useAiInfraStore(aiModelSelectors.getModelCard(model, provider));
+  // The card selector falls back across lists while stores hydrate (or when
+  // access resolution transiently empties the enabled list). A pricing-less
+  // card would flip this readout between credit and token units — and a
+  // differently-priced one would move the credit total — with no usage change.
+  // Hold the last priced card; resolveStableModelCard is pure, so re-assigning
+  // the ref during render stays safe under StrictMode double-render.
+  const stableCardRef = useRef(liveModelCard);
+  stableCardRef.current = resolveStableModelCard(stableCardRef.current, liveModelCard);
+  const modelCard = stableCardRef.current;
   const isShowCredit = useGlobalStore(systemStatusSelectors.isShowCredit) && !!modelCard?.pricing;
 
   const detailTokens = getDetailsToken(usage, modelCard);

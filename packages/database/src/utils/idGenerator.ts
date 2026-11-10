@@ -8,9 +8,11 @@ export const createNanoId = (size = 8) =>
 const prefixes = {
   agentCronJobs: 'cron',
   agentSkills: 'skl',
+  agentHistoryJobs: 'ahj',
   briefs: 'brf',
   taskComments: 'cmt',
   tasks: 'task',
+  accountTombs: 'tomb',
   agents: 'agt',
   budget: 'bgt',
   chatGroups: 'cg',
@@ -20,21 +22,45 @@ const prefixes = {
   evalExperiments: 'exp',
   evalRuns: 'run',
   evalTestCases: 'case',
+  expertiseDomains: 'epd',
   files: 'file',
   generationBatches: 'gb',
   generationTopics: 'gt',
   generations: 'gen',
+  keyOutbox: 'kout',
+  goals: 'goal',
   knowledgeBases: 'kb',
+  memberBudgets: 'mbgt',
   memory: 'mem',
   messageGroups: 'mg',
   messages: 'msg',
+  modelAccessRules: 'mar',
+  organizationInvites: 'oinv',
+  organizationMembers: 'omem',
+  organizationTeamMembers: 'otmm',
+  organizationTeams: 'oteam',
+  organizations: 'org',
+  orSyncRuns: 'orsr',
+  platformAdmins: 'padm',
+  platformAdminSessions: 'opsess',
+  platformAdminUsers: 'opusr',
   plugins: 'plg',
+  reconciliationRuns: 'rcn',
+  renewalBatches: 'rnw',
+  projects: 'prj',
   sessionGroups: 'sg',
   sessions: 'ssn',
   threads: 'thd',
   topicComments: 'tcm',
   topics: 'tpc',
+  trialAbuseBlocklist: 'tab',
+  usageHolds: 'uhld',
+  usageLogs: 'ulog',
   user: 'user',
+  userPublicIds: 'upid',
+  userTrials: 'utrl',
+  userWallets: 'uwlt',
+  walletTransactions: 'wtx',
   workspaceAuditLogs: 'wal',
   workspaceInvitations: 'wsi',
   workspaces: 'ws',
@@ -52,3 +78,10 @@ export const idGenerator = (namespace: keyof typeof prefixes, size = 12) => {
 export const randomSlug = (count = 2) => (generate(count) as string[]).join('-');
 
 export const inboxSessionId = (userId: string) => `ssn_inbox_${userId}`;
+
+/** Uppercase alnum public-facing code generator (never starts with `0`/`O` confusion — full charset is fine for internal use). */
+const createPublicCodeSuffix = customAlphabet('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', 6);
+
+/** Short, user-facing identifiers (e.g. `ORGAB12CD`, `USR8F3K2Q`) — distinct from internal `idGenerator` ids. */
+export const generatePublicCode = (prefix: string): string =>
+  `${prefix}${createPublicCodeSuffix()}`;

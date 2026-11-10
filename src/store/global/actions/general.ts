@@ -19,7 +19,7 @@ import {
 } from '@/store/global/initialState';
 import type { StoreSetter } from '@/store/types';
 import type { LocaleMode } from '@/types/locale';
-import { switchLang } from '@/utils/client/switchLang';
+import { hasAutoLocaleCookie, switchLang } from '@/utils/client/switchLang';
 import { merge } from '@/utils/merge';
 import { setNamespace } from '@/utils/storeDebug';
 
@@ -337,6 +337,12 @@ export class GlobalGeneralActionImpl {
           this.#get().updateSystemStatus(statusWithResetTransientStates, 'initSystemStatus', {
             skipWorkspaceOverlay: true,
           });
+
+          // Before `auto` was persisted as a cookie value, choosing "System Language" only
+          // deleted the cookie, so a stored `auto` can have no cookie and render as Persian.
+          if (!isDesktop && status?.language === 'auto' && !hasAutoLocaleCookie()) {
+            switchLang('auto');
+          }
         },
       },
     );

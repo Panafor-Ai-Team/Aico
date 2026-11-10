@@ -17,12 +17,14 @@ import { useTranslation } from 'react-i18next';
 import urlJoin from 'url-join';
 
 import { useActiveWorkspaceSlug } from '@/business/client/hooks/useActiveWorkspaceSlug';
+import { toProviderRouteSegment } from '@/components/Branding/brandedProviderRoute';
 import { ModelItemRender, ProviderItemRender } from '@/components/ModelSelect';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { buildWorkspaceAwarePath } from '@/features/Workspace/workspaceAwarePath';
 import { useUserStore } from '@/store/user';
 import { userGeneralSettingsSelectors } from '@/store/user/selectors';
 
+import { getRowCoefficient } from '../../rowCoefficient';
 import { styles } from '../../styles';
 import { type ListItem } from '../../types';
 import { menuKey } from '../../utils';
@@ -89,7 +91,7 @@ export const ListItemRenderer = memo<ListItemRendererProps>(
               navigate('/settings/provider/all');
             }}
           >
-            {t('ModelSwitchPanel.emptyProvider')}
+            <span dir="auto">{t('ModelSwitchPanel.emptyProvider')}</span>
             <Icon icon={LucideArrowRight} />
           </Block>
         );
@@ -142,10 +144,10 @@ export const ListItemRenderer = memo<ListItemRendererProps>(
             style={{ color: cssVar.colorTextTertiary }}
             onClick={() => {
               onClose();
-              navigate(`/settings/provider/${item.provider.id}`);
+              navigate(`/settings/provider/${toProviderRouteSegment(item.provider.id)}`);
             }}
           >
-            {t('ModelSwitchPanel.emptyModel')}
+            <span dir="auto">{t('ModelSwitchPanel.emptyModel')}</span>
             <Icon icon={LucideArrowRight} />
           </Flexbox>
         );
@@ -155,6 +157,11 @@ export const ListItemRenderer = memo<ListItemRendererProps>(
         const key = menuKey(item.provider.id, item.model.id);
         const isActive = key === activeKey;
         const restricted = isModelRestricted?.(item.model.id, item.provider.id);
+        const rowCoefficient = getRowCoefficient(
+          item.model.pricing,
+          item.provider.id,
+          item.model.id,
+        );
 
         return (
           <Flexbox style={{ marginBlock: 1, marginInline: 4 }}>
@@ -176,9 +183,15 @@ export const ListItemRenderer = memo<ListItemRendererProps>(
                 <ModelItemRender
                   {...item.model}
                   {...item.model.abilities}
+                  coefficientLabel={rowCoefficient?.label}
                   newBadgeLabel={newLabel}
                   proBadgeLabel={restricted ? proLabel : undefined}
                   showInfoTag={isDevMode}
+                  coefficientWarning={
+                    rowCoefficient?.billedTwice
+                      ? t('ModelSwitchPanel.detail.pricing.reasoningBilledTwiceHint')
+                      : undefined
+                  }
                 />
               </DropdownMenuSubmenuTrigger>
               <DropdownMenuPortal>

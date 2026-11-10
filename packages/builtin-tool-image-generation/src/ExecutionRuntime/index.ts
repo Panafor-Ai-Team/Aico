@@ -1,9 +1,14 @@
 import {
+  DEFAULT_AUTO_IMAGE_MODEL_PROVIDER,
+  findImageModelByRequestedId,
+  pickDefaultAutoImageModel,
+} from '@lobechat/business-const';
+import {
   type AsyncTaskError,
   AsyncTaskStatus,
   type BuiltinServerRuntimeOutput,
 } from '@lobechat/types';
-import type { RuntimeImageGenParams } from 'model-bank';
+import type { ModelParamsSchema, RuntimeImageGenParams } from 'model-bank';
 import { extractDefaultValues } from 'model-bank';
 
 import type {
@@ -21,6 +26,18 @@ import type {
 } from '../types';
 
 const DEFAULT_LIST_LIMIT = 20;
+
+/** Schema defaults the request should carry; prompt and reference images come from the call. */
+export const imageSchemaDefaults = (schema?: ModelParamsSchema): Record<string, unknown> => {
+  if (!schema) return {};
+  const {
+    imageUrl: _imageUrl,
+    imageUrls: _imageUrls,
+    prompt: _prompt,
+    ...defaults
+  } = extractDefaultValues(schema) as Record<string, unknown>;
+  return defaults;
+};
 const MAX_LIST_LIMIT = 50;
 const MAX_PARAMETER_LOOKUP_LIMIT = 200;
 const DEFAULT_IMAGE_NUM = 1;
@@ -56,6 +73,10 @@ const clampInteger = (value: number | undefined, fallback: number, max: number) 
   return Math.min(max, Math.max(1, Math.floor(value as number)));
 };
 
+/** Images `generateImage` produces for an `imageNum` argument. */
+export const resolveImageNum = (value: number | undefined) =>
+  clampInteger(value, DEFAULT_IMAGE_NUM, MAX_IMAGE_NUM);
+
 const formatErrorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : typeof error === 'string' ? error : fallback;
 
@@ -83,7 +104,7 @@ const formatModelList = (state: ListImageModelsState) => {
   for (const provider of state.providers) {
     if (provider.models.length === 0) continue;
 
-    lines.push(`\n${provider.name || provider.id} (${provider.id})`);
+    lines.push(`\n${provider.name || provider.id}`);
     for (const model of provider.models) {
       const displayName =
         model.displayName && model.displayName !== model.id ? ` — ${model.displayName}` : '';
@@ -215,7 +236,7 @@ const formatMarkdownImageLines = (generations: GeneratedImageTask[]) =>
 
 const formatStartedContent = (state: GenerateImageState) =>
   [
-    `Image generation started with ${state.provider}/${state.model}.`,
+    `Image generation started with ${state.model}.`,
     state.batchId ? `Batch ID: ${state.batchId}` : undefined,
     'Generations:',
     ...formatGenerationLines(state.generations),
@@ -224,21 +245,31 @@ const formatStartedContent = (state: GenerateImageState) =>
     .filter((line): line is string => Boolean(line))
     .join('\n');
 
+const formatReusableReferenceLines = (generations: GeneratedImageTask[]) => {
+  const urls = generations
+    .map((item) => getTaskAssetUrl(item))
+    .filter((url): url is string => Boolean(url));
+  if (urls.length === 0) return [];
+
+  return ['Reusable reference URLs for follow-up edits (pass as imageUrl or imageUrls):', ...urls];
+};
+
 const formatCompletedContent = (state: GenerateImageState) =>
   [
-    `Image generation completed with ${state.provider}/${state.model}.`,
+    `Image generation completed with ${state.model}.`,
     state.batchId ? `Batch ID: ${state.batchId}` : undefined,
     'Images:',
     ...formatGenerationLines(state.generations, { includeImageUrl: false }),
     'Markdown image tags for the final response. Copy them exactly; do not rewrite the URLs:',
     ...formatMarkdownImageLines(state.generations),
+    ...formatReusableReferenceLines(state.generations),
   ]
     .filter((line): line is string => Boolean(line))
     .join('\n');
 
 const formatFailedContent = (state: GenerateImageState) =>
   [
-    `Image generation finished with errors using ${state.provider}/${state.model}.`,
+    `Image generation finished with errors using ${state.model}.`,
     state.batchId ? `Batch ID: ${state.batchId}` : undefined,
     'Results:',
     ...formatGenerationLines(state.generations, { includeImageUrl: false }),
@@ -249,7 +280,7 @@ const formatFailedContent = (state: GenerateImageState) =>
 
 const formatTimedOutContent = (state: GenerateImageState, waitTimeoutMs: number) =>
   [
-    `Image generation started with ${state.provider}/${state.model} and is still processing after ${waitTimeoutMs}ms.`,
+    `Image generation started with ${state.model} and is still processing after ${waitTimeoutMs}ms.`,
     state.batchId ? `Batch ID: ${state.batchId}` : undefined,
     'Current generations:',
     ...formatGenerationLines(state.generations),
@@ -260,7 +291,7 @@ const formatTimedOutContent = (state: GenerateImageState, waitTimeoutMs: number)
 
 const formatWaitFailedContent = (state: GenerateImageState, message: string) =>
   [
-    `Image generation started with ${state.provider}/${state.model}, but the latest status could not be checked.`,
+    `Image generation started with ${state.model}, but the latest status could not be checked.`,
     state.batchId ? `Batch ID: ${state.batchId}` : undefined,
     'Generations:',
     ...formatGenerationLines(state.generations),
@@ -367,24 +398,60 @@ export class ImageGenerationExecutionRuntime {
   private async resolveImageModel(
     provider?: string,
     model?: string,
-  ): Promise<{ model: string; provider: string }> {
+  ): Promise<{ model: string; parameters?: ModelParamsSchema; provider: string }> {
     const state = await this.service.listImageModels({
       limit: MAX_PARAMETER_LOOKUP_LIMIT,
       provider,
     });
 
     if (model) {
-      const matchedProvider = state.providers.find(
-        (item) =>
-          (!provider || item.id === provider) &&
-          item.models.some((candidate) => candidate.id === model),
-      );
-
-      if (matchedProvider) return { model, provider: matchedProvider.id };
+      for (const providerItem of state.providers) {
+        if (provider && providerItem.id !== provider) continue;
+        // Exact id first, then vendor-prefix / `:image` aliases so a request for
+        // product-default `gpt-image-2` resolves to OpenRouter's `openai/gpt-image-2`
+        // (or CheapVibeCode's bare id) instead of ImageModelNotFound.
+        const matched = findImageModelByRequestedId(
+          providerItem.models,
+          (candidate) => candidate.id,
+          model,
+        );
+        if (matched) {
+          return {
+            model: matched.id,
+            parameters: matched.parameters,
+            provider: providerItem.id,
+          };
+        }
+      }
     } else {
+      // Same pin as Create → Image: product default (gpt-image-2 family) first,
+      // preferring the managed OpenRouter slot Create uses as DEFAULT_AI_IMAGE_PROVIDER.
+      const flat = state.providers.flatMap((providerItem) =>
+        providerItem.models.map((candidate) => ({ candidate, providerId: providerItem.id })),
+      );
+      const preferredProviderModels = flat.filter(
+        (entry) => entry.providerId === DEFAULT_AUTO_IMAGE_MODEL_PROVIDER,
+      );
+      const pinned =
+        pickDefaultAutoImageModel(preferredProviderModels, (entry) => entry.candidate.id) ??
+        pickDefaultAutoImageModel(flat, (entry) => entry.candidate.id);
+      if (pinned) {
+        return {
+          model: pinned.candidate.id,
+          parameters: pinned.candidate.parameters,
+          provider: pinned.providerId,
+        };
+      }
+
       for (const providerItem of state.providers) {
         const firstModel = providerItem.models[0];
-        if (firstModel) return { model: firstModel.id, provider: providerItem.id };
+        if (firstModel) {
+          return {
+            model: firstModel.id,
+            parameters: firstModel.parameters,
+            provider: providerItem.id,
+          };
+        }
       }
     }
 
@@ -447,7 +514,7 @@ export class ImageGenerationExecutionRuntime {
       return errorOutput('InvalidToolArguments', '`prompt` is required.');
     }
 
-    const imageNum = clampInteger(args.imageNum, DEFAULT_IMAGE_NUM, MAX_IMAGE_NUM);
+    const imageNum = resolveImageNum(args.imageNum);
     if (typeof args.imageNum === 'number' && args.imageNum !== imageNum) {
       return errorOutput(
         'InvalidToolArguments',
@@ -455,7 +522,7 @@ export class ImageGenerationExecutionRuntime {
       );
     }
 
-    let selection: { model: string; provider: string };
+    let selection: { model: string; parameters?: ModelParamsSchema; provider: string };
     try {
       selection = await this.resolveImageModel(args.provider?.trim(), args.model?.trim());
     } catch (error) {
@@ -463,10 +530,13 @@ export class ImageGenerationExecutionRuntime {
       return errorOutput('ImageModelNotFound', message);
     }
 
-    const { model, provider } = selection;
+    const { model, parameters: parametersSchema, provider } = selection;
     const waitUntilComplete = args.waitUntilComplete !== false;
     const referenceUrls = normalizeReferenceUrls(args);
     const params = {
+      // Schema defaults first (e.g. GPT Image 2's `quality: 'medium'`), so the
+      // tool sends what the Create page would; explicit arguments still win.
+      ...imageSchemaDefaults(parametersSchema),
       ...args.parameters,
       ...referenceUrls,
       prompt,

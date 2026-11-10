@@ -9,6 +9,7 @@ import { storageOverageRouter } from '@/business/server/lambda-routers/storageOv
 import { subscriptionRouter } from '@/business/server/lambda-routers/subscription';
 import { taskTemplateRouter } from '@/business/server/lambda-routers/taskTemplate';
 import { topUpRouter } from '@/business/server/lambda-routers/topUp';
+import { waitlistRouter } from '@/business/server/lambda-routers/waitlist';
 import { workspaceRouter } from '@/business/server/lambda-routers/workspace';
 import { workspaceAuditLogRouter } from '@/business/server/lambda-routers/workspaceAuditLog';
 import { workspaceCreditsRouter } from '@/business/server/lambda-routers/workspaceCredits';
@@ -25,12 +26,14 @@ import { agentDocumentRouter } from './agentDocument';
 import { agentEvalRouter } from './agentEval';
 import { agentEvalExternalRouter } from './agentEvalExternal';
 import { agentGroupRouter } from './agentGroup';
+import { agentLabelRouter } from './agentLabel';
 import { agentNotifyRouter } from './agentNotify';
 import { agentQuotaRouter } from './agentQuota';
 import { agentSignalRouter } from './agentSignal';
 import { agentSkillsRouter } from './agentSkills';
 import { aiAgentRouter } from './aiAgent';
 import { aiChatRouter } from './aiChat';
+import { aicoBillingRouter } from './aicoBilling';
 import { aiModelRouter } from './aiModel';
 import { aiProviderRouter } from './aiProvider';
 import { apiKeyRouter } from './apiKey';
@@ -45,6 +48,7 @@ import { configRouter } from './config';
 import { connectorRouter } from './connector';
 import { deviceRouter } from './device';
 import { documentRouter } from './document';
+import { expertiseRouter } from './expertise';
 import { exporterRouter } from './exporter';
 import { fileRouter } from './file';
 import { followUpActionRouter } from './followUpAction';
@@ -61,11 +65,14 @@ import { llmGenerationTracingRouter } from './llmGenerationTracing';
 import { marketRouter } from './market';
 import { messageRouter } from './message';
 import { messengerRouter } from './messenger';
+import { multipartUploadRouter } from './multipartUpload';
 import { notebookRouter } from './notebook';
 import { notificationRouter } from './notification';
 import { oauthAppRouter } from './oauthApp';
 import { oauthDeviceFlowRouter } from './oauthDeviceFlow';
+import { organizationRouter } from './organization';
 import { pluginRouter } from './plugin';
+import { projectRouter } from './project';
 import { pushTokenRouter } from './pushToken';
 import { ragEvalRouter } from './ragEval';
 import { recentRouter } from './recent';
@@ -92,13 +99,16 @@ import { workspaceUserSettingsRouter } from './workspaceUserSettings';
 export const lambdaRouter = router({
   acceptance: acceptanceRouter,
   agent: agentRouter,
+  aicoBilling: aicoBillingRouter,
   agentBotProvider: agentBotProviderRouter,
   agentNotify: agentNotifyRouter,
   botMessage: botMessageRouter,
   agentDocument: agentDocumentRouter,
   agentEval: agentEvalRouter,
   agentEvalExternal: agentEvalExternalRouter,
+  agentLabel: agentLabelRouter,
   agentSkills: agentSkillsRouter,
+  expertise: expertiseRouter,
   agentSignal: agentSignalRouter,
   task: taskRouter,
   changelog: changelogRouter,
@@ -136,11 +146,15 @@ export const lambdaRouter = router({
   market: marketRouter,
   message: messageRouter,
   messenger: messengerRouter,
+  multipartUpload: multipartUploadRouter,
   notebook: notebookRouter,
   notification: notificationRouter,
   oauthApp: oauthAppRouter,
   oauthDeviceFlow: oauthDeviceFlowRouter,
+  organization: organizationRouter,
+  // platformAdmin lives on @aico/control-plane only — never mount on the product lambda.
   plugin: pluginRouter,
+  project: projectRouter,
   pushToken: pushTokenRouter,
   ragEval: ragEvalRouter,
   recent: recentRouter,
@@ -177,6 +191,7 @@ export const lambdaRouter = router({
   subscription: subscriptionRouter,
   taskTemplate: taskTemplateRouter,
   topUp: topUpRouter,
+  waitlist: waitlistRouter,
 });
 
 export type LambdaRouter = typeof lambdaRouter;

@@ -1,8 +1,10 @@
 'use client';
 
+import { type VoiceMessageRecording } from '@lobechat/types';
 import { type SlashOptions } from '@lobehub/editor';
 import { type ChatInputActionsProps } from '@lobehub/editor/react';
-import { Alert, Flexbox, type MenuProps } from '@lobehub/ui';
+import { Flexbox, type MenuProps } from '@lobehub/ui';
+import { Alert } from '@lobehub/ui/base-ui';
 import { type ReactNode } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -10,7 +12,9 @@ import { useTranslation } from 'react-i18next';
 import {
   getBusinessChatInputSendAreaPrefix,
   useBusinessChatInputAlerts,
+  useBusinessChatInputSendDisabled,
 } from '@/business/client/hooks/useBusinessChatInputSendAreaPrefix';
+import { useFundsBlockedComposerCue } from '@/features/AicoBilling';
 import type { ActionKeys, ChatInputFeature } from '@/features/ChatInput';
 import { ChatInputProvider, DesktopChatInput } from '@/features/ChatInput';
 import {
@@ -38,6 +42,8 @@ import TodoProgress from '../TodoProgress';
 import InputCompletionErrorAlert from './InputCompletionErrorAlert';
 import OpStatusTray from './OpStatusTray';
 import QueueTray from './QueueTray';
+import RuntimeToolsHydration from './RuntimeToolsHydration';
+import { sendVoiceMessage } from './sendVoiceMessage';
 import {
   getContextWindowMessages,
   getConversationChatInputUiState,
@@ -46,6 +52,7 @@ import {
 import GoalArmedChip from './VerifyTray/GoalArmedChip';
 import { useGoalArmStore } from './VerifyTray/goalArmStore';
 import GoalTray from './VerifyTray/GoalTray';
+import { canSendVoiceMessage, useCanSendVoiceMessage } from './voiceMessageCapability';
 
 /** Max recent messages to feed into auto-complete context (≈10 conversation turns) */
 const MAX_CONTEXT_MESSAGES = 25;
@@ -184,7 +191,8 @@ const ChatInput = memo<ChatInputProps>(
     const storeApi = useConversationStoreApi();
     const dbMessages = useConversationStore(dataSelectors.dbMessages);
     const context = useConversationStore((s) => s.context);
-    const draftKey = useMemo(() => messageMapKey(context), [context]);
+    const contextKey = useMemo(() => messageMapKey(context), [context]);
+    const canRecordVoiceMessage = useCanSendVoiceMessage(context);
     const [agentId, inputMessage, sendMessage, stopGenerating] = useConversationStore((s) => [
       s.context.agentId,
       s.inputMessage,
@@ -209,6 +217,11 @@ const ChatInput = memo<ChatInputProps>(
       [chatInputMessages],
     );
     const updateInputMessage = useConversationStore((s) => s.updateInputMessage);
+    const { onMarkdownContentChange: withFundsBlockedCue } = useFundsBlockedComposerCue();
+    const handleMarkdownContentChange = useMemo(
+      () => withFundsBlockedCue(updateInputMessage),
+      [updateInputMessage, withFundsBlockedCue],
+    );
     const setEditor = useConversationStore((s) => s.setEditor);
     const setChatInputOverlayHeight = useConversationStore((s) => s.setChatInputOverlayHeight);
 
@@ -255,7 +268,7 @@ const ChatInput = memo<ChatInputProps>(
 
     // File store - for UI state only (disabled button, etc.)
     const fileList = useFileStore(fileChatSelectors.chatUploadFileList);
-    const contextList = useFileStore(fileChatSelectors.chatContextSelections);
+    const contextList = useFileStore(fileChatSelectors.chatContextSelections(contextKey));
     const isUploadingFiles = useFileStore(fileChatSelectors.isUploadingFiles);
 
     // Queue state
@@ -275,7 +288,7 @@ const ChatInput = memo<ChatInputProps>(
     );
 
     // Pre-topic "armed goal" state (topic Goal lab). `armedAt` is only ever set
-    // by the lab-gated "+" → Set goal entry, so its presence already implies the
+    // by the lab-gated "+" → Goal entry, so its presence already implies the
     // lab is on. While armed the goal chip rides the action bar and the composer
     // placeholder prompts for the goal (the next message becomes it).
     const goalArmedAt = useGoalArmStore((s) => (agentId ? s.armedAt[agentId] : undefined));
@@ -291,8 +304,40 @@ const ChatInput = memo<ChatInputProps>(
     // Input stays enabled during agent execution — messages are queued.
     // When disableQueue is set (e.g. onboarding), block sending while loading.
     // disableSend hard-blocks regardless of content (host surface is read-only).
+    const billingSendDisabled = useBusinessChatInputSendDisabled();
     const disabled =
-      isInputEmpty || isUploadingFiles || (!!disableQueue && isInputQueueBlocked) || !!disableSend;
+      isInputEmpty ||
+      isUploadingFiles ||
+      (!!disableQueue && isInputQueueBlocked) ||
+      !!disableSend ||
+      billingSendDisabled;
+
+    // `disabled` above lags the editor: `inputMessage` mirrors content through
+    // the editor's debounced onChange, so a fast type→Enter arrives while the
+    // mirror still reads empty and the send would be silently dropped. Gate
+    // Enter/click on live state instead — handleSend re-validates all of these
+    // at trigger time, so this only mirrors the visual disabled semantics.
+    const customDisabled = customSendButtonProps?.disabled;
+    const resolveSendBlocked = useCallback(() => {
+      if (disableSend || billingSendDisabled) return true;
+      if (customDisabled !== undefined) return customDisabled;
+
+      const fileStore = useFileStore.getState();
+      if (fileChatSelectors.isUploadingFiles(fileStore)) return true;
+
+      const { context: liveContext, editor } = storeApi.getState();
+      if (
+        disableQueue &&
+        operationSelectors.isInputLoadingByContext(liveContext)(useChatStore.getState())
+      )
+        return true;
+
+      const hasText = String(editor?.getMarkdownContent?.() || '').trim().length > 0;
+      const hasFiles = fileChatSelectors.chatUploadFileList(fileStore).length > 0;
+      const hasContextSelections =
+        fileChatSelectors.chatContextSelections(messageMapKey(liveContext))(fileStore).length > 0;
+      return !hasText && !hasFiles && !hasContextSelections;
+    }, [billingSendDisabled, customDisabled, disableQueue, disableSend, storeApi]);
     const shouldUsePlainSendButton = !showSendMenu && !!sendMenu;
     const businessAlerts = useBusinessChatInputAlerts();
     const businessSendAreaPrefix = getBusinessChatInputSendAreaPrefix(sendAreaPrefix);
@@ -301,14 +346,14 @@ const ChatInput = memo<ChatInputProps>(
     const handleSend: SendButtonHandler = useCallback(
       async ({ clearContent, getMarkdownContent, getEditorData }) => {
         // Host surface is read-only (e.g. page locked) — block Enter too, not
-        // just the grayed-out button.
-        if (disableSend) return;
+        // just the grayed-out button. Same for empty managed billing source.
+        if (disableSend || billingSendDisabled) return;
 
         // Get instant values from stores at trigger time
         const fileStore = useFileStore.getState();
         const currentFileList = fileChatSelectors.chatUploadFileList(fileStore);
         const currentIsUploading = fileChatSelectors.isUploadingFiles(fileStore);
-        const currentContextList = fileChatSelectors.chatContextSelections(fileStore);
+        const currentContextList = fileChatSelectors.chatContextSelections(contextKey)(fileStore);
 
         if (currentIsUploading) return;
 
@@ -327,7 +372,7 @@ const ChatInput = memo<ChatInputProps>(
         const clearComposer = () => {
           clearContent();
           fileStore.clearChatUploadFileList();
-          fileStore.clearChatContextSelections();
+          fileStore.clearChatContextSelections(contextKey);
         };
 
         // A deferred send was armed from the composer (see `scheduledSendAt`):
@@ -356,10 +401,21 @@ const ChatInput = memo<ChatInputProps>(
           editorData,
           files: currentFileList,
           message,
+          onPreflightFailure: () => {
+            useFileStore.getState().restoreChatContextSelections(contextKey, currentContextList);
+          },
           pageSelections,
         });
       },
-      [sendMessage, storeApi, disableQueue, disableSend, isInputQueueBlocked],
+      [
+        billingSendDisabled,
+        contextKey,
+        sendMessage,
+        storeApi,
+        disableQueue,
+        disableSend,
+        isInputQueueBlocked,
+      ],
     );
 
     const sendButtonProps: SendButtonProps = {
@@ -371,6 +427,29 @@ const ChatInput = memo<ChatInputProps>(
         ? { shape: customSendButtonProps?.shape ?? 'round' }
         : undefined),
     };
+
+    const handleVoiceMessageSend = useCallback(
+      (recording: VoiceMessageRecording) => {
+        if (operationSelectors.isInputVisiblyLoadingByContext(context)(useChatStore.getState())) {
+          return false;
+        }
+
+        return Boolean(
+          useChatStore.getState().sendVoiceMessage({
+            canSend: canSendVoiceMessage,
+            context,
+            recording,
+            send: (file, { context: targetContext, messageId, signal }) =>
+              sendVoiceMessage(sendMessage, file, {
+                context: targetContext,
+                optimisticUserMessageId: messageId,
+                signal,
+              }),
+          }),
+        );
+      },
+      [context, sendMessage],
+    );
 
     const defaultContent = (
       <WideScreenContainer
@@ -439,12 +518,15 @@ const ChatInput = memo<ChatInputProps>(
       <ChatInputProvider
         agentId={agentId}
         allowExpand={allowExpand}
+        canRecordVoiceMessage={canRecordVoiceMessage}
+        contextSelectionKey={contextKey}
         contextWindowMessages={contextWindowMessages}
-        draftKey={draftKey}
+        draftKey={contextKey}
         feature={feature}
         getMessages={getMessages}
         leftActions={leftActions}
         mentionItems={mentionItems}
+        resolveSendBlocked={resolveSendBlocked}
         rightActions={rightActions}
         sendButtonProps={sendButtonProps}
         sendMenu={showSendMenu ? sendMenu : undefined}
@@ -455,9 +537,11 @@ const ChatInput = memo<ChatInputProps>(
             onEditorReady?.(instance);
           }
         }}
-        onMarkdownContentChange={updateInputMessage}
+        onMarkdownContentChange={handleMarkdownContentChange}
         onSend={handleSend}
+        onVoiceMessageSend={handleVoiceMessageSend}
       >
+        <RuntimeToolsHydration />
         {children ?? defaultContent}
       </ChatInputProvider>
     );

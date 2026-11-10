@@ -61,18 +61,26 @@ export default {
     'We explore your notes and pages to understand how you think, organize ideas, and manage projects',
   'flow.steps.connectApps.apps.twitter.description':
     'We review your posts and activity to understand your opinions, passions, and social connections',
+  'flow.steps.connectApps.autoConnectCountdown': 'Connect in {{countdown}}s',
+  'flow.steps.connectApps.connect': 'Connect',
+  'flow.steps.connectApps.connected': 'Connected',
   'flow.steps.connectApps.description': 'Add a few apps to help shape a more personal experience.',
   'flow.steps.connectApps.title': 'Begin the shape of you',
   'flow.steps.learnYourWorld.analysisFailed':
     'We could not finish analyzing your connected sources.',
   'flow.steps.learnYourWorld.description': 'Building your user profile',
+  'flow.steps.learnYourWorld.factsTitle': 'What we found',
   'flow.steps.learnYourWorld.progress.build': 'Building a user profile based on what we learn.',
+  'flow.steps.learnYourWorld.progress.buildEta': 'about 20–30s',
   'flow.steps.learnYourWorld.progress.explore': 'Exploring more signals to understand you better.',
+  'flow.steps.learnYourWorld.progress.exploreEta': 'about 20–30s',
   'flow.steps.learnYourWorld.progress.review': 'Reviewing your connected information.',
   'flow.steps.learnYourWorld.retry': 'Retry',
   'flow.steps.learnYourWorld.sectionHint':
     'Analyze your connected data to understand what matters to you…',
   'flow.steps.learnYourWorld.skipAhead': 'Skip ahead',
+  'flow.steps.learnYourWorld.skipNotificationHint':
+    "💡 You can skip this step for now — we'll notify you when your profile is ready.",
   'flow.steps.learnYourWorld.title': 'Learn your world',
   'flow.steps.messenger.connect': 'Connect',
   'flow.steps.messenger.connected': 'Connected',
@@ -89,6 +97,7 @@ export default {
   'flow.steps.messenger.quoteHighlight': 'wherever you already are.',
   'flow.steps.messenger.title': 'Stay connected',
   'flow.steps.profile.empty': 'Your profile is still being prepared.',
+  'flow.steps.profile.expandIdentity': 'Expand profile',
   'flow.steps.profile.identity': 'Identity',
   'flow.steps.profile.supplementModal.aboutYou': 'About you',
   'flow.steps.profile.supplementModal.description':
@@ -135,6 +144,9 @@ export default {
   'interests.title2': 'This will help me know you better',
   'interests.title3': "Take your time, I'll get to know you better",
   'next': 'Next',
+  'proSettings.connectors.connectFailed': 'Could not start the connection. Please try again.',
+  'proSettings.connectors.popupBlocked':
+    'Connection popup blocked. Allow popups in your browser to continue.',
   'proSettings.connectors.title': 'Connect Your Favorite Tools',
   'responseLanguage.hint':
     'After selecting a language, AI responses will use that language, and the interface language will also sync',

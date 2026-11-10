@@ -6,7 +6,10 @@ import type {
 import type { OpenAIChatMessage } from '@lobechat/types';
 
 import type { LobeChatDatabase } from '@/database/type';
-import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
+import {
+  initServerModelRuntime,
+  toServerCallModelId,
+} from '@/server/services/aico/serverModelRuntime';
 
 export interface AiGenerationObjectInput {
   messages: OpenAIChatMessage[] | GenerateObjectPayload['messages'];
@@ -34,7 +37,7 @@ export interface AiGenerationObjectOptions {
 }
 
 /**
- * Thin wrapper around `initModelRuntimeFromDB` + `ModelRuntime.generateObject`.
+ * Thin wrapper around `initServerModelRuntime` + `ModelRuntime.generateObject`.
  *
  * Almost every server-side caller that produces structured output goes through
  * the same two-step dance: resolve the user's provider config from the DB,
@@ -60,13 +63,18 @@ export class AiGenerationService {
     input: AiGenerationObjectInput,
     options: AiGenerationObjectOptions = {},
   ): Promise<T> {
-    const runtime = this.workspaceId
-      ? await initModelRuntimeFromDB(this.db, this.userId, input.provider, this.workspaceId)
-      : await initModelRuntimeFromDB(this.db, this.userId, input.provider);
+    const model = toServerCallModelId(input.provider, input.model);
+    const runtime = await initServerModelRuntime({
+      db: this.db,
+      model,
+      provider: input.provider,
+      userId: this.userId,
+      workspaceId: this.workspaceId,
+    });
     return (await runtime.generateObject(
       {
         messages: input.messages as GenerateObjectPayload['messages'],
-        model: input.model,
+        model,
         schema: input.schema,
         thinking: input.thinking,
         tools: input.tools,

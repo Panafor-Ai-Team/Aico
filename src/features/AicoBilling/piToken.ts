@@ -1,0 +1,102 @@
+/**
+ * Client-side π token formatting (1 π = 1000 CVC tokens).
+ * Prefer server-provided `remainingPi` / `piPerUsd` when available; these
+ * helpers cover message costs and model rates that still arrive as raw USD.
+ */
+
+export const CVC_TOKENS_PER_PI = 1000;
+export const DEFAULT_CVC_TOKENS_PER_USD = 25_000_000;
+
+/**
+ * CVC tokens per USD as the server has it (`AICO_CVC_TOKENS_PER_USD`).
+ *
+ * Every catalog price is derived from CVC's published multiplier at this rate,
+ * so the coefficient shown has to be converted back at the same rate or it stops
+ * matching CVC. The server hands it to the client with the billing sources;
+ * until that arrives (or if it is invalid) the 25M default applies.
+ */
+let serverCvcTokensPerUsd: number | undefined;
+
+export const getCvcTokensPerUsd = (): number => serverCvcTokensPerUsd ?? DEFAULT_CVC_TOKENS_PER_USD;
+
+export const setCvcTokensPerUsd = (value: number | null | undefined): void => {
+  const n = Number(value);
+  serverCvcTokensPerUsd = Number.isFinite(n) && n > 0 ? n : undefined;
+};
+/** Default top-up yield at CVC 1.25×: $1 → 20_000 π. */
+export const DEFAULT_PI_PER_USD = 20_000;
+
+export const rawUsdToPiTokens = (
+  rawUsd: number,
+  cvcTokensPerUsd: number = getCvcTokensPerUsd(),
+): number => {
+  if (!Number.isFinite(rawUsd) || rawUsd <= 0) return 0;
+  return (rawUsd * cvcTokensPerUsd) / CVC_TOKENS_PER_PI;
+};
+
+/**
+ * CVC usage coefficient for a catalog USD rate.
+ * At default 25M CVC/$: 1× ≈ $0.04/M tokens ≈ 1,000 π/M tokens.
+ */
+export const rawUsdToCvcCoefficient = (
+  rawUsd: number,
+  cvcTokensPerUsd: number = getCvcTokensPerUsd(),
+): number => {
+  if (!Number.isFinite(rawUsd) || rawUsd <= 0) return 0;
+  return (rawUsd * cvcTokensPerUsd) / 1_000_000;
+};
+
+/** Format a CVC coefficient for UI (`4×`, `0.33×`, `62.5×`). */
+export const formatCvcCoefficient = (coefficient: number): string => {
+  if (!Number.isFinite(coefficient) || coefficient === 0) return '0×';
+  // One decimal from 10× up (keeps 62.5× / 312.5×); two decimals below 10×.
+  const rounded =
+    coefficient >= 10 ? Math.round(coefficient * 10) / 10 : Math.round(coefficient * 100) / 100;
+  const text = Number.isInteger(rounded) ? String(rounded) : String(parseFloat(rounded.toFixed(2)));
+  return `${text}×`;
+};
+
+/**
+ * Coefficient for plain-text surfaces in RTL locales: without isolation the
+ * trailing `×` mirrors to the wrong side (`×4`). Explicit U+2066/U+2069 escapes
+ * keep the isolates visible in source.
+ */
+export const isolateLtr = (text: string): string => `\u2066${text}\u2069`;
+
+export const formatIsolatedCoefficient = (coefficient: number): string =>
+  isolateLtr(formatCvcCoefficient(coefficient));
+
+/** Managed token rate as its CVC coefficient only: `$0.16/M` → `4×`. */
+export const formatTokenCoefficient = (
+  rawUsd: number,
+  cvcTokensPerUsd: number = getCvcTokensPerUsd(),
+): string => formatCvcCoefficient(rawUsdToCvcCoefficient(rawUsd, cvcTokensPerUsd));
+
+/** Format a π amount without its unit (balances are integers; tiny costs keep decimals). */
+export const formatPiAmount = (pi: number | string | null | undefined): string => {
+  const n = typeof pi === 'string' ? Number(pi) : Number(pi ?? 0);
+  if (!Number.isFinite(n) || n === 0) return '0';
+  const abs = Math.abs(n);
+  const sign = n < 0 ? '-' : '';
+  if (abs >= 100) return `${sign}${Math.round(abs).toLocaleString()}`;
+  if (abs >= 1) return `${sign}${abs.toFixed(2)}`;
+  return `${sign}${abs.toFixed(3)}`;
+};
+
+/** Plain-text π amount for strings (tooltips, toasts, i18n sentences). */
+export const formatPiTokens = (pi: number | string | null | undefined): string =>
+  `${formatPiAmount(pi)} π`;
+
+export const formatRemainingPi = (remainingPi: string | number | undefined): string =>
+  formatPiTokens(remainingPi ?? 0);
+
+/** Convert π → billed USD string for APIs that still take amountUsd. */
+export const piTokensToBilledUsdString = (
+  pi: number,
+  piPerUsd: number = DEFAULT_PI_PER_USD,
+): string => {
+  if (!Number.isFinite(pi) || pi <= 0 || !Number.isFinite(piPerUsd) || piPerUsd <= 0) {
+    return '0.000000';
+  }
+  return (pi / piPerUsd).toFixed(6);
+};

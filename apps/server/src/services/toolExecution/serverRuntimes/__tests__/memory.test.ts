@@ -5,9 +5,16 @@ import type { ToolExecutionContext } from '../../types';
 
 const mocks = vi.hoisted(() => ({
   embeddings: vi.fn(),
-  initModelRuntimeFromDB: vi.fn(),
+  getUserWallet: vi.fn(async () => null),
+  initEmbeddingRuntimeFromDB: vi.fn(),
   initModelRuntimeWithUserPayload: vi.fn(),
   searchMemory: vi.fn(),
+}));
+
+vi.mock('@/database/models/aicoBilling', () => ({
+  AicoBillingModel: vi.fn().mockImplementation(() => ({
+    getUserWallet: mocks.getUserWallet,
+  })),
 }));
 
 vi.mock('@/database/models/userMemory', () => ({
@@ -27,7 +34,7 @@ vi.mock('@/server/globalConfig', () => ({
 }));
 
 vi.mock('@/server/modules/ModelRuntime', () => ({
-  initModelRuntimeFromDB: mocks.initModelRuntimeFromDB,
+  initEmbeddingRuntimeFromDB: mocks.initEmbeddingRuntimeFromDB,
   initModelRuntimeWithUserPayload: mocks.initModelRuntimeWithUserPayload,
 }));
 
@@ -88,7 +95,7 @@ describe('memoryRuntime', () => {
       },
       { userId: 'synthetic-user' },
     );
-    expect(mocks.initModelRuntimeFromDB).not.toHaveBeenCalled();
+    expect(mocks.initEmbeddingRuntimeFromDB).not.toHaveBeenCalled();
     expect(mocks.embeddings).toHaveBeenCalledWith(
       expect.objectContaining({
         input: ['renewal timeline'],
@@ -99,6 +106,38 @@ describe('memoryRuntime', () => {
     expect(mocks.searchMemory).toHaveBeenCalledWith(
       expect.objectContaining({ queries: ['renewal timeline'] }),
       [[0.1, 0.2, 0.3]],
+    );
+  });
+
+  it('authorizes the default embedding runtime with billing context and embedding model id', async () => {
+    // Regression: the managed authorize boundary (OR-003) requires an explicit
+    // modelId. The default branch passed neither billing nor model, so every
+    // memory search on a managed deployment failed before embedding.
+    mocks.initEmbeddingRuntimeFromDB.mockResolvedValueOnce({
+      embeddings: mocks.embeddings,
+    });
+    mocks.embeddings.mockResolvedValueOnce([[0.1, 0.2, 0.3]]);
+    mocks.searchMemory.mockResolvedValueOnce({
+      activities: [],
+      contexts: [],
+      experiences: [],
+      identities: [],
+      preferences: [],
+    });
+
+    const { memoryEmbeddingRuntime: _omitted, ...contextWithoutRuntime } = createContext();
+    const runtime = await memoryRuntime.factory(contextWithoutRuntime as any);
+    await runtime.searchUserMemory({ queries: ['renewal timeline'] });
+
+    expect(mocks.initEmbeddingRuntimeFromDB).toHaveBeenCalledWith(
+      expect.anything(),
+      'synthetic-user',
+      'default-provider',
+      undefined,
+      {
+        billingContext: { source: 'personal' },
+        modelId: 'default-embedding-model',
+      },
     );
   });
 });

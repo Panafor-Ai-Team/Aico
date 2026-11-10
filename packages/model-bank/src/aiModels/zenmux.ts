@@ -278,7 +278,7 @@ const zenmuxChatModels: AIChatModelCard[] = [
     },
     contextWindowTokens: 2_000_000,
     description:
-      'Grok 4 Fast (Non-Reasoning) is xAI’s high-throughput, low-cost multimodal model (supports a 2M context window) for scenarios sensitive to latency and cost that do not require in-model reasoning. It sits alongside the reasoning version of Grok 4 Fast, and reasoning can be enabled via the API reasoning parameter when needed. Prompts and completions may be used by xAI or OpenRouter to improve future models.',
+      'Grok 4 Fast (Non-Reasoning) is xAI’s high-throughput, low-cost multimodal model (supports a 2M context window) for scenarios sensitive to latency and cost that do not require in-model reasoning. It sits alongside the reasoning version of Grok 4 Fast, and reasoning can be enabled via the API reasoning parameter when needed. Prompts and completions may be used by xAI to improve future models.',
     displayName: 'Grok 4.1 Fast (Non-Reasoning)',
     family: 'grok',
     generation: 'grok-4.1',

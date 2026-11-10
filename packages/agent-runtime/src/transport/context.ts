@@ -1,4 +1,5 @@
 import type { ResolvedToolSet } from '@lobechat/context-engine';
+import type { ChatToolPayload } from '@lobechat/types';
 
 import type { AgentState, CallLLMPayload } from '../types';
 
@@ -17,6 +18,12 @@ export interface ContextBuildInput {
 }
 
 export interface ContextBuildOutput {
+  /**
+   * When set, `call_llm` skips the model and finalizes this turn as if the
+   * assistant immediately issued these tool calls (Create → Image parity for
+   * clear photo asks in chat).
+   */
+  directToolCalls?: ChatToolPayload[];
   /** Adapter-native prepared messages; kept in-memory and out of serialized state. */
   messages: unknown[];
   /** Adapter-native model extension parameters consumed by the LLM transport. */

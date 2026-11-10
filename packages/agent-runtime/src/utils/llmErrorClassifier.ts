@@ -95,6 +95,16 @@ const numericStatusFromCode = (...codes: unknown[]): number | undefined => {
   return undefined;
 };
 
+// The chat route reports plain HTTP-class failures (400, 403, 429...) as a numeric
+// `errorType`, which the client keeps as `type`. It is the only status signal such
+// an error carries: its message is translated UI text, not something to match on.
+const numericErrorType = (...types: unknown[]): number | undefined => {
+  for (const type of types) {
+    if (typeof type === 'number' && type >= 100 && type <= 599) return type;
+  }
+  return undefined;
+};
+
 const normalizeSignal = (error: unknown): LLMErrorSignal => {
   if (typeof error === 'string') {
     const message = error.toLowerCase();
@@ -120,7 +130,9 @@ const normalizeSignal = (error: unknown): LLMErrorSignal => {
           ? raw.status
           : typeof raw.statusCode === 'number'
             ? raw.statusCode
-            : (numericStatusFromCode(raw.code) ?? tryExtractStatus(message)),
+            : (numericStatusFromCode(raw.code) ??
+              numericErrorType(raw.errorType, raw.type) ??
+              tryExtractStatus(message)),
     };
   }
 
@@ -166,6 +178,7 @@ const normalizeSignal = (error: unknown): LLMErrorSignal => {
               : typeof nestedError?.status === 'number'
                 ? nestedError.status
                 : (numericStatusFromCode(raw.code, nested?.code, nestedError?.code) ??
+                  numericErrorType(raw.errorType, raw.type, nested?.errorType, nested?.type) ??
                   tryExtractStatus(message)),
     };
   }
@@ -224,7 +237,10 @@ const createKindClassifier = (options: LLMErrorClassifierOptions = {}) => {
 
     if (status !== undefined) {
       if (status === 401 || status === 403) return 'stop';
-      if (status === 400 || status === 404 || status === 409 || status === 422) return 'stop';
+      // 413: the request body is too large and resending it cannot succeed.
+      if (status === 400 || status === 404 || status === 409 || status === 413 || status === 422) {
+        return 'stop';
+      }
       if (status === 408 || status === 425 || status === 429 || status >= 500) return 'retry';
     }
 
@@ -255,6 +271,27 @@ const bestEffortMessage = (error: unknown): string => {
     // Property access itself can throw (e.g. hostile Proxy). Fall through to default.
   }
   return 'unknown error';
+};
+
+/**
+ * The chat route's own "no response headers within the start window" failure.
+ * It already cost a full window per attempt, so retrying it many times keeps the
+ * user waiting for minutes on an upstream that is not answering.
+ */
+export const isChatStartTimeoutError = (error: unknown): boolean => {
+  try {
+    if (normalizeSignal(error).message.includes('chat start timed out')) return true;
+
+    // Over HTTP the client's message is translated UI text; the route's own
+    // message only survives in the response body as `body.error.message`.
+    const body = (error as { body?: { error?: { message?: unknown } } } | undefined)?.body;
+    const bodyMessage = body?.error?.message;
+    return (
+      typeof bodyMessage === 'string' && bodyMessage.toLowerCase().includes('chat start timed out')
+    );
+  } catch {
+    return false;
+  }
 };
 
 export const createLLMErrorClassifier = (options: LLMErrorClassifierOptions = {}) => {

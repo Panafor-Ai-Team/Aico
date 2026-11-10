@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Mock getToolStoreState
 const mockGetState = vi.fn();
 vi.mock('@/store/tool', () => ({
-  getToolStoreState: () => mockGetState(),
+  getToolStoreState: () => ({ ensureRuntimeToolsReady: async () => {}, ...mockGetState() }),
 }));
 
 // Mock toolSelectors.availableToolsForDiscovery

@@ -12,7 +12,7 @@
   "discover.models.title": "模型社群",
   "discover.plugins.description": "搜尋圖表生成、學術、圖像生成、視頻生成、語音生成、自動化工作流程，為你的助手整合豐富的插件能力",
   "discover.plugins.title": "外掛社群",
-  "discover.providers.description": "探索主流模型供應商 OpenAI / Qwen / Ollama / Anthropic / DeepSeek / Google Gemini / OpenRouter",
+  "discover.providers.description": "探索主流模型供應商 OpenAI / Qwen / Ollama / Anthropic / DeepSeek / Google Gemini",
   "discover.providers.title": "模型服務社群",
   "discover.search": "搜尋",
   "discover.title": "發現",

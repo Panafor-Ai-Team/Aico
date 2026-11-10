@@ -22,6 +22,12 @@ import { type MemoryAgentConfig } from '@/server/globalConfig/parseMemoryExtract
 import { parseMemoryExtractionConfig } from '@/server/globalConfig/parseMemoryExtractionConfig';
 import { KeyVaultsGateKeeper } from '@/server/modules/KeyVaultsEncrypt';
 import {
+  initBilledMemoryRuntime,
+  isManagedMemoryProvider,
+  resolveMemoryBillingContext,
+} from '@/server/services/aico/memoryBilling';
+import { getUserScopedAiProviderRuntimeState } from '@/server/services/aiProviderAccess';
+import {
   type ProviderKeyVaultMap,
   type RuntimeResolveOptions,
 } from '@/server/services/memory/userMemory/extract';
@@ -100,8 +106,10 @@ export class UserPersonaService {
     // purely user-level feature with no workspace concept; the payload carries no
     // workspaceId, so provider config is resolved against the user's personal scope.
     const aiInfraRepos = new AiInfraRepos(this.db, payload.userId, {});
-    const runtimeState = await aiInfraRepos.getAiProviderRuntimeState(
-      KeyVaultsGateKeeper.getUserKeyVaults,
+    const runtimeState = await getUserScopedAiProviderRuntimeState(
+      payload.userId,
+      () => aiInfraRepos.getAiProviderRuntimeState(KeyVaultsGateKeeper.getUserKeyVaults),
+      { throwOnUnresolvedAccess: true },
     );
     const providerId = await AiInfraRepos.tryMatchingProviderFrom(runtimeState, {
       fallbackProvider: agentConfig.provider,
@@ -119,19 +127,29 @@ export class UserPersonaService {
 
     const hooks = getBusinessModelRuntimeHooks(payload.userId, 'lobehub');
 
-    const runtime = await resolveRuntimeAgentConfig(
-      agentConfig,
-      keyVaults,
-      {
-        fallback: {
-          apiKey: agentConfig.apiKey,
-          baseURL: agentConfig.baseURL,
-        },
-        preferred: { providerIds: [providerId] },
-        userId: payload.userId,
-      } satisfies RuntimeResolveOptions,
-      hooks,
-    );
+    // Aico: a managed persona writer is billed to the user's preferred source.
+    const runtime = isManagedMemoryProvider(agentConfig.provider)
+      ? await initBilledMemoryRuntime({
+          billingContext: await resolveMemoryBillingContext(this.db, payload.userId),
+          db: this.db,
+          kind: 'generation',
+          modelId: agentConfig.model,
+          provider: agentConfig.provider!,
+          userId: payload.userId,
+        })
+      : await resolveRuntimeAgentConfig(
+          agentConfig,
+          keyVaults,
+          {
+            fallback: {
+              apiKey: agentConfig.apiKey,
+              baseURL: agentConfig.baseURL,
+            },
+            preferred: { providerIds: [providerId] },
+            userId: payload.userId,
+          } satisfies RuntimeResolveOptions,
+          hooks,
+        );
 
     const personaModel = new UserPersonaModel(this.db, payload.userId);
     const lastDocument = await personaModel.getLatestPersonaDocument();

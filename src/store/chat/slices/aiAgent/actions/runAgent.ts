@@ -8,6 +8,7 @@ import {
   notifyDesktopAgentCompleted,
   notifyDesktopHumanApprovalRequired,
 } from '@/store/chat/utils/desktopNotification';
+import { resolveGroupTopicScope } from '@/store/chat/utils/topicMapKey';
 import { type StoreSetter } from '@/store/types';
 
 const log = debug('store:chat:ai-agent:runAgent');
@@ -258,6 +259,7 @@ export class AgentActionImpl {
           this.#get().markTopicUnread({
             agentId: op.context.agentId,
             groupId: op.context.groupId,
+            scope: resolveGroupTopicScope(op.context.scope),
             topicId: op.context.topicId,
           });
         }

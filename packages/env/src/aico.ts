@@ -1,0 +1,296 @@
+import { createEnv } from '@t3-oss/env-core';
+import { z } from 'zod';
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace NodeJS {
+    interface ProcessEnv {
+      /**
+       * When `1`, Trial may be enabled via platform_trial_config in non-production.
+       * Production always rejects Trial activation/execution (a product decision; the
+       * atomic request quota, AICO-P1-010, has shipped).
+       */
+      AICO_ALLOW_TRIAL?: string;
+      /**
+       * Usage ledger mode for managed traffic: `off` (default, legacy per-key
+       * brakes only), `shadow` (records holds and what enforce would refuse, never
+       * blocks) or `enforce` (every managed call reserves a hold in our database
+       * before it reaches the upstream and settles when it ends). Enforce refuses
+       * traffic until the cutover snapshot has completed.
+       */
+      AICO_BILLING_LEDGER_MODE?: string;
+      /**
+       * Shared bearer token for product → control-plane `/internal/*` calls.
+       * Must match the control plane's `AICO_CONTROL_PLANE_SERVICE_TOKEN`.
+       */
+      AICO_CONTROL_PLANE_SERVICE_TOKEN?: string;
+      /**
+       * Base URL of the Aico control plane (no trailing slash), e.g. `http://localhost:3020`.
+       * Product server uses this for OpenRouter management proxy calls.
+       */
+      AICO_CONTROL_PLANE_URL?: string;
+      /**
+       * When `1`, CheapVibeCode top-ups and cycle renewals resize the existing key
+       * through `POST /v1/keys/edit` instead of minting a replacement. Off by
+       * default; unset restores mint-then-delete rotation.
+       */
+      AICO_CVC_RESIZE_IN_PLACE?: string;
+      /**
+       * CheapVibeCode tokens per 1 USD of raw upstream capacity. CVC prices in its
+       * own tokens and publishes no USD rate, so this is the only bridge between
+       * their unit and our micro-USD ledger. Default 25,000,000 (the rate we buy
+       * at). Changing it re-denominates every CVC key limit written after the
+       * change; it does NOT revalue limits already pushed upstream.
+       */
+      AICO_CVC_TOKENS_PER_USD?: string;
+      /**
+       * OpenRouter inference key used only for embeddings while the managed chat
+       * provider is not OpenRouter (CheapVibeCode serves no embeddings route).
+       * The platform pays for these calls; they are not metered to member wallets.
+       */
+      AICO_EMBEDDING_OPENROUTER_API_KEY?: string;
+      /**
+       * Kill switch for the 2026-10 reclaim fix (R1): a removed member's key is
+       * frozen first and settled through the freeze, because CheapVibeCode will
+       * not read a frozen key's balance. On unless set to `0`.
+       */
+      AICO_FIX_R1_FROZEN_RECLAIM?: string;
+      /**
+       * Kill switch for the 2026-10 renewal fix (R5): the renewal transaction
+       * locks each budget and abandons the batch if a budget changed while it
+       * was settling. On unless set to `0`.
+       */
+      AICO_FIX_R5_RENEWAL_LOCK?: string;
+      /**
+       * Kill switch for the 2026-10 renewal-batch fixes (R3, R4, R9, R10, R11,
+       * FIN-028, N5, N6): batch keys carry a fingerprint of their budget set, a
+       * batch is claimed by compare-and-swap under a lease, a failed or stale
+       * batch is retried after a backoff, suspended orgs do not renew. Read from
+       * the environment, so it only changes on a restart; a worker finishes the
+       * run it started on the path it started with. Needs
+       * `AICO_FIX_R5_RENEWAL_LOCK`, which protects budgets two workers share.
+       * On unless set to `0`.
+       */
+      AICO_FIX_S2_RENEWAL_BATCH?: string;
+      /**
+       * Kill switch for the 2026-10 reclaim guards (N2, N3, N4): a refused
+       * freeze is retried instead of estimated, a reclaim refund is capped at
+       * what the cycle funded, and a budget that changed since its key was read
+       * is not settled. On unless set to `0`.
+       */
+      AICO_FIX_SA_RECLAIM_GUARD?: string;
+      /**
+       * Kill switch for the 2026-10 key-follows-money fixes (N7, W2 gap, R8, C7):
+       * a key that could not be read or whose edit's outcome is unknown is
+       * reported so the caller queues a retry, a lowered member cap replaces a
+       * key that kept refunded headroom, and a key mint only lands if the
+       * subject still holds the key it saw. On unless set to `0`.
+       */
+      AICO_FIX_SC_KEY_FOLLOWS_MONEY?: string;
+      /**
+       * When `1`, this process is the control plane (may hold `OPENROUTER_MANAGEMENT_API_KEY`).
+       * Product servers must leave this unset.
+       */
+      AICO_IS_CONTROL_PLANE?: string;
+      /**
+       * Comma-separated CVC model ids measured to honour `max_tokens` (see
+       * `scripts/aico/probe_max_tokens.py`). Holds for these cover `max_tokens`;
+       * every other model is held at its own output ceiling, because most CVC
+       * models do not count reasoning against the cap. Default: the 2026-09-22
+       * probe result.
+       */
+      AICO_LEDGER_CAPPED_OUTPUT_MODELS?: string;
+      /**
+       * Shared-key mode only. Managed traffic is refused once the upstream account
+       * float, net of ledger spend since the last reading and open holds, would
+       * drop below this many raw micro-USD. Default 1,000,000 ($1).
+       */
+      AICO_LEDGER_FLOAT_FLOOR_MICRO_USD?: string;
+      /**
+       * Seconds after which a float reading is considered stale and alerts.
+       * A stale reading never blocks traffic on its own. Default 600.
+       */
+      AICO_LEDGER_FLOAT_MAX_AGE_SECONDS?: string;
+      /**
+       * Seconds an unsettled hold stays open before maintenance charges it in
+       * full. Must outlive the longest stream (route maxDuration is 300s).
+       * Default 900.
+       */
+      AICO_LEDGER_HOLD_TTL_SECONDS?: string;
+      /** Maximum concurrent open holds per wallet or member budget. Default 6. */
+      AICO_LEDGER_MAX_OPEN_HOLDS?: string;
+      /**
+       * Output cap injected as `max_tokens` on managed chat requests that did not
+       * ask for one. It bounds the hold, so it bounds what a request can cost.
+       * Default 32,000.
+       */
+      AICO_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS?: string;
+      /**
+       * `per_subject` (default): every wallet/budget has its own upstream key.
+       * `shared`: all managed traffic uses `AICO_SHARED_INFERENCE_API_KEY` and the
+       * usage ledger is the only brake. Shared requires
+       * `AICO_BILLING_LEDGER_MODE=enforce`; any other combination refuses traffic.
+       */
+      AICO_MANAGED_INFERENCE_KEY?: string;
+      /**
+       * Which upstream gateway backs the managed (`BRANDING_PROVIDER`) experience:
+       * `openrouter` (default) or `cheapvibecode`. This is the rollback lever — both
+       * implementations stay live and switching is an env change, not a restore.
+       *
+       * Exactly ONE managed provider is live per deployment, and that is load-bearing:
+       * `user_wallets.raw_capacity_micro_usd` is a single blended pool denominated in
+       * the active provider's raw USD, bought at whatever multiplier was in force at
+       * top-up time. Never run two managed providers at once without first splitting
+       * wallet capacity per provider.
+       */
+      AICO_MANAGED_PROVIDER?: string;
+      /**
+       * When `1`, managed-provider calls are mocked in-process (local QA).
+       * Ignored in production — see `createOpenRouterManagementClient`.
+       */
+      AICO_OPENROUTER_MOCK?: string;
+      /**
+       * Reconcile's wallet and org ledger checks look at transactions from this
+       * instant on; older rows are summarised, not re-checked. For history that
+       * can no longer be repaired (breaks that a past bug wrote and that new
+       * code does not cause). UTC ISO with a `Z`, e.g. `2026-10-25T00:00:00Z`.
+       * A date without a time or with an offset is rejected and the app will
+       * not start. Unset checks the whole history.
+       */
+      AICO_RECONCILE_LEDGER_SINCE?: string;
+      /**
+       * Optional HTTPS webhook for Aico security ops alerts (MON-003).
+       * Receives JSON: { type, severity, summary, details, timestamp }.
+       */
+      AICO_SECURITY_ALERT_WEBHOOK_URL?: string;
+      /**
+       * CheapVibeCode primary key used as the single inference key when
+       * `AICO_MANAGED_INFERENCE_KEY=shared`. It has no upstream limit: the usage
+       * ledger is the only brake. Never log it. Accepted risk (2026-09-16).
+       */
+      AICO_SHARED_INFERENCE_API_KEY?: string;
+      /**
+       * Toman per 1 USD — fallback FX rate when platform_fx_config is unavailable.
+       * Example: 187400 means 187,400 toman = $1. Prefer setting the rate in the
+       * platform admin panel (platform_fx_config).
+       */
+      AICO_TOMAN_PER_USD?: string;
+      /**
+       * CheapVibeCode API origin, no trailing slash. Their docs describe a
+       * Primary/Fallback domain switch as the remedy for an outage, so this is a
+       * comma-separated list tried in order.
+       */
+      CHEAPVIBECODE_BASE_URL?: string;
+      /**
+       * CheapVibeCode primary key (sk-cvc-…). Unlike OpenRouter's, this single
+       * credential is BOTH the management API key and a fully funded inference
+       * key — a leak spends the account float directly, it does not merely mint
+       * keys. Control plane only; product servers must NOT set this.
+       */
+      CHEAPVIBECODE_MANAGEMENT_API_KEY?: string;
+      /**
+       * CheapVibeCode video API base, `/v1` included. Video generation is served
+       * only by the `ru.` host, so it is separate from CHEAPVIBECODE_BASE_URL.
+       * Defaults to https://ru.cheapvibecode.ru/v1.
+       */
+      CHEAPVIBECODE_VIDEO_BASE_URL?: string;
+      /**
+       * OpenRouter Management API key (sk-or-…). Creates per-user keys.
+       * Never expose to the client. Product servers must NOT set this — only the control plane.
+       */
+      OPENROUTER_MANAGEMENT_API_KEY?: string;
+    }
+  }
+}
+
+export const getAicoConfig = () => {
+  return createEnv({
+    server: {
+      AICO_ALLOW_TRIAL: z.boolean().optional().default(false),
+      AICO_BILLING_LEDGER_MODE: z.enum(['off', 'shadow', 'enforce']).default('off'),
+      AICO_CONTROL_PLANE_SERVICE_TOKEN: z.string().optional(),
+      AICO_CONTROL_PLANE_URL: z.string().url().optional(),
+      AICO_IS_CONTROL_PLANE: z.boolean().optional().default(false),
+      AICO_LEDGER_FLOAT_FLOOR_MICRO_USD: z.coerce.number().int().nonnegative().default(1_000_000),
+      AICO_LEDGER_FLOAT_MAX_AGE_SECONDS: z.coerce.number().int().min(60).default(600),
+      AICO_LEDGER_HOLD_TTL_SECONDS: z.coerce.number().int().min(360).max(3600).default(900),
+      AICO_LEDGER_MAX_OPEN_HOLDS: z.coerce.number().int().min(1).max(64).default(6),
+      AICO_LEDGER_CAPPED_OUTPUT_MODELS: z
+        .string()
+        .default(
+          'claude-fable-5-1,claude-fable-5,claude-opus-5,claude-opus-4-8,claude-opus-4-7,claude-opus-4-6,claude-sonnet-5,claude-sonnet-4-6,claude-haiku-4-5,glm-5.3,glm-5.3-flash,hy4-preview,kimi-k3,mimo-v2.5',
+        ),
+      AICO_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS: z.coerce
+        .number()
+        .int()
+        .min(256)
+        .max(200_000)
+        .default(32_000),
+      AICO_MANAGED_INFERENCE_KEY: z.enum(['per_subject', 'shared']).default('per_subject'),
+      AICO_MANAGED_PROVIDER: z.enum(['openrouter', 'cheapvibecode']).default('openrouter'),
+      AICO_SHARED_INFERENCE_API_KEY: z.string().optional(),
+      AICO_CVC_RESIZE_IN_PLACE: z.boolean().optional().default(false),
+      AICO_FIX_R1_FROZEN_RECLAIM: z.boolean().default(true),
+      AICO_FIX_R5_RENEWAL_LOCK: z.boolean().default(true),
+      AICO_FIX_SA_RECLAIM_GUARD: z.boolean().default(true),
+      AICO_FIX_S2_RENEWAL_BATCH: z.boolean().default(true),
+      AICO_FIX_SC_KEY_FOLLOWS_MONEY: z.boolean().default(true),
+      AICO_CVC_TOKENS_PER_USD: z.coerce.number().positive().int().default(25_000_000),
+      AICO_OPENROUTER_MOCK: z.boolean().optional().default(false),
+      AICO_EMBEDDING_OPENROUTER_API_KEY: z.string().optional(),
+      CHEAPVIBECODE_BASE_URL: z.string().default('https://ru.cheapvibecode.ru'),
+      CHEAPVIBECODE_MANAGEMENT_API_KEY: z.string().optional(),
+      CHEAPVIBECODE_VIDEO_BASE_URL: z.string().url().optional(),
+      AICO_RECONCILE_LEDGER_SINCE: z.string().datetime().optional(),
+      AICO_SECURITY_ALERT_WEBHOOK_URL: z.string().url().optional(),
+      AICO_TOMAN_PER_USD: z.coerce.number().positive().int().default(187_400),
+      OPENROUTER_MANAGEMENT_API_KEY: z.string().optional(),
+    },
+    runtimeEnv: {
+      AICO_ALLOW_TRIAL: process.env.AICO_ALLOW_TRIAL === '1',
+      AICO_BILLING_LEDGER_MODE: process.env.AICO_BILLING_LEDGER_MODE || 'off',
+      AICO_CONTROL_PLANE_SERVICE_TOKEN: process.env.AICO_CONTROL_PLANE_SERVICE_TOKEN,
+      AICO_CONTROL_PLANE_URL: process.env.AICO_CONTROL_PLANE_URL,
+      AICO_IS_CONTROL_PLANE: process.env.AICO_IS_CONTROL_PLANE === '1',
+      // `|| undefined`: an empty value falls back to the default instead of coercing to 0.
+      AICO_LEDGER_FLOAT_FLOOR_MICRO_USD: process.env.AICO_LEDGER_FLOAT_FLOOR_MICRO_USD || undefined,
+      AICO_LEDGER_FLOAT_MAX_AGE_SECONDS: process.env.AICO_LEDGER_FLOAT_MAX_AGE_SECONDS || undefined,
+      AICO_LEDGER_HOLD_TTL_SECONDS: process.env.AICO_LEDGER_HOLD_TTL_SECONDS || undefined,
+      AICO_LEDGER_MAX_OPEN_HOLDS: process.env.AICO_LEDGER_MAX_OPEN_HOLDS || undefined,
+      AICO_LEDGER_CAPPED_OUTPUT_MODELS: process.env.AICO_LEDGER_CAPPED_OUTPUT_MODELS || undefined,
+      AICO_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS:
+        process.env.AICO_MANAGED_DEFAULT_MAX_OUTPUT_TOKENS || undefined,
+      AICO_MANAGED_INFERENCE_KEY: process.env.AICO_MANAGED_INFERENCE_KEY || 'per_subject',
+      AICO_MANAGED_PROVIDER: process.env.AICO_MANAGED_PROVIDER || 'openrouter',
+      AICO_SHARED_INFERENCE_API_KEY: process.env.AICO_SHARED_INFERENCE_API_KEY || undefined,
+      AICO_CVC_RESIZE_IN_PLACE: process.env.AICO_CVC_RESIZE_IN_PLACE === '1',
+      AICO_FIX_R1_FROZEN_RECLAIM: process.env.AICO_FIX_R1_FROZEN_RECLAIM !== '0',
+      AICO_FIX_R5_RENEWAL_LOCK: process.env.AICO_FIX_R5_RENEWAL_LOCK !== '0',
+      AICO_FIX_SA_RECLAIM_GUARD: process.env.AICO_FIX_SA_RECLAIM_GUARD !== '0',
+      AICO_FIX_S2_RENEWAL_BATCH: process.env.AICO_FIX_S2_RENEWAL_BATCH !== '0',
+      AICO_FIX_SC_KEY_FOLLOWS_MONEY: process.env.AICO_FIX_SC_KEY_FOLLOWS_MONEY !== '0',
+      AICO_CVC_TOKENS_PER_USD: process.env.AICO_CVC_TOKENS_PER_USD,
+      AICO_OPENROUTER_MOCK: process.env.AICO_OPENROUTER_MOCK === '1',
+      AICO_EMBEDDING_OPENROUTER_API_KEY: process.env.AICO_EMBEDDING_OPENROUTER_API_KEY || undefined,
+      CHEAPVIBECODE_BASE_URL: process.env.CHEAPVIBECODE_BASE_URL || 'https://ru.cheapvibecode.ru',
+      CHEAPVIBECODE_MANAGEMENT_API_KEY: process.env.CHEAPVIBECODE_MANAGEMENT_API_KEY,
+      CHEAPVIBECODE_VIDEO_BASE_URL: process.env.CHEAPVIBECODE_VIDEO_BASE_URL || undefined,
+      AICO_RECONCILE_LEDGER_SINCE: process.env.AICO_RECONCILE_LEDGER_SINCE || undefined,
+      AICO_SECURITY_ALERT_WEBHOOK_URL: process.env.AICO_SECURITY_ALERT_WEBHOOK_URL || undefined,
+      AICO_TOMAN_PER_USD: process.env.AICO_TOMAN_PER_USD,
+      OPENROUTER_MANAGEMENT_API_KEY: process.env.OPENROUTER_MANAGEMENT_API_KEY,
+    },
+  });
+};
+
+export const aicoEnv = getAicoConfig();
+
+/** @deprecated Prefer `tomanToMicroUsd` from `@/database/utils/aicoMoney`. Kept for transitional call sites. */
+export const tomanToUsd = (amountToman: number, rate = aicoEnv.AICO_TOMAN_PER_USD): number => {
+  if (!Number.isFinite(amountToman) || amountToman <= 0) throw new Error('Invalid FX amount');
+  if (!Number.isFinite(rate) || rate <= 0 || !Number.isInteger(rate))
+    throw new Error('Invalid FX rate');
+  // Integer floor via micro-USD then back to 6-decimal number for legacy callers.
+  const micro = (BigInt(Math.trunc(amountToman)) * 1_000_000n) / BigInt(rate);
+  return Number(micro) / 1_000_000;
+};

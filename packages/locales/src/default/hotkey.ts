@@ -17,7 +17,7 @@ export default {
   'desktop.showApp.title': 'Show/Hide Main Window',
   'editMessage.desc': 'Enter edit mode by holding Alt and double-clicking the message',
   'editMessage.title': 'Edit Message',
-  'navigateToChat.desc': 'Switch to the Chat tab and enter Lobe AI',
+  'navigateToChat.desc': 'Switch to the Chat tab and enter Panachat AI',
   'navigateToChat.title': 'Switch to Default Chat',
   'nextTab.desc':
     'Cycle to the next browser-style tab in the Desktop app; wraps around to the first tab at the end',
@@ -48,4 +48,6 @@ export default {
   'toggleLeftPanel.title': 'Toggle Left Panel',
   'toggleRightPanel.desc': 'Show or hide the right panel',
   'toggleRightPanel.title': 'Toggle Right Panel',
+  'toggleTerminalPanel.desc': 'Show or hide the bottom terminal panel',
+  'toggleTerminalPanel.title': 'Toggle Terminal Panel',
 };

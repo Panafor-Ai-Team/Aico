@@ -1,0 +1,811 @@
+{
+  "description": "Every migration shipped before the journal split (canary 754a7cb8aa), in the order the single legacy journal applied them. Production ledger rows are keyed by these `when` values; hashes are drizzle-orm's sha256 of each file. Never edit: a shipped migration must not change.",
+  "entries": [
+    {
+      "hash": "1513c1da50dc083fc0bd9783fe88c60e4fa80b60db645aa87bfda54332252c65",
+      "tag": "0000_init",
+      "when": 1716982944425
+    },
+    {
+      "hash": "ddb29ee7e7a675c12b44996e4be061b1736e8f785052242801f4cdfb2a94f258",
+      "tag": "0001_add_client_id",
+      "when": 1717153686544
+    },
+    {
+      "hash": "90b61fc3e744d8e2609418d9e25274ff07af4caf87370bb614db511d67900d73",
+      "tag": "0002_amusing_puma",
+      "when": 1717587734458
+    },
+    {
+      "hash": "535a9aba48be3d75762f29bbb195736f17abfe51f41a548debe925949dd0caf2",
+      "tag": "0003_naive_echo",
+      "when": 1718460779230
+    },
+    {
+      "hash": "c63c5819d73414632ea32c543cfb997be31a2be3fad635c148c97e726c57fd16",
+      "tag": "0004_add_next_auth",
+      "when": 1721724512422
+    },
+    {
+      "hash": "c112a4eb471fa4efe791b250057a1e33040515a0c60361c7d7a59044ec9e1667",
+      "tag": "0005_pgvector",
+      "when": 1722944166657
+    },
+    {
+      "hash": "bc4e36664868d14888b9e9aef180b3e02c563fa3c253111787e68b8ea4cd995f",
+      "tag": "0006_add_knowledge_base",
+      "when": 1724089032064
+    },
+    {
+      "hash": "e99840848ffbb33ca4d7ead6158f02b8d12cb4ff5706d4529d7fa586afa4c2a9",
+      "tag": "0007_fix_embedding_table",
+      "when": 1724254147447
+    },
+    {
+      "hash": "9646161fa041354714f823d726af27247bcd6e60fa3be5698c0d69f337a5700b",
+      "tag": "0008_add_rag_evals",
+      "when": 1725366565650
+    },
+    {
+      "hash": "7dad43a2a25d1aec82124a4e53f8d82f8505c3073f23606c1dc5d2a4598eacf9",
+      "tag": "0009_remove_unused_user_tables",
+      "when": 1729699958471
+    },
+    {
+      "hash": "a7d801b679e25ef3ffda343366992b2835c089363e9d7c09074336d40e438004",
+      "tag": "0010_add_accessed_at_and_clean_tables",
+      "when": 1730900133049
+    },
+    {
+      "hash": "80c2eae0600190b354e4fd6b619687a66186b992ec687495bb55c6c163a98fa6",
+      "tag": "0011_add_topic_history_summary",
+      "when": 1731138670427
+    },
+    {
+      "hash": "d8263bfefe296ed366379c7b7fc65195d12e6a1c0a9f1c96097ea28f2123fe50",
+      "tag": "0012_add_thread",
+      "when": 1731858381716
+    },
+    {
+      "hash": "845a692ceabbfc3caf252a97d3e19a213bc0c433df2689900135f9cfded2cf49",
+      "tag": "0013_add_ai_infra",
+      "when": 1735834653361
+    },
+    {
+      "hash": "2cb36ae4fcdd7b7064767e04bfbb36ae34518ff4bb1b39006f2dd394d1893868",
+      "tag": "0014_add_message_reasoning",
+      "when": 1737609172353
+    },
+    {
+      "hash": "78d8fefd8c58938d7bc3da2295a73b35ce2e8d7cb2820f8e817acdb8dd5bebb2",
+      "tag": "0015_add_message_search_metadata",
+      "when": 1739901891891
+    },
+    {
+      "hash": "2a7a98be2e49361391444d6fabf3fb5db0bcb6a65e5540e9c3d426ceeb1f7f3a",
+      "tag": "0016_add_message_index",
+      "when": 1741844738677
+    },
+    {
+      "hash": "89e91285be422d5f44511c7405f57b57f8dfda4f0304126ae9b0f266e5fd60f1",
+      "tag": "0017_add_user_id_to_tables",
+      "when": 1742269437903
+    },
+    {
+      "hash": "110a49a1a7c42ded9a9613edb8dc15fee0b4b3dd8061f871b7b42241f29987b5",
+      "tag": "0018_add_client_id_for_entities",
+      "when": 1742616026643
+    },
+    {
+      "hash": "d9032edf59f717e0e71da5a95b3545ec251c311155cafe14df01a12800a9eae0",
+      "tag": "0019_add_hotkey_user_settings",
+      "when": 1742806552131
+    },
+    {
+      "hash": "f3a80b900906b54ba658208cd448610647fc03f1f4d51963509c07f4e53ef4de",
+      "tag": "0020_add_oidc",
+      "when": 1744458287757
+    },
+    {
+      "hash": "fdbac49ffdbe759234e760d0d48cdc1854028ea70d756a12b72f24305b4f3072",
+      "tag": "0021_add_agent_opening_settings",
+      "when": 1744602998656
+    },
+    {
+      "hash": "0518cd9882f7ea38eb498b31c8dda73fb56bbc3aa55445ecbc7a9e716631d047",
+      "tag": "0022_add_documents",
+      "when": 1746724476380
+    },
+    {
+      "hash": "15815e06e3b188933119f380ae12ef8694f2c5f8003cebb397ed00053a065be4",
+      "tag": "0023_remove_param_and_doubao",
+      "when": 1748925630721
+    },
+    {
+      "hash": "a7ccf007fd185ff922823148d1eae6fafe652fc98d2fd2793f84a84f29e93cd1",
+      "tag": "0024_add_rbac_tables",
+      "when": 1749301573666
+    },
+    {
+      "hash": "39cea379f08ee4cb944875c0b67f7791387b508c2d47958bb4cd501ed1ef33eb",
+      "tag": "0025_add_provider_config",
+      "when": 1749309388370
+    },
+    {
+      "hash": "e445db851f792aac49482e04689569a37939f7d0a3851cbcdf10dc24e8943b2c",
+      "tag": "0026_add_autovacuum_tuning",
+      "when": 1752212281564
+    },
+    {
+      "hash": "abed92b1356df6d7eb35c03f47fbbdcdaf25aefda750dc3e4963c1c2a0d38b54",
+      "tag": "0027_ai_image",
+      "when": 1752413805765
+    },
+    {
+      "hash": "83c410b18ef5c8667b4bdfd7880ef7db4c3278d826e6e87e9d3e05dde67fe8e1",
+      "tag": "0028_oauth_handoffs",
+      "when": 1752567402506
+    },
+    {
+      "hash": "fe5c0d7c2768189771c42ef93693fc1d58586b468c4bdde7fb6f2dc58cc9931c",
+      "tag": "0029_add_apikey_manage",
+      "when": 1753201379817
+    },
+    {
+      "hash": "3af468ca75761ca4ca4e32ba8704728f0499aa935bfe00ae5aabfa8405a18bd4",
+      "tag": "0030_add_group_chat",
+      "when": 1756298669289
+    },
+    {
+      "hash": "41395946b955d89f5c97272077d27d131a626b64bdca2b970c0bbcdf0a8370fd",
+      "tag": "0031_add_agent_index",
+      "when": 1757902833213
+    },
+    {
+      "hash": "bafc1c74796a4c69342e61d28997b0e3a38f1e7d022ba92d9cbf31e00b5748c8",
+      "tag": "0032_improve_agents_field",
+      "when": 1757993755131
+    },
+    {
+      "hash": "ce04ef4cde2db479d28ff08dced8383052c5052c904bab8343b5493fa10b0679",
+      "tag": "0033_add_table_index",
+      "when": 1758012348218
+    },
+    {
+      "hash": "1ba9b1f74ea13348da98d6fcdad7867ab4316ed565bf75d84d160c526cdac14b",
+      "tag": "0034_fix_chat_group",
+      "when": 1758825944181
+    },
+    {
+      "hash": "433ddae88e785f2db734e49a4c115eee93e60afe389f7919d66e5ba9aa159a37",
+      "tag": "0035_add_virtual",
+      "when": 1759116400580
+    },
+    {
+      "hash": "3a787841eede425d972f2a00cf2f7f8d0b27b391c46ed525c6dceaa79d58d887",
+      "tag": "0036_add_group_messages",
+      "when": 1759666151079
+    },
+    {
+      "hash": "4bdc6505797d7a33b622498c138cfd47f637239f6905e1c484cd01d9d5f21d6b",
+      "tag": "0037_add_user_memory",
+      "when": 1760086906862
+    },
+    {
+      "hash": "ce09b301abb80f6563abc2f526bdd20b4f69bae430f09ba2179b9e3bfec43067",
+      "tag": "0038_add_image_user_settings",
+      "when": 1760108430562
+    },
+    {
+      "hash": "bf2f21293e90e11cf60a784cf3ec219eafa95f7545d7d2f9d1449c0b0949599a",
+      "tag": "0039_add_editor_data",
+      "when": 1761554153406
+    },
+    {
+      "hash": "c483b3ea859f78f687737229bd40f6fef5486aaf05fa20a8ea6961c2a8f0cc64",
+      "tag": "0040_improve_user_memory_field",
+      "when": 1761563458595
+    },
+    {
+      "hash": "2f740719356c4ea28a4f71b6089595871f6e185e056b43288a7d16f7d0aae196",
+      "tag": "0041_improve_index",
+      "when": 1761878697451
+    },
+    {
+      "hash": "fd8e7ff36bf877ddc1a45d360edfe1fe9a579cd02d68d7664545d7df95b8eb09",
+      "tag": "0042_improve_agent_index",
+      "when": 1762232313711
+    },
+    {
+      "hash": "923ccbdf46c32be9a981dabd348e6923b4a365444241e9b8cc174bf5b914cbc5",
+      "tag": "0043_add_ai_model_settings",
+      "when": 1762251112601
+    },
+    {
+      "hash": "4178aacb4b8892b7fd15d29209bbf9b1d1f9d7c406ba796f27542c0bcd919680",
+      "tag": "0044_high_toxin",
+      "when": 1762870034882
+    },
+    {
+      "hash": "552a032cc0e595277232e70b5f9338658585bafe9481ae8346a5f322b673a68b",
+      "tag": "0045_add_tool_intervention",
+      "when": 1762911968658
+    },
+    {
+      "hash": "6c2081c8ac22772a8276052c9ae0852a4c03463cbe998df26f85683ab356b914",
+      "tag": "0046_add_parent_id",
+      "when": 1763453175961
+    },
+    {
+      "hash": "f823b521f4d25e5dc5ab238b372727d2d2d7f0aed27b5eabc8a9608ce4e50568",
+      "tag": "0047_add_slug_document",
+      "when": 1763987922211
+    },
+    {
+      "hash": "4188893a9083b3c7baebdbad0dd3f9d9400ede7584ca2394f5c64305dc9ec7b0",
+      "tag": "0048_add_editor_data",
+      "when": 1764215503726
+    },
+    {
+      "hash": "1532ebceae7b70550bc9c230fb0a65090aaa773bc7b873eefbc2ce2a815997e2",
+      "tag": "0049_better_auth",
+      "when": 1764229953081
+    },
+    {
+      "hash": "2c103eee82bdf329944fb622dd9c2b9f20df80eb54f23eb9254d2285de413099",
+      "tag": "0050_thread_and_user_id",
+      "when": 1764303057060
+    },
+    {
+      "hash": "28c0d738c0b1fdf5fd871363be1a1477b4accbabdc140fe8dc6e9b339aae2c89",
+      "tag": "0051_add_market_into_user_settings",
+      "when": 1764335703306
+    },
+    {
+      "hash": "94721bc06910a456a4756c9b0c27ef5d7ff55b7ea8c772acf58052c0155c693b",
+      "tag": "0052_topic_and_messages",
+      "when": 1764500630663
+    },
+    {
+      "hash": "523a8418ceeadbe80c34affee07cdfa2e8076e297473c55c73e74648a9be1e45",
+      "tag": "0053_better_auth_admin",
+      "when": 1764511006123
+    },
+    {
+      "hash": "1d2536a9471bb87686b35053f98ba7762259a07c819dc4489bb4f3c7f27a4d8d",
+      "tag": "0054_better_auth_two_factor",
+      "when": 1764579351312
+    },
+    {
+      "hash": "6a43d90ee1d2e1e008d1b8206f227aa05b9a2e2a8fc8c31ec608a3716c716a6c",
+      "tag": "0055_rename_phone_number_to_phone",
+      "when": 1764583392443
+    },
+    {
+      "hash": "6e7ac7f964eb03efa3cb0d2fd35ded23e25c3abf955c4c2a51418f8daef54af9",
+      "tag": "0056_update_agent_slug_index",
+      "when": 1764685643024
+    },
+    {
+      "hash": "89c134be2948d3afc360d6bac11dea0c6fd5c902bf6093ed077033adb920fd02",
+      "tag": "0057_add_topic_user_memory_extract_status",
+      "when": 1764734167674
+    },
+    {
+      "hash": "276514dc101fffc66794156f4ba644599a4ae5997a68b9e7f54452ee374bfa61",
+      "tag": "0058_add_source_into_user_plugins",
+      "when": 1764842015809
+    },
+    {
+      "hash": "7838f9938b370867470e5e11807855253d23b11c2ac6aa9e90687844a356c949",
+      "tag": "0059_add_normalized_email_indexes",
+      "when": 1764858574403
+    },
+    {
+      "hash": "004923916a27bc61294eeb20738f2884f1ca43978a03aa9f0216fc849c98465b",
+      "tag": "0060_add_user_last_active_at",
+      "when": 1765437218969
+    },
+    {
+      "hash": "444e28eed827bdf52b836a0d284c1cc946ce4e687c94044ddcd8c18fe68fdec5",
+      "tag": "0061_add_document_and_memory_index",
+      "when": 1765540257262
+    },
+    {
+      "hash": "ba6a6beff2ad39419ec4aa7887539c9db0472e13f9242cb8780ff96eec450268",
+      "tag": "0062_add_more_index",
+      "when": 1765728439737
+    },
+    {
+      "hash": "7a8ee107778222390e676951173baa81bfa09dd47216a8467575fca54915172c",
+      "tag": "0063_add_columns_for_several_tables",
+      "when": 1766157362540
+    },
+    {
+      "hash": "431a620396060130c46d6174d4bef3a517a0872aff8d19f3044bd9e7dec78ba5",
+      "tag": "0064_add_agents_session_group_id",
+      "when": 1766297832021
+    },
+    {
+      "hash": "1ae24d25f4b0ee7f38353b6d7fc6be4ae1171c105eb329d8aa97888abc85373b",
+      "tag": "0065_add_passkey",
+      "when": 1766408202688
+    },
+    {
+      "hash": "42d46c25f68aa3d6ab46b7c15734d984a9a8452e8058e98de79f4d675a38e28f",
+      "tag": "0066_add_document_fields",
+      "when": 1766474494249
+    },
+    {
+      "hash": "b232deaabeb8cda936770237690b67c46eee17090ea7fa34f5361205de9c1ea8",
+      "tag": "0067_add_agent_cron_tables",
+      "when": 1767929492232
+    },
+    {
+      "hash": "143ecf98eb575750f45e06facd28fa2c0fc4300ef04fd0c35d62deb5ae376668",
+      "tag": "0068_update_group_data",
+      "when": 1768189437504
+    },
+    {
+      "hash": "7c882b0540cfda6c7fe19e3109713411be3072206c6c76097b1222c556c4d2e7",
+      "tag": "0069_add_topic_shares_table",
+      "when": 1768303764632
+    },
+    {
+      "hash": "8d720d22c6e7e125edf0ecde201b5a24041954e7ad10c476a37497b98ad7d61c",
+      "tag": "0070_add_user_memory_activities",
+      "when": 1768999498635
+    },
+    {
+      "hash": "a70fbaaa27d793d70b5fb5203929fe31659c707f37415e4b2eaba54ad1f1d420",
+      "tag": "0071_add_async_task_extend",
+      "when": 1769093425330
+    },
+    {
+      "hash": "357ecfc4f578a45b5f48e31c4688ace650356c3dcef575c115d21e13cce59eac",
+      "tag": "0072_add_market_identifier_chat_group",
+      "when": 1769251608013
+    },
+    {
+      "hash": "3f9b1b043e133feb737f12fa75b01615f4e159a2e6fa33e69273e68089783c19",
+      "tag": "0073_add_message_group_metadata",
+      "when": 1769272397744
+    },
+    {
+      "hash": "65373c691a1e05fe082f6637b78ef7917af850a4150702a833c950dac6df80a7",
+      "tag": "0074_add_fk_indexes_for_cascade_delete",
+      "when": 1769341100106
+    },
+    {
+      "hash": "d69b5144028ec04eda61f949c7de481552119858e329374afd1ec747e4eddd62",
+      "tag": "0075_add_user_memory_persona",
+      "when": 1769362978088
+    },
+    {
+      "hash": "b129da68e81075cb61516a358ab5ab69a6f9dad716920934409c5462dca91077",
+      "tag": "0076_add_message_group_index",
+      "when": 1770179814971
+    },
+    {
+      "hash": "1391abef19eb83853d58be0c31aace7762bd88e7eaba484f5426a74847acbd46",
+      "tag": "0077_add_agent_skills",
+      "when": 1770392264696
+    },
+    {
+      "hash": "b5b140f17d31664adf515c9bbac22a3a374a132ff99b5f02c5a2f20b672d7190",
+      "tag": "0078_added_id_nanoid_for_replacing_id",
+      "when": 1770621740632
+    },
+    {
+      "hash": "f504a487ab9e6f5408b93a724c542b31bce9b952cf077a5997334a06dd761e94",
+      "tag": "0079_update_id_nanoid_from_casted_id",
+      "when": 1770621892194
+    },
+    {
+      "hash": "26eeadeae9540876736132593011ddfe620c770e663fe5f8e2c3e018cc057552",
+      "tag": "0080_add_constraint_unique_not_null_to_id_nanoid",
+      "when": 1770624987735
+    },
+    {
+      "hash": "26f5ea957b6e46c5babe73b89d7b746b204e84cbcdfed3f14d4c62a16a71a8aa",
+      "tag": "0081_switch_forgien_key_to_id_nanoid",
+      "when": 1770626135088
+    },
+    {
+      "hash": "76e61bb94cf5922cc8c3573965fc5c53c520f326580bc7c683e2b39754b37b18",
+      "tag": "0082_set_id_nanoid_as_primary",
+      "when": 1770628390927
+    },
+    {
+      "hash": "3084c1381d0fd19abe35b298deaf42c6f7ea38d06daed0e3ecdbc891be2750d6",
+      "tag": "0083_remove_id_seq_identity_column",
+      "when": 1770628799077
+    },
+    {
+      "hash": "0034e6afd3a425720ba01ec5d41119ed49a1a491856411f93c143db3c50c01b1",
+      "tag": "0084_rename_id_nanoid_to_id",
+      "when": 1770631019385
+    },
+    {
+      "hash": "cbe9d605b30af0e6888396a6c3a318eb61ce2867c5a5fb3fc8ada01c9f81bad8",
+      "tag": "0085_remove_id_unique_constraint",
+      "when": 1770632176750
+    },
+    {
+      "hash": "c9e8945cbd337a99fdb4ef8a595fa4875caf11c35efbcb740ff8ca455572f16d",
+      "tag": "0086_video_generation_schema",
+      "when": 1770955654188
+    },
+    {
+      "hash": "85cddffd817e6884b5a981b877bd77fbdbaf6b94c0b49cadfad54d317667877a",
+      "tag": "0087_add_eval_benchmark",
+      "when": 1771386090928
+    },
+    {
+      "hash": "d80e7fb1b515bd067d4c14618f4f73f5696159ac2e9b911c1d8f2cfbd393a8c8",
+      "tag": "0088_fix_benchmark_add_bot_provider",
+      "when": 1772277762014
+    },
+    {
+      "hash": "bf11c21cae799c6f9d58bed11a57c1cd384f1bd616ab10baf1a85e9eedd4407e",
+      "tag": "0089_add_api_key_hash",
+      "when": 1772723999146
+    },
+    {
+      "hash": "f5ff69f21db850b260ca8f3be5e615b78a7425fb030d0ca42a963e9d0c0e0f91",
+      "tag": "0090_enable_pg_search",
+      "when": 1773115333051
+    },
+    {
+      "hash": "f2301c92c04b4edfd9e8cefc491c7f7d5a0325231624fa6fe9451cc59804f46b",
+      "tag": "0091_topics_add_description",
+      "when": 1773308533505
+    },
+    {
+      "hash": "46908528df3223d628b04bd4206956de07400e332dd6f9d45406b07ffff1c0d4",
+      "tag": "0092_add_agent_documents",
+      "when": 1773419250145
+    },
+    {
+      "hash": "ae390b474eaaacfc943db4762348aac5bbc7a87af1bcdf99737719d04fd7e7bc",
+      "tag": "0093_add_bm25_indexes_with_icu",
+      "when": 1773653550268
+    },
+    {
+      "hash": "0b2fbae4e0f5ee9d1921a0de312d5521727320b388ee96d92d7fc3bb6bd62fd3",
+      "tag": "0094_agent_bot_providers_add_settings",
+      "when": 1773764776073
+    },
+    {
+      "hash": "45c5f157fd69999088eb7971debfaff7e24eadd38b66ce3cc6c5bfb7725b3709",
+      "tag": "0095_add_agent_task_system",
+      "when": 1774502940061
+    },
+    {
+      "hash": "074c9e6b5d9ec65811944293032d8a868ee158627f36b64882557c58c8c9ad14",
+      "tag": "0096_add_notification_tables",
+      "when": 1774514478074
+    },
+    {
+      "hash": "2916832e559d1325b86c14086ac348f00f6f3398674ef0b5a030f3418e4e1492",
+      "tag": "0097_add_agent_onboarding",
+      "when": 1774548140282
+    },
+    {
+      "hash": "705ef9f499dd2138fb350557668f2ac122d207efc7c8d0ec6860c4647dc69253",
+      "tag": "0098_add_document_history",
+      "when": 1776234919716
+    },
+    {
+      "hash": "c5c60809b403cc152e7aa1f08e51c2f9c9d0dbcd6c806c120e67b97a90a93b8f",
+      "tag": "0099_topic_status_tasks_automation_mode",
+      "when": 1776674965365
+    },
+    {
+      "hash": "292209c447f7a88bd45239be47f38d3fc78f4e4d4df980c472d84cc1a09edd29",
+      "tag": "0100_add_metadata_and_trigger_to_briefs",
+      "when": 1777552567945
+    },
+    {
+      "hash": "5a315751529ac638603043aa91315f5170d4557035b9ea54e2dfd851885c2afe",
+      "tag": "0101_add_messenger_tables",
+      "when": 1778164638645
+    },
+    {
+      "hash": "f7968cfe66b2038527ce76aaa600843cd2fc06dd96bd91e7fafbe9dcdb8e43f0",
+      "tag": "0102_add_agent_operations_table",
+      "when": 1778602304603
+    },
+    {
+      "hash": "2cd4169c4c8ac3538dc2080330c27c713a15389e8cce5c1a89768cf24d8cf656",
+      "tag": "0103_add_llm_tracing_and_eval_experiments",
+      "when": 1779464293586
+    },
+    {
+      "hash": "7cd112ddd7924ad41642a1f49cafe3d208241388b682506f9e32842920405c2b",
+      "tag": "0104_add_devices_connectors_push_tokens",
+      "when": 1779966336116
+    },
+    {
+      "hash": "d21ebec07adeb98943ebb586ccd0d8186c13fa027a48c9caea932c697d2a5217",
+      "tag": "0105_add_usage_agent_share_workspace",
+      "when": 1780497229863
+    },
+    {
+      "hash": "ca100d057987f9bc7d247e15427509c2020ab3baed6738b7de9a27ab359870dc",
+      "tag": "0106_add_workspace_id_columns",
+      "when": 1780508742730
+    },
+    {
+      "hash": "12741ecb7dd96057cd33dbf4bd50c47a08e3051b22be2800455ec43c05d8edb4",
+      "tag": "0107_add_workspace_id_fk",
+      "when": 1780557205766
+    },
+    {
+      "hash": "838da6adabf83b90eb356f0896d0edc054969afa89bc5a60beb7568bd78c186f",
+      "tag": "0108_add_workspace_id_indexes",
+      "when": 1780563957134
+    },
+    {
+      "hash": "c906fa0737b76f8223d39d25e5d8c884a33aec26390bc4d6c10730d70f118d55",
+      "tag": "0109_migrate_unique_constraints",
+      "when": 1780571940776
+    },
+    {
+      "hash": "e3b03c1c2dffb25d3cc6ee738ae1af354e462f35e1f3f41a79b98e5b71c2d281",
+      "tag": "0110_add_verify_tables_and_ai_infra_id",
+      "when": 1780832120210
+    },
+    {
+      "hash": "5885e44be3d3a9bd3d610c06db710a5f83444a6ea31f171544f19fd95cd306d3",
+      "tag": "0111_workspace_device_and_ai_infra_surrogate_pk",
+      "when": 1781883177374
+    },
+    {
+      "hash": "6f429e29cf4d13a724c7821e20e88ebfb4bb8e3975f88c79ff548dc7e5ef8b96",
+      "tag": "0112_add_verify_evidence_and_reports",
+      "when": 1781953132733
+    },
+    {
+      "hash": "a0acb0bf63e28295d9bf5f780d127ec6710cd8bc6b2d7e4449ac06c9f84d1e69",
+      "tag": "0113_add_verify_runs",
+      "when": 1781964552445
+    },
+    {
+      "hash": "846eac4dd71826907792619396a2c49f51146d4a7412244b8b91f408f724816f",
+      "tag": "0114_add_verify_run_scenario_context",
+      "when": 1782009459420
+    },
+    {
+      "hash": "b60d87ead9cb5d78e01468c3a8af4128faebd8b06a3f2e7b7c76753fe5fe0fc0",
+      "tag": "0115_add_workspace_private_visibility",
+      "when": 1782954350516
+    },
+    {
+      "hash": "5068a29f8c6c89febe1a0295f9ba0876ed870614a568ae30036a83fbf436c94f",
+      "tag": "0116_add_task_connector_message_and_verify_updates",
+      "when": 1783164982287
+    },
+    {
+      "hash": "bdebeba00e6d57ff418748ffb8c78852a85b5e9d88ae476d13bf8b4b66e49a41",
+      "tag": "0117_workspace_user_settings_and_device_share",
+      "when": 1783760291530
+    },
+    {
+      "hash": "7f25c69de3295373067bc17c5f1e5d74822f4be1b9243a4f0cb5a5a277f86d13",
+      "tag": "0118_workspace_user_settings_surrogate_pk",
+      "when": 1783773134101
+    },
+    {
+      "hash": "9377f70ea26e700d05ba17792df051c624f70e59354481c5d2c634ffce22e4ca",
+      "tag": "0119_add_acceptances",
+      "when": 1784101324965
+    },
+    {
+      "hash": "03740df718ef4883d4d1d4865eeda46a85380c6e962a78e162eb9b5775fd93ff",
+      "tag": "0120_oidc_clients_governance",
+      "when": 1784130423992
+    },
+    {
+      "hash": "14ba1143962422e31f7551ed7fa5d2ba921d8c42b1d7a5923ec1ae87cb3b907e",
+      "tag": "0121_add_work_registry_tables",
+      "when": 1784209244697
+    },
+    {
+      "hash": "ca6247794e51209be0d3b23ac47e85e65801e52852f14f6638d656a8335f628c",
+      "tag": "0122_verify_visibility_and_check_user_decision",
+      "when": 1784258432422
+    },
+    {
+      "hash": "a09532acd7f4bc27377637262375c7c94e5ff1e45aad20b190c13182d9295d40",
+      "tag": "0123_resource_permissions_and_messenger_credentials",
+      "when": 1784296516822
+    },
+    {
+      "hash": "a6ea6c4f8ad61e52faf7a0a639024cdce5389c388090faf3ef616bc62f54754a",
+      "tag": "0124_agent_quota_accounts",
+      "when": 1784554877720
+    },
+    {
+      "hash": "5e57cae67229b0ea97f0ce8d799c3f3d934724fd3e3a30c073096fa87ec3a4da",
+      "tag": "0125_add_stats_activity_created_at_indexes",
+      "when": 1784642643318
+    },
+    {
+      "hash": "3d6ff17d8f8749b0679ca55e8c159243b21d095ba3f90b1933883b14cf95fd3a",
+      "tag": "0126_agent_quota_workspace_identity",
+      "when": 1784648819431
+    },
+    {
+      "hash": "917ff8885fff978d96d9dea282090a24dafc58c4a33b3b226fe3149b57e0c360",
+      "tag": "0127_add_topic_comments",
+      "when": 1784716592911
+    },
+    {
+      "hash": "44b99518b9592d296c38a8b51360a13db64af1a0a3a62433f179b9a92d1e723a",
+      "tag": "0128_notifications_add_workspace_id",
+      "when": 1784898202325
+    },
+    {
+      "hash": "76c76620341217a76e794302046a36285ddfa4d38edc7ca0738636a25144b1ad",
+      "tag": "0129_workspace_members_unique_active_owner",
+      "when": 1784941780510
+    },
+    {
+      "hash": "0e719fe4ca9906730808af45bb4d2f4264a6bc780fcbd49a08a2eff5af17b2f4",
+      "tag": "0130_notifications_add_context",
+      "when": 1785044468256
+    },
+    {
+      "hash": "b469e0f50106ceb6b4480bf7f8e40992b155a3247fc79b4a2f15ee57d23111f5",
+      "tag": "0131_fixed_mathemanic",
+      "when": 1785330810607
+    },
+    {
+      "hash": "d225427a2e18be6a88e6d17424474648bba6300123d6b1d73949926f983dc422",
+      "tag": "0132_shocking_blizzard",
+      "when": 1785332967344
+    },
+    {
+      "hash": "d1090e8c0e4cceb4d9a0bc85c1145927fe68fc372c143156aae83997eb8b1ab6",
+      "tag": "0133_aico_public_ids_trial_budget",
+      "when": 1785408828375
+    },
+    {
+      "hash": "e03914acce410e85b08bec3ba1022f4bef32bde48623da659c1ef5e33517700a",
+      "tag": "0134_agents_add_name_column",
+      "when": 1785657510456
+    },
+    {
+      "hash": "ddff74f088dbf2e0a30632bed134669fe7ea8ce65c28ba34cc08da8f735a1fb2",
+      "tag": "0135_aico_openrouter_model_catalog",
+      "when": 1785659889771
+    },
+    {
+      "hash": "fecca3c92e0dad1fff7450f3c30ee35c95c90559895473053a94544e790c2701",
+      "tag": "0136_aico_final_remediation",
+      "when": 1785740000000
+    },
+    {
+      "hash": "1c4477d15fe148878772f38f84a3c8a54d88411cdeb6a621b4f0a400f470a1d6",
+      "tag": "0137_aico_openrouter_default_enabled",
+      "when": 1786060000000
+    },
+    {
+      "hash": "cc9e424535575a639e0adc2bc04137be2b1e6444af140f282d49fb61c724aa73",
+      "tag": "0138_aico_openrouter_model_sync_runs",
+      "when": 1786169920581
+    },
+    {
+      "hash": "20eafdd3c2edfa454efad92134d7eb57dca5ad5a54e37b73dd97097c8a98dc49",
+      "tag": "0139_aico_pin_openrouter_auto",
+      "when": 1786200000000
+    },
+    {
+      "hash": "e603b81f3b3fef4fbca1d666ee9ef7ef8bd8f7501c7985ed1e1079056f5df69c",
+      "tag": "0140_aico_seed_default_team_models",
+      "when": 1786250000000
+    },
+    {
+      "hash": "752728118fe7d663d7aadbaad5894b2a12f7e3aee428e4cbc6abac7a3fb8d48a",
+      "tag": "0141_aico_member_budgets_org_id",
+      "when": 1786500000000
+    },
+    {
+      "hash": "ed2895661189eaeecde7544eef91ca4920a862cff729e79d392caf34879363bb",
+      "tag": "0142_aico_security_audit_and_alerts",
+      "when": 1786277590791
+    },
+    {
+      "hash": "cbc009c98db85d694bc18fe04e7f32c8d3632342efdf134f3a268c22d9a4eed4",
+      "tag": "0143_aico_wallet_tx_gateway_ref_uidx",
+      "when": 1786600000000
+    },
+    {
+      "hash": "dd1479597c7c450f8ea8c69ae3f126e96f6a0b3d7dca005ff6dcabb0af38f397",
+      "tag": "0144_aico_wallet_tx_balance_audit",
+      "when": 1786610000000
+    },
+    {
+      "hash": "3c9f2db067dad6818fc5c9079967f574379c52ed1616f2732127b8724b65b078",
+      "tag": "0145_aico_platform_fx_config",
+      "when": 1786700000000
+    },
+    {
+      "hash": "2eb2b06540b47cb246b67af1c4182d68fa8cb108a56bd8df866281814e3b183f",
+      "tag": "0146_aico_platform_admin_identity",
+      "when": 1787028494381
+    },
+    {
+      "hash": "e8496e15602d283ef025dfbbfcda2a64705376cd60b771899c33648d3cbcdcea",
+      "tag": "0147_aico_usage_multiplier",
+      "when": 1787900000000
+    },
+    {
+      "hash": "401aa26e5e196874277c1e2a5aae283adee3da4d4d61e7c21223532eadd4060e",
+      "tag": "0148_aico_wallet_raw_capacity",
+      "when": 1788000000000
+    },
+    {
+      "hash": "cc0d52352145305a8ea8ec782b38afccc535e9e3df9226e373d7c38a7c6ab5aa",
+      "tag": "0149_aico_wallet_frozen_capacity",
+      "when": 1788100000000
+    },
+    {
+      "hash": "b69aef5d98afc67b6d14d11ba3dff17b10db8d6f84ae11893f5e32d47d41db92",
+      "tag": "0150_aico_wallet_usage_sync",
+      "when": 1788200000000
+    },
+    {
+      "hash": "1291aae12b7c943f507cbb6b1b20be409fb91acd2c0d00434311dde71180717d",
+      "tag": "0151_aico_per_provider_usage_multiplier",
+      "when": 1788300000000
+    },
+    {
+      "hash": "da763977e4a5bdca733b7af06595f864c00a3353eff6e439b863d7cdae6cd0d8",
+      "tag": "0152_aico_model_multiplier_overrides",
+      "when": 1788400000000
+    },
+    {
+      "hash": "80177d9efa7c800fec88f418f12332c2bb0e9e9cd4196f57184676d496dc4666",
+      "tag": "0153_aico_managed_key_limit",
+      "when": 1788500000000
+    },
+    {
+      "hash": "b473b22e7fd7417dcaddd0394e949bcc8d1b7c1d53d21fc31885b238f3b03566",
+      "tag": "0154_aico_managed_key_provider",
+      "when": 1788600000000
+    },
+    {
+      "hash": "57d0eb55ebe08cca3de33e14b8124f6878eda6104756b3f06206e2aedeaf526b",
+      "tag": "0155_aico_enable_existing_catalog_models",
+      "when": 1788700000000
+    },
+    {
+      "hash": "beaf76aa0cff0f40d2d89dc08c8b9ec7346f002f05a66c86250f651c7293331b",
+      "tag": "0156_aico_usage_ledger",
+      "when": 1788800000000
+    },
+    {
+      "hash": "7125342b4002ee58672e697e47d375c4b882939e4968036ad79a45538a029b85",
+      "tag": "0157_aico_reconciliation_runs",
+      "when": 1788900000000
+    },
+    {
+      "hash": "b310d5c76f14e0916e69906bee1af2976f067b6f61d0731cb63a72c5b019caaf",
+      "tag": "0158_aico_member_budget_unique_key",
+      "when": 1789000000000
+    },
+    {
+      "hash": "dd0db1a12642d8f75955d702b3c1e26cfdfef1d1d74c86dc8d30f3569209f4e8",
+      "tag": "0159_aico_budget_closed_hold_pool",
+      "when": 1789100000000
+    },
+    {
+      "hash": "c83cf9abe3ee8b29c12f779da817f4968c935b3039c004a2f573a1f14a46f53e",
+      "tag": "0160_aico_billing_foreign_keys",
+      "when": 1793469018920
+    }
+  ],
+  "sourceRef": "754a7cb8aa6fed3459bd10b381c90060e5c8ab10"
+}
