@@ -1,3 +1,4 @@
+import { scrubVendorNames, scrubVendorNamesDeep } from '@lobechat/const';
 import { type ChatMessageError } from '@lobechat/types';
 import { type AudioPlayerProps } from '@lobehub/tts/react';
 import { AudioPlayer } from '@lobehub/tts/react';
@@ -22,7 +23,7 @@ const Player = memo<PlayerProps>(({ onRetry, error, onDelete, audio, isLoading, 
         <Alert
           closable
           style={{ alignItems: 'center', width: '100%' }}
-          title={error.message}
+          title={error.message ? scrubVendorNames(error.message) : error.message}
           type="error"
           action={
             <Button size={'small'} type={'primary'} onClick={onRetry}>
@@ -32,7 +33,7 @@ const Player = memo<PlayerProps>(({ onRetry, error, onDelete, audio, isLoading, 
           extra={
             error.body && (
               <Highlighter actionIconSize={'small'} language={'json'} variant={'borderless'}>
-                {JSON.stringify(error.body, null, 2)}
+                {JSON.stringify(scrubVendorNamesDeep(error.body), null, 2)}
               </Highlighter>
             )
           }

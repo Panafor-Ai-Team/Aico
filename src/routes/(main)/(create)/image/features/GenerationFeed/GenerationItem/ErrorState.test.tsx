@@ -115,4 +115,33 @@ describe('ErrorState', () => {
       screen.queryByText('Content policy check failed. Revise your prompt and try again.'),
     ).toBeNull();
   });
+
+  it('scrubs upstream gateway names out of the task error body', () => {
+    const generation: Generation = {
+      asyncTaskId: 'task-id',
+      createdAt: new Date(),
+      id: 'generation-id',
+      task: {
+        error: {
+          body: { detail: 'CheapVibeCode API 503: Service Unavailable' },
+          name: AsyncTaskErrorType.ServerError,
+        },
+        id: 'task-id',
+        status: AsyncTaskStatus.Error,
+      },
+    };
+
+    render(
+      <ErrorState
+        aspectRatio="1 / 1"
+        generation={generation}
+        generationBatch={generationBatch}
+        onCopyError={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Panachat API 503: Service Unavailable')).toBeTruthy();
+    expect(screen.queryByText(/CheapVibeCode/)).toBeNull();
+  });
 });
