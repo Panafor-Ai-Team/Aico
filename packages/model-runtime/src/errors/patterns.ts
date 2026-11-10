@@ -484,6 +484,11 @@ export const ERROR_PATTERNS: ErrorPattern[] = [
     code: AgentRuntimeErrorType.ProviderServiceUnavailable,
     match: sub('Upstream service temporarily unavailable'),
   },
+  // CheapVibeCode capacity refusal (`type: service_unavailable_error`, `code: capacity_unavailable`).
+  {
+    code: AgentRuntimeErrorType.ProviderServiceUnavailable,
+    match: sub('Service is temporarily unavailable'),
+  },
   {
     code: AgentRuntimeErrorType.ProviderServiceUnavailable,
     match: sub('This model is currently experiencing high demand'),

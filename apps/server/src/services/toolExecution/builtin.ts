@@ -1,4 +1,5 @@
 import { GoalIdentifier } from '@lobechat/builtin-tool-goal';
+import { MemoryIdentifier } from '@lobechat/builtin-tool-memory';
 import { builtinTools } from '@lobechat/builtin-tools';
 import { type LobeChatDatabase } from '@lobechat/database';
 import {
@@ -11,6 +12,10 @@ import debug from 'debug';
 
 import { UserModel } from '@/database/models/user';
 import { isCapabilityEnabled } from '@/server/services/aico/capabilityGate';
+import {
+  isUserMemoryEnabled,
+  USER_MEMORY_DISABLED_MESSAGE,
+} from '@/server/services/aico/userMemoryGate';
 import { ComposioService } from '@/server/services/composio';
 import { MarketService } from '@/server/services/market';
 
@@ -122,6 +127,17 @@ export class BuiltinToolsExecutor implements IToolExecutor {
     // a gated manifest set.
     if (identifier === GoalIdentifier && !(await isCapabilityEnabled(context.userId, 'goals'))) {
       const message = 'Goals are not enabled on this server, so the goal tool was not run.';
+      return {
+        content: message,
+        error: { code: 'CAPABILITY_DISABLED', message },
+        success: false,
+      };
+    }
+
+    // Aico operator switch: memory may be off for the whole server even when the
+    // calling agent still carries the tool (replayed or client-sent calls).
+    if (identifier === MemoryIdentifier && !isUserMemoryEnabled()) {
+      const message = `${USER_MEMORY_DISABLED_MESSAGE} The memory tool was not run.`;
       return {
         content: message,
         error: { code: 'CAPABILITY_DISABLED', message },

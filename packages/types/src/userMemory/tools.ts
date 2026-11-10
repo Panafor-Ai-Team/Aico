@@ -10,8 +10,15 @@ import type {
 } from './layers';
 import { LayersEnum } from './shared';
 
+// Models sometimes send placeholder blanks (`categories: [""]`). A blank filter value
+// means "no filter", so drop it instead of failing the whole search.
+const isBlankString = (item: unknown) => typeof item === 'string' && item.trim().length === 0;
+
 const stringArrayFieldSchema = z.preprocess(
-  (value) => (typeof value === 'string' ? [value] : value),
+  (value) => {
+    const list = typeof value === 'string' ? [value] : value;
+    return Array.isArray(list) ? list.filter((item) => !isBlankString(item)) : list;
+  },
   z.array(z.string().trim().min(1)),
 );
 

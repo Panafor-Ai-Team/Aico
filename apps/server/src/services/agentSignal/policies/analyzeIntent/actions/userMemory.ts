@@ -28,6 +28,10 @@ import {
 } from '@/server/modules/Mecha';
 import { AgentService } from '@/server/services/agent';
 import type { AgentSignalOperationMarker } from '@/server/services/agentSignal/operationMarker';
+import {
+  isUserMemoryEnabled,
+  USER_MEMORY_DISABLED_MESSAGE,
+} from '@/server/services/aico/userMemoryGate';
 
 import type { RuntimeProcessorContext } from '../../../runtime/context';
 import { defineActionHandler } from '../../../runtime/middleware';
@@ -190,6 +194,10 @@ export const runMemoryActionAgent = async (
    */
   dispatch?: { marker: AgentSignalOperationMarker },
 ): Promise<MemoryAgentActionResult> => {
+  if (!isUserMemoryEnabled()) {
+    return { detail: USER_MEMORY_DISABLED_MESSAGE, status: 'skipped' };
+  }
+
   if (!input.agentId) {
     return {
       detail: 'Missing agentId for memory action.',

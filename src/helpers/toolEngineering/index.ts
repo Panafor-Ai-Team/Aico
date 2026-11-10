@@ -32,6 +32,7 @@ import type { ConnectorToolPermission } from '@/database/schemas';
 import { applyToolNameMaxLength } from '@/helpers/applyToolNameMaxLength';
 import { resolveToolMode } from '@/helpers/executionTarget';
 import { isToolAvailableInCurrentEnv } from '@/helpers/toolAvailability';
+import { isUserMemoryAllowedByServer } from '@/helpers/userMemoryAvailability';
 import { patchManifestWithPermissions } from '@/libs/mcp/patchManifestPermissions';
 import { getAgentStoreState } from '@/store/agent';
 import { agentChatConfigSelectors, agentSelectors } from '@/store/agent/selectors';
@@ -255,8 +256,10 @@ export const createAgentToolsEngine = (
   // `alwaysOnToolIds` are deliberately omitted in chat mode so the activator
   // can't smuggle additional tools in.
   const kbEnabled = agentSelectors.hasEnabledKnowledgeBases(agentState);
+  // The operator switch (server config) overrides both the agent and the user setting.
   const memoryEnabled =
-    chatConfig.memory?.enabled ?? settingsSelectors.memoryEnabled(useUserStore.getState());
+    isUserMemoryAllowedByServer() &&
+    (chatConfig.memory?.enabled ?? settingsSelectors.memoryEnabled(useUserStore.getState()));
   const webBrowsingEnabled = searchConfig.useApplicationBuiltinSearchTool;
   // Deployment-level gate: the server reports `false` when neither an Onlyboxes
   // console nor Market Trusted Client credentials are configured (see

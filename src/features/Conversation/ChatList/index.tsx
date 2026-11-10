@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { memo, useCallback, useMemo } from 'react';
 
 import AsyncError from '@/components/AsyncError';
+import { useUserMemoryAllowed } from '@/helpers/userMemoryAvailability';
 import { useFetchTopicMemories } from '@/hooks/useFetchMemoryForTopic';
 import { useFetchNotebookDocuments } from '@/hooks/useFetchNotebookDocuments';
 import { getMessageListCacheIdentity } from '@/services/message/cache';
@@ -95,7 +96,9 @@ const ChatList = memo<ChatListProps>(
   }) => {
     // Fetch messages (SWR key is null when skipFetch is true)
     const context = useConversationStore((s) => s.context);
-    const enableUserMemories = useUserStore(settingsSelectors.memoryEnabled);
+    const userMemoryEnabled = useUserStore(settingsSelectors.memoryEnabled);
+    const userMemoryAllowed = useUserMemoryAllowed();
+    const enableUserMemories = userMemoryAllowed && userMemoryEnabled;
     const [skipFetch, useFetchMessages] = useConversationStore((s) => [
       dataSelectors.skipFetch(s),
       s.useFetchMessages,

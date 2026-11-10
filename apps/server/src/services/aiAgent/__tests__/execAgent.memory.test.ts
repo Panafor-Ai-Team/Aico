@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { inMemoryAgentStateManager } from '@/server/modules/AgentRuntime/InMemoryAgentStateManager';
 import { inMemoryStreamEventManager } from '@/server/modules/AgentRuntime/InMemoryStreamEventManager';
+import type * as UserMemoryGate from '@/server/services/aico/userMemoryGate';
 
 import {
   createMockResponsesAPIStream,
@@ -36,6 +37,12 @@ vi.mock('@/server/services/file', () => ({
   FileService: vi.fn().mockImplementation(() => ({
     getFullFileUrl: vi.fn().mockImplementation((path: string) => (path ? `/files${path}` : null)),
   })),
+}));
+
+const memorySwitch = vi.hoisted(() => ({ enabled: true }));
+vi.mock('@/server/services/aico/userMemoryGate', async (importOriginal) => ({
+  ...(await importOriginal<typeof UserMemoryGate>()),
+  isUserMemoryEnabled: () => memorySwitch.enabled,
 }));
 
 let mockResponsesCreate: any;
@@ -129,6 +136,25 @@ describe('execAgent - memory enabled priority', () => {
 
     const callArgs = mockResponsesCreate.mock.calls[0][0] as { tools?: any[] };
     expect(hasMemoryTools(callArgs.tools ?? [])).toBe(false);
+  });
+
+  // Aico operator switch (`AICO_USER_MEMORY_ENABLED=0`): wins over an agent that
+  // explicitly turned memory on.
+  it('should drop memory tools when the operator turned memory off, even if the agent enables it', async () => {
+    memorySwitch.enabled = false;
+    try {
+      await setUserMemorySettings(true);
+      const agent = await createTestAgent({ memory: { enabled: true } });
+
+      const caller = aiAgentRouter.createCaller(createTestContext());
+      const result = await caller.execAgent({ agentId: agent.id, prompt: 'Hello' });
+      await waitForOperationComplete(inMemoryAgentStateManager, result.operationId);
+
+      const callArgs = mockResponsesCreate.mock.calls[0][0] as { tools?: any[] };
+      expect(hasMemoryTools(callArgs.tools ?? [])).toBe(false);
+    } finally {
+      memorySwitch.enabled = true;
+    }
   });
 
   it('should enable memory by default when neither agent nor user configures it', async () => {

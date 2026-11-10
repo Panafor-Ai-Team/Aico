@@ -25,6 +25,22 @@ vi.mock('@/store/tool', () => ({
         type: 'builtin' as const,
       },
       {
+        identifier: 'lobe-user-memory',
+        manifest: {
+          api: [
+            {
+              description: 'Search user memories',
+              name: 'searchUserMemory',
+              parameters: { properties: {}, type: 'object' },
+            },
+          ],
+          identifier: 'lobe-user-memory',
+          meta: { avatar: '🧠', title: 'Memory' },
+          type: 'builtin',
+        } as unknown as ToolManifest,
+        type: 'builtin' as const,
+      },
+      {
         identifier: 'search',
         manifest: {
           api: [
@@ -498,6 +514,46 @@ describe('toolEngineering', () => {
         setServerConfig({ enableCloudSandbox: true });
 
         expect(buildEnabledToolIds()).not.toContain('lobe-cloud-sandbox');
+      });
+    });
+
+    // Aico operator switch: `AICO_USER_MEMORY_ENABLED=0` must win over an agent
+    // that has memory turned on, so the model is never offered the memory tool.
+    describe('user memory operator switch', () => {
+      const setServerConfig = (serverConfig: Record<string, unknown>) => {
+        (window as any).global_serverConfigStore = { getState: () => ({ serverConfig }) };
+      };
+
+      const buildEnabledToolIds = () =>
+        createAgentToolsEngine({ model: 'gpt-4', provider: 'openai' }).generateToolsDetailed({
+          model: 'gpt-4',
+          provider: 'openai',
+          toolIds: ['lobe-user-memory'],
+        }).enabledToolIds;
+
+      it('drops the memory tool when the server turned memory off', () => {
+        const previous = mockCurrentChatConfig;
+        mockCurrentChatConfig = { memory: { enabled: true } };
+        try {
+          setServerConfig({ enableUserMemory: false });
+          expect(buildEnabledToolIds()).not.toContain('lobe-user-memory');
+        } finally {
+          mockCurrentChatConfig = previous;
+        }
+      });
+
+      it('keeps the agent setting in charge when the switch is on or not hydrated', () => {
+        const previous = mockCurrentChatConfig;
+        mockCurrentChatConfig = { memory: { enabled: true } };
+        try {
+          setServerConfig({ enableUserMemory: true });
+          expect(buildEnabledToolIds()).toContain('lobe-user-memory');
+
+          setServerConfig({});
+          expect(buildEnabledToolIds()).toContain('lobe-user-memory');
+        } finally {
+          mockCurrentChatConfig = previous;
+        }
       });
     });
 

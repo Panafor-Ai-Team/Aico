@@ -122,6 +122,12 @@ export interface GlobalServerConfig {
   enableMarketTrustedClient?: boolean;
   enableMultimodalUnderstanding?: boolean;
   enableUploadFileToServer?: boolean;
+  /**
+   * Aico operator switch (`AICO_USER_MEMORY_ENABLED`). `false` turns user memory
+   * off for everyone; `undefined` (not hydrated yet, or an older server) keeps
+   * each user's and agent's own memory setting in charge.
+   */
+  enableUserMemory?: boolean;
   image?: PartialDeep<UserImageConfig>;
   memory?: GlobalMemoryConfig;
   multimodalUnderstanding?: MultimodalUnderstandingConfig;

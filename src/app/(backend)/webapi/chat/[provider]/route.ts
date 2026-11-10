@@ -115,6 +115,13 @@ const withStreamInactivityGuard = (
   const decoder = new TextDecoder();
   let carry = '';
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // A client cancel ends the read loop with an error too; log the first outcome only.
+  let outcomeLogged = false;
+  const logOutcome = (outcome: 'done' | 'error' | 'cancelled') => {
+    if (outcomeLogged) return;
+    outcomeLogged = true;
+    logTiming(outcome);
+  };
   const guarded = new ReadableStream({
     async start(controller) {
       const arm = () => {
@@ -149,17 +156,17 @@ const withStreamInactivityGuard = (
           }
         }
         controller.close();
-        logTiming('done');
+        logOutcome('done');
       } catch (error) {
         controller.error(error);
-        logTiming('error');
+        logOutcome('error');
       } finally {
         clearTimeout(timer);
       }
     },
     cancel() {
       clearTimeout(timer);
-      logTiming('cancelled');
+      logOutcome('cancelled');
       reader.cancel().catch(() => {});
     },
   });
@@ -392,6 +399,13 @@ export const POST = checkAuth(async (req: Request, { params, userId, serverDB })
     } = e as ChatCompletionErrorPayload;
 
     const error = errorContent || e;
+
+    // The browser went away (stop button, closed tab, client-side retry): the runtime
+    // surfaces that as an empty provider error, which is not an upstream failure.
+    if (req.signal?.aborted) {
+      timingLog('client aborted before stream start: provider=%s', provider);
+      return createErrorResponse(errorType, { error, ...res, provider: publicProvider });
+    }
 
     // track the error at server side
     if (AGENT_RUNTIME_ERROR_SET.has(errorType as string)) {

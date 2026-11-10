@@ -33,6 +33,7 @@ import { appEnv } from '@/envs/app';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { parseMemoryExtractionConfig } from '@/server/globalConfig/parseMemoryExtractionConfig';
+import { assertUserMemoryEnabled } from '@/server/services/aico/userMemoryGate';
 import {
   createUserMemoryEmbedder,
   getUserMemoryEmbeddingRuntime,
@@ -309,6 +310,8 @@ export const userMemoryRouter = router({
   requestMemoryFromChatTopic: userMemoryWriteProcedure
     .input(userMemoryExtractionInputSchema)
     .mutation(async ({ ctx, input }) => {
+      assertUserMemoryEnabled();
+
       if (input.fromDate && input.toDate && input.fromDate > input.toDate) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
