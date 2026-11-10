@@ -1,5 +1,6 @@
 'use client';
 
+import { scrubVendorNames } from '@lobechat/const';
 import { ActionIconGroup, Block, Flexbox, Markdown, Tag, Text } from '@lobehub/ui';
 import { toast } from '@lobehub/ui/base-ui';
 import { createStaticStyles } from 'antd-style';
@@ -146,7 +147,7 @@ export const VideoGenerationBatchItem = memo<VideoGenerationBatchItemProps>(({ b
         : generation.task.error.body?.detail || generation.task.error.name || 'Unknown error';
 
     try {
-      await navigator.clipboard.writeText(errorMessage);
+      await navigator.clipboard.writeText(scrubVendorNames(errorMessage));
       toast.success(t('generation.actions.errorCopied'));
     } catch (error) {
       console.error('Failed to copy error message:', error);

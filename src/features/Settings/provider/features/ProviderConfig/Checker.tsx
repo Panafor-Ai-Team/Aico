@@ -1,6 +1,7 @@
 'use client';
 
 import { CheckCircleFilled } from '@ant-design/icons';
+import { scrubVendorNames, scrubVendorNamesDeep } from '@lobechat/const';
 import { type ChatMessageError } from '@lobechat/types';
 import { TraceNameMap } from '@lobechat/types';
 import { isRecord, pickTrimmedString } from '@lobechat/utils/object';
@@ -38,7 +39,6 @@ const Error = memo<{ error: ChatMessageError }>(({ error }) => {
     <Flexbox gap={8} style={{ maxWidth: 600, width: '100%' }}>
       <Alert
         showIcon
-        title={getRuntimeErrorMessage(t, error.type, { provider: providerName }, fallbackMessage)}
         type={'error'}
         extra={
           <Flexbox paddingBlock={8} paddingInline={16}>
@@ -48,10 +48,13 @@ const Error = memo<{ error: ChatMessageError }>(({ error }) => {
               variant={'borderless'}
               wrap={true}
             >
-              {JSON.stringify(error.body || error, null, 2)}
+              {JSON.stringify(scrubVendorNamesDeep(error.body || error), null, 2)}
             </Highlighter>
           </Flexbox>
         }
+        title={scrubVendorNames(
+          getRuntimeErrorMessage(t, error.type, { provider: providerName }, fallbackMessage),
+        )}
       />
     </Flexbox>
   );

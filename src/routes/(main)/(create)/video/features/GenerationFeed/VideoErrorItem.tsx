@@ -1,5 +1,6 @@
 'use client';
 
+import { scrubVendorNames } from '@lobechat/const';
 import { Block, Center, Icon, Text } from '@lobehub/ui';
 import { cssVar } from 'antd-style';
 import { VideoOffIcon } from 'lucide-react';
@@ -24,7 +25,7 @@ const VideoErrorItem = memo<VideoErrorItemProps>(
     const { t } = useTranslation('video');
     const { t: tError } = useTranslation(['error', 'modelRuntime']);
 
-    const errorMessage = useMemo(() => {
+    const rawErrorMessage = useMemo(() => {
       if (!generation.task.error) return '';
 
       const error = generation.task.error;
@@ -44,6 +45,9 @@ const VideoErrorItem = memo<VideoErrorItemProps>(
 
       return error.name || 'Unknown error';
     }, [generation.task.error, tError]);
+
+    // Async-task errors bypass the tRPC formatter, so scrub gateway names (D-018).
+    const errorMessage = rawErrorMessage ? scrubVendorNames(rawErrorMessage) : rawErrorMessage;
 
     const isProviderContentModerationError =
       generation.task.error?.name === AsyncTaskErrorType.ProviderContentModeration;
