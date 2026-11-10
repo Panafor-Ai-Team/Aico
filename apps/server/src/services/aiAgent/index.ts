@@ -168,6 +168,7 @@ import {
 } from '@/server/services/agentSignal/featureGate';
 import { shouldSuppressSignal } from '@/server/services/agentSignal/suppressSignal';
 import { isCapabilityEnabled } from '@/server/services/aico/capabilityGate';
+import { isUserMemoryEnabled } from '@/server/services/aico/userMemoryGate';
 import { platformRegistry } from '@/server/services/bot/platforms';
 import { ComposioService } from '@/server/services/composio';
 import {
@@ -2902,6 +2903,8 @@ export class AiAgentService {
     } catch (error) {
       log('execAgent: failed to fetch user settings: %O', error);
     }
+    // Aico operator switch: overrides both the agent-level and the user-level setting.
+    if (!isUserMemoryEnabled()) globalMemoryEnabled = false;
     log(
       'execAgent: globalMemoryEnabled=%s, timezone=%s',
       globalMemoryEnabled,

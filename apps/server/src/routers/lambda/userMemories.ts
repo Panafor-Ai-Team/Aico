@@ -47,6 +47,10 @@ import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { getServerDefaultFilesConfig } from '@/server/globalConfig';
 import { initEmbeddingRuntimeFromDB } from '@/server/modules/ModelRuntime';
 import { resolvePreferredGenerationBilling } from '@/server/services/aico/generationBilling';
+import {
+  assertUserMemoryEnabled,
+  isUserMemoryEnabled,
+} from '@/server/services/aico/userMemoryGate';
 import { embedUserMemoryTexts } from '@/server/services/memory/userMemory/embedding';
 import {
   createUserMemoryEmbedder as createEmbedder,
@@ -243,7 +247,15 @@ const memoryProcedure = authedProcedure.use(serverDatabase).use(async (opts) => 
     },
   });
 });
-const memoryWriteProcedure = memoryProcedure.use(withScopedPermission('message:create'));
+// Aico operator switch: search, tool writes and re-embedding stop while memory is off;
+// reading and listing stored memories stay on the plain `memoryProcedure`.
+const memoryActiveProcedure = memoryProcedure.use(async (opts) => {
+  assertUserMemoryEnabled();
+  return opts.next();
+});
+const memoryActiveWriteProcedure = memoryActiveProcedure.use(
+  withScopedPermission('message:create'),
+);
 
 export const userMemoriesRouter = router({
   getMemoryDetail: memoryProcedure
@@ -442,7 +454,7 @@ export const userMemoriesRouter = router({
       }
     }),
 
-  reEmbedMemories: memoryWriteProcedure
+  reEmbedMemories: memoryActiveWriteProcedure
     .input(reEmbedInputSchema.optional())
     .mutation(async ({ ctx, input }) => {
       try {
@@ -912,6 +924,9 @@ export const userMemoriesRouter = router({
   retrieveMemoryForTopic: memoryProcedure
     .input(z.object({ topicId: z.string() }))
     .query(async ({ ctx, input }) => {
+      // Aico operator switch: no embedding call, no error — the topic simply has no memories.
+      if (!isUserMemoryEnabled()) return EMPTY_SEARCH_RESULT;
+
       // Dev-only escape hatch: skip the embedding + memory search triggered by topic
       // load / switch, so chat debugging logs aren't drowned in embedding-model
       // router-runtime output. Only honored in non-production builds.
@@ -956,7 +971,7 @@ export const userMemoriesRouter = router({
       }
     }),
 
-  searchMemory: memoryProcedure.input(searchMemorySchema).query(async ({ input, ctx }) => {
+  searchMemory: memoryActiveProcedure.input(searchMemorySchema).query(async ({ input, ctx }) => {
     try {
       return await searchUserMemories(ctx, input);
     } catch (error) {
@@ -965,7 +980,7 @@ export const userMemoriesRouter = router({
     }
   }),
 
-  toolAddActivityMemory: memoryWriteProcedure
+  toolAddActivityMemory: memoryActiveWriteProcedure
     .input(ActivityMemoryItemSchema)
     .mutation(async ({ input, ctx }) => {
       try {
@@ -1027,7 +1042,7 @@ export const userMemoriesRouter = router({
       }
     }),
 
-  toolAddContextMemory: memoryWriteProcedure
+  toolAddContextMemory: memoryActiveWriteProcedure
     .input(ContextMemoryItemSchema)
     .mutation(async ({ input, ctx }) => {
       try {
@@ -1082,7 +1097,7 @@ export const userMemoriesRouter = router({
       }
     }),
 
-  toolAddExperienceMemory: memoryWriteProcedure
+  toolAddExperienceMemory: memoryActiveWriteProcedure
     .input(ExperienceMemoryItemSchema)
     .mutation(async ({ input, ctx }) => {
       try {
@@ -1138,7 +1153,7 @@ export const userMemoriesRouter = router({
       }
     }),
 
-  toolAddIdentityMemory: memoryWriteProcedure
+  toolAddIdentityMemory: memoryActiveWriteProcedure
     .input(AddIdentityActionSchema)
     .mutation(async ({ input, ctx }) => {
       try {
@@ -1206,7 +1221,7 @@ export const userMemoriesRouter = router({
       }
     }),
 
-  toolAddPreferenceMemory: memoryWriteProcedure
+  toolAddPreferenceMemory: memoryActiveWriteProcedure
     .input(PreferenceMemoryItemSchema)
     .mutation(async ({ input, ctx }) => {
       try {
@@ -1266,7 +1281,7 @@ export const userMemoriesRouter = router({
       }
     }),
 
-  toolRemoveIdentityMemory: memoryWriteProcedure
+  toolRemoveIdentityMemory: memoryActiveWriteProcedure
     .input(RemoveIdentityActionSchema)
     .mutation(async ({ input, ctx }) => {
       try {
@@ -1294,12 +1309,14 @@ export const userMemoriesRouter = router({
       }
     }),
 
-  toolSearchMemory: memoryProcedure.input(searchMemorySchema).query(async ({ input, ctx }) => {
-    const result = await searchUserMemories(ctx, input);
-    return result;
-  }),
+  toolSearchMemory: memoryActiveProcedure
+    .input(searchMemorySchema)
+    .query(async ({ input, ctx }) => {
+      const result = await searchUserMemories(ctx, input);
+      return result;
+    }),
 
-  toolUpdateIdentityMemory: memoryWriteProcedure
+  toolUpdateIdentityMemory: memoryActiveWriteProcedure
     .input(UpdateIdentityActionSchema)
     .mutation(async ({ input, ctx }) => {
       try {

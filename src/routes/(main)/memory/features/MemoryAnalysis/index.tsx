@@ -4,6 +4,8 @@ import { AsyncTaskStatus } from '@lobechat/types';
 import { Flexbox } from '@lobehub/ui';
 import { memo, useMemo } from 'react';
 
+import { useUserMemoryAllowed } from '@/helpers/userMemoryAvailability';
+
 import AnalysisAction from './Action';
 import { MemoryAnalysisStatus } from './Status';
 import { useMemoryAnalysisAsyncTask } from './useTask';
@@ -14,6 +16,7 @@ interface Props {
 
 const MemoryAnalysis = memo<Props>(({ iconOnly }) => {
   const { data, isValidating } = useMemoryAnalysisAsyncTask();
+  const userMemoryAllowed = useUserMemoryAllowed();
 
   const { showAction, showStatus } = useMemo(() => {
     const status = data?.status;
@@ -26,6 +29,8 @@ const MemoryAnalysis = memo<Props>(({ iconOnly }) => {
     };
   }, [data, isValidating]);
 
+  // Aico operator switch: with memory off on the server there is nothing to analyse with.
+  if (!userMemoryAllowed) return null;
   if (!showAction && !showStatus) return null;
 
   // For iconOnly mode, only show the action button

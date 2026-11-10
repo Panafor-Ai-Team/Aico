@@ -176,6 +176,13 @@ declare global {
        */
       AICO_TOMAN_PER_USD?: string;
       /**
+       * Operator switch for user memory (tool, topic retrieval, persona injection,
+       * extraction). `0` turns it off for every user regardless of their own or
+       * their agents' memory settings; stored memories and settings are kept and
+       * stay viewable. Anything else (or unset) leaves memory on.
+       */
+      AICO_USER_MEMORY_ENABLED?: string;
+      /**
        * CheapVibeCode API origin, no trailing slash. Their docs describe a
        * Primary/Fallback domain switch as the remedy for an outage, so this is a
        * comma-separated list tried in order.
@@ -244,6 +251,7 @@ export const getAicoConfig = () => {
       AICO_RECONCILE_LEDGER_SINCE: z.string().datetime().optional(),
       AICO_SECURITY_ALERT_WEBHOOK_URL: z.string().url().optional(),
       AICO_TOMAN_PER_USD: z.coerce.number().positive().int().default(187_400),
+      AICO_USER_MEMORY_ENABLED: z.boolean().default(true),
       OPENROUTER_MANAGEMENT_API_KEY: z.string().optional(),
     },
     runtimeEnv: {
@@ -278,6 +286,7 @@ export const getAicoConfig = () => {
       AICO_RECONCILE_LEDGER_SINCE: process.env.AICO_RECONCILE_LEDGER_SINCE || undefined,
       AICO_SECURITY_ALERT_WEBHOOK_URL: process.env.AICO_SECURITY_ALERT_WEBHOOK_URL || undefined,
       AICO_TOMAN_PER_USD: process.env.AICO_TOMAN_PER_USD,
+      AICO_USER_MEMORY_ENABLED: process.env.AICO_USER_MEMORY_ENABLED !== '0',
       OPENROUTER_MANAGEMENT_API_KEY: process.env.OPENROUTER_MANAGEMENT_API_KEY,
     },
   });

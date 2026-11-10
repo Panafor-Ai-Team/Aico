@@ -4,6 +4,7 @@ import { chunk } from 'es-toolkit/compat';
 
 import { appEnv } from '@/envs/app';
 import { parseMemoryExtractionConfig } from '@/server/globalConfig/parseMemoryExtractionConfig';
+import { isUserMemoryEnabled } from '@/server/services/aico/userMemoryGate';
 import {
   buildWorkflowPayloadInput,
   MemoryExtractionExecutor,
@@ -43,6 +44,9 @@ export const hourlyWorkflowHandler = async (
     response: { processedUsers: 0 },
   });
   if (!entryGuard.result) return entryGuard.response;
+
+  // Aico operator switch: same rule as the guard above — return, never throw.
+  if (!isUserMemoryEnabled()) return { processedUsers: 0 };
 
   const baseUrl = resolveBaseUrl();
   if (!baseUrl) {

@@ -4,6 +4,7 @@ import { debounce } from 'es-toolkit/compat';
 import { startTransition, useEffect, useMemo, useState } from 'react';
 
 import { createAgentToolsEngine } from '@/helpers/toolEngineering';
+import { useUserMemoryAllowed } from '@/helpers/userMemoryAvailability';
 import { useModelContextWindowTokens } from '@/hooks/useModelContextWindowTokens';
 import { useModelSupportToolUse } from '@/hooks/useModelSupportToolUse';
 import { useTokenCount } from '@/hooks/useTokenCount';
@@ -116,7 +117,8 @@ export const useTokenBreakdown = (): TokenBreakdown => {
     ];
   });
   const globalMemoryEnabled = useUserStore(settingsSelectors.memoryEnabled);
-  const effectiveMemoryEnabled = agentMemoryEnabled ?? globalMemoryEnabled;
+  const userMemoryAllowed = useUserMemoryAllowed();
+  const effectiveMemoryEnabled = userMemoryAllowed && (agentMemoryEnabled ?? globalMemoryEnabled);
   const [isProviderHasBuiltinSearch, isModelHasBuiltinSearch, isModelBuiltinSearchInternal] =
     useAiInfraStore((s) => [
       aiProviderSelectors.isProviderHasBuiltinSearch(provider)(s),

@@ -20,6 +20,12 @@ vi.mock('@/server/services/aico/capabilityGate', () => ({
   isCapabilityEnabled: vi.fn(async () => goalsCapability.enabled),
 }));
 
+const userMemorySwitch = vi.hoisted(() => ({ enabled: true }));
+vi.mock('@/server/services/aico/userMemoryGate', () => ({
+  isUserMemoryEnabled: () => userMemorySwitch.enabled,
+  USER_MEMORY_DISABLED_MESSAGE: 'User memory is turned off on this server.',
+}));
+
 vi.mock('@/server/services/composio', () => ({
   ComposioService: vi.fn().mockImplementation(() => ({})),
 }));
@@ -101,6 +107,41 @@ describe('BuiltinToolsExecutor Aico goals capability gate', () => {
     } finally {
       goalsCapability.enabled = false;
     }
+  });
+});
+
+describe('BuiltinToolsExecutor Aico user memory switch', () => {
+  const executor = new BuiltinToolsExecutor({} as any, 'user-1');
+  const memoryPayload: ChatToolPayload = {
+    apiName: 'searchUserMemory',
+    arguments: '{"queries":["favourite food"]}',
+    id: 'm1',
+    identifier: 'lobe-user-memory',
+    type: 'default' as any,
+  };
+
+  it('refuses a memory call without reaching the runtime while memory is off', async () => {
+    userMemorySwitch.enabled = false;
+    try {
+      const { getServerRuntime } = await import('../serverRuntimes');
+      vi.mocked(getServerRuntime).mockClear();
+
+      const result = await executor.execute(memoryPayload, context);
+
+      expect(result).toMatchObject({ error: { code: 'CAPABILITY_DISABLED' }, success: false });
+      expect(getServerRuntime).not.toHaveBeenCalled();
+    } finally {
+      userMemorySwitch.enabled = true;
+    }
+  });
+
+  it('runs the memory call while memory is on', async () => {
+    const { getServerRuntime } = await import('../serverRuntimes');
+    vi.mocked(getServerRuntime).mockClear();
+
+    await executor.execute(memoryPayload, context);
+
+    expect(getServerRuntime).toHaveBeenCalledWith('lobe-user-memory', context);
   });
 });
 

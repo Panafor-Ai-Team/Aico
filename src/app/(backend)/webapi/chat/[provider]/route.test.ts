@@ -2,6 +2,7 @@
 import { type LobeRuntimeAI } from '@lobechat/model-runtime';
 import { ModelRuntime } from '@lobechat/model-runtime';
 import { ChatErrorType } from '@lobechat/types';
+import debug from 'debug';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { auth } from '@/auth';
@@ -471,6 +472,108 @@ describe('POST handler', () => {
         expect(recordUsage).not.toHaveBeenCalled();
       } finally {
         ledger.mode = 'off';
+      }
+    });
+  });
+
+  describe('logging', () => {
+    it('does not log a client abort as a provider error', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const controller = new AbortController();
+        const aborted = new Request(new URL('https://test.com'), {
+          body: JSON.stringify({ aicoBilling: billing, model: 'test-model' }),
+          method: 'POST',
+          signal: controller.signal,
+        });
+        const mockRuntime: LobeRuntimeAI = {
+          baseURL: 'abc',
+          chat: vi.fn().mockImplementation(async () => {
+            controller.abort();
+            // What the runtime surfaces when the browser drops the request.
+            throw {
+              error: { headers: undefined, status: undefined },
+              errorType: 'ProviderBizError',
+            };
+          }),
+        };
+        vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+        await POST(aborted, { params: Promise.resolve({ provider: 'openrouter' }) });
+
+        const routeLines = [...warn.mock.calls, ...error.mock.calls].filter((args) =>
+          String(args[0]).startsWith('Route:'),
+        );
+        expect(routeLines).toEqual([]);
+      } finally {
+        warn.mockRestore();
+        error.mockRestore();
+      }
+    });
+
+    it('still logs a provider error when the client is connected', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const mockRuntime: LobeRuntimeAI = {
+          baseURL: 'abc',
+          chat: vi.fn().mockRejectedValue({
+            error: { message: 'Resource not found' },
+            errorType: 'ProviderBizError',
+          }),
+        };
+        vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+        await POST(makeRequest({ model: 'test-model' }), {
+          params: Promise.resolve({ provider: 'openrouter' }),
+        });
+
+        expect(warn).toHaveBeenCalledWith('Route: [openrouter] ProviderBizError:', {
+          message: 'Resource not found',
+        });
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('logs one timing outcome when the client cancels the stream', async () => {
+      const previousLog = debug.log;
+      const lines: string[] = [];
+      debug.log = (...args: unknown[]) => {
+        lines.push(args.map(String).join(' '));
+      };
+      debug.enable('lobe-server:chat:timing');
+      try {
+        const hanging = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"x":1}\n\n'));
+          },
+        });
+        const mockRuntime: LobeRuntimeAI = {
+          baseURL: 'abc',
+          chat: vi
+            .fn()
+            .mockResolvedValue(
+              new Response(hanging, { headers: { 'Content-Type': 'text/event-stream' } }),
+            ),
+        };
+        vi.mocked(initModelRuntimeFromDB).mockResolvedValue(new ModelRuntime(mockRuntime));
+
+        const response = await POST(makeRequest({ model: 'test-model' }), {
+          params: Promise.resolve({ provider: 'openrouter' }),
+        });
+        const reader = response.body!.getReader();
+        await reader.read();
+        await reader.cancel();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        const outcomes = lines
+          .map((line) => /"outcome":"(\w+)"/.exec(line)?.[1])
+          .filter((outcome): outcome is string => !!outcome);
+        expect(outcomes).toEqual(['cancelled']);
+      } finally {
+        debug.disable();
+        debug.log = previousLog;
       }
     });
   });

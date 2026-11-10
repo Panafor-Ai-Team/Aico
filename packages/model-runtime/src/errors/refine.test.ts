@@ -4,6 +4,18 @@ import { describe, expect, it } from 'vitest';
 import { refineErrorCode } from './refine';
 
 describe('refineErrorCode', () => {
+  // Production 2026-11-10: CheapVibeCode's capacity refusal stayed a generic
+  // ProviderBizError (HTTP 471) because the wording carries an extra "is".
+  it('classifies the CheapVibeCode capacity refusal as a transient 503', () => {
+    expect(
+      refineErrorCode({
+        errorType: AgentRuntimeErrorType.ProviderBizError,
+        message: 'Service is temporarily unavailable. Please retry in a moment.',
+        provider: 'cheapvibecode',
+      }),
+    ).toBe(AgentRuntimeErrorType.ProviderServiceUnavailable);
+  });
+
   it('does not touch a specific (non-refinable) errorType', () => {
     expect(
       refineErrorCode({
