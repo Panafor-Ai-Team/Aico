@@ -420,10 +420,6 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
     keywords: ['delete account', 'deactivate', 'close account'],
     labelKey: 'accountDeletion.title',
     tab: SettingsTabs.Storage,
-    // Rendered by the business AccountDeletion slot; the OSS default slot
-    // renders nothing, so this gate matches the actual render condition only
-    // for implementations that provide the slot (e.g. cloud).
-    visible: (ctx) => ctx.enableBusinessFeatures,
   },
   // Proxy (the tab itself is desktop-only and filtered via useCategory)
   {

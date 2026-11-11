@@ -75,7 +75,7 @@ vi.mock('antd', () => ({
 }));
 
 vi.mock('@/business/client/features/AccountDeletion', () => ({
-  default: () => <div />,
+  default: () => <div data-testid="account-deletion" />,
 }));
 
 vi.mock('@/features/DataImporter', () => ({
@@ -116,6 +116,12 @@ afterEach(() => {
 });
 
 describe('AdvancedActions', () => {
+  it('renders account deletion without business features', () => {
+    render(<AdvancedActions />, { wrapper: createWrapper(false) });
+
+    expect(screen.getByTestId('account-deletion')).toBeDefined();
+  });
+
   it('does not duplicate analytics when About settings are visible', () => {
     render(<AdvancedActions />, { wrapper: createWrapper(false) });
 
