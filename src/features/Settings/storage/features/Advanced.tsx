@@ -147,7 +147,7 @@ const AdvancedActions = () => {
         ]}
         {...FORM_STYLE}
       />
-      {enableBusinessFeatures && <AccountDeletion />}
+      <AccountDeletion />
     </>
   );
 };
