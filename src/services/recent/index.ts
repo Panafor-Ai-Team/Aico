@@ -2,6 +2,7 @@ import { lambdaClient } from '@/libs/trpc/client';
 import { type RecentItem } from '@/server/routers/lambda/recent';
 
 export const RECENT_SIDEBAR_TYPES = [
+  'topic',
   'document',
   'task',
 ] as const satisfies readonly RecentItem['type'][];
