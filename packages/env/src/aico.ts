@@ -120,6 +120,14 @@ declare global {
       /** Maximum concurrent open holds per wallet or member budget. Default 6. */
       AICO_LEDGER_MAX_OPEN_HOLDS?: string;
       /**
+       * How long one LLM call may wait for the upstream to start answering
+       * (response headers on `/webapi/chat`, first chunk on server-run agents)
+       * before it fails as a start timeout. Seconds, default 60. Raise it while
+       * the gateway is slow on large prompts; values are clamped to 30–240 and
+       * anything unparsable falls back to 60, so a typo cannot stop the app.
+       */
+      AICO_LLM_START_TIMEOUT_SECONDS?: string;
+      /**
        * Output cap injected as `max_tokens` on managed chat requests that did not
        * ask for one. It bounds the hold, so it bounds what a request can cost.
        * Default 32,000.
@@ -210,6 +218,10 @@ declare global {
   }
 }
 
+const DEFAULT_LLM_START_TIMEOUT_SECONDS = 60;
+const MIN_LLM_START_TIMEOUT_SECONDS = 30;
+const MAX_LLM_START_TIMEOUT_SECONDS = 240;
+
 export const getAicoConfig = () => {
   return createEnv({
     server: {
@@ -245,6 +257,13 @@ export const getAicoConfig = () => {
       AICO_CVC_TOKENS_PER_USD: z.coerce.number().positive().int().default(25_000_000),
       AICO_OPENROUTER_MOCK: z.boolean().optional().default(false),
       AICO_EMBEDDING_OPENROUTER_API_KEY: z.string().optional(),
+      AICO_LLM_START_TIMEOUT_SECONDS: z.coerce
+        .number()
+        .int()
+        .catch(DEFAULT_LLM_START_TIMEOUT_SECONDS)
+        .transform((seconds) =>
+          Math.min(MAX_LLM_START_TIMEOUT_SECONDS, Math.max(MIN_LLM_START_TIMEOUT_SECONDS, seconds)),
+        ),
       CHEAPVIBECODE_BASE_URL: z.string().default('https://ru.cheapvibecode.ru'),
       CHEAPVIBECODE_MANAGEMENT_API_KEY: z.string().optional(),
       CHEAPVIBECODE_VIDEO_BASE_URL: z.string().url().optional(),
@@ -280,6 +299,7 @@ export const getAicoConfig = () => {
       AICO_CVC_TOKENS_PER_USD: process.env.AICO_CVC_TOKENS_PER_USD,
       AICO_OPENROUTER_MOCK: process.env.AICO_OPENROUTER_MOCK === '1',
       AICO_EMBEDDING_OPENROUTER_API_KEY: process.env.AICO_EMBEDDING_OPENROUTER_API_KEY || undefined,
+      AICO_LLM_START_TIMEOUT_SECONDS: process.env.AICO_LLM_START_TIMEOUT_SECONDS || undefined,
       CHEAPVIBECODE_BASE_URL: process.env.CHEAPVIBECODE_BASE_URL || 'https://ru.cheapvibecode.ru',
       CHEAPVIBECODE_MANAGEMENT_API_KEY: process.env.CHEAPVIBECODE_MANAGEMENT_API_KEY,
       CHEAPVIBECODE_VIDEO_BASE_URL: process.env.CHEAPVIBECODE_VIDEO_BASE_URL || undefined,

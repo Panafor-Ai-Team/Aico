@@ -8,6 +8,7 @@ import { checkAuth } from '@/app/(backend)/middleware/auth';
 import { AicoBillingModel } from '@/database/models/aicoBilling';
 import { OrganizationModel } from '@/database/models/organization';
 import type { LobeChatDatabase } from '@/database/type';
+import { aicoEnv } from '@/envs/aico';
 import { createTraceOptions, initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
 import {
   AICO_BILLING_CONTEXT_HEADER,
@@ -37,8 +38,10 @@ export const maxDuration = 300;
 // otherwise stall first-token until maxDuration kills the stream mid-sentence.
 const SETUP_TIMEOUT_MS = 20_000;
 // Cap for waiting on upstream headers (time to first byte). Cleared once the
-// stream starts, so long generations are never cut mid-stream.
-const CHAT_START_TIMEOUT_MS = 60_000;
+// stream starts, so long generations are never cut mid-stream. Tunable through
+// AICO_LLM_START_TIMEOUT_SECONDS (default 60) while the gateway is slow on
+// large prompts.
+const CHAT_START_TIMEOUT_MS = aicoEnv.AICO_LLM_START_TIMEOUT_SECONDS * 1000;
 
 // Per-request phase timings, one line per chat. Enable with
 // DEBUG=lobe-server:chat:timing to tell setup, billing hold, upstream first
