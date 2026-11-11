@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyHomeCustomizeDefaults,
+  HOME_CUSTOMIZE_DEFAULTS,
+  HOME_CUSTOMIZE_DEFAULTS_VERSION,
   HOME_PRESETS,
   HOME_WIDGET_GROUPS,
   HOME_WIDGET_KEYS,
@@ -45,6 +48,27 @@ describe('resolveHomePreset', () => {
   const stateOf = (key: keyof typeof HOME_PRESETS) => ({
     hiddenWidgets: [...HOME_PRESETS[key].hiddenWidgets],
     showPortrait: HOME_PRESETS[key].showPortrait,
+  });
+
+  it('opens a fresh Home on the minimal preset', () => {
+    expect(
+      resolveHomePreset({
+        hiddenWidgets: HOME_CUSTOMIZE_DEFAULTS.hiddenHomeWidgets,
+        showPortrait: HOME_CUSTOMIZE_DEFAULTS.showHomePortrait,
+      }),
+    ).toBe('minimal');
+  });
+
+  it('adopts the minimal switches once, then respects the stored choice', () => {
+    const migrated = applyHomeCustomizeDefaults({ hiddenHomeWidgets: [], showHomePortrait: true });
+
+    expect(migrated.hiddenHomeWidgets).toEqual([...HOME_PRESETS.minimal.hiddenWidgets]);
+    expect(migrated.showHomePortrait).toBe(false);
+    expect(migrated.homeCustomizeVersion).toBe(HOME_CUSTOMIZE_DEFAULTS_VERSION);
+
+    // Same object back: a status already on this version is never re-migrated,
+    // so choosing "Full" after the migration sticks.
+    expect(applyHomeCustomizeDefaults(migrated)).toBe(migrated);
   });
 
   it('names each preset from the switches it spells out', () => {

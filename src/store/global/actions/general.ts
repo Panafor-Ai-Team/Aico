@@ -6,6 +6,7 @@ import type { SWRResponse } from 'swr';
 import { getActiveWorkspaceId } from '@/business/client/hooks/useActiveWorkspaceId';
 import { getActiveWorkspaceSlug } from '@/business/client/hooks/useActiveWorkspaceSlug';
 import { CURRENT_VERSION, isDesktop } from '@/const/version';
+import { applyHomeCustomizeDefaults } from '@/features/Home/CustomizeModal/config';
 import { buildWorkspaceAwarePath } from '@/features/Workspace/workspaceAwarePath';
 import { useOnlyFetchOnceSWR } from '@/libs/swr';
 import { globalKeys } from '@/libs/swr/keys';
@@ -328,7 +329,7 @@ export class GlobalGeneralActionImpl {
 
           // Reset transient UI states that should not persist across page reloads
           const statusWithResetTransientStates = {
-            ...status,
+            ...applyHomeCustomizeDefaults(status),
             showCommandMenu: false,
             showHotkeyHelper: false,
             workingSidebarRevealRequest: undefined,

@@ -1,5 +1,10 @@
 import { type NavigateFunction } from 'react-router';
 
+import {
+  applyHomeCustomizeDefaults,
+  HOME_CUSTOMIZE_DEFAULTS,
+  HOME_CUSTOMIZE_DEFAULTS_VERSION,
+} from '@/features/Home/CustomizeModal/config';
 import { type MigrationSQL, type MigrationTableItem } from '@/types/clientDB';
 import { DatabaseLoadingState } from '@/types/clientDB';
 import { type LocaleMode } from '@/types/locale';
@@ -214,6 +219,12 @@ export interface SystemStatus {
   hidePWAInstaller?: boolean;
   hideThreadLimitAlert?: boolean;
   hideTopicSharePrivacyWarning?: boolean;
+  /**
+   * Which shipped Home defaults this browser has adopted — see
+   * `applyHomeCustomizeDefaults`. Set once so a changed default reaches users
+   * whose status was saved before it, then never re-applied.
+   */
+  homeCustomizeVersion?: number;
   /**
    * Home rail: the goals card folded to its title. Persisted, because a card
    * you deliberately put away must stay away across reloads — otherwise the
@@ -523,7 +534,8 @@ export const INITIAL_STATUS = {
   fileManagerViewMode: 'list' as const,
   filePanelWidth: 320,
   groupAgentBuilderPanelWidth: 360,
-  hiddenHomeWidgets: [],
+  hiddenHomeWidgets: HOME_CUSTOMIZE_DEFAULTS.hiddenHomeWidgets,
+  homeCustomizeVersion: HOME_CUSTOMIZE_DEFAULTS_VERSION,
   hidePWAInstaller: false,
   hideThreadLimitAlert: false,
   hideTopicSharePrivacyWarning: false,
@@ -548,7 +560,7 @@ export const INITIAL_STATUS = {
   resourceManagerColumnWidths: DEFAULT_RESOURCE_MANAGER_COLUMN_WIDTHS,
   showCommandMenu: false,
   showFilePanel: true,
-  showHomePortrait: true,
+  showHomePortrait: HOME_CUSTOMIZE_DEFAULTS.showHomePortrait,
   showHotkeyHelper: false,
   showHomeRail: true,
   showImagePanel: true,
@@ -586,13 +598,14 @@ const statusStorage = new AsyncLocalStorage<SystemStatus>('LOBE_SYSTEM_STATUS');
  * pre-hydration placeholder to the default width.
  */
 export const createInitialSystemStatus = (): SystemStatus => {
-  const persistedStatus = statusStorage.getFromLocalStorageSync();
+  const persistedStatus = applyHomeCustomizeDefaults(statusStorage.getFromLocalStorageSync());
 
   return {
     ...INITIAL_STATUS,
     hiddenHomeWidgets: Array.isArray(persistedStatus.hiddenHomeWidgets)
       ? persistedStatus.hiddenHomeWidgets
       : INITIAL_STATUS.hiddenHomeWidgets,
+    homeCustomizeVersion: persistedStatus.homeCustomizeVersion,
     leftPanelWidth:
       typeof persistedStatus.leftPanelWidth === 'number'
         ? persistedStatus.leftPanelWidth

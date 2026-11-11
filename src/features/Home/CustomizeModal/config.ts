@@ -44,13 +44,6 @@ export const HOME_WIDGET_GROUPS = [
 
 export type HomeWidgetGroupKey = (typeof HOME_WIDGET_GROUPS)[number]['key'];
 
-export const HOME_CUSTOMIZE_DEFAULTS = {
-  hiddenHomeWidgets: [] as string[],
-  homeRecentsCount: 8,
-  homeTaskCount: 8,
-  showHomePortrait: true,
-};
-
 export const HOME_COUNT_MIN = 3;
 export const HOME_COUNT_MAX = 15;
 
@@ -75,6 +68,45 @@ export const HOME_PRESETS: Record<HomePresetKey, HomePreset> = {
   },
   full: { count: 8, hiddenWidgets: [], showPortrait: true },
   minimal: { count: 5, hiddenWidgets: HOME_WIDGET_KEYS, showPortrait: false },
+};
+
+// A fresh Home opens on the Minimal preset: every section hidden and no
+// portrait, so the greeting and composer stand alone until the user opts in.
+// Only the switches follow the preset — the list counts keep their own default,
+// per the note on `HomePreset.count`.
+export const HOME_CUSTOMIZE_DEFAULTS = {
+  hiddenHomeWidgets: [...HOME_PRESETS.minimal.hiddenWidgets] as string[],
+  homeRecentsCount: 8,
+  homeTaskCount: 8,
+  showHomePortrait: HOME_PRESETS.minimal.showPortrait,
+};
+
+/**
+ * Which shipped defaults a browser has already adopted. The whole status is
+ * saved on every `updateSystemStatus`, so a user who never opened the panel
+ * still has the old "full" switches on disk — a changed default alone would
+ * never reach them. Bump this when a new default must.
+ */
+export const HOME_CUSTOMIZE_DEFAULTS_VERSION = 1;
+
+interface HomeDefaultsState {
+  hiddenHomeWidgets?: string[];
+  homeCustomizeVersion?: number;
+  showHomePortrait?: boolean;
+}
+
+/** Adopt the current defaults once per version; after that the stored choice wins. */
+export const applyHomeCustomizeDefaults = <T extends HomeDefaultsState>(
+  status: T,
+): Omit<T, keyof HomeDefaultsState> & HomeDefaultsState => {
+  if ((status.homeCustomizeVersion ?? 0) >= HOME_CUSTOMIZE_DEFAULTS_VERSION) return status;
+
+  return {
+    ...status,
+    hiddenHomeWidgets: [...HOME_CUSTOMIZE_DEFAULTS.hiddenHomeWidgets],
+    homeCustomizeVersion: HOME_CUSTOMIZE_DEFAULTS_VERSION,
+    showHomePortrait: HOME_CUSTOMIZE_DEFAULTS.showHomePortrait,
+  };
 };
 
 interface HomeVisibilityState {
