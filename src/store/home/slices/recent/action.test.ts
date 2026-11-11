@@ -40,7 +40,7 @@ afterEach(() => {
 
 describe('RecentActionImpl', () => {
   describe('useFetchRecents onData scope guard', () => {
-    it('fetches only document and task recents without polling', async () => {
+    it('fetches topic, document and task recents without polling', async () => {
       const swrSpy = vi.spyOn(swr, 'useClientDataSWRWithSync').mockReturnValue({
         data: undefined,
         isValidating: false,
@@ -57,7 +57,7 @@ describe('RecentActionImpl', () => {
       const fetcher = swrSpy.mock.calls[0][1] as () => Promise<RecentItem[]>;
       await fetcher();
 
-      expect(getAllSpy).toHaveBeenCalledWith(11, ['document', 'task']);
+      expect(getAllSpy).toHaveBeenCalledWith(11, ['topic', 'document', 'task']);
     });
 
     it('applies data for the matching scope and tags recentsScope', () => {
