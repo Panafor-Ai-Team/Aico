@@ -37,7 +37,6 @@ export default function AccountDeletion() {
 
   return (
     <Flexbox gap={12} style={{ maxWidth: 420 }}>
-      <Text strong>{t('accountDeletion.title')}</Text>
       <Text type="secondary">{t('accountDeletion.desc')}</Text>
       <Input
         placeholder={t('accountDeletion.emailPlaceholder')}
