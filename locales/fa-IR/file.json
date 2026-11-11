@@ -274,6 +274,7 @@
   "work.loadErrorTitle": "نتوانستیم آثار را بارگذاری کنیم",
   "work.loadMoreError": "بارگذاری آثار بیشتر شکست خورد.",
   "work.retry": "تلاش مجدد",
+  "work.tokens": "{{tokens}} توکن",
   "work.topicGroup.other": "سایر",
   "work.totalCost": "هزینه کل {{cost}}",
   "work.type.document": "سند",

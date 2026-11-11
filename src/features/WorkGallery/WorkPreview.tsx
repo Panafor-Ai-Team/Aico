@@ -1,6 +1,6 @@
 'use client';
 
-import type { WorkSummaryItem } from '@lobechat/types';
+import type { TaskStatus, WorkSummaryItem } from '@lobechat/types';
 import { Github } from '@lobehub/icons';
 import { Flexbox, Tag, Text } from '@lobehub/ui';
 import { createStaticStyles, cssVar } from 'antd-style';
@@ -8,6 +8,7 @@ import { CheckCircle2Icon, GitPullRequestIcon } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { TASK_STATUS_VISUALS } from '@/components/ExecutionStatus';
 import { getWorkTypeDescriptor } from '@/features/Work/descriptors';
 import LinearIcon from '@/features/Work/icons/LinearIcon';
 
@@ -184,6 +185,13 @@ const WorkPreview = memo<WorkPreviewProps>(({ item, title }) => {
   const isLinear = item.resourceType.startsWith('linear_');
   const taskStatus = item.resourceType === 'task' ? item.task.status : null;
   const status = item.status || taskStatus;
+  // A task's status is a raw enum (`running`, `completed`, …): show the same
+  // label and glyph the task board uses instead of the bare value.
+  const taskVisual = taskStatus ? TASK_STATUS_VISUALS[taskStatus as TaskStatus] : undefined;
+  const statusLabel =
+    taskStatus && status === taskStatus
+      ? t(`taskDetail.status.${taskStatus}` as any, { defaultValue: taskStatus, ns: 'chat' })
+      : status;
 
   return (
     <div className={styles.cover}>
@@ -200,7 +208,11 @@ const WorkPreview = memo<WorkPreviewProps>(({ item, title }) => {
         ) : item.resourceType === 'task' ? (
           <Flexbox className={styles.taskBody} gap={10}>
             <Flexbox horizontal align={'center'} gap={8}>
-              <CheckCircle2Icon color={cssVar.colorSuccess} size={22} />
+              {taskVisual ? (
+                <taskVisual.icon color={taskVisual.color} size={22} />
+              ) : (
+                <CheckCircle2Icon color={cssVar.colorSuccess} size={22} />
+              )}
               <Text strong>{title}</Text>
             </Flexbox>
             <div className={styles.previewDescription}>{description}</div>
@@ -231,7 +243,7 @@ const WorkPreview = memo<WorkPreviewProps>(({ item, title }) => {
       </div>
       {!isLinear && !isGithub && status && (
         <Tag className={styles.status} color={getStatusColor(status)} size={'small'}>
-          {status}
+          {statusLabel}
         </Tag>
       )}
     </div>

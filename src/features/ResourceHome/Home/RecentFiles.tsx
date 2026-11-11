@@ -8,6 +8,7 @@ import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import FileIcon from '@/components/FileIcon';
+import { formatTaskItemDate } from '@/features/AgentTasks/features/formatTaskItemDate';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { useClientDataSWR } from '@/libs/swr';
 import { fileService } from '@/services/file';
@@ -74,11 +75,18 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   `,
 }));
 
-const formatTime = (date: Date | string) =>
-  dayjs().diff(dayjs(date), 'd') < 7 ? dayjs(date).fromNow() : dayjs(date).format('YYYY-MM-DD');
-
 const RecentFiles = memo(() => {
-  const { t } = useTranslation('file');
+  const { t, i18n } = useTranslation(['file', 'common']);
+  // Past a week, match the Works cards above: a localized "MMM D" date
+  // instead of a bare ISO date next to relative ones.
+  const formatTime = (date: Date | string) =>
+    dayjs().diff(dayjs(date), 'd') < 7
+      ? dayjs(date).fromNow()
+      : formatTaskItemDate(date, {
+          formatOtherYear: t('time.formatOtherYear', { ns: 'common' }),
+          formatThisYear: t('time.formatThisYear', { ns: 'common' }),
+          locale: i18n.language,
+        });
   const navigate = useWorkspaceAwareNavigate();
 
   const { data, isLoading } = useClientDataSWR('resource-home-recent-files', () =>
@@ -89,7 +97,10 @@ const RecentFiles = memo(() => {
 
   return (
     <Flexbox gap={12}>
-      <SectionTitle title={t('home.recentFiles')} viewAllUrl={`/resource/${FilesTabs.All}`} />
+      <SectionTitle
+        title={t('home.recentFiles', { ns: 'file' })}
+        viewAllUrl={`/resource/${FilesTabs.All}`}
+      />
       {isLoading ? (
         <div className={styles.grid}>
           {Array.from({ length: 4 }, (_, index) => (
