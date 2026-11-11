@@ -2484,6 +2484,128 @@ describe('StreamingExecutor actions', () => {
       // Operation should be failed
       expect(result.current.operations[operationId!].status).toBe('failed');
     });
+
+    it('saves a step error on the failing assistant message of a multi-step run', async () => {
+      const { result } = renderHook(() => useChatStore());
+      const { updateMessageErrorSpy } = spyOnMessageService();
+
+      act(() => {
+        useChatStore.setState({ executeClientAgent: realExecAgentRuntime });
+      });
+      vi.spyOn(agentConfigResolver, 'resolveAgentConfig').mockReturnValue({
+        agentConfig: createMockAgentConfig(),
+        chatConfig: createMockChatConfig(),
+        isBuiltinAgent: false,
+        plugins: [],
+      });
+
+      const context = { agentId: TEST_IDS.SESSION_ID, topicId: TEST_IDS.TOPIC_ID };
+      const at = (second: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, second)).getTime();
+      // One agent run: a tool-calling step, its tool result, then the empty
+      // assistant row created for the final step whose LLM call failed.
+      const runMessages = [
+        { content: 'question', createdAt: at(0), id: 'msg-user', meta: {}, role: 'user' },
+        {
+          content: '',
+          createdAt: at(1),
+          id: 'msg-step-1',
+          meta: {},
+          parentId: 'msg-user',
+          role: 'assistant',
+          tools: [
+            {
+              apiName: 'readFile',
+              arguments: '{}',
+              id: 'call_1',
+              identifier: 'lobe-cloud-sandbox',
+              type: 'builtin',
+            },
+          ],
+        },
+        {
+          content: 'file content',
+          createdAt: at(2),
+          id: 'msg-tool-1',
+          meta: {},
+          parentId: 'msg-step-1',
+          role: 'tool',
+          tool_call_id: 'call_1',
+        },
+        {
+          content: '',
+          createdAt: at(3),
+          id: 'msg-final',
+          meta: {},
+          parentId: 'msg-tool-1',
+          role: 'assistant',
+        },
+      ] as unknown as UIChatMessage[];
+
+      act(() => {
+        result.current.replaceMessages(runMessages, { context });
+      });
+      // The display list folds the run into one `assistantGroup` row, so it
+      // holds no plain `assistant` message to attach the error to.
+      expect(
+        result.current.messagesMap[messageMapKey(context)].some((m) => m.role === 'assistant'),
+      ).toBe(false);
+
+      let operationId!: string;
+      act(() => {
+        operationId = result.current.startOperation({
+          context,
+          type: 'execAgentRuntime',
+        }).operationId;
+      });
+
+      mockInternalCreateAgentState({
+        agentConfig: createMockResolvedAgentConfig(),
+        context: {
+          phase: 'init',
+          payload: { model: 'gpt-4o-mini', provider: 'openai' },
+          session: {
+            messageCount: runMessages.length,
+            sessionId: TEST_IDS.SESSION_ID,
+            status: 'running',
+            stepCount: 1,
+          },
+        },
+        state: createMockRuntimeState(operationId, 'running'),
+      });
+
+      const stepError = {
+        message: 'Chat start timed out: upstream-headers',
+        type: 'InternalServerError',
+      };
+      vi.spyOn(agentRuntime.AgentRuntime.prototype, 'step').mockResolvedValue({
+        events: [{ error: stepError, type: 'error' } as any],
+        newState: createMockRuntimeState(operationId, 'error'),
+        nextContext: undefined,
+      });
+
+      const serverMessages = runMessages.map((message) =>
+        message.id === 'msg-final' ? { ...message, error: stepError } : message,
+      ) as UIChatMessage[];
+      updateMessageErrorSpy.mockResolvedValue({ messages: serverMessages, success: true } as any);
+
+      await act(async () => {
+        await result.current.executeClientAgent({
+          context,
+          messages: runMessages,
+          operationId,
+          parentMessageId: 'msg-tool-1',
+          parentMessageType: 'tool',
+        });
+      });
+
+      expect(updateMessageErrorSpy).toHaveBeenCalledWith(
+        'msg-final',
+        stepError,
+        expect.objectContaining({ agentId: TEST_IDS.SESSION_ID, topicId: TEST_IDS.TOPIC_ID }),
+      );
+      // The raw bucket takes the server's echo, never the grouped display list.
+      expect(result.current.dbMessagesMap[messageMapKey(context)]).toEqual(serverMessages);
+    });
   });
 
   describe('isSubAgent filtering', () => {

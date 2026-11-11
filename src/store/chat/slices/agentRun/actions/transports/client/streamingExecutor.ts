@@ -863,18 +863,31 @@ export class StreamingExecutorActionImpl {
 
           case 'error': {
             log('[executeClientAgent] Received error event: %o', event.error);
-            // Find the assistant message to update error
-            const currentMessages = this.#get().messagesMap[messageKey] || [];
-            const assistantMessage = currentMessages.findLast((m) => m.role === 'assistant');
+            // Look the failing step up in the RAW bucket. The display list
+            // (messagesMap) folds a multi-step run into one `assistantGroup`
+            // row, so a `role === 'assistant'` search there misses the step
+            // that failed and the error was never saved: the run just stopped
+            // with an empty bubble and no error after a reload.
+            const rawMessages = this.#get().dbMessagesMap[messageKey] || [];
+            const assistantMessage = rawMessages.findLast((m) => m.role === 'assistant');
             if (assistantMessage) {
-              await messageService.updateMessageError(assistantMessage.id, event.error, {
-                agentId,
-                groupId,
-                topicId,
-              });
+              const result = await messageService
+                .updateMessageError(assistantMessage.id, event.error, {
+                  agentId,
+                  groupId,
+                  threadId,
+                  topicId,
+                })
+                .catch((error) => {
+                  console.error('[executeClientAgent] saving the step error failed:', error);
+                  return undefined;
+                });
+              // replaceMessages expects raw rows, so take the server's echo —
+              // never the parsed display list.
+              if (result?.success && result.messages) {
+                this.#get().replaceMessages(result.messages, { context });
+              }
             }
-            const finalMessages = this.#get().messagesMap[messageKey] || [];
-            this.#get().replaceMessages(finalMessages, { context });
             break;
           }
         }
