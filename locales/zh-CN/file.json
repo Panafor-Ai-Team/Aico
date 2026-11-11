@@ -274,6 +274,7 @@
   "work.loadErrorTitle": "无法加载产物",
   "work.loadMoreError": "加载更多产物失败。",
   "work.retry": "重试",
+  "work.tokens": "{{tokens}} tokens",
   "work.topicGroup.other": "其他",
   "work.totalCost": "累计开销 {{cost}}",
   "work.type.document": "文档",

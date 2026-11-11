@@ -298,6 +298,7 @@ export default {
   'work.type.linearIssue': 'Linear Issue',
   'work.type.task': 'Task',
   'work.updatedAt': 'Updated {{date}}',
+  'work.tokens': '{{tokens}} tokens',
   'work.topicGroup.other': 'Other',
   'work.totalCost': 'Total cost {{cost}}',
   'uploadDock.body.collapse': 'Collapse',

@@ -274,6 +274,7 @@
   "work.loadErrorTitle": "Impossible de charger les travaux",
   "work.loadMoreError": "Échec du chargement de travaux supplémentaires.",
   "work.retry": "Réessayer",
+  "work.tokens": "{{tokens}} jetons",
   "work.topicGroup.other": "Autre",
   "work.totalCost": "Coût total {{cost}}",
   "work.type.document": "Document",

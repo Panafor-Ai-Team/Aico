@@ -257,7 +257,12 @@ const WorkPreviewCard = memo<WorkPreviewCardProps>(({ item, onOpen }) => {
           )}
           {(totalTokens || cost) && (
             <span className={styles.usage}>
-              {[totalTokens ? `${formatTokenNumber(totalTokens)} tokens` : null, cost]
+              {[
+                totalTokens
+                  ? t('work.tokens', { ns: 'file', tokens: formatTokenNumber(totalTokens) })
+                  : null,
+                cost,
+              ]
                 .filter(Boolean)
                 .join(' · ')}
             </span>

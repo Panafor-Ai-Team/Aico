@@ -274,6 +274,7 @@
   "work.loadErrorTitle": "Couldn’t load works",
   "work.loadMoreError": "Failed to load more works.",
   "work.retry": "Retry",
+  "work.tokens": "{{tokens}} tokens",
   "work.topicGroup.other": "Other",
   "work.totalCost": "Total cost {{cost}}",
   "work.type.document": "Document",
