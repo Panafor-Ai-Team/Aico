@@ -116,10 +116,10 @@ afterEach(() => {
 });
 
 describe('AdvancedActions', () => {
-  it('renders account deletion without business features', () => {
+  it('no longer hosts account deletion (it lives in Profile → Account)', () => {
     render(<AdvancedActions />, { wrapper: createWrapper(false) });
 
-    expect(screen.getByTestId('account-deletion')).toBeDefined();
+    expect(screen.queryByTestId('account-deletion')).toBeNull();
   });
 
   it('does not duplicate analytics when About settings are visible', () => {

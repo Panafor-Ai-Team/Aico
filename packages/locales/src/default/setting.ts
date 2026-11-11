@@ -1188,7 +1188,7 @@ export default {
   'settingsSearch.tabKeywords.notification': 'notification, email, push, alerts',
   'settingsSearch.tabKeywords.plans': 'subscription, plan, upgrade, pricing, membership',
   'settingsSearch.tabKeywords.profile':
-    'profile, account, avatar, username, password, email, sign out, logout',
+    'profile, account, avatar, username, password, email, sign out, logout, account deletion, delete account',
   'settingsSearch.tabKeywords.provider':
     'provider, model, llm, api key, apikey, byok, bring your own key, endpoint',
   'settingsSearch.tabKeywords.proxy': 'proxy, network, connection',
@@ -1197,8 +1197,7 @@ export default {
     'service model, model assignment, topic naming, translation, tts, voice, speech, image, image generation, embedding, prompt rewrite, suggestion',
   'settingsSearch.tabKeywords.skill': 'skills, plugins, tools',
   'settingsSearch.tabKeywords.stats': 'analytics, statistics, stats',
-  'settingsSearch.tabKeywords.storage':
-    'storage, files, import, export, backup, reset, clear data, account deletion, delete account',
+  'settingsSearch.tabKeywords.storage': 'storage, files, import, export, backup, reset, clear data',
   'settingsSearch.tabKeywords.systemTools': 'system tools, built-in tools',
   'settingsSearch.tabKeywords.usage': 'usage, consumption, quota, spend, statistics',
   'settingSystem.oauth.info.desc': 'Logged in',

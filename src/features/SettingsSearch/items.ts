@@ -80,6 +80,8 @@ export const TAB_SEARCH_EN_KEYWORDS: Partial<Record<SettingsTabs, string[]>> = {
     'email',
     'sign out',
     'logout',
+    'account deletion',
+    'delete account',
   ],
   [SettingsTabs.Provider]: [
     'provider',
@@ -117,8 +119,6 @@ export const TAB_SEARCH_EN_KEYWORDS: Partial<Record<SettingsTabs, string[]>> = {
     'backup',
     'reset',
     'clear data',
-    'account deletion',
-    'delete account',
   ],
   [SettingsTabs.SystemTools]: ['system tools', 'built-in tools'],
   [SettingsTabs.Usage]: ['usage', 'consumption', 'quota', 'spend', 'statistics'],
@@ -240,6 +240,14 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
     // async user data intentionally not mirrored; a miss degrades to a plain
     // tab switch.
     visible: (ctx) => ctx.enableComposio,
+  },
+  {
+    anchor: 'profile-account-deletion',
+    descKey: 'accountDeletion.desc',
+    keywords: ['delete account', 'deactivate', 'close account'],
+    labelKey: 'accountDeletion.title',
+    tab: SettingsTabs.Profile,
+    visible: (ctx) => ctx.isLogin,
   },
   // Appearance
   {
@@ -413,13 +421,6 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
     labelKey: 'analytics.telemetry.title',
     tab: SettingsTabs.Storage,
     visible: (ctx) => ctx.hideDocs,
-  },
-  {
-    anchor: 'storage-account-deletion',
-    descKey: 'accountDeletion.desc',
-    keywords: ['delete account', 'deactivate', 'close account'],
-    labelKey: 'accountDeletion.title',
-    tab: SettingsTabs.Storage,
   },
   // Proxy (the tab itself is desktop-only and filtered via useCategory)
   {

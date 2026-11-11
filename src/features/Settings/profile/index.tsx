@@ -6,6 +6,7 @@ import { Divider } from 'antd';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import AccountDeletion from '@/business/client/features/AccountDeletion';
 import { SettingsProfileRowSkeleton } from '@/components/Skeleton/Settings/Profile';
 import SettingHeader from '@/features/Settings/features/SettingHeader';
 import { useServerConfigStore } from '@/store/serverConfig';
@@ -62,7 +63,7 @@ const ProfileSetting = ({ showSettingHeader = true }: ProfileSettingProps) => {
     }
   }, [isLogin, fetchAuthProviders]);
 
-  const { t } = useTranslation('auth');
+  const { t } = useTranslation(['auth', 'setting']);
 
   return (
     <>
@@ -130,6 +131,18 @@ const ProfileSetting = ({ showSettingHeader = true }: ProfileSettingProps) => {
                 label={t('profile.authorizations.title')}
               >
                 <ComposioAuthorizationList servers={connectedServers} />
+              </ProfileRow>
+            </>
+          )}
+
+          {isLogin && (
+            <>
+              <Divider style={{ margin: 0 }} />
+              <ProfileRow
+                anchor={'profile-account-deletion'}
+                label={t('accountDeletion.title', { ns: 'setting' })}
+              >
+                <AccountDeletion />
               </ProfileRow>
             </>
           )}
