@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PortalViewType } from '@/store/chat/slices/portal/initialState';
 
 interface RenderHomeOptions {
+  hiddenHomeWidgets?: string[];
   isLogin?: boolean;
   portalViewType?: PortalViewType;
   search?: string;
@@ -20,6 +21,7 @@ function translate() {
 }
 
 const renderHome = async ({
+  hiddenHomeWidgets = [],
   isLogin = true,
   portalViewType,
   search = '',
@@ -48,7 +50,7 @@ const renderHome = async ({
     },
   }));
   function selectFromGlobalStore(selector: (state: unknown) => unknown) {
-    return selector({ status: { showHomePortrait } });
+    return selector({ status: { hiddenHomeWidgets, showHomePortrait } });
   }
   vi.doMock('@/store/global', () => ({ useGlobalStore: selectFromGlobalStore }));
   function selectFromUserStore(selector: (state: unknown) => unknown) {
@@ -79,11 +81,11 @@ afterEach(() => {
 });
 
 describe('Home portrait visibility', () => {
-  it('shows the portrait and its bubble by default for a signed-in viewer', async () => {
+  it('hides the portrait by default for a signed-in viewer', async () => {
     await renderHome();
 
-    expect(screen.getByTestId('home-portrait')).toBeInTheDocument();
-    expect(screen.getByTestId('portrait-bubble')).toBeInTheDocument();
+    expect(screen.queryByTestId('home-portrait')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('portrait-bubble')).not.toBeInTheDocument();
   }, 20000);
 
   it('keeps the portrait when the preference is explicitly on', async () => {
