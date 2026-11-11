@@ -34,6 +34,7 @@ import {
 } from '@lobechat/observability-otel/modules/agent-runtime';
 
 import { AicoBillingModel } from '@/database/models/aicoBilling';
+import { aicoEnv } from '@/envs/aico';
 import { initModelRuntimeFromDB } from '@/server/modules/ModelRuntime';
 import type { AicoBillingContext } from '@/server/services/aico/billingContext';
 import { resolvePreferredGenerationBilling } from '@/server/services/aico/generationBilling';
@@ -63,13 +64,15 @@ const SERVER_LLM_RETRY_POLICY = {
 // hung upstream that sends nothing fails here instead of riding the OpenAI
 // SDK default (10 min) and multiplying across the 6-attempt retry policy.
 // The message carries "timed out" so the retry classifier keeps it retryable.
-const LLM_FIRST_BYTE_TIMEOUT_MS = 60_000;
+// Tunable through AICO_LLM_START_TIMEOUT_SECONDS (default 60).
+const LLM_FIRST_BYTE_TIMEOUT_MS = aicoEnv.AICO_LLM_START_TIMEOUT_SECONDS * 1000;
 
 // Cumulative first-byte budget for one call_llm step across its attempts.
 // Per-attempt caps alone still sum to minutes during a full outage; once the
 // budget is spent, remaining attempts fail immediately so the run ends fast.
 // Healthy and flapping upstreams finish inside the budget and never notice it.
-const LLM_FIRST_BYTE_BUDGET_MS = 120_000;
+// Never less than two full attempts, so a raised start timeout keeps its retry.
+const LLM_FIRST_BYTE_BUDGET_MS = Math.max(120_000, 2 * LLM_FIRST_BYTE_TIMEOUT_MS);
 
 // Marks our own stall-guard timeouts. Neutral to the error classifier (keeps
 // them retryable via "timed out") but lets the retry policy skip backoff
