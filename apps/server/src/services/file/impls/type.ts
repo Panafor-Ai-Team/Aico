@@ -55,7 +55,9 @@ export interface FileServiceImpl {
    * Get file metadata from storage
    * Used to verify actual file size instead of trusting client-provided values
    */
-  getFileMetadata: (key: string) => Promise<{ contentLength: number; contentType?: string }>;
+  getFileMetadata: (
+    key: string,
+  ) => Promise<{ contentLength: number; contentType?: string; lastModified?: Date }>;
 
   /**
    * Get full file URL

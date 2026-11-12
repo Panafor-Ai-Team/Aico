@@ -152,6 +152,99 @@ export class FileModel {
     return (trx ?? this.db).update(globalFiles).set(data).where(eq(globalFiles.hashId, hashId));
   };
 
+  /**
+   * Whether the caller already owns a file row with these bytes. Hash dedup is
+   * only offered for the caller's own files: answering for other users' hashes
+   * reveals that someone uploaded that exact file and hands out their key.
+   */
+  hasOwnFileWithHash = async (hash: string, trx?: Transaction): Promise<boolean> => {
+    const [row] = await (trx ?? this.db)
+      .select({ id: files.id })
+      .from(files)
+      .where(and(eq(files.fileHash, hash), this.ownership()))
+      .limit(1);
+    return Boolean(row);
+  };
+
+  findOwnFileByHash = async (hash: string) => {
+    const [row] = await this.db
+      .select({
+        fileType: files.fileType,
+        metadata: files.metadata,
+        size: files.size,
+        url: files.url,
+      })
+      .from(files)
+      .where(and(eq(files.fileHash, hash), this.ownership()))
+      .orderBy(desc(files.createdAt))
+      .limit(1);
+    return row;
+  };
+
+  hasAnyFileWithHash = async (hash: string, trx?: Transaction): Promise<boolean> => {
+    const [row] = await (trx ?? this.db)
+      .select({ id: files.id })
+      .from(files)
+      .where(eq(files.fileHash, hash))
+      .limit(1);
+    return Boolean(row);
+  };
+
+  /**
+   * Who a storage key belongs to, across all users:
+   * - `own`: a file row of the caller (or a global row of a hash the caller owns) uses it
+   * - `foreign`: only rows of other users use it
+   * - `unreferenced`: no row uses it yet (a fresh upload)
+   */
+  getStorageKeyClaim = async (
+    url: string,
+    trx?: Transaction,
+  ): Promise<'foreign' | 'own' | 'unreferenced'> => {
+    const db = trx ?? this.db;
+
+    const [ownRow] = await db
+      .select({ id: files.id })
+      .from(files)
+      .where(and(eq(files.url, url), this.ownership()))
+      .limit(1);
+    if (ownRow) return 'own';
+
+    const [anyRow] = await db
+      .select({ id: files.id })
+      .from(files)
+      .where(eq(files.url, url))
+      .limit(1);
+    if (anyRow) return 'foreign';
+
+    const [globalRow] = await db
+      .select({ hashId: globalFiles.hashId })
+      .from(globalFiles)
+      .where(eq(globalFiles.url, url))
+      .limit(1);
+    if (!globalRow) return 'unreferenced';
+
+    return (await this.hasOwnFileWithHash(globalRow.hashId, trx)) ? 'own' : 'foreign';
+  };
+
+  /**
+   * Keep only the storage keys that no file row and no global file row still
+   * points at, so deleting one user's row never removes an object another row
+   * (any user) still serves.
+   */
+  filterUnreferencedStorageKeys = async (urls: string[], trx?: Transaction): Promise<string[]> => {
+    const unique = [...new Set(urls.filter(Boolean))];
+    if (unique.length === 0) return [];
+
+    const db = trx ?? this.db;
+    const [fileRefs, globalRefs] = await Promise.all([
+      db.select({ url: files.url }).from(files).where(inArray(files.url, unique)),
+      db.select({ url: globalFiles.url }).from(globalFiles).where(inArray(globalFiles.url, unique)),
+    ]);
+    const referenced = new Set([...fileRefs, ...globalRefs].map((row) => row.url));
+
+    return unique.filter((url) => !referenced.has(url));
+  };
+
   checkHash = async (hash: string) => {
     const item = await this.db.query.globalFiles.findFirst({
       where: eq(globalFiles.hashId, hash),
@@ -216,9 +309,15 @@ export class FileModel {
       // delete the file from global file if it is not used by other files
       // if `DISABLE_REMOVE_GLOBAL_FILE` is true, we will not remove the global file
       if (fileCount === 0 && removeGlobalFile) {
-        await tx.delete(globalFiles).where(eq(globalFiles.hashId, fileHash));
+        const [globalRow] = await tx
+          .delete(globalFiles)
+          .where(eq(globalFiles.hashId, fileHash))
+          .returning({ url: globalFiles.url });
 
-        return file;
+        // The global row can point at a different object than this file row
+        // (another upload of the same bytes); return it so callers can clean
+        // up both instead of leaking the global object.
+        return { ...file, globalFileUrl: globalRow?.url as string | undefined };
       }
     };
 
@@ -345,12 +444,21 @@ export class FileModel {
       if (hashesToDelete.length === 0) return [];
 
       // 5. Delete global files that are no longer referenced
-      await trx.delete(globalFiles).where(inArray(globalFiles.hashId, hashesToDelete));
+      const deletedGlobals = await trx
+        .delete(globalFiles)
+        .where(inArray(globalFiles.hashId, hashesToDelete))
+        .returning({ hashId: globalFiles.hashId, url: globalFiles.url });
+      const globalUrlByHash = new Map(deletedGlobals.map((row) => [row.hashId, row.url]));
 
       const hashesToDeleteSet = new Set(hashesToDelete);
 
       // Return only files whose backing global object became unreferenced.
-      return fileList.filter((file) => file.fileHash && hashesToDeleteSet.has(file.fileHash));
+      return fileList
+        .filter((file) => file.fileHash && hashesToDeleteSet.has(file.fileHash))
+        .map((file) => ({
+          ...file,
+          globalFileUrl: globalUrlByHash.get(file.fileHash!) as string | undefined,
+        }));
     });
   };
 

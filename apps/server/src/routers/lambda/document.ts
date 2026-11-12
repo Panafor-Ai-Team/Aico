@@ -24,6 +24,10 @@ import {
 import { hasWorkspaceScopedPermission } from '@/server/services/workspacePermission';
 import { TransferErrorCode } from '@/types/transferError';
 
+import {
+  assertValidParentDocument,
+  MAX_DOCUMENT_TREE_DEPTH,
+} from './_helpers/assertValidParentDocument';
 import { isWorkspaceNonOwner } from './_helpers/assertWorkspaceRowManageable';
 import {
   assertContentsNotInRestrictedKnowledgeBase,
@@ -112,6 +116,7 @@ export const documentRouter = router({
         }
       }
 
+      await assertValidParentDocument(ctx.documentModel, resolvedParentId);
       await assertCanCreateUnderParent(ctx, resolvedParentId);
 
       // Parse editorData from JSON string to object
@@ -180,6 +185,7 @@ export const documentRouter = router({
         ...new Set(processedDocuments.map((doc) => doc.parentId).filter(Boolean)),
       ] as string[];
       for (const parentId of parentIds) {
+        await assertValidParentDocument(ctx.documentModel, parentId);
         await assertCanCreateUnderParent(ctx, parentId);
       }
 
@@ -340,9 +346,16 @@ export const documentRouter = router({
     .query(async ({ ctx, input }) => {
       const chain = [];
       let currentFolder = await ctx.documentModel.findBySlug(input.slug);
+      const visited = new Set<string>();
 
-      // Build chain from current folder to root
-      while (currentFolder) {
+      // Build chain from current folder to root. Stop on a repeated id or an
+      // implausible depth so corrupted parent links can't loop forever.
+      while (
+        currentFolder &&
+        !visited.has(currentFolder.id) &&
+        chain.length < MAX_DOCUMENT_TREE_DEPTH
+      ) {
+        visited.add(currentFolder.id);
         chain.unshift({
           id: currentFolder.id,
           name: currentFolder.title || currentFolder.filename || 'Untitled',
@@ -466,6 +479,7 @@ export const documentRouter = router({
         const currentParentId = currentDocument?.parentId ?? null;
         const nextParentId = input.parentId ?? null;
         if (currentParentId !== nextParentId) {
+          await assertValidParentDocument(ctx.documentModel, nextParentId, input.id);
           if (currentParentId) await assertCanCreateUnderParent(ctx, currentParentId);
           if (nextParentId) await assertCanCreateUnderParent(ctx, nextParentId);
         }

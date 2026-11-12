@@ -10,6 +10,7 @@ import { EMPTY_EDITOR_STATE } from '@/libs/editor/constants';
 import { isValidEditorData } from '@/libs/editor/isValidEditorData';
 import { documentService } from '@/services/document';
 import type { StoreSetter } from '@/store/types';
+import { saveToast } from '@/store/utils/saveToast';
 import { composeSkillMarkdown, parseSkillMarkdownFrontmatter } from '@/utils/skillMarkdown';
 import { setNamespace } from '@/utils/storeDebug';
 
@@ -39,6 +40,8 @@ export const createEditorSlice = (set: Setter, get: () => DocumentStore, _api?: 
 export class EditorActionImpl {
   readonly #get: () => DocumentStore;
   readonly #set: Setter;
+  /** Documents whose current save-failure streak was already toasted. */
+  readonly #saveFailureToasted = new Set<string>();
 
   constructor(set: Setter, get: () => DocumentStore, _api?: unknown) {
     void _api;
@@ -336,6 +339,8 @@ export class EditorActionImpl {
         title: metadata?.title,
       });
 
+      this.#saveFailureToasted.delete(id);
+
       // Mark as clean and update save status
       internal_dispatchDocument({
         id,
@@ -363,6 +368,12 @@ export class EditorActionImpl {
       // (FORBIDDEN). Tell the user instead of silently dropping the edit.
       if (errorCode === 'FORBIDDEN') {
         toast.error(t('permission.saveNoEditPermission', { ns: 'setting' }));
+      } else if (!lockBlocked && !this.#saveFailureToasted.has(id)) {
+        // Any other rejected save (network, server error, size limit) used to
+        // fail silently. Tell the user once per failure streak — autosave keeps
+        // retrying — and keep `isDirty` so the content stays on screen.
+        this.#saveFailureToasted.add(id);
+        saveToast(error, { retry: () => void this.performSave(id, metadata, options) });
       }
       if (!lockBlocked) console.error('[DocumentStore] Failed to save:', error);
       internal_dispatchDocument({

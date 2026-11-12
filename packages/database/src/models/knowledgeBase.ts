@@ -1,11 +1,25 @@
 import type { KnowledgeBaseItem } from '@lobechat/types';
-import { and, count, desc, eq, inArray, ne, or, sum } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull, ne, or, sum } from 'drizzle-orm';
 
 import type { NewDocument, NewFile, NewKnowledgeBase } from '../schemas';
 import { documents, files, knowledgeBaseFiles, knowledgeBases } from '../schemas';
 import type { LobeChatDatabase } from '../type';
 import { buildWorkspacePayload, buildWorkspaceWhere } from '../utils/workspace';
 import { FileModel } from './file';
+
+/**
+ * Rows a library may carry along on transfer/copy: only rows in the library's
+ * own scope (its workspace, or its owner's personal space). Library links can
+ * point at files of other scopes (older rows written before the link check in
+ * addFilesToKnowledgeBase), and those must never be moved or duplicated.
+ */
+const sameScopeAs = (
+  knowledgeBase: { userId: string; workspaceId: string | null },
+  table: typeof files | typeof documents,
+) =>
+  knowledgeBase.workspaceId
+    ? eq(table.workspaceId, knowledgeBase.workspaceId)
+    : and(eq(table.userId, knowledgeBase.userId), isNull(table.workspaceId));
 
 export class KnowledgeBaseModel {
   private userId: string;
@@ -51,8 +65,25 @@ export class KnowledgeBaseModel {
     const documentIds = fileIds.filter((id) => id.startsWith('docs_'));
     const directFileIds = fileIds.filter((id) => !id.startsWith('docs_'));
 
+    // Only link files the caller can see. The ids come from the client, and a
+    // link to someone else's file would let copy/transfer of this library pull
+    // that file (and its parsed documents) into the caller's account.
+    let ownedDirectFileIds: string[] = [];
+    if (directFileIds.length > 0) {
+      const ownedFiles = await this.db
+        .select({ id: files.id })
+        .from(files)
+        .where(
+          and(
+            inArray(files.id, directFileIds),
+            buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, files),
+          ),
+        );
+      ownedDirectFileIds = ownedFiles.map((file) => file.id);
+    }
+
     // Resolve document IDs to their mirror file IDs via documents.fileId
-    let resolvedFileIds = [...directFileIds];
+    let resolvedFileIds = [...ownedDirectFileIds];
     if (documentIds.length > 0) {
       const docsWithFiles = await this.db
         .select({ fileId: documents.fileId })
@@ -470,7 +501,7 @@ export class KnowledgeBaseModel {
         await trx
           .update(files)
           .set({ ...ownershipUpdate, ...visibilityUpdate, updatedAt: now })
-          .where(inArray(files.id, fileIds));
+          .where(and(inArray(files.id, fileIds), sameScopeAs(knowledgeBase, files)));
       }
 
       const documentWhere =
@@ -481,7 +512,7 @@ export class KnowledgeBaseModel {
       await trx
         .update(documents)
         .set({ ...ownershipUpdate, ...visibilityUpdate, updatedAt: now })
-        .where(documentWhere);
+        .where(and(documentWhere, sameScopeAs(knowledgeBase, documents)));
 
       return { id };
     });
@@ -535,7 +566,10 @@ export class KnowledgeBaseModel {
         fileIds.length > 0
           ? or(eq(documents.knowledgeBaseId, id), inArray(documents.fileId, fileIds))
           : eq(documents.knowledgeBaseId, id);
-      const sourceDocuments = await trx.select().from(documents).where(documentWhere);
+      const sourceDocuments = await trx
+        .select()
+        .from(documents)
+        .where(and(documentWhere, sameScopeAs(knowledgeBase, documents)));
       const sourceDocumentIds = new Set(sourceDocuments.map((item) => item.id));
       const documentIdMap = new Map<string, string>();
       let pendingDocuments = [...sourceDocuments];
@@ -589,7 +623,10 @@ export class KnowledgeBaseModel {
 
       const fileIdMap = new Map<string, string>();
       if (fileIds.length > 0) {
-        const sourceFiles = await trx.select().from(files).where(inArray(files.id, fileIds));
+        const sourceFiles = await trx
+          .select()
+          .from(files)
+          .where(and(inArray(files.id, fileIds), sameScopeAs(knowledgeBase, files)));
 
         for (const file of sourceFiles) {
           const metadata =

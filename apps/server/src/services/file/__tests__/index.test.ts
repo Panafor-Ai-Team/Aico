@@ -645,4 +645,35 @@ describe('FileService', () => {
       });
     });
   });
+
+  describe('deleteStorageForRemovedFiles', () => {
+    it('deletes only keys no other row still uses, including the released global key', async () => {
+      mockFileModel.filterUnreferencedStorageKeys = vi
+        .fn()
+        .mockResolvedValue(['files/2/own.png', 'files/1/global.png']);
+
+      await service.deleteStorageForRemovedFiles([
+        { globalFileUrl: 'files/1/global.png', url: 'files/2/own.png' },
+        { url: 'internal://generated' },
+      ]);
+
+      expect(mockFileModel.filterUnreferencedStorageKeys).toHaveBeenCalledWith([
+        'files/2/own.png',
+        'files/1/global.png',
+      ]);
+      expect(service['impl'].deleteFiles).toHaveBeenCalledWith([
+        'files/2/own.png',
+        'files/1/global.png',
+      ]);
+    });
+
+    it('skips storage when every key is still referenced', async () => {
+      mockFileModel.filterUnreferencedStorageKeys = vi.fn().mockResolvedValue([]);
+
+      await service.deleteStorageForRemovedFiles([{ url: 'files/2/shared.png' }]);
+
+      expect(service['impl'].deleteFile).not.toHaveBeenCalled();
+      expect(service['impl'].deleteFiles).not.toHaveBeenCalled();
+    });
+  });
 });

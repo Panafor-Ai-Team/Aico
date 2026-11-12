@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { withScopedPermission } from '@/business/server/trpc-middlewares/rbacPermission';
 import { authedProcedure, router } from '@/libs/trpc/lambda';
 import { FileS3 } from '@/server/modules/S3';
+import { assertSafeUploadKey, assertUploadKeyIsFree } from '@/server/services/file/uploadKeyPolicy';
 
 const MAX_MULTIPART_SIZE = 1024 * 1024 * 1024; // 1GB
 
@@ -22,7 +23,10 @@ export const multipartUploadRouter = router({
       }),
     )
     .mutation(async ({ input }) => {
+      assertSafeUploadKey(input.pathname);
+
       const s3 = new FileS3();
+      await assertUploadKeyIsFree(s3, input.pathname);
       const uploadId = await s3.createMultipartUpload(input.pathname, input.contentType);
       return { key: input.pathname, uploadId };
     }),
@@ -37,6 +41,8 @@ export const multipartUploadRouter = router({
       }),
     )
     .mutation(async ({ input }) => {
+      assertSafeUploadKey(input.key);
+
       const s3 = new FileS3();
       const url = await s3.createPartUploadUrl(input.key, input.uploadId, input.partNumber);
       return { url };
@@ -52,6 +58,8 @@ export const multipartUploadRouter = router({
       }),
     )
     .mutation(async ({ input }) => {
+      assertSafeUploadKey(input.key);
+
       const s3 = new FileS3();
       await s3.completeMultipartUpload(input.key, input.uploadId, input.parts);
       return { success: true };
@@ -61,6 +69,8 @@ export const multipartUploadRouter = router({
     .use(withScopedPermission('file:upload'))
     .input(z.object({ key: z.string().min(1), uploadId: z.string().min(1) }))
     .mutation(async ({ input }) => {
+      assertSafeUploadKey(input.key);
+
       const s3 = new FileS3();
       await s3.abortMultipartUpload(input.key, input.uploadId);
       return { success: true };

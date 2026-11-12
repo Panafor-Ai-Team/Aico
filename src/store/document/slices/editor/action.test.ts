@@ -13,6 +13,9 @@ vi.mock('@/services/document', () => ({
   },
 }));
 
+const saveToastMock = vi.hoisted(() => vi.fn());
+vi.mock('@/store/utils/saveToast', () => ({ saveToast: saveToastMock }));
+
 vi.mock('@/services/notebook', () => ({
   notebookService: {
     updateDocument: vi.fn().mockResolvedValue({}),
@@ -991,6 +994,41 @@ name: skill-name
       });
 
       expect(result.current.documents['doc-1'].saveBlockedByLock).toBe(false);
+    });
+
+    it('tells the user once when a save is rejected and keeps the unsaved content', async () => {
+      saveToastMock.mockClear();
+      const { result } = renderHook(() => useDocumentStore());
+      const mockEditor = createValidMockEditor() as any;
+
+      act(() => {
+        result.current.initDocumentWithEditor({
+          content: '# Test',
+          documentId: 'doc-1',
+          editor: mockEditor,
+          sourceType: 'page',
+        });
+        result.current.markDirty('doc-1');
+      });
+
+      const serverError = Object.assign(new Error('Payload too large'), {
+        data: { code: 'PAYLOAD_TOO_LARGE' },
+      });
+      vi.mocked(documentService.updateDocument)
+        .mockRejectedValueOnce(serverError)
+        .mockRejectedValueOnce(serverError);
+      await act(async () => {
+        await result.current.performSave('doc-1');
+        await result.current.performSave('doc-1');
+      });
+
+      expect(saveToastMock).toHaveBeenCalledTimes(1);
+      expect(saveToastMock).toHaveBeenCalledWith(
+        serverError,
+        expect.objectContaining({ retry: expect.any(Function) }),
+      );
+      expect(result.current.documents['doc-1'].isDirty).toBe(true);
+      expect(result.current.documents['doc-1'].saveStatus).toBe('idle');
     });
 
     it('clearSaveBlockedByLock is a no-op when the document is not lock-blocked', () => {

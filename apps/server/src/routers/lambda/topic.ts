@@ -828,7 +828,7 @@ export const topicRouter = router({
         if (needToRemove && needToRemove.length > 0) {
           const wsId = ctx.workspaceId ?? undefined;
           const fileService = new FileService(ctx.serverDB, ctx.userId, wsId);
-          await fileService.deleteFiles(needToRemove.map((file) => file.url!));
+          await fileService.deleteStorageForRemovedFiles(needToRemove);
         }
       }
 

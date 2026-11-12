@@ -68,7 +68,9 @@ export class S3StaticFileImpl implements FileServiceImpl {
     return this.s3.createPreSignedUpload(key);
   }
 
-  async getFileMetadata(key: string): Promise<{ contentLength: number; contentType?: string }> {
+  async getFileMetadata(
+    key: string,
+  ): Promise<{ contentLength: number; contentType?: string; lastModified?: Date }> {
     return this.s3.getFileMetadata(key);
   }
 

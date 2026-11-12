@@ -10,6 +10,7 @@ import debug from 'debug';
 import { and, eq, sql } from 'drizzle-orm';
 import isEqual from 'fast-deep-equal';
 
+import { serverDBEnv } from '@/config/db';
 import { DocumentModel } from '@/database/models/document';
 import { FileModel } from '@/database/models/file';
 import { KnowledgeBaseModel } from '@/database/models/knowledgeBase';
@@ -111,10 +112,10 @@ export class DocumentService {
   }
 
   private async deleteFileRecordAndStorage(fileId: string) {
-    const file = await this.fileModel.delete(fileId);
-    if (!file?.url || file.url.startsWith('internal://')) return;
+    const file = await this.fileModel.delete(fileId, serverDBEnv.REMOVE_GLOBAL_FILE);
+    if (!file) return;
 
-    await this.fileService.deleteFile(file.url);
+    await this.fileService.deleteStorageForRemovedFiles([file]);
   }
 
   /**
@@ -154,7 +155,9 @@ export class DocumentService {
     // ACL to children. Personal mode leaves it undefined — the ownership
     // filter ignores the column there.
     let resolvedVisibility: 'private' | 'public' | undefined = visibility;
-    if (this.workspaceId && knowledgeBaseId) {
+    if (knowledgeBaseId) {
+      // Checked in personal mode too: the id comes from the client, and the
+      // insert would otherwise link this page into another user's library.
       const knowledgeBase = await this.knowledgeBaseModel.findById(
         knowledgeBaseId,
         this.callerAgentVisibility,
@@ -162,7 +165,7 @@ export class DocumentService {
       if (!knowledgeBase) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Knowledge base not found' });
       }
-      resolvedVisibility = knowledgeBase.visibility;
+      if (this.workspaceId) resolvedVisibility = knowledgeBase.visibility;
     }
     if (!resolvedVisibility && this.workspaceId) resolvedVisibility = 'private';
 
@@ -556,7 +559,15 @@ export class DocumentService {
   /**
    * Delete document (recursively deletes children if it's a folder)
    */
-  async deleteDocument(id: string, options?: { restrictToCreator?: boolean }) {
+  async deleteDocument(
+    id: string,
+    options?: { restrictToCreator?: boolean },
+    visited: Set<string> = new Set(),
+  ) {
+    // A parent loop in stored data must not recurse forever.
+    if (visited.has(id)) return;
+    visited.add(id);
+
     const document = await this.documentModel.findById(id);
     if (!document) return;
     // Descendants created by other members are skipped, not deleted — their
@@ -575,7 +586,7 @@ export class DocumentService {
 
       // Recursively delete all children
       for (const child of children) {
-        await this.deleteDocument(child.id, options);
+        await this.deleteDocument(child.id, options, visited);
       }
 
       // Also delete all files in this folder

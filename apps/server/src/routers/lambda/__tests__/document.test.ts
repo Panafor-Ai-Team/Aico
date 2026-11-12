@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   businessFileTransferStorageCheck: vi.fn(),
   countFileUsageInSubtree: vi.fn(),
   findById: vi.fn(),
+  findBySlug: vi.fn(),
   getAccessLevel: vi.fn(),
   getResourceMeta: vi.fn(),
   publishToWorkspace: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock('@/database/models/document', () => ({
   DocumentModel: vi.fn(() => ({
     countFileUsageInSubtree: mocks.countFileUsageInSubtree,
     findById: mocks.findById,
+    findBySlug: mocks.findBySlug,
     subtreeHasForeignRows: mocks.subtreeHasForeignRows,
     transferTo: mocks.transferTo,
   })),
@@ -219,5 +221,55 @@ describe('documentRouter publishDocumentToWorkspace', () => {
     await caller().publishDocumentToWorkspace({ accessLevel: 'edit', id: 'doc-1' });
 
     expect(mocks.setAccessLevel).toHaveBeenCalledWith('document', 'doc-1', 'edit', 'creator-1');
+  });
+});
+
+describe('documentRouter folder loops', () => {
+  const rows: Record<
+    string,
+    { id: string; parentId: string | null; slug?: string; title?: string }
+  > = {
+    a: { id: 'a', parentId: null, title: 'A' },
+    b: { id: 'b', parentId: 'a', title: 'B' },
+    c: { id: 'c', parentId: 'b', title: 'C' },
+    x: { id: 'x', parentId: 'y', slug: 'x', title: 'X' },
+    y: { id: 'y', parentId: 'x', title: 'Y' },
+  };
+  const personalCaller = () =>
+    documentRouter.createCaller({ serverDB: {}, userId: 'user-1' } as any);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.assertCanPerformResourceAction.mockResolvedValue(undefined);
+    mocks.findById.mockImplementation(async (id: string) => rows[id]);
+    mocks.findBySlug.mockImplementation(async (slug: string) =>
+      Object.values(rows).find((row) => row.slug === slug),
+    );
+  });
+
+  it('rejects moving a folder into itself', async () => {
+    await expect(personalCaller().updateDocument({ id: 'a', parentId: 'a' })).rejects.toMatchObject(
+      { code: 'BAD_REQUEST' },
+    );
+    expect(mocks.updateDocument).not.toHaveBeenCalled();
+  });
+
+  it('rejects moving a folder under its own subfolder', async () => {
+    await expect(personalCaller().updateDocument({ id: 'a', parentId: 'c' })).rejects.toMatchObject(
+      { code: 'BAD_REQUEST' },
+    );
+    expect(mocks.updateDocument).not.toHaveBeenCalled();
+  });
+
+  it('rejects a parent id the caller cannot see', async () => {
+    await expect(
+      personalCaller().updateDocument({ id: 'c', parentId: 'someone-elses-folder' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('ends the breadcrumb on a parent loop already stored in the database', async () => {
+    const chain = await personalCaller().getFolderBreadcrumb({ slug: 'x' });
+
+    expect(chain.map((item: { id: string }) => item.id)).toEqual(['y', 'x']);
   });
 });

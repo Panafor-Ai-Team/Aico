@@ -176,6 +176,10 @@ const mockFileModelUpdateGlobalFile = vi.fn();
 const mockFileModelClear = vi.fn();
 const mockFileModelTransferTo = vi.fn();
 const mockFileModelCopyToWorkspace = vi.fn();
+const mockFileModelFindOwnFileByHash = vi.fn();
+const mockFileModelHasOwnFileWithHash = vi.fn();
+const mockFileModelHasAnyFileWithHash = vi.fn();
+const mockFileModelGetStorageKeyClaim = vi.fn();
 
 vi.mock('@/database/models/file', () => ({
   FileModel: vi.fn(() => ({
@@ -190,6 +194,10 @@ vi.mock('@/database/models/file', () => ({
     updateGlobalFile: mockFileModelUpdateGlobalFile,
     clear: mockFileModelClear,
     copyToWorkspace: mockFileModelCopyToWorkspace,
+    findOwnFileByHash: mockFileModelFindOwnFileByHash,
+    getStorageKeyClaim: mockFileModelGetStorageKeyClaim,
+    hasAnyFileWithHash: mockFileModelHasAnyFileWithHash,
+    hasOwnFileWithHash: mockFileModelHasOwnFileWithHash,
     transferTo: mockFileModelTransferTo,
   })),
 }));
@@ -206,11 +214,13 @@ const mockFileServiceGetFullFileUrl = vi.fn();
 const mockFileServiceGetFileAccessUrl = vi.fn();
 const mockFileServiceGetFileMetadata = vi.fn();
 const mockFileServiceDeleteFile = vi.fn();
+const mockFileServiceDeleteStorageForRemovedFiles = vi.fn();
 
 vi.mock('@/server/services/file', () => ({
   FileService: vi.fn(() => ({
     deleteFile: mockFileServiceDeleteFile,
     deleteFiles: vi.fn(),
+    deleteStorageForRemovedFiles: mockFileServiceDeleteStorageForRemovedFiles,
     getFileAccessUrl: mockFileServiceGetFileAccessUrl,
     getFullFileUrl: mockFileServiceGetFullFileUrl,
     getFileMetadata: mockFileServiceGetFileMetadata,
@@ -264,6 +274,14 @@ describe('fileRouter', () => {
     routerMocks.businessFileTransferStorageCheck.mockResolvedValue(undefined);
     routerMocks.hasWorkspaceScopedPermission.mockResolvedValue(true);
     mockKnowledgeBaseFindById.mockResolvedValue({ id: 'kb-1', visibility: 'public' });
+    // vi.clearAllMocks keeps implementations; reset the ones tests override.
+    mockFileModelCheckHash.mockReset();
+    mockFileModelCreate.mockReset();
+    // Default: the caller re-uses its own storage key and owns the hash.
+    mockFileModelGetStorageKeyClaim.mockResolvedValue('own');
+    mockFileModelHasOwnFileWithHash.mockResolvedValue(true);
+    mockFileModelHasAnyFileWithHash.mockResolvedValue(true);
+    mockFileModelFindOwnFileByHash.mockResolvedValue(undefined);
 
     mockFile = {
       id: 'test-id',
@@ -296,26 +314,53 @@ describe('fileRouter', () => {
   });
 
   describe('checkFileHash', () => {
-    it('should handle when fileModel.checkHash returns undefined', async () => {
-      ctx.fileModel.checkHash.mockResolvedValue(undefined);
-      await expect(caller.checkFileHash({ hash: 'test-hash' })).resolves.toBeUndefined();
+    it('should report no reusable copy when the caller has no file with this hash', async () => {
+      mockFileModelFindOwnFileByHash.mockResolvedValue(undefined);
+      await expect(caller.checkFileHash({ hash: 'test-hash' })).resolves.toEqual({
+        isExist: false,
+      });
     });
 
-    it('should return existing hash when the stored object is still available', async () => {
-      const checkResult = {
+    it('should answer with the caller own copy when the stored object is still available', async () => {
+      mockFileModelCheckHash.mockResolvedValue({
         isExist: true,
-        metadata: { path: 'files/existing.png' },
-        url: 'files/existing.png',
-      };
-      mockFileModelCheckHash.mockResolvedValue(checkResult);
+        metadata: { path: 'files/1/other-user.png' },
+        url: 'files/1/other-user.png',
+      });
+      mockFileModelFindOwnFileByHash.mockResolvedValue({
+        fileType: 'image/png',
+        metadata: { filename: 'own.png', path: 'files/2/stale.png' },
+        size: 100,
+        url: 'files/2/own.png',
+      });
       mockFileServiceGetFileMetadata.mockResolvedValue({
         contentLength: 100,
         contentType: 'image/png',
       });
 
-      await expect(caller.checkFileHash({ hash: 'test-hash' })).resolves.toEqual(checkResult);
+      await expect(caller.checkFileHash({ hash: 'test-hash' })).resolves.toEqual({
+        fileType: 'image/png',
+        isExist: true,
+        metadata: { filename: 'own.png', path: 'files/2/own.png' },
+        size: 100,
+        url: 'files/2/own.png',
+      });
 
-      expect(mockFileServiceGetFileMetadata).toHaveBeenCalledWith('files/existing.png');
+      expect(mockFileServiceGetFileMetadata).toHaveBeenCalledWith('files/2/own.png');
+    });
+
+    it('should not reveal or hand out another user copy of the same bytes', async () => {
+      mockFileModelCheckHash.mockResolvedValue({
+        isExist: true,
+        metadata: { path: 'files/1/other-user.png' },
+        url: 'files/1/other-user.png',
+      });
+      mockFileModelFindOwnFileByHash.mockResolvedValue(undefined);
+
+      await expect(caller.checkFileHash({ hash: 'test-hash' })).resolves.toEqual({
+        isExist: false,
+      });
+      expect(mockFileServiceGetFileMetadata).not.toHaveBeenCalled();
     });
 
     it('should treat stale hash records as missing when the stored object is unavailable', async () => {
@@ -323,6 +368,12 @@ describe('fileRouter', () => {
       mockFileModelCheckHash.mockResolvedValue({
         isExist: true,
         metadata: { path: 'generations/images/missing_raw.jpg' },
+        url: 'generations/images/missing_raw.jpg',
+      });
+      mockFileModelFindOwnFileByHash.mockResolvedValue({
+        fileType: 'image/jpeg',
+        metadata: {},
+        size: 1,
         url: 'generations/images/missing_raw.jpg',
       });
       mockFileServiceGetFileMetadata.mockRejectedValue(new Error('NoSuchKey'));
@@ -344,6 +395,72 @@ describe('fileRouter', () => {
   });
 
   describe('createFile', () => {
+    const baseInput = {
+      fileType: 'image/png',
+      hash: 'new-hash',
+      metadata: {},
+      name: 'a.png',
+      size: 100,
+      url: 'files/1/fresh.png',
+    };
+
+    it('should refuse a storage key that only other users use', async () => {
+      mockFileModelCheckHash.mockResolvedValue({ isExist: false });
+      mockFileModelGetStorageKeyClaim.mockResolvedValue('foreign');
+
+      await expect(caller.createFile(baseInput)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      expect(mockFileModelCreate).not.toHaveBeenCalled();
+    });
+
+    it('should accept a fresh unclaimed upload', async () => {
+      mockFileModelCheckHash.mockResolvedValue({ isExist: false });
+      mockFileModelGetStorageKeyClaim.mockResolvedValue('unreferenced');
+      mockFileServiceGetFileMetadata.mockResolvedValue({
+        contentLength: 100,
+        lastModified: new Date(),
+      });
+      mockFileModelCreate.mockResolvedValue({ id: 'new-file' });
+
+      await expect(caller.createFile(baseInput)).resolves.toMatchObject({ id: 'new-file' });
+    });
+
+    it('should refuse an unclaimed key with no object behind it', async () => {
+      mockFileModelCheckHash.mockResolvedValue({ isExist: false });
+      mockFileModelGetStorageKeyClaim.mockResolvedValue('unreferenced');
+      mockFileServiceGetFileMetadata.mockRejectedValue(new Error('NotFound'));
+
+      await expect(caller.createFile(baseInput)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      expect(mockFileModelCreate).not.toHaveBeenCalled();
+    });
+
+    it('should refuse an old unclaimed object (not this caller upload)', async () => {
+      mockFileModelCheckHash.mockResolvedValue({ isExist: false });
+      mockFileModelGetStorageKeyClaim.mockResolvedValue('unreferenced');
+      mockFileServiceGetFileMetadata.mockResolvedValue({
+        contentLength: 100,
+        lastModified: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+      });
+
+      await expect(caller.createFile(baseInput)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      expect(mockFileModelCreate).not.toHaveBeenCalled();
+    });
+
+    it('should not repoint another user shared hash row at the caller object', async () => {
+      mockFileModelCheckHash.mockResolvedValue({ isExist: true, url: 'files/1/other.png' });
+      mockFileModelGetStorageKeyClaim.mockResolvedValue('unreferenced');
+      mockFileModelHasOwnFileWithHash.mockResolvedValue(false);
+      mockFileModelHasAnyFileWithHash.mockResolvedValue(true);
+      mockFileServiceGetFileMetadata.mockImplementation(async (url: string) => {
+        if (url === 'files/1/other.png') throw new Error('NotFound');
+        return { contentLength: 100, lastModified: new Date() };
+      });
+      mockFileModelCreate.mockResolvedValue({ id: 'new-file' });
+
+      await caller.createFile(baseInput);
+
+      expect(mockFileModelUpdateGlobalFile).not.toHaveBeenCalled();
+    });
+
     it('should throw if fileModel.checkHash returns undefined', async () => {
       ctx.fileModel.checkHash.mockResolvedValue(undefined);
       await expect(
@@ -570,6 +687,25 @@ describe('fileRouter', () => {
           hash: 'test-hash',
           fileType: 'text',
           knowledgeBaseId: 'missing-kb',
+          name: 'test.txt',
+          size: 100,
+          url: 'files/test.txt',
+          metadata: {},
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+      expect(mockFileModelCreate).not.toHaveBeenCalled();
+    });
+
+    it('should reject adding a file to another user library in personal mode', async () => {
+      mockFileModelCheckHash.mockResolvedValue({ isExist: false });
+      mockKnowledgeBaseFindById.mockResolvedValue(undefined);
+
+      await expect(
+        caller.createFile({
+          hash: 'test-hash',
+          fileType: 'text',
+          knowledgeBaseId: 'someone-else-kb',
           name: 'test.txt',
           size: 100,
           url: 'files/test.txt',
@@ -894,7 +1030,7 @@ describe('fileRouter', () => {
       await caller.removeUnreferencedFile({ id: 'voice-file' });
 
       expect(mockFileModelDeleteUnreferenced).toHaveBeenCalledWith('voice-file', false);
-      expect(mockFileServiceDeleteFile).not.toHaveBeenCalled();
+      expect(mockFileServiceDeleteStorageForRemovedFiles).not.toHaveBeenCalled();
     });
 
     it('removes object storage after the unreferenced database row is deleted', async () => {
@@ -903,7 +1039,22 @@ describe('fileRouter', () => {
 
       await caller.removeUnreferencedFile({ id: 'voice-file' });
 
-      expect(mockFileServiceDeleteFile).toHaveBeenCalledWith('voice/file.webm');
+      expect(mockFileServiceDeleteStorageForRemovedFiles).toHaveBeenCalledWith([
+        { url: 'voice/file.webm' },
+      ]);
+    });
+  });
+
+  describe('removeFile storage cleanup', () => {
+    it('hands the deleted row (with its released global key) to the reference-safe cleanup', async () => {
+      mockFileModelFindById.mockResolvedValue({ id: 'f1', userId: 'test-user' });
+      const removed = { globalFileUrl: 'files/1/global.png', url: 'files/2/own.png' };
+      mockFileModelDelete.mockResolvedValue(removed);
+
+      await caller.removeFile({ id: 'f1' });
+
+      expect(mockFileServiceDeleteStorageForRemovedFiles).toHaveBeenCalledWith([removed]);
+      expect(mockFileServiceDeleteFile).not.toHaveBeenCalled();
     });
   });
 

@@ -345,15 +345,19 @@ export class DocumentModel {
     if (!root) return [];
 
     const collected: DocumentItem[] = [root];
+    const seen = new Set<string>([root.id]);
     let frontier: string[] = [root.id];
 
     while (frontier.length > 0) {
       const children = await runner.query.documents.findMany({
         where: and(this.ownership(), inArray(documents.parentId, frontier)),
       });
-      if (children.length === 0) break;
-      collected.push(...children);
-      frontier = children.map((c) => c.id);
+      // Skip ids already collected so a parent loop in stored data ends the walk.
+      const fresh = children.filter((child) => !seen.has(child.id));
+      if (fresh.length === 0) break;
+      for (const child of fresh) seen.add(child.id);
+      collected.push(...fresh);
+      frontier = fresh.map((c) => c.id);
     }
 
     return collected;

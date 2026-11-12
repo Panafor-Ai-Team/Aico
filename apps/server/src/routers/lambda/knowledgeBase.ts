@@ -7,7 +7,7 @@ import { wsCompatProcedure } from '@/business/server/trpc-middlewares/workspaceA
 import { serverDBEnv } from '@/config/db';
 import { KnowledgeBaseModel } from '@/database/models/knowledgeBase';
 import { ResourcePermissionModel } from '@/database/models/resourcePermission';
-import { DEFAULT_RESOURCE_ACCESS_LEVELS, insertKnowledgeBasesSchema } from '@/database/schemas';
+import { DEFAULT_RESOURCE_ACCESS_LEVELS } from '@/database/schemas';
 import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { FileService } from '@/server/services/file';
@@ -408,7 +408,15 @@ export const knowledgeBaseRouter = router({
     .input(
       z.object({
         id: z.string(),
-        value: insertKnowledgeBasesSchema.partial(),
+        // Only the fields the library editor changes. Unknown keys (userId,
+        // workspaceId, id, visibility, ...) are stripped: ownership moves go
+        // through transfer/copy and visibility through setKnowledgeBaseVisibility,
+        // which carry their own checks.
+        value: z.object({
+          avatar: z.string().nullish(),
+          description: z.string().nullish(),
+          name: z.string().trim().min(1).optional(),
+        }),
       }),
     )
     .mutation(async ({ input, ctx }) => {
