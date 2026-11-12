@@ -33,14 +33,16 @@ const styles = createStaticStyles(({ css }) => ({
  * the flat all-files table (which now lives at /resource/all).
  */
 const ResourceHomeDashboard = memo(() => {
-  const { t } = useTranslation('file');
+  const { t } = useTranslation(['file', 'common']);
 
   return (
     <Flexbox height={'100%'}>
       <NavHeader
-        left={<Flexbox style={{ marginLeft: 8 }}>{t('resource')}</Flexbox>}
         right={<AddButton />}
         style={{ borderBottom: `1px solid ${cssVar.colorBorderSecondary}` }}
+        left={
+          <Flexbox style={{ marginInlineStart: 8 }}>{t('tab.resource', { ns: 'common' })}</Flexbox>
+        }
       />
       <div className={styles.scroll}>
         <Flexbox className={styles.content} gap={40}>
