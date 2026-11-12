@@ -5,14 +5,18 @@ import { getChunkTargetId, useFileStore } from '@/store/file';
 import { AsyncTaskStatus } from '@/types/asyncTask';
 import { type FileListItem } from '@/types/files';
 
+const IN_FLIGHT = new Set<AsyncTaskStatus>([AsyncTaskStatus.Pending, AsyncTaskStatus.Processing]);
+
 export const useCheckTaskStatus = (data: FileListItem[] | undefined) => {
   const processingFileIds =
     data
       ?.filter(
         (item) =>
           item.sourceType === 'file' &&
-          (item.chunkingStatus === AsyncTaskStatus.Processing ||
-            item.embeddingStatus === AsyncTaskStatus.Processing),
+          // Embedding tasks start as Pending; polling only Processing left the
+          // status stuck on "pending" until a reload.
+          (IN_FLIGHT.has(item.chunkingStatus as AsyncTaskStatus) ||
+            IN_FLIGHT.has(item.embeddingStatus as AsyncTaskStatus)),
       )
       .map(getChunkTargetId) ?? [];
   const processingKey = processingFileIds.join(',');

@@ -1,3 +1,4 @@
+import { isEqual } from 'es-toolkit';
 import type { StateCreator } from 'zustand/vanilla';
 
 import type { ResourceManagerMode } from '@/features/ResourceManager';
@@ -118,10 +119,35 @@ export class ResourceManagerStoreActionImpl {
 
         await kbStore.removeKnowledgeBase(libraryId);
 
+        // `/knowledge` no longer exists; the catch-all reloaded the app at `/`.
         if (typeof window !== 'undefined') {
-          window.location.href = '/knowledge';
+          window.location.href = '/resource';
         }
       }
+    }
+  };
+
+  /**
+   * Move resources from the open library into another library.
+   *
+   * Add first: if the target refuses (already there, no access), nothing has
+   * left the source library yet. Then clear the folder link, since folders
+   * belong to one library and a leftover parent hid the item in the target.
+   * Removing from the source library comes last.
+   */
+  moveResourcesToLibrary = async (targetLibraryId: string, ids: string[]): Promise<void> => {
+    if (ids.length === 0) return;
+
+    const { libraryId } = this.#get();
+    const { useKnowledgeBaseStore } = await import('@/store/library');
+    const { resourceService } = await import('@/services/resource');
+    const { default: pMap } = await import('p-map');
+    const kbStore = useKnowledgeBaseStore.getState();
+
+    await kbStore.addFilesToKnowledgeBase(targetLibraryId, ids);
+    await pMap(ids, (id) => resourceService.moveResource(id, null), { concurrency: 5 });
+    if (libraryId && libraryId !== targetLibraryId) {
+      await kbStore.removeFilesFromKnowledgeBase(libraryId, ids);
     }
   };
 
@@ -133,7 +159,9 @@ export class ResourceManagerStoreActionImpl {
     const { useFileStore } = await import('@/store/file');
     const queryParams = useFileStore.getState().queryParams;
 
-    if (!queryParams) return selectedFileIds;
+    // In "all" mode `selectedFileIds` are the exclusions; without a query to
+    // resolve against, returning them would act on exactly the wrong rows.
+    if (!queryParams) return [];
 
     const result = await resourceService.resolveSelectionIds(queryParams as any);
     return result.ids.filter((id) => !selectedFileIds.includes(id));
@@ -150,6 +178,9 @@ export class ResourceManagerStoreActionImpl {
     if (!queryParams) return;
 
     const { total } = await resourceService.resolveSelectionIds(queryParams as any);
+    // The user may have opened another folder or changed the filter while this
+    // was in flight; "all" would then apply to a list they never selected.
+    if (!isEqual(useFileStore.getState().queryParams, queryParams)) return;
     this.#set({ selectAllState: 'all', selectedFileIds: [], selectionTotal: total });
   };
 

@@ -334,14 +334,27 @@ class UploadService {
   ): Promise<FileMetadata> => {
     const xhr = new XMLHttpRequest();
 
+    const cancel = () => {
+      onProgress?.('cancelled', { progress: 0, restTime: 0, speed: 0 });
+      return new Error('Upload cancelled by user');
+    };
+
+    // A cancel before or during signing must stop here: an already-aborted
+    // signal never fires a new 'abort' event, so the PUT below would still run.
+    if (abortController?.signal.aborted) throw cancel();
     const { preSignUrl, ...result } = await this.getSignedUploadUrl(file, { directory, pathname });
+    if (abortController?.signal.aborted) throw cancel();
     const startTime = Date.now();
 
     // Setup abort listener
     if (abortController) {
-      abortController.signal.addEventListener('abort', () => {
-        xhr.abort();
-      });
+      abortController.signal.addEventListener(
+        'abort',
+        () => {
+          xhr.abort();
+        },
+        { once: true },
+      );
     }
 
     xhr.upload.addEventListener('progress', (event) => {

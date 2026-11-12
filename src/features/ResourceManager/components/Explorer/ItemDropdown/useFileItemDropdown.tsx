@@ -21,6 +21,7 @@ import { shallow } from 'zustand/shallow';
 import RepoIcon from '@/components/LibIcon';
 import { useKnowledgeBaseListContext } from '@/features/ResourceManager/components/KnowledgeBaseListProvider';
 import { PAGE_FILE_TYPE } from '@/features/ResourceManager/constants';
+import { useResourceManagerStore } from '@/features/ResourceManager/store';
 import VisibilityConfirmContent from '@/features/VisibilityConfirmContent';
 import { useAppOrigin } from '@/hooks/useAppOrigin';
 import { usePermission } from '@/hooks/usePermission';
@@ -78,22 +79,16 @@ export const useFileItemDropdown = ({
   // delete a shared resource — mirrors the server-side enforcement.
   const canManage = useResourceManageable(userId);
 
-  const {
-    deleteResource,
-    moveResource,
-    refreshFileList,
-    publishFileToWorkspace,
-    setFileVisibility,
-  } = useFileStore(
-    (s) => ({
-      deleteResource: s.deleteResource,
-      moveResource: s.moveResource,
-      publishFileToWorkspace: s.publishFileToWorkspace,
-      refreshFileList: s.refreshFileList,
-      setFileVisibility: s.setFileVisibility,
-    }),
-    shallow,
-  );
+  const { deleteResource, refreshFileList, publishFileToWorkspace, setFileVisibility } =
+    useFileStore(
+      (s) => ({
+        deleteResource: s.deleteResource,
+        publishFileToWorkspace: s.publishFileToWorkspace,
+        refreshFileList: s.refreshFileList,
+        setFileVisibility: s.setFileVisibility,
+      }),
+      shallow,
+    );
   const [removeFilesFromKnowledgeBase, addFilesToKnowledgeBase] = useKnowledgeBaseStore((s) => [
     s.removeFilesFromKnowledgeBase,
     s.addFilesToKnowledgeBase,
@@ -170,14 +165,7 @@ export const useFileItemDropdown = ({
       onClick: async ({ domEvent }) => {
         domEvent.stopPropagation();
         try {
-          // First remove from current library
-          if (libraryId) {
-            await removeFilesFromKnowledgeBase(libraryId, [id]);
-          }
-          // Clear folder relationship (parentId) since folders are library-specific
-          await moveResource(id, null);
-          // Then add to target library
-          await addFilesToKnowledgeBase(kb.id, [id]);
+          await useResourceManagerStore.getState().moveResourcesToLibrary(kb.id, [id]);
           toast.success(t('moveToKnowledgeBase.success', { ns: 'knowledgeBase' }));
         } catch (e: any) {
           console.error(e);
@@ -380,37 +368,43 @@ export const useFileItemDropdown = ({
             domEvent.stopPropagation();
             const downloadingToast = toast.loading(t('FileManager.actions.downloading'));
 
-            if (isPage) {
-              // For pages, download as markdown
-              try {
-                const doc = await documentService.getDocumentById(id);
-                if (doc?.content) {
-                  // Add title as markdown heading
-                  const title = doc.title || filename;
-                  const contentWithTitle = `# ${title}\n\n${doc.content}`;
+            // try/finally: a failed download used to leave "Downloading…" open.
+            try {
+              if (isPage) {
+                // For pages, download as markdown
+                try {
+                  const doc = await documentService.getDocumentById(id);
+                  if (doc?.content) {
+                    // Add title as markdown heading
+                    const title = doc.title || filename;
+                    const contentWithTitle = `# ${title}\n\n${doc.content}`;
 
-                  // Create a blob with the markdown content including title
-                  const blob = new Blob([contentWithTitle], { type: 'text/markdown' });
-                  const blobUrl = URL.createObjectURL(blob);
+                    // Create a blob with the markdown content including title
+                    const blob = new Blob([contentWithTitle], { type: 'text/markdown' });
+                    const blobUrl = URL.createObjectURL(blob);
 
-                  // Ensure filename has .md extension
-                  const mdFilename = filename.endsWith('.md') ? filename : `${filename}.md`;
+                    // Ensure filename has .md extension
+                    const mdFilename = filename.endsWith('.md') ? filename : `${filename}.md`;
 
-                  await downloadFile(blobUrl, mdFilename);
-                  URL.revokeObjectURL(blobUrl);
-                } else {
-                  toast.error('Failed to download page: no content available');
+                    await downloadFile(blobUrl, mdFilename);
+                    URL.revokeObjectURL(blobUrl);
+                  } else {
+                    toast.error(t('operationFailed', { ns: 'common' }));
+                  }
+                } catch (error) {
+                  console.error('Failed to download page:', error);
+                  toast.error(t('operationFailed', { ns: 'common' }));
                 }
-              } catch (error) {
-                console.error('Failed to download page:', error);
-                toast.error('Failed to download page');
+              } else {
+                // For regular files, download from URL
+                await downloadFile(url, filename);
               }
-            } else {
-              // For regular files, download from URL
-              await downloadFile(url, filename);
+            } catch (error) {
+              console.error('Failed to download file:', error);
+              toast.error(t('operationFailed', { ns: 'common' }));
+            } finally {
+              downloadingToast.close();
             }
-
-            downloadingToast.close();
           },
         },
         canEditResources && {
@@ -477,7 +471,6 @@ export const useFileItemDropdown = ({
     isPage,
     libraries,
     libraryId,
-    moveResource,
     onRenameStart,
     publishFileToWorkspace,
     setFileVisibility,

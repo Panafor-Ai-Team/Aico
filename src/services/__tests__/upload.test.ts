@@ -111,6 +111,58 @@ describe('UploadService', () => {
     });
   });
 
+  describe('cancel before the upload starts', () => {
+    it('does not sign or send when the upload was already cancelled', async () => {
+      const xhrMock = {
+        open: vi.fn(),
+        send: vi.fn(),
+        setRequestHeader: vi.fn(),
+        upload: { addEventListener: vi.fn() },
+        addEventListener: vi.fn(),
+      };
+      global.XMLHttpRequest = vi.fn(() => xhrMock) as any;
+      const abortController = new AbortController();
+      abortController.abort();
+      const onProgress = vi.fn();
+
+      await expect(
+        uploadService.uploadToServerS3(new File(['x'], 'a.txt', { type: 'text/plain' }), {
+          abortController,
+          onProgress,
+        }),
+      ).rejects.toThrow('Upload cancelled by user');
+
+      expect(lambdaClient.upload.createS3PreSignedUrl.mutate).not.toHaveBeenCalled();
+      expect(xhrMock.send).not.toHaveBeenCalled();
+      expect(onProgress).toHaveBeenCalledWith('cancelled', expect.anything());
+    });
+
+    it('does not send when cancelled while the URL was being signed', async () => {
+      const xhrMock = {
+        open: vi.fn(),
+        send: vi.fn(),
+        setRequestHeader: vi.fn(),
+        upload: { addEventListener: vi.fn() },
+        addEventListener: vi.fn(),
+      };
+      global.XMLHttpRequest = vi.fn(() => xhrMock) as any;
+      const abortController = new AbortController();
+      vi.mocked(lambdaClient.upload.createS3PreSignedUrl.mutate).mockImplementationOnce(
+        async () => {
+          abortController.abort();
+          return 'https://storage.test/signed';
+        },
+      );
+
+      await expect(
+        uploadService.uploadToServerS3(new File(['x'], 'a.txt', { type: 'text/plain' }), {
+          abortController,
+        }),
+      ).rejects.toThrow('Upload cancelled by user');
+      expect(xhrMock.send).not.toHaveBeenCalled();
+    });
+  });
+
   describe('uploadBase64ToS3', () => {
     beforeEach(() => {
       // Mock XMLHttpRequest for server upload

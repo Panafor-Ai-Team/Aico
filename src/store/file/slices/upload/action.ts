@@ -85,6 +85,9 @@ const normalizeUploadedImageFileType = async (
   });
 };
 
+/** Same text `uploadService` rejects with when an XHR is aborted. */
+const UPLOAD_CANCELLED_MESSAGE = 'Upload cancelled by user';
+
 type ExistingFileMetadata = Record<string, unknown> & { path?: string };
 
 const normalizeExistingFileMetadata = (metadata: unknown): ExistingFileMetadata => {
@@ -160,7 +163,15 @@ export class FileUploadActionImpl {
       // 2. check file hash
       const hash = sha256(fileArrayBuffer);
 
+      const throwIfCancelled = () => {
+        if (!abortController?.signal.aborted) return;
+        onStatusUpdate?.({ id: statusId, type: 'updateFile', value: { status: 'cancelled' } });
+        throw new Error(UPLOAD_CANCELLED_MESSAGE);
+      };
+
+      throwIfCancelled();
       const checkStatus = await fileService.checkFileHash(hash);
+      throwIfCancelled();
       let metadata: ExistingFileMetadata;
 
       // 3. if file exist, just skip upload
@@ -220,6 +231,10 @@ export class FileUploadActionImpl {
         ? await (audioDurationPromise ?? getAudioDuration(normalizedFile).catch(() => undefined))
         : undefined;
 
+      // A cancel after the bytes were stored (or reused) must not still create
+      // the file record and flip the item back to "done".
+      throwIfCancelled();
+
       // 5. create file to db
       // Fall back to the global file URL when legacy/generated metadata has no `path`.
       const fileUrl = metadata.path || checkStatus.url;
@@ -269,6 +284,19 @@ export class FileUploadActionImpl {
         })
       ) {
         return;
+      }
+
+      // Anything else used to leave the dock item frozen at its last progress
+      // value with no retry. Cancels already set their own status.
+      const cancelled =
+        abortController?.signal.aborted ||
+        (error instanceof Error && error.message === UPLOAD_CANCELLED_MESSAGE);
+      if (!cancelled) {
+        onStatusUpdate?.({
+          id: statusId,
+          type: 'updateFile',
+          value: { error: t('upload.uploadFailed', { ns: 'error' }), status: 'error' },
+        });
       }
 
       throw error;

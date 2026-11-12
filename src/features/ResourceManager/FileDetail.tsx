@@ -36,7 +36,8 @@ const FileDetail = memo<FileDetailProps>((props) => {
     { children: name, key: 'name', label: t('detail.basic.filename') },
     { children: formatSize(size), key: 'size', label: t('detail.basic.size') },
     {
-      children: name.split('.').pop()?.toUpperCase(),
+      // A name without a dot has no extension; don't show the whole name as the type.
+      children: name.includes('.') ? name.split('.').pop()?.toUpperCase() : props.fileType,
       key: 'type',
       label: t('detail.basic.type'),
     },

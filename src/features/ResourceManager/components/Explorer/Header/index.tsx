@@ -138,7 +138,13 @@ const Header = memo(() => {
           if (!canEditResources) return;
 
           const handleDelete = async () => {
-            await onActionClick('delete');
+            try {
+              await onActionClick('delete');
+            } catch (error) {
+              console.error('Failed to delete resources:', error);
+              toast.error(t('operationFailed', { ns: 'common' }));
+              return;
+            }
             toast.success(t('FileManager.actions.deleteSuccess'));
           };
 

@@ -100,3 +100,57 @@ describe('TreeActionImpl.moveItem', () => {
     expect(mockRefreshFileList).not.toHaveBeenCalled();
   });
 });
+
+describe('TreeActionImpl optimistic actions', () => {
+  beforeEach(() => {
+    mockRefreshFileList.mockReset();
+    mockResourceMove.mockReset().mockResolvedValue(undefined);
+    mockStoreMove.mockReset();
+    fileStoreState.resourceMap = new Map();
+  });
+
+  const withTimeout = <T>(promise: Promise<T>, ms = 1000) =>
+    Promise.race([
+      promise,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timed out')), ms)),
+    ]);
+
+  it('settles and lets a second move in the same folder reach the server', async () => {
+    const state = createState();
+    state.children = {
+      'folder-a': [
+        { id: 'file-1', isFolder: false, name: 'one.txt' } as any,
+        { id: 'file-2', isFolder: false, name: 'two.txt' } as any,
+      ],
+    };
+    const actions = new TreeActionImpl(
+      createSetter(() => state),
+      () => state,
+    );
+    vi.spyOn(actions, 'revalidate').mockResolvedValue();
+
+    await withTimeout(actions.moveItem('file-1', 'folder-a', 'folder-b'));
+    await withTimeout(actions.moveItem('file-2', 'folder-a', 'folder-b'));
+
+    expect(mockResourceMove).toHaveBeenCalledWith('file-1', 'folder-b');
+    expect(mockResourceMove).toHaveBeenCalledWith('file-2', 'folder-b');
+  });
+});
+
+describe('TreeActionImpl folder slug keys', () => {
+  it('reconciles explorer rows (keyed by folder slug) into the folder id the tree renders', () => {
+    const state = createState();
+    state.children = {
+      '': [{ id: 'docs_folder1', isFolder: true, name: 'Folder', slug: 'abc12345' } as any],
+    };
+    const actions = new TreeActionImpl(
+      createSetter(() => state),
+      () => state,
+    );
+
+    actions.reconcile('abc12345', [{ id: 'file-9', isFolder: false, name: 'nine.txt' } as any]);
+
+    expect(state.children['docs_folder1']?.map((item) => item.id)).toEqual(['file-9']);
+    expect(state.children['abc12345']).toBeUndefined();
+  });
+});
