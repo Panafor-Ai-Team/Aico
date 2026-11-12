@@ -86,7 +86,7 @@ const SearchInput = memo(() => {
         />
       </div>
       {showIcon && (
-        <ActionIcon icon={SearchIcon} style={{ marginRight: 4 }} onClick={handleExpand} />
+        <ActionIcon icon={SearchIcon} style={{ marginInlineEnd: 4 }} onClick={handleExpand} />
       )}
     </>
   );

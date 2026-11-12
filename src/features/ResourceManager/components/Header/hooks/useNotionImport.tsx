@@ -123,8 +123,8 @@ const useNotionImport = ({
               title = firstLine.replace(/^#+\s*/, '').trim();
               content = lines.slice(1).join('\n').trim();
             } else {
-              const filename = mdFile.name.split('/').pop() || 'Untitled';
-              title = filename.replace(/\.md$/, '');
+              const filename = mdFile.name.split('/').pop() || t('pageList.untitled');
+              title = filename.replace(/\.(md|markdown)$/i, '');
             }
 
             await createDocument({

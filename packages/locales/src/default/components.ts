@@ -15,6 +15,7 @@ export default {
   'DragUpload.dragMixedTitle': 'Reference Folder & Upload Files',
   'DragUpload.dragTitle': 'Upload Images',
   'FileManager.actions.addToLibrary': 'Add to Library',
+  'FileManager.actions.batchActions': 'Batch actions',
   'FileManager.actions.batchChunking': 'Batch Chunking',
   'FileManager.actions.chunking': 'Chunking',
   'FileManager.actions.chunkingTooltip':
@@ -53,6 +54,7 @@ export default {
   'FileManager.actions.moveToOtherLibrary': 'Move to another Library',
   'FileManager.actions.moveToRoot': 'Move to root directory',
   'FileManager.actions.moving': 'Moving...',
+  'FileManager.actions.nameRequired': 'Name cannot be empty',
   'FileManager.actions.removeFromLibrary': 'Remove from Library',
   'FileManager.actions.removeFromLibrarySuccess': 'File removed successfully.',
   'FileManager.actions.rename': 'Rename',

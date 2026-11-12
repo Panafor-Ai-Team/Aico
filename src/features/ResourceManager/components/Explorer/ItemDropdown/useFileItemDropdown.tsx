@@ -130,7 +130,7 @@ export const useFileItemDropdown = ({
     const addToKnowledgeBaseSubmenu: ItemType[] = availableKnowledgeBases.map((kb) => ({
       icon: <RepoIcon />,
       key: `add-to-library-${kb.id}`,
-      label: <span style={{ marginLeft: 8 }}>{kb.name}</span>,
+      label: <span style={{ marginInlineStart: 8 }}>{kb.name}</span>,
       onClick: async ({ domEvent }) => {
         domEvent.stopPropagation();
         try {
@@ -161,7 +161,7 @@ export const useFileItemDropdown = ({
     const moveToKnowledgeBaseSubmenu: ItemType[] = availableKnowledgeBases.map((kb) => ({
       icon: <RepoIcon />,
       key: `move-to-library-${kb.id}`,
-      label: <span style={{ marginLeft: 8 }}>{kb.name}</span>,
+      label: <span style={{ marginInlineStart: 8 }}>{kb.name}</span>,
       onClick: async ({ domEvent }) => {
         domEvent.stopPropagation();
         try {

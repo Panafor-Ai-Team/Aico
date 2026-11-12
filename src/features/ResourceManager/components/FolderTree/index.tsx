@@ -6,6 +6,7 @@ import { createStaticStyles, cx } from 'antd-style';
 import { FolderIcon, FolderOpenIcon } from 'lucide-react';
 import * as m from 'motion/react-m';
 import { memo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   folderHeader: css`
@@ -59,7 +60,11 @@ export const FolderTreeItemComponent = memo<FolderTreeItemProps>(
     onFolderClick,
   }) => {
     const itemKey = item.slug || item.id;
-    const isExpanded = expandedFolders.has(itemKey);
+    // A newly created subfolder expands its parent by id, other paths by slug.
+    const isExpanded = expandedFolders.has(itemKey) || expandedFolders.has(item.id);
+    const { i18n } = useTranslation();
+    // A collapsed caret points along the reading direction (left in RTL).
+    const collapsedRotate = i18n.dir() === 'rtl' ? 90 : -90;
     // Compare selectedKey with item.id since selectedKey is always the ID
     const isActive = selectedKey === item.id;
 
@@ -90,7 +95,7 @@ export const FolderTreeItemComponent = memo<FolderTreeItemProps>(
           onClick={handleClick}
         >
           <m.div
-            animate={{ rotate: isExpanded ? 0 : -90 }}
+            animate={{ rotate: isExpanded ? 0 : collapsedRotate }}
             transition={{ duration: 0.2, ease: 'easeInOut' }}
           >
             <ActionIcon

@@ -126,7 +126,7 @@ const AddButton = () => {
       );
 
       // Generate unique folder name
-      const baseName = 'Untitled';
+      const baseName = t('pageList.untitled');
       const existingNames = new Set(foldersAtSameLevel.map((folder) => folder.name));
 
       let uniqueName = baseName;

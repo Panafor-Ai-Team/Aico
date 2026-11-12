@@ -9,6 +9,7 @@ import { cx } from 'antd-style';
 import { FileText, FolderIcon, FolderOpenIcon } from 'lucide-react';
 import * as m from 'motion/react-m';
 import React, { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import FileIcon from '@/components/FileIcon';
 import { PAGE_FILE_TYPE } from '@/features/ResourceManager/constants';
@@ -40,6 +41,9 @@ interface HierarchyNodeProps {
 export const HierarchyNode = memo<HierarchyNodeProps>(
   ({ item, level = 0, isExpanded, isLoading, onToggle, selectedKey, parentKey }) => {
     const navigate = useWorkspaceAwareNavigate();
+    const { t, i18n } = useTranslation('components');
+    // A collapsed caret points along the reading direction (left in RTL).
+    const collapsedRotate = i18n.dir() === 'rtl' ? 90 : -90;
 
     const [setMode, libraryId] = useResourceManagerStore((s) => [s.setMode, s.libraryId]);
 
@@ -84,7 +88,7 @@ export const HierarchyNode = memo<HierarchyNodeProps>(
 
     const handleRenameConfirm = useCallback(async () => {
       if (!renamingValue.trim()) {
-        toast.error('Folder name cannot be empty');
+        toast.error(t('FileManager.actions.nameRequired'));
         return;
       }
 
@@ -95,13 +99,13 @@ export const HierarchyNode = memo<HierarchyNodeProps>(
 
       try {
         await renameItem(item.id, parentKey, renamingValue.trim());
-        toast.success('Renamed successfully');
+        toast.success(t('FileManager.actions.renameSuccess'));
         setIsRenaming(false);
       } catch (error) {
         console.error('Rename error:', error);
-        toast.error('Rename failed');
+        toast.error(t('FileManager.actions.renameError'));
       }
-    }, [item.id, item.name, parentKey, renamingValue, renameItem]);
+    }, [item.id, item.name, parentKey, renamingValue, renameItem, t]);
 
     const handleRenameCancel = useCallback(() => {
       setIsRenaming(false);
@@ -240,7 +244,7 @@ export const HierarchyNode = memo<HierarchyNodeProps>(
               <ActionIcon spin icon={LoadingOutlined as any} size={'small'} style={{ width: 20 }} />
             ) : (
               <m.div
-                animate={{ rotate: isExpanded ? 0 : -90 }}
+                animate={{ rotate: isExpanded ? 0 : collapsedRotate }}
                 initial={false}
                 transition={{ duration: 0.2, ease: 'easeInOut' }}
               >

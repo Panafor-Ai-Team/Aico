@@ -310,7 +310,7 @@ const MasonryView = memo(function MasonryView({
               minHeight: 40,
             }}
           >
-            {t('loading', { defaultValue: 'Loading...' })}
+            {t('loading', { ns: 'common' })}
           </Center>
         )}
       </div>

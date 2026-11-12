@@ -107,7 +107,7 @@ const BatchActionsDropdown = memo<BatchActionsDropdownProps>(({ selectCount, onA
       disabled: selectCount === 0,
       icon: <RepoIcon />,
       key: `add-to-kb-${kb.id}`,
-      label: <span style={{ marginLeft: 8 }}>{kb.name}</span>,
+      label: <span style={{ marginInlineStart: 8 }}>{kb.name}</span>,
       onClick: async () => {
         try {
           const effectiveSelectedIds = await resolveSelectedResourceIds();
@@ -293,7 +293,7 @@ const BatchActionsDropdown = memo<BatchActionsDropdownProps>(({ selectCount, onA
         <ActionIconWithChevron
           disabled={!canEditResources}
           icon={CircleEllipsisIcon}
-          title={t('FileManager.actions.batchActions', 'Batch actions')}
+          title={t('FileManager.actions.batchActions')}
         />
       </Tooltip>
     </DropdownMenu>
