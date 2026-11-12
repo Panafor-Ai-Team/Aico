@@ -1031,6 +1031,37 @@ name: skill-name
       expect(result.current.documents['doc-1'].saveStatus).toBe('idle');
     });
 
+    it('explains an oversized page instead of offering a pointless retry', async () => {
+      saveToastMock.mockClear();
+      const { result } = renderHook(() => useDocumentStore());
+      const mockEditor = createValidMockEditor() as any;
+
+      act(() => {
+        result.current.initDocumentWithEditor({
+          content: '# Big',
+          documentId: 'doc-big',
+          editor: mockEditor,
+          sourceType: 'page',
+        });
+        result.current.markDirty('doc-big');
+      });
+
+      const tooLarge = Object.assign(new Error('[{"message":"PAGE_TOO_LARGE"}]'), {
+        data: { code: 'BAD_REQUEST' },
+      });
+      vi.mocked(documentService.updateDocument).mockRejectedValueOnce(tooLarge);
+      await act(async () => {
+        await result.current.performSave('doc-big');
+      });
+
+      expect(saveToastMock).toHaveBeenCalledWith(
+        tooLarge,
+        expect.objectContaining({ hideCause: true, title: expect.any(String) }),
+      );
+      expect(saveToastMock.mock.calls[0][1].retry).toBeUndefined();
+      expect(result.current.documents['doc-big'].isDirty).toBe(true);
+    });
+
     it('clearSaveBlockedByLock is a no-op when the document is not lock-blocked', () => {
       const { result } = renderHook(() => useDocumentStore());
       const mockEditor = createValidMockEditor() as any;

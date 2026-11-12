@@ -182,6 +182,8 @@ export default {
   'pageEditor.menu.importDocument': 'Import Page',
   'pageEditor.menu.move': 'Move',
   'pageEditor.menu.pin': 'Pin Page',
+  'pageEditor.saveTooLarge':
+    'This page is too large to save (over 5 MB). Split it into smaller pages; your text is still on screen.',
   'pageEditor.saving': 'Saving...',
   'pageEditor.titlePlaceholder': 'Untitled',
   'pageEditor.wordCount': '{{wordCount}} words',

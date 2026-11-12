@@ -373,7 +373,18 @@ export class EditorActionImpl {
         // fail silently. Tell the user once per failure streak — autosave keeps
         // retrying — and keep `isDirty` so the content stays on screen.
         this.#saveFailureToasted.add(id);
-        saveToast(error, { retry: () => void this.performSave(id, metadata, options) });
+        const tooLarge = String((error as { message?: string })?.message ?? '').includes(
+          'PAGE_TOO_LARGE',
+        );
+        if (tooLarge) {
+          // Retrying cannot help; the server caps a page at 5 MB.
+          saveToast(error, {
+            hideCause: true,
+            title: t('pageEditor.saveTooLarge', { ns: 'file' }),
+          });
+        } else {
+          saveToast(error, { retry: () => void this.performSave(id, metadata, options) });
+        }
       }
       if (!lockBlocked) console.error('[DocumentStore] Failed to save:', error);
       internal_dispatchDocument({

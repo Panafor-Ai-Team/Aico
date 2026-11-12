@@ -160,6 +160,7 @@
   "pageEditor.menu.importDocument": "وارد کردن صفحه",
   "pageEditor.menu.move": "انتقال",
   "pageEditor.menu.pin": "سنجاق کردن صفحه",
+  "pageEditor.saveTooLarge": "این صفحه برای ذخیره بیش از حد بزرگ است (بیش از ۵ مگابایت). آن را به چند صفحهٔ کوچک‌تر تقسیم کنید؛ متن شما هنوز روی صفحه است.",
   "pageEditor.saving": "در حال ذخیره...",
   "pageEditor.titlePlaceholder": "بدون عنوان",
   "pageEditor.wordCount": "{{wordCount}} کلمه",

@@ -160,6 +160,7 @@
   "pageEditor.menu.importDocument": "导入文稿",
   "pageEditor.menu.move": "移动",
   "pageEditor.menu.pin": "置顶文稿",
+  "pageEditor.saveTooLarge": "此页面过大，无法保存（超过 5 MB）。请拆分为多个较小的页面；你的内容仍保留在屏幕上。",
   "pageEditor.saving": "正在保存…",
   "pageEditor.titlePlaceholder": "无标题",
   "pageEditor.wordCount": "{{wordCount}} 字",

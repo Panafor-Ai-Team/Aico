@@ -37,6 +37,7 @@ import {
   compareDocumentHistoryItemsInputSchema,
   getDocumentHistoryItemInputSchema,
   listDocumentHistoryInputSchema,
+  pagePayloadString,
   saveDocumentHistoryInputSchema,
   updateDocumentInputSchema,
 } from './_schema/documentHistory';
@@ -93,8 +94,8 @@ export const documentRouter = router({
     .use(withScopedPermission('document:create'))
     .input(
       z.object({
-        content: z.string().optional(),
-        editorData: z.string().optional(),
+        content: pagePayloadString().optional(),
+        editorData: pagePayloadString().optional(),
         fileType: z.string().optional(),
         knowledgeBaseId: z.string().optional(),
         metadata: z.record(z.string(), z.any()).optional(),
@@ -143,8 +144,8 @@ export const documentRouter = router({
       z.object({
         documents: z.array(
           z.object({
-            content: z.string().optional(),
-            editorData: z.string(),
+            content: pagePayloadString().optional(),
+            editorData: pagePayloadString(),
             fileType: z.string().optional(),
             knowledgeBaseId: z.string().optional(),
             metadata: z.record(z.string(), z.any()).optional(),

@@ -160,6 +160,7 @@
   "pageEditor.menu.importDocument": "Importer une page",
   "pageEditor.menu.move": "Déplacer",
   "pageEditor.menu.pin": "Épingler la page",
+  "pageEditor.saveTooLarge": "Cette page est trop volumineuse pour être enregistrée (plus de 5 Mo). Divisez-la en pages plus petites ; votre texte est toujours affiché.",
   "pageEditor.saving": "Enregistrement...",
   "pageEditor.titlePlaceholder": "Sans titre",
   "pageEditor.wordCount": "{{wordCount}} mots",
