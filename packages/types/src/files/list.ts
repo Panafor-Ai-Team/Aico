@@ -81,13 +81,16 @@ export enum ResourceSourceFilter {
 export const QueryFileListSchema = z.object({
   category: z.string().optional(),
   knowledgeBaseId: z.string().optional(),
-  limit: z.number().int().positive().default(50),
+  // Bounded: an unbounded page size turns one request into a full-table read.
+  limit: z.number().int().positive().max(200).default(50),
   offset: z.number().int().min(0).default(0),
   parentId: z.string().nullish(),
   q: z.string().nullish(),
   showFilesInKnowledgeBase: z.boolean().default(false),
   sortType: z.enum(['desc', 'asc']).optional(),
-  sorter: z.enum(['createdAt', 'size']).optional(),
+  // Must match the explorer's sort menu (name / date added / size); a value
+  // missing here fails validation and the whole list shows an error.
+  sorter: z.enum(['createdAt', 'name', 'size', 'updatedAt']).optional(),
   /**
    * Origin narrowing driven by the explorer's source filter. Absent / `all`
    * keeps the historical pool (everything except hidden sources).
