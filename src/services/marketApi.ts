@@ -196,11 +196,11 @@ export class MarketApiService {
   }
 
   /**
-   * Get skill download URL from market
+   * Get skill download URL from our own catalog (see
+   * `src/app/(backend)/market/skills/[identifier]/download/route.ts`).
    */
   getSkillDownloadUrl(identifier: string): string {
-    const marketBaseUrl = process.env.NEXT_PUBLIC_MARKET_BASE_URL || 'https://market.lobehub.com';
-    return `${marketBaseUrl}/api/v1/skills/${identifier}/download`;
+    return `/market/skills/${encodeURIComponent(identifier)}/download`;
   }
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { searchSkills, toDetail, toListItem } from './skillCatalog';
+import { incrementSkillInstall, searchSkills, toDetail, toListItem } from './skillCatalog';
 
 const row = {
   author: { name: 'acme', url: 'https://github.com/acme' },
@@ -65,5 +65,13 @@ describe('skillCatalog', () => {
     await expect(searchSkills({ execute } as any, { q: 'anything' })).rejects.toThrow(
       /skill_catalog unavailable/,
     );
+  });
+
+  it('bumps the local install counter', async () => {
+    const execute = vi.fn().mockResolvedValue({ rows: [] });
+
+    await incrementSkillInstall({ execute } as any, 'acme-skill');
+
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 });
