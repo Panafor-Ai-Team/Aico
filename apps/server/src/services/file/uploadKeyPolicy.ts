@@ -6,18 +6,25 @@ import { fileEnv } from '@/envs/file';
  * Storage keys a client may ask the server to sign for upload.
  *
  * Clients build keys themselves (`src/services/upload.ts` →
- * `generateFilePathMetadata`, and `src/services/import`), and older desktop
- * builds ship that code, so the server cannot simply pick the key. Instead it
- * only signs keys with the exact shape those clients produce:
+ * `generateFilePathMetadata`, `src/services/import`, the CLI's
+ * `uploadLocalFile`, and the desktop agents' `fileStoreImageUploader`), and
+ * older desktop / CLI builds ship that code, so the server cannot simply pick
+ * the key. Instead it only signs keys with the exact shapes those clients
+ * produce:
  *
- *   <root>/<0-3 plain segments>/<uuid v4>.<extension>
+ *   <root>/<0-3 plain segments>/<uuid v4>.<extension>     (web, import)
+ *   <root>/<0-3 plain segments>/<sha256 hex>[.<extension>] (CLI, desktop agents)
  *
  * where `<root>` is one of the upload directories the app uses. This keeps
  * uploads out of arbitrary prefixes (server-generated assets, other users'
  * folders) and, together with {@link assertUploadKeyIsFree}, stops a caller
  * from overwriting an object whose key it learned elsewhere.
  */
-const UUID_PREFIX = /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}\./i;
+const UUID_FILENAME =
+  /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}\.(?<extension>.*)$/i;
+// The CLI and desktop agents name an upload after the sha256 of its bytes; the
+// CLI drops the dot when the local file has no extension.
+const SHA256_FILENAME = /^[\da-f]{64}(?:\.(?<extension>.*))?$/i;
 const PLAIN_SEGMENT = /^[\w-]{1,64}$/;
 // The extension is `originalName.split('.').at(-1)`, so it can be anything
 // except a path separator or a control character.
@@ -26,7 +33,9 @@ const EXTENSION = /^[^/\\\u0000-\u001F\u007F]{0,128}$/;
 const MAX_KEY_LENGTH = 512;
 const MAX_MIDDLE_SEGMENTS = 3;
 
-const STATIC_UPLOAD_ROOTS = ['skills', 'ragEval', 'eval-datasets', 'import_config'];
+// `files` is listed even when NEXT_PUBLIC_S3_FILE_PATH names another folder:
+// the CLI and desktop agents hard-code it.
+const STATIC_UPLOAD_ROOTS = ['files', 'skills', 'ragEval', 'eval-datasets', 'import_config'];
 
 const getUploadRoots = (): string[] => {
   const roots = new Set(STATIC_UPLOAD_ROOTS);
@@ -47,8 +56,9 @@ export const isSafeUploadKey = (key: string): boolean => {
   if (!filename || segments.length > MAX_MIDDLE_SEGMENTS) return false;
   if (!segments.every((segment) => PLAIN_SEGMENT.test(segment))) return false;
 
-  if (!UUID_PREFIX.test(filename)) return false;
-  return EXTENSION.test(filename.slice(37));
+  const match = UUID_FILENAME.exec(filename) ?? SHA256_FILENAME.exec(filename);
+  if (!match) return false;
+  return EXTENSION.test(match.groups?.extension ?? '');
 };
 
 export const assertSafeUploadKey = (key: string) => {
