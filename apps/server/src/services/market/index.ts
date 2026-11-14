@@ -499,25 +499,39 @@ export class MarketService {
       sort?: 'createdAt' | 'upvotes';
     },
   ) {
-    log('getSkillComments: %s, params: %O', identifier, params);
+    log('getSkillComments: %s, params: %O (local catalog)', identifier, params);
 
-    return this.market.marketSkills.getComments(identifier, params);
+    // The catalog has no comments; an empty page keeps the store independent.
+    return {
+      currentPage: params?.page ?? 1,
+      items: [],
+      pageSize: params?.pageSize ?? 20,
+      totalCount: 0,
+      totalPages: 0,
+    };
   }
 
   /**
    * Get skill rating distribution from market
    */
   async getSkillRatingDistribution(identifier: string) {
-    log('getSkillRatingDistribution: %s', identifier);
+    log('getSkillRatingDistribution: %s (local catalog)', identifier);
 
-    return this.market.marketSkills.getRatingDistribution(identifier);
+    // No ratings in the catalog; zeros instead of an upstream request.
+    return { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, totalCount: 0 };
   }
 
   /**
-   * Get skill download URL from market
+   * Get skill download URL.
+   *
+   * Points at our own route (`/market/skills/:id/download`), which serves the
+   * ZIP from the read-only `SKILL_ZIP_DIR` mount — no request to
+   * market.lobehub.com. `version` is accepted for signature compatibility; the
+   * catalog stores one archive per identifier.
    */
-  getSkillDownloadUrl(identifier: string, version?: string): string {
-    return this.market.marketSkills.getDownloadUrl(identifier, version);
+  getSkillDownloadUrl(identifier: string, _version?: string): string {
+    const base = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || '';
+    return `${base}/market/skills/${encodeURIComponent(identifier)}/download`;
   }
 
   /**

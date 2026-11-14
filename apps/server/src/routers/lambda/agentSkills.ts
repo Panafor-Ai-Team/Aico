@@ -11,6 +11,7 @@ import { router } from '@/libs/trpc/lambda';
 import { serverDatabase } from '@/libs/trpc/lambda/middleware';
 import { FileService } from '@/server/services/file';
 import { MarketService } from '@/server/services/market';
+import { incrementSkillInstall } from '@/server/services/market/skillCatalog';
 import {
   SkillImporter,
   SkillImportError,
@@ -231,13 +232,18 @@ export const agentSkillsRouter = router({
     .input(z.object({ identifier: z.string() }))
     .mutation(async ({ ctx, input }) => {
       try {
-        // Get download URL from market service
+        // Local catalog route, not market.lobehub.com
         const downloadUrl = ctx.marketService.getSkillDownloadUrl(input.identifier);
         // Import using the download URL
-        return await ctx.skillImporter.importFromUrl(
+        const result = await ctx.skillImporter.importFromUrl(
           { url: downloadUrl },
           { identifier: input.identifier, source: 'market' },
         );
+        // Count installs ourselves; upstream never learns about them.
+        await incrementSkillInstall(ctx.serverDB, input.identifier).catch((error) => {
+          console.warn('importFromMarket: failed to bump install count', error);
+        });
+        return result;
       } catch (error) {
         handleSkillImportError(error);
       }

@@ -714,35 +714,41 @@ describe('MarketService', () => {
     });
   });
 
-  describe('skill comments & ratings', () => {
-    it('getSkillComments delegates to marketSkills.getComments with params', async () => {
+  describe('skill comments, ratings & downloads (local catalog)', () => {
+    it('getSkillComments returns an empty page without calling upstream', async () => {
       const service = new MarketService();
-      const response = { currentPage: 1, items: [], pageSize: 10, totalCount: 0, totalPages: 0 };
-      (service.market.marketSkills.getComments as any).mockResolvedValue(response);
 
       const result = await service.getSkillComments('github.acme.skill-a', {
         page: 2,
-        sort: 'upvotes',
+        pageSize: 10,
       });
 
-      expect(service.market.marketSkills.getComments).toHaveBeenCalledWith('github.acme.skill-a', {
-        page: 2,
-        sort: 'upvotes',
+      expect(service.market.marketSkills.getComments).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        currentPage: 2,
+        items: [],
+        pageSize: 10,
+        totalCount: 0,
+        totalPages: 0,
       });
-      expect(result).toEqual(response);
     });
 
-    it('getSkillRatingDistribution delegates to marketSkills.getRatingDistribution', async () => {
+    it('getSkillRatingDistribution returns zeros without calling upstream', async () => {
       const service = new MarketService();
-      const distribution = { 1: 0, 2: 0, 3: 1, 4: 2, 5: 3, totalCount: 6 };
-      (service.market.marketSkills.getRatingDistribution as any).mockResolvedValue(distribution);
 
       const result = await service.getSkillRatingDistribution('github.acme.skill-a');
 
-      expect(service.market.marketSkills.getRatingDistribution).toHaveBeenCalledWith(
-        'github.acme.skill-a',
+      expect(service.market.marketSkills.getRatingDistribution).not.toHaveBeenCalled();
+      expect(result).toEqual({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, totalCount: 0 });
+    });
+
+    it('getSkillDownloadUrl points at our own download route', () => {
+      const service = new MarketService();
+
+      expect(service.getSkillDownloadUrl('acme/skill')).toContain(
+        '/market/skills/acme%2Fskill/download',
       );
-      expect(result).toEqual(distribution);
+      expect(service.market.marketSkills.getDownloadUrl).not.toHaveBeenCalled();
     });
   });
 
