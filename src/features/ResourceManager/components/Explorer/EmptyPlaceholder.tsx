@@ -6,6 +6,7 @@ import { ArrowUpIcon, PlusIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { useCreateNewModal } from '@/features/LibraryModal';
+import useUploadFolder from '@/features/ResourceManager/components/Header/hooks/useUploadFolder';
 import { useCurrentFolderId } from '@/features/ResourceManager/hooks/useCurrentFolderId';
 import { useTopLevelFileUpload } from '@/features/ResourceManager/hooks/useTopLevelFileUpload';
 import { useResourceManagerStore } from '@/features/ResourceManager/store';
@@ -69,7 +70,8 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 const EmptyPlaceholder = () => {
   const { t } = useTranslation('components');
 
-  const pushDockFileList = useFileStore((s) => s.pushDockFileList);
+  const { t: tFile } = useTranslation('file');
+  const uploadFolderWithStructure = useFileStore((s) => s.uploadFolderWithStructure);
   const uploadTopLevel = useTopLevelFileUpload();
 
   const libraryId = useResourceManagerStore((s) => s.libraryId);
@@ -78,6 +80,14 @@ const EmptyPlaceholder = () => {
     s.setSourceFilter,
   ]);
   const currentFolderId = useCurrentFolderId();
+  // Same path as the header's "Upload folder": keeps the folder tree and
+  // applies the block list / .gitignore instead of flattening every file.
+  const { uploadFolderFiles } = useUploadFolder({
+    currentFolderId,
+    libraryId,
+    t: tFile,
+    uploadFolderWithStructure,
+  });
 
   const { open } = useCreateNewModal();
   const { allowed: canCreate } = usePermission('create_content');
@@ -136,8 +146,10 @@ const EmptyPlaceholder = () => {
         <Upload
           multiple={true}
           showUploadList={false}
-          beforeUpload={async (file) => {
-            await uploadTopLevel([file]);
+          beforeUpload={(file, fileList) => {
+            // antd calls this once per picked file; start the whole batch once
+            // so the upload concurrency limit applies to it.
+            if (file === fileList[0]) void uploadTopLevel(fileList);
             return false;
           }}
         >
@@ -156,11 +168,11 @@ const EmptyPlaceholder = () => {
           directory
           multiple={true}
           showUploadList={false}
-          beforeUpload={async (file) => {
+          beforeUpload={(file, fileList) => {
             // Directory upload keeps its own path — the whole tree inherits
             // its root's visibility, so we skip the mode-driven default and
             // let the server infer from the parent chain.
-            await pushDockFileList([file], libraryId, currentFolderId ?? undefined);
+            if (file === fileList[0]) void uploadFolderFiles(fileList);
 
             return false;
           }}

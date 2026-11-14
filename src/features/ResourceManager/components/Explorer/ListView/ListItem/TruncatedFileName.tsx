@@ -79,8 +79,9 @@ const TruncatedFileName = memo<TruncatedFileNameProps>(({ name, className }) => 
         const startChars = Math.ceil(mid / 2);
         const endChars = Math.floor(mid / 2);
 
+        // `slice(-0)` is the whole string, so guard on endChars, not mid.
         const truncated =
-          baseName.slice(0, startChars) + (mid > 0 ? baseName.slice(-endChars) : '');
+          baseName.slice(0, startChars) + (endChars > 0 ? baseName.slice(-endChars) : '');
 
         measureSpan.textContent = truncated;
         const truncatedWidth = measureSpan.offsetWidth;
@@ -101,9 +102,8 @@ const TruncatedFileName = memo<TruncatedFileNameProps>(({ name, className }) => 
       } else {
         const startChars = Math.ceil(bestFit.length / 2);
         const endChars = Math.floor(bestFit.length / 2);
-        setDisplayName(
-          `${baseName.slice(0, startChars)}...${baseName.slice(-endChars)}${extension}`,
-        );
+        const tail = endChars > 0 ? baseName.slice(-endChars) : '';
+        setDisplayName(`${baseName.slice(0, startChars)}...${tail}${extension}`);
       }
     };
 

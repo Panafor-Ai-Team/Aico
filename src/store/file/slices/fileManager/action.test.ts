@@ -496,6 +496,29 @@ describe('FileManagerActions', () => {
       expect(parseSpy).toHaveBeenCalledWith(['file-1'], { skipExist: false });
     });
 
+    it('keeps uploading the rest of the batch when one file fails', async () => {
+      const { result } = renderHook(() => useStore());
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const files = ['a.txt', 'b.txt', 'c.txt'].map(
+        (name) => new File(['content'], name, { type: 'text/plain' }),
+      );
+      const uploadSpy = vi
+        .spyOn(result.current, 'uploadWithProgress')
+        .mockImplementation(async ({ file }) => {
+          if (file.name === 'a.txt') throw new Error('Upload cancelled by user');
+          return { id: `id-${file.name}`, url: `files/${file.name}` };
+        });
+      const parseSpy = vi.spyOn(result.current, 'parseFilesToChunks').mockResolvedValue();
+
+      await act(async () => {
+        await result.current.pushDockFileList(files);
+      });
+
+      expect(uploadSpy).toHaveBeenCalledTimes(3);
+      expect(parseSpy).toHaveBeenCalledWith(['id-b.txt', 'id-c.txt'], { skipExist: false });
+    });
+
     it('should upload files with knowledgeBaseId', async () => {
       const { result } = renderHook(() => useStore());
 

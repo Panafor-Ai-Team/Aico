@@ -64,6 +64,21 @@ export class TreeActionImpl {
     return this.#engine;
   };
 
+  /**
+   * The explorer addresses the open folder by its slug (it is in the URL),
+   * while the tree keys children by folder id. Map a slug to the id of the
+   * matching folder node so explorer-driven updates (reconcile, revalidate,
+   * drag, rename, delete) land on the key the tree actually renders.
+   */
+  #resolveFolderKey = (key: string): string => {
+    if (!key) return '';
+    for (const nodes of Object.values(this.#get().children)) {
+      const match = nodes?.find((node) => node.slug === key);
+      if (match) return match.id;
+    }
+    return key;
+  };
+
   init = (knowledgeBaseId: string) => {
     this.#set(
       {
@@ -155,7 +170,8 @@ export class TreeActionImpl {
     }
   };
 
-  revalidate = async (folderId: string) => {
+  revalidate = async (rawFolderId: string) => {
+    const folderId = this.#resolveFolderKey(rawFolderId);
     const { epoch, knowledgeBaseId, status } = this.#get();
     if (status[folderId] === 'loading') return;
 
@@ -195,7 +211,8 @@ export class TreeActionImpl {
     }
   };
 
-  reconcile = (folderId: string, items: TreeItem[]) => {
+  reconcile = (rawFolderId: string, items: TreeItem[]) => {
+    const folderId = this.#resolveFolderKey(rawFolderId);
     this.#set(
       {
         children: { ...this.#get().children, [folderId]: sortTreeItems(items) },
@@ -221,7 +238,9 @@ export class TreeActionImpl {
     if (this.#get().epoch !== epoch) return;
   };
 
-  moveItem = async (itemId: string, fromParent: string, toParent: string): Promise<void> => {
+  moveItem = async (itemId: string, rawFrom: string, rawTo: string): Promise<void> => {
+    const fromParent = this.#resolveFolderKey(rawFrom);
+    const toParent = this.#resolveFolderKey(rawTo);
     const { children } = this.#get();
     const item = children[fromParent]?.find((i) => i.id === itemId);
 
@@ -264,15 +283,21 @@ export class TreeActionImpl {
       }
     };
 
-    tx.onSuccess = async () => {
-      await engine.flush();
-      void Promise.all([this.revalidate(fromParent), this.revalidate(toParent)]);
+    tx.onSuccess = () => {
+      // Don't await the flush here: this mutation stays in-flight until
+      // onSuccess returns, so awaiting flush() waited on itself forever and
+      // every later tree action on the same folder never reached the server.
+      void engine
+        .flush()
+        .then(() => Promise.all([this.revalidate(fromParent), this.revalidate(toParent)]));
     };
 
     await tx.commit();
   };
 
-  moveItems = async (itemIds: string[], fromParent: string, toParent: string): Promise<void> => {
+  moveItems = async (itemIds: string[], rawFrom: string, rawTo: string): Promise<void> => {
+    const fromParent = this.#resolveFolderKey(rawFrom);
+    const toParent = this.#resolveFolderKey(rawTo);
     const { children } = this.#get();
     const idsSet = new Set(itemIds);
     const items = (children[fromParent] ?? []).filter((i) => idsSet.has(i.id));
@@ -315,15 +340,20 @@ export class TreeActionImpl {
       }
     };
 
-    tx.onSuccess = async () => {
-      await engine.flush();
-      void Promise.all([this.revalidate(fromParent), this.revalidate(toParent)]);
+    tx.onSuccess = () => {
+      // Don't await the flush here: this mutation stays in-flight until
+      // onSuccess returns, so awaiting flush() waited on itself forever and
+      // every later tree action on the same folder never reached the server.
+      void engine
+        .flush()
+        .then(() => Promise.all([this.revalidate(fromParent), this.revalidate(toParent)]));
     };
 
     await tx.commit();
   };
 
-  renameItem = async (itemId: string, parentId: string, newName: string): Promise<void> => {
+  renameItem = async (itemId: string, rawParentId: string, newName: string): Promise<void> => {
+    const parentId = this.#resolveFolderKey(rawParentId);
     const engine = this.#getEngine();
     const tx = engine.createTransaction(`renameItem(${itemId})`);
 
@@ -340,15 +370,18 @@ export class TreeActionImpl {
       await useFileStore.getState().refreshFileList();
     };
 
-    tx.onSuccess = async () => {
-      await engine.flush();
-      void this.revalidate(parentId);
+    tx.onSuccess = () => {
+      // Don't await the flush here: this mutation stays in-flight until
+      // onSuccess returns, so awaiting flush() waited on itself forever and
+      // every later tree action on the same folder never reached the server.
+      void engine.flush().then(() => this.revalidate(parentId));
     };
 
     await tx.commit();
   };
 
-  removeItems = async (itemIds: string[], parentId: string): Promise<void> => {
+  removeItems = async (itemIds: string[], rawParentId: string): Promise<void> => {
+    const parentId = this.#resolveFolderKey(rawParentId);
     const idsSet = new Set(itemIds);
     const engine = this.#getEngine();
     const tx = engine.createTransaction(`removeItems(${itemIds.join(',')})`);
@@ -363,16 +396,20 @@ export class TreeActionImpl {
       await useFileStore.getState().refreshFileList();
     };
 
-    tx.onSuccess = async () => {
-      await engine.flush();
-      const expanded = { ...this.#get().expanded };
-      const children = { ...this.#get().children };
-      for (const id of itemIds) {
-        delete expanded[id];
-        delete children[id];
-      }
-      this.#set({ children, expanded }, false, 'tree/removeItems/cleanup');
-      void this.revalidate(parentId);
+    tx.onSuccess = () => {
+      // Don't await the flush here: this mutation stays in-flight until
+      // onSuccess returns, so awaiting flush() waited on itself forever and
+      // every later tree action on the same folder never reached the server.
+      void engine.flush().then(() => {
+        const expanded = { ...this.#get().expanded };
+        const children = { ...this.#get().children };
+        for (const id of itemIds) {
+          delete expanded[id];
+          delete children[id];
+        }
+        this.#set({ children, expanded }, false, 'tree/removeItems/cleanup');
+        return this.revalidate(parentId);
+      });
     };
 
     await tx.commit();

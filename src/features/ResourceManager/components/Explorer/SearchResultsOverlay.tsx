@@ -5,7 +5,7 @@ import { Checkbox } from '@lobehub/ui/base-ui';
 import { VirtuosoMasonry } from '@virtuoso.dev/masonry';
 import { cssVar } from 'antd-style';
 import { SearchIcon } from 'lucide-react';
-import { memo, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Virtuoso } from 'react-virtuoso';
 
@@ -46,7 +46,18 @@ const SearchResultsOverlay = memo(() => {
       getResourceSourceFilter(s),
     ]);
 
-  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
+  // Use the shared selection: the batch toolbar reads the store, so a local
+  // list made the checkboxes here do nothing.
+  const [storeSelectedFileIds, setStoreSelectedFileIds] = useResourceManagerStore((s) => [
+    s.selectedFileIds,
+    s.setSelectedFileIds,
+  ]);
+  const selectedFileIds = storeSelectedFileIds;
+  const setSelectedFileIds = useCallback(
+    (update: (prev: string[]) => string[]) =>
+      setStoreSelectedFileIds(update(useResourceManagerStore.getState().selectedFileIds)),
+    [setStoreSelectedFileIds],
+  );
   const { isItemSelectable } = useExplorerSelectionEligibility();
 
   const columnWidths = useGlobalStore((s) => ({
@@ -134,7 +145,7 @@ const SearchResultsOverlay = memo(() => {
       selectAllState: 'loaded' as const,
       selectFileIds: selectedFileIds,
     }),
-    [data, isItemSelectable, libraryId, selectedFileIds],
+    [data, isItemSelectable, libraryId, selectedFileIds, setSelectedFileIds],
   );
 
   if (!isActive) return null;

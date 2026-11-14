@@ -367,6 +367,8 @@ const MasonryFileItem = memo<MasonryFileItemProps>(
             } else if (url) {
               // For regular markdown files, fetch from URL
               const res = await fetch(url);
+              // An error page (expired link, 403/404) is not file content.
+              if (!res.ok) throw new Error(`Preview fetch failed: ${res.status}`);
               text = await res.text();
             } else {
               text = '';

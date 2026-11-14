@@ -31,6 +31,10 @@ export const useExplorerInfiniteScroll = ({
     setIsLoadingMore(true);
     try {
       await loadMoreResources();
+    } catch (error) {
+      // Scroll handlers fire-and-forget this; keep the failure out of the
+      // unhandled-rejection path. The next scroll retries.
+      console.error('Failed to load more resources:', error);
     } finally {
       setIsLoadingMore(false);
     }

@@ -1,3 +1,5 @@
+import { toast } from '@lobehub/ui/base-ui';
+import { t } from 'i18next';
 import { useCallback } from 'react';
 
 import { useActiveWorkspaceId } from '@/business/client/hooks/useActiveWorkspaceId';
@@ -38,7 +40,14 @@ export const useTopLevelFileUpload = () => {
   return useCallback(
     async (files: File[]) => {
       if (files.length === 0) return;
-      await pushDockFileList(files, libraryId, currentFolderId ?? undefined, visibility);
+      try {
+        await pushDockFileList(files, libraryId, currentFolderId ?? undefined, visibility);
+      } catch (error) {
+        // Per-file failures are shown on each dock item; this covers the batch
+        // setup failing, which callers fire-and-forget (`void uploadTopLevel`).
+        console.error('[upload] batch failed:', error);
+        toast.error(t('upload.uploadFailed', { ns: 'error' }));
+      }
     },
     [libraryId, currentFolderId, pushDockFileList, visibility],
   );

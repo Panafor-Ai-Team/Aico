@@ -67,7 +67,7 @@ const Header = memo(() => {
 
   // If no libraryId, show category name or "Resource" for All
   const leftContent = hasSelected ? (
-    <Flexbox horizontal align={'center'} gap={8} style={{ marginLeft: 0 }}>
+    <Flexbox horizontal align={'center'} gap={8} style={{ marginInlineStart: 0 }}>
       {libraryId ? (
         <ActionIcon
           disabled={!canEditResources}
@@ -138,7 +138,13 @@ const Header = memo(() => {
           if (!canEditResources) return;
 
           const handleDelete = async () => {
-            await onActionClick('delete');
+            try {
+              await onActionClick('delete');
+            } catch (error) {
+              console.error('Failed to delete resources:', error);
+              toast.error(t('operationFailed', { ns: 'common' }));
+              return;
+            }
             toast.success(t('FileManager.actions.deleteSuccess'));
           };
 
@@ -177,13 +183,13 @@ const Header = memo(() => {
       />
     </Flexbox>
   ) : !libraryId ? (
-    <Flexbox style={{ marginLeft: 8 }}>
+    <Flexbox style={{ marginInlineStart: 8 }}>
       {category === FilesTabs.All
         ? t('resource', { ns: 'file' })
         : t(`tab.${category as FilesTabs}` as any, { ns: 'file' })}
     </Flexbox>
   ) : (
-    <Flexbox style={{ marginLeft: 8 }}>
+    <Flexbox style={{ marginInlineStart: 8 }}>
       <Breadcrumb category={category} knowledgeBaseId={libraryId} />
     </Flexbox>
   );
@@ -205,7 +211,7 @@ const Header = memo(() => {
           <SortDropdown />
           <BatchActionsDropdown selectCount={selectCount} onActionClick={onActionClick} />
           <ViewSwitcher />
-          <Flexbox style={{ marginLeft: 8 }}>
+          <Flexbox style={{ marginInlineStart: 8 }}>
             <AddButton />
           </Flexbox>
         </>

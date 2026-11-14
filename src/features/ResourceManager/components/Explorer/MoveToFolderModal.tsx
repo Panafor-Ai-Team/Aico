@@ -96,8 +96,9 @@ const MoveToFolderModalContent = memo<MoveToFolderModalContentProps>(
           setFolders((prevFolders) => {
             const updateFolder = (folders: FolderTreeItem[]): FolderTreeItem[] => {
               return folders.map((folder) => {
-                const folderKey = folder.slug || folder.id;
-                if (folderKey === folderId) {
+                // Callers pass either the slug or the id (a new folder is
+                // selected by id), so match both.
+                if (folder.slug === folderId || folder.id === folderId) {
                   return { ...folder, children: sortedChildren };
                 }
                 if (folder.children) {
@@ -142,8 +143,9 @@ const MoveToFolderModalContent = memo<MoveToFolderModalContentProps>(
           setFolders((prevFolders) => {
             const updateFolder = (folders: FolderTreeItem[]): FolderTreeItem[] => {
               return folders.map((folder) => {
-                const folderKey = folder.slug || folder.id;
-                if (folderKey === folderId) {
+                // Callers pass either the slug or the id (a new folder is
+                // selected by id), so match both.
+                if (folder.slug === folderId || folder.id === folderId) {
                   return { ...folder, children: sortedChildren };
                 }
                 if (folder.children) {
@@ -203,7 +205,7 @@ const MoveToFolderModalContent = memo<MoveToFolderModalContentProps>(
         setSelectedFolderId(newFolderId);
       } catch (error) {
         console.error('Failed to create folder:', error);
-        toast.error(t('FileManager.actions.renameError'));
+        toast.error(t('header.actions.createFolderError', { ns: 'file' }));
       } finally {
         setIsCreatingFolder(false);
       }
@@ -216,8 +218,7 @@ const MoveToFolderModalContent = memo<MoveToFolderModalContentProps>(
       t,
     ]);
 
-    const handleMove = () => {
-      if (!selectedFolderId) return;
+    const moveTo = async (targetFolderId: string) => {
       const { children } = useTreeStore.getState();
       let fromParent = '';
       for (const [parentKey, items] of Object.entries(children)) {
@@ -227,28 +228,24 @@ const MoveToFolderModalContent = memo<MoveToFolderModalContentProps>(
         }
       }
 
-      void moveItem(fileId, fromParent, selectedFolderId).catch(() => {
-        toast.error(t('FileManager.actions.moveError'));
-      });
-      toast.success(t('FileManager.actions.moveSuccess'));
       close();
+      try {
+        // The server also refuses a move under the folder's own subfolder.
+        await moveItem(fileId, fromParent, targetFolderId);
+        toast.success(t('FileManager.actions.moveSuccess'));
+      } catch {
+        toast.error(t('FileManager.actions.moveError'));
+      }
+    };
+
+    const handleMove = () => {
+      // A folder cannot be moved into itself.
+      if (!selectedFolderId || selectedFolderId === fileId) return;
+      void moveTo(selectedFolderId);
     };
 
     const handleMoveToRoot = () => {
-      const { children } = useTreeStore.getState();
-      let fromParent = '';
-      for (const [parentKey, items] of Object.entries(children)) {
-        if (items.some((i) => i.id === fileId)) {
-          fromParent = parentKey;
-          break;
-        }
-      }
-
-      void moveItem(fileId, fromParent, '').catch(() => {
-        toast.error(t('FileManager.actions.moveError'));
-      });
-      toast.success(t('FileManager.actions.moveSuccess'));
-      close();
+      void moveTo('');
     };
 
     return (
@@ -292,7 +289,11 @@ const MoveToFolderModalContent = memo<MoveToFolderModalContentProps>(
           <Button type="default" onClick={handleMoveToRoot}>
             {t('FileManager.actions.moveToRoot')}
           </Button>
-          <Button disabled={!selectedFolderId} type="primary" onClick={handleMove}>
+          <Button
+            disabled={!selectedFolderId || selectedFolderId === fileId}
+            type="primary"
+            onClick={handleMove}
+          >
             {t('FileManager.actions.moveHere')}
           </Button>
         </ModalFooter>

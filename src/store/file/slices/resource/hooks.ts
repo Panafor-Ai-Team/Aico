@@ -9,7 +9,7 @@ import {
 import { mutate, useClientDataSWR } from '@/libs/swr';
 import { resourceKeys } from '@/libs/swr/keys';
 import { resourceService } from '@/services/resource';
-import type { ResourceQueryParams } from '@/types/resource';
+import type { ResourceItem, ResourceQueryParams } from '@/types/resource';
 
 import { useFileStore } from '../../store';
 import { mergeServerResourcesWithOptimistic } from './utils';
@@ -44,6 +44,58 @@ export const revalidateResources = async (params?: ResourceQueryParams) => {
       },
     );
   }
+};
+
+type CachedResourcePage = Awaited<ReturnType<typeof resourceService.queryResources>>;
+
+const isResourceListKey = (key: unknown) => Array.isArray(key) && key[0] === resourceKeys.list.root;
+
+/**
+ * Apply a local change to every cached resource list page, without refetching.
+ *
+ * The explorer copies the cached page into the store whenever the folder or
+ * filter changes. Delete, rename and move only patched the store, so going to
+ * another folder and back within the dedupe window showed deleted rows again
+ * and old names.
+ */
+export const patchCachedResourceLists = async (
+  patch: (items: ResourceItem[]) => ResourceItem[],
+): Promise<void> => {
+  await mutate(
+    isResourceListKey,
+    (current: CachedResourcePage | undefined) => {
+      if (!current) return current;
+      const items = patch(current.items);
+      const removed = current.items.length - items.length;
+      return {
+        ...current,
+        items,
+        total: current.total === undefined ? undefined : Math.max(current.total - removed, 0),
+      };
+    },
+    { revalidate: false },
+  );
+  // Search results are cached as a plain item array under their own key; keep
+  // them in step too, or a deleted/renamed row stays in the open results.
+  await mutate(
+    (key) => Array.isArray(key) && key[0] === resourceKeys.search.root,
+    (current: ResourceItem[] | undefined) => (current ? patch(current) : current),
+    { revalidate: false },
+  );
+};
+
+/**
+ * Drop every cached list page except the one on screen, so other folders are
+ * fetched fresh the next time they open (used after a move, where the
+ * destination folder's cached page is missing the moved row).
+ */
+export const dropOtherCachedResourceLists = async (): Promise<void> => {
+  const current = useFileStore.getState().queryParams;
+  await mutate(
+    (key) => isResourceListKey(key) && !isEqual((key as ResourceSWRKey)[1], current),
+    undefined,
+    { revalidate: false },
+  );
 };
 
 /**

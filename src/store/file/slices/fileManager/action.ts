@@ -304,8 +304,12 @@ export class FileManageActionImpl {
     });
 
     await Promise.all(pools);
-    await this.#get().refreshFileList();
-    this.#get().toggleParsingIds(chunkTargetIds, false);
+    try {
+      await this.#get().refreshFileList();
+    } finally {
+      // Always clear the busy flag, or the row spins until reload.
+      this.#get().toggleParsingIds(chunkTargetIds, false);
+    }
   };
 
   pushDockFileList = async (
@@ -369,18 +373,27 @@ export class FileManageActionImpl {
     });
 
     // 4. Upload files with concurrency limit using p-map
+    // Each file settles on its own: one cancelled or failed upload used to
+    // reject the whole p-map, so the files after it never started and every
+    // placeholder row of the batch disappeared.
     const uploadResults = await pMap(
       uploadFiles,
       async (uploadFileItem) => {
-        const result = await this.#get().uploadWithProgress({
-          abortController: uploadFileItem.abortController,
-          file: uploadFileItem.file,
-          knowledgeBaseId,
-          onStatusUpdate: dispatchDockFileList,
-          parentId,
-          uploadId: uploadFileItem.id,
-          visibility,
-        });
+        let result: Awaited<ReturnType<FileStore['uploadWithProgress']>>;
+        try {
+          result = await this.#get().uploadWithProgress({
+            abortController: uploadFileItem.abortController,
+            file: uploadFileItem.file,
+            knowledgeBaseId,
+            onStatusUpdate: dispatchDockFileList,
+            parentId,
+            uploadId: uploadFileItem.id,
+            visibility,
+          });
+        } catch (error) {
+          console.error('[upload] file failed:', uploadFileItem.file.name, error);
+          result = undefined;
+        }
 
         if (!result) {
           this.#get().removeLocalResource(uploadFileItem.id);
@@ -404,13 +417,7 @@ export class FileManageActionImpl {
         };
       },
       { concurrency: MAX_UPLOAD_FILE_COUNT },
-    ).catch((error) => {
-      for (const uploadFile of uploadFiles) {
-        this.#get().removeLocalResource(uploadFile.id);
-      }
-
-      throw error;
-    });
+    );
 
     // 5. auto-embed files that support chunking
     const fileIdsToEmbed = uploadResults
@@ -429,15 +436,19 @@ export class FileManageActionImpl {
     // toggle file ids
     this.#get().toggleEmbeddingIds([chunkTargetId]);
 
-    await serverFileService.removeFileAsyncTask(chunkTargetId, 'embedding');
+    // try/finally: a failure used to leave the id marked busy, and the guard
+    // above then blocked re-embedding this file until a reload.
+    try {
+      await serverFileService.removeFileAsyncTask(chunkTargetId, 'embedding');
 
-    await this.#get().refreshFileList();
+      await this.#get().refreshFileList();
 
-    await ragService.createEmbeddingChunksTask(chunkTargetId);
+      await ragService.createEmbeddingChunksTask(chunkTargetId);
 
-    await this.#get().refreshFileList();
-
-    this.#get().toggleEmbeddingIds([chunkTargetId], false);
+      await this.#get().refreshFileList();
+    } finally {
+      this.#get().toggleEmbeddingIds([chunkTargetId], false);
+    }
   };
 
   reParseFile = async (id: string): Promise<void> => {
@@ -445,11 +456,13 @@ export class FileManageActionImpl {
     // toggle file ids
     this.#get().toggleParsingIds([chunkTargetId]);
 
-    await ragService.retryParseFile(chunkTargetId);
+    try {
+      await ragService.retryParseFile(chunkTargetId);
 
-    await this.#get().refreshFileList();
-
-    this.#get().toggleParsingIds([chunkTargetId], false);
+      await this.#get().refreshFileList();
+    } finally {
+      this.#get().toggleParsingIds([chunkTargetId], false);
+    }
   };
 
   #refreshKnowledgeListCaches = async (): Promise<void> => {
@@ -702,14 +715,21 @@ export class FileManageActionImpl {
       const uploadResults = await pMap(
         uploadItems,
         async ({ abortController, file, id, parentId, shouldShowInCurrentList }) => {
-          const result = await this.#get().uploadWithProgress({
-            abortController,
-            file,
-            knowledgeBaseId,
-            onStatusUpdate: dispatchDockFileList,
-            parentId,
-            uploadId: id,
-          });
+          // Settle per file, as in pushDockFileList: one failure must not stop the rest.
+          let result: Awaited<ReturnType<FileStore['uploadWithProgress']>>;
+          try {
+            result = await this.#get().uploadWithProgress({
+              abortController,
+              file,
+              knowledgeBaseId,
+              onStatusUpdate: dispatchDockFileList,
+              parentId,
+              uploadId: id,
+            });
+          } catch (error) {
+            console.error('[upload] file failed:', file.name, error);
+            result = undefined;
+          }
 
           if (shouldShowInCurrentList) {
             if (!result) {
@@ -725,14 +745,7 @@ export class FileManageActionImpl {
           return { file, fileId: result?.id, fileType: file.type };
         },
         { concurrency: MAX_UPLOAD_FILE_COUNT },
-      ).catch((error) => {
-        for (const uploadItem of uploadItems) {
-          if (!uploadItem.shouldShowInCurrentList) continue;
-          this.#get().removeLocalResource(uploadItem.id);
-        }
-
-        throw error;
-      });
+      );
 
       // 9. Auto-embed files that support chunking
       const fileIdsToEmbed = uploadResults

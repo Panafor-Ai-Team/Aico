@@ -74,7 +74,12 @@ const BatchActionsDropdown = memo<BatchActionsDropdownProps>(({ selectCount, onA
             },
             okText: t('delete', { ns: 'common' }),
             onOk: async () => {
-              await onActionClick('deleteLibrary');
+              try {
+                await onActionClick('deleteLibrary');
+              } catch (error) {
+                console.error('Failed to delete library:', error);
+                toast.error(t('operationFailed', { ns: 'common' }));
+              }
             },
             title: t('header.actions.deleteLibrary', { ns: 'file' }),
           });
@@ -102,7 +107,7 @@ const BatchActionsDropdown = memo<BatchActionsDropdownProps>(({ selectCount, onA
       disabled: selectCount === 0,
       icon: <RepoIcon />,
       key: `add-to-kb-${kb.id}`,
-      label: <span style={{ marginLeft: 8 }}>{kb.name}</span>,
+      label: <span style={{ marginInlineStart: 8 }}>{kb.name}</span>,
       onClick: async () => {
         try {
           const effectiveSelectedIds = await resolveSelectedResourceIds();
@@ -116,6 +121,34 @@ const BatchActionsDropdown = memo<BatchActionsDropdownProps>(({ selectCount, onA
         } catch (e) {
           console.error(e);
           toast.error(t('addToKnowledgeBase.error', { ns: 'knowledgeBase' }));
+        }
+      },
+    }));
+
+    // Inside a library "Move to other library" must leave the current one;
+    // reusing the add submenu only copied the files into the target.
+    const moveToKnowledgeBaseSubmenu: DropdownItem[] = availableKnowledgeBases.map((kb) => ({
+      disabled: selectCount === 0,
+      icon: <RepoIcon />,
+      key: `move-to-kb-${kb.id}`,
+      label: <span style={{ marginInlineStart: 8 }}>{kb.name}</span>,
+      onClick: async () => {
+        try {
+          const effectiveSelectedIds = await resolveSelectedResourceIds();
+          await useResourceManagerStore
+            .getState()
+            .moveResourcesToLibrary(kb.id, effectiveSelectedIds);
+          useResourceManagerStore.getState().clearSelectAllState();
+          toast.success(t('moveToKnowledgeBase.success', { ns: 'knowledgeBase' }));
+        } catch (e: any) {
+          console.error(e);
+          const isDuplicateError =
+            e?.data?.code === 'CONFLICT' || e?.message === 'FILE_ALREADY_IN_KNOWLEDGE_BASE';
+          toast[isDuplicateError ? 'warning' : 'error'](
+            t(isDuplicateError ? 'addToKnowledgeBase.alreadyExists' : 'moveToKnowledgeBase.error', {
+              ns: 'knowledgeBase',
+            }),
+          );
         }
       },
     }));
@@ -147,7 +180,7 @@ const BatchActionsDropdown = memo<BatchActionsDropdownProps>(({ selectCount, onA
 
       if (availableKnowledgeBases.length > 0) {
         items.push({
-          children: addToKnowledgeBaseSubmenu as any,
+          children: moveToKnowledgeBaseSubmenu as any,
           disabled: selectCount === 0,
           icon: <Icon icon={BookPlusIcon} />,
           key: 'moveToOtherKnowledgeBase',
@@ -194,7 +227,13 @@ const BatchActionsDropdown = memo<BatchActionsDropdownProps>(({ selectCount, onA
         ),
         onClick: async () => {
           const handleDelete = async () => {
-            await onActionClick('delete');
+            try {
+              await onActionClick('delete');
+            } catch (error) {
+              console.error('Failed to delete resources:', error);
+              toast.error(t('operationFailed', { ns: 'common' }));
+              return;
+            }
             toast.success(t('FileManager.actions.deleteSuccess'));
           };
 
@@ -254,7 +293,7 @@ const BatchActionsDropdown = memo<BatchActionsDropdownProps>(({ selectCount, onA
         <ActionIconWithChevron
           disabled={!canEditResources}
           icon={CircleEllipsisIcon}
-          title={t('FileManager.actions.batchActions', 'Batch actions')}
+          title={t('FileManager.actions.batchActions')}
         />
       </Tooltip>
     </DropdownMenu>

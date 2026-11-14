@@ -77,14 +77,21 @@ const AddButton = () => {
 
     // Create a new page and wait for server sync - ensures page editor can load the document
     const untitledTitle = t('pageList.untitled');
-    const realId = await createResourceAndSync({
-      content: '',
-      fileType: CUSTOM_DOCUMENT_FILE_TYPE,
-      knowledgeBaseId: libraryId,
-      parentId: currentFolderId ?? undefined,
-      sourceType: DERIVED_DOCUMENT_SOURCE_TYPE,
-      title: untitledTitle,
-    });
+    let realId: string;
+    try {
+      realId = await createResourceAndSync({
+        content: '',
+        fileType: CUSTOM_DOCUMENT_FILE_TYPE,
+        knowledgeBaseId: libraryId,
+        parentId: currentFolderId ?? undefined,
+        sourceType: DERIVED_DOCUMENT_SOURCE_TYPE,
+        title: untitledTitle,
+      });
+    } catch (error) {
+      console.error('Failed to create page:', error);
+      toast.error(t('operationFailed', { ns: 'common' }));
+      return;
+    }
 
     // Switch to page view mode with real ID
     setCurrentViewItemId(realId);
@@ -119,7 +126,7 @@ const AddButton = () => {
       );
 
       // Generate unique folder name
-      const baseName = 'Untitled';
+      const baseName = t('pageList.untitled');
       const existingNames = new Set(foldersAtSameLevel.map((folder) => folder.name));
 
       let uniqueName = baseName;
@@ -207,9 +214,11 @@ const AddButton = () => {
             accept={getAcceptedFileTypes(category)}
             multiple={true}
             showUploadList={false}
-            beforeUpload={async (file) => {
+            beforeUpload={(file, fileList) => {
               setMenuOpen(false);
-              await uploadTopLevel([file]);
+              // antd calls this once per picked file; start the whole batch
+              // once so the upload concurrency limit applies to it.
+              if (file === fileList[0]) void uploadTopLevel(fileList);
               return false;
             }}
           >

@@ -2,18 +2,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { initialState as fileInitialState } from '@/store/file/initialState';
 import { useFileStore } from '@/store/file/store';
+import { useKnowledgeBaseStore } from '@/store/library';
 
 import { useResourceManagerStore } from '.';
 import { initialState } from './initialState';
 
-const { mockDeleteResourcesByQuery, mockResolveSelectionIds } = vi.hoisted(() => ({
-  mockDeleteResourcesByQuery: vi.fn(),
-  mockResolveSelectionIds: vi.fn(),
-}));
+const { mockDeleteResourcesByQuery, mockMoveResource, mockResolveSelectionIds } = vi.hoisted(
+  () => ({
+    mockDeleteResourcesByQuery: vi.fn(),
+    mockMoveResource: vi.fn(),
+    mockResolveSelectionIds: vi.fn(),
+  }),
+);
 
 vi.mock('@/services/resource', () => ({
   resourceService: {
     deleteResourcesByQuery: mockDeleteResourcesByQuery,
+    moveResource: mockMoveResource,
     resolveSelectionIds: mockResolveSelectionIds,
   },
 }));
@@ -111,6 +116,62 @@ describe('resource manager store actions', () => {
       selectedFileIds: [],
       selectionTotal: 2,
     });
+  });
+
+  it('should resolve nothing (not the exclusions) when select-all has no query', async () => {
+    useResourceManagerStore.setState({ selectAllState: 'all', selectedFileIds: ['excluded-1'] });
+    useFileStore.setState({ queryParams: undefined } as any);
+
+    await expect(useResourceManagerStore.getState().resolveSelectedResourceIds()).resolves.toEqual(
+      [],
+    );
+  });
+
+  it('should drop a select-all that lands after the user changed folder', async () => {
+    useFileStore.setState({ queryParams: { parentId: 'folder-a' } as any });
+    mockResolveSelectionIds.mockImplementation(async () => {
+      useFileStore.setState({ queryParams: { parentId: 'folder-b' } as any });
+      return { ids: ['file-1'], total: 1 };
+    });
+
+    await useResourceManagerStore.getState().selectAllResources();
+
+    expect(useResourceManagerStore.getState().selectAllState).not.toBe('all');
+  });
+
+  it('moves to another library: add to target, clear the folder, then leave the source', async () => {
+    const calls: string[] = [];
+    useKnowledgeBaseStore.setState({
+      addFilesToKnowledgeBase: vi.fn(async () => {
+        calls.push('add');
+      }),
+      removeFilesFromKnowledgeBase: vi.fn(async () => {
+        calls.push('remove');
+      }),
+    } as any);
+    mockMoveResource.mockImplementation(async (id: string, parentId: string | null) => {
+      calls.push(`move:${id}:${parentId}`);
+    });
+    useResourceManagerStore.setState({ libraryId: 'kb-source' });
+
+    await useResourceManagerStore.getState().moveResourcesToLibrary('kb-target', ['f1']);
+
+    expect(calls).toEqual(['add', 'move:f1:null', 'remove']);
+  });
+
+  it('keeps files in the source library when the target refuses them', async () => {
+    const remove = vi.fn();
+    useKnowledgeBaseStore.setState({
+      addFilesToKnowledgeBase: vi.fn().mockRejectedValue(new Error('CONFLICT')),
+      removeFilesFromKnowledgeBase: remove,
+    } as any);
+    useResourceManagerStore.setState({ libraryId: 'kb-source' });
+
+    await expect(
+      useResourceManagerStore.getState().moveResourcesToLibrary('kb-target', ['f1']),
+    ).rejects.toThrow('CONFLICT');
+    expect(remove).not.toHaveBeenCalled();
+    expect(mockMoveResource).not.toHaveBeenCalled();
   });
 
   it('should keep all-selected deletion caller-scoped when exclusions are present', async () => {
