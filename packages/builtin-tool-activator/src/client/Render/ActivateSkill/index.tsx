@@ -4,8 +4,10 @@ import { type BuiltinRenderProps } from '@lobechat/types';
 import { Flexbox, Markdown, ScrollShadow } from '@lobehub/ui';
 import { createStaticStyles } from 'antd-style';
 import { memo } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import type { ActivateSkillParams, ActivateSkillState } from '../../../types';
+import { getSkillDisplayName } from '../../skillDisplayName';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   container: css`
@@ -38,8 +40,9 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 
 const ActivateSkill = memo<BuiltinRenderProps<ActivateSkillParams, ActivateSkillState>>(
   ({ content, pluginState }) => {
+    const { t } = useTranslation('plugin');
     const { description, name, title } = pluginState || {};
-    const displayName = title || name;
+    const displayName = getSkillDisplayName(t, name, title);
 
     if (!displayName) return null;
 

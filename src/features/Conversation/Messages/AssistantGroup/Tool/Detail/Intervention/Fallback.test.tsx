@@ -5,6 +5,8 @@ import { render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
+import type * as ToolHelpers from '@/store/tool/helpers';
+
 import FallbackIntervention from './Fallback';
 
 const metaMap: Record<string, { avatar?: string; title?: string }> = {
@@ -33,6 +35,7 @@ vi.mock('react-i18next', () => ({
         ({
           'builtins.lobe-activator.apiName.activateTools': 'Activate Tools',
           'builtins.lobe-activator.title': 'Tools & Skills Activator',
+          'builtins.lobe-skill-store.title': 'Skill Store',
           'edit': 'Edit',
         }) as Record<string, string>
       )[key] ||
@@ -48,11 +51,8 @@ vi.mock('@/store/tool/selectors', () => ({
   },
 }));
 
-vi.mock('@/store/tool', () => ({
-  pluginHelpers: {
-    getPluginTitle: (meta?: { title?: string }) => meta?.title,
-    getToolFallbackName: (identifier: string) => identifier.replace(/^lobe-/, ''),
-  },
+vi.mock('@/store/tool', async () => ({
+  pluginHelpers: (await vi.importActual<typeof ToolHelpers>('@/store/tool/helpers')).pluginHelpers,
   useToolStore: (selector: (state: unknown) => unknown) => selector({}),
 }));
 
@@ -100,6 +100,24 @@ describe('FallbackIntervention', () => {
     expect(
       screen.getByText('Tools & Skills Activator → Activate Tools (Web Search, Calculator)'),
     ).toBeInTheDocument();
+  });
+
+  it('names a requested builtin tool by its localized title, not its identifier', () => {
+    render(
+      <FallbackIntervention
+        apiName="activateTools"
+        assistantGroupId="assistant-group-1"
+        id="message-1"
+        identifier="lobe-activator"
+        requestArgs='{"identifiers":["lobe-skill-store"]}'
+        toolCallId="tool-call-1"
+      />,
+    );
+
+    expect(
+      screen.getByText('Tools & Skills Activator → Activate Tools (Skill Store)'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/skill-store/)).not.toBeInTheDocument();
   });
 
   it('shows the activation reason for activateTools interventions', () => {

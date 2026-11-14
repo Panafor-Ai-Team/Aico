@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { inspectorTextStyles, shinyTextStyles } from '@/styles';
 
 import type { ActivateSkillParams, ActivateSkillSource, ActivateSkillState } from '../../../types';
+import { getSkillDisplayName } from '../../skillDisplayName';
 
 /**
  * `t` is invoked with literal keys per branch so i18next's typed-key map can
@@ -72,7 +73,7 @@ export const ActivateSkillInspector = memo<
   const { t } = useTranslation('plugin');
 
   const name = args?.name || partialArgs?.name;
-  const displayName = pluginState?.title || pluginState?.name || name;
+  const displayName = getSkillDisplayName(t, pluginState?.name || name, pluginState?.title);
   const label = resolveLabel(t, pluginState?.source);
 
   if (isArgumentsStreaming) {
