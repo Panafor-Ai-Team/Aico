@@ -110,17 +110,15 @@ const FallbackIntervention = memo<FallbackInterventionProps>(
 
       return typeof reason === 'string' && reason.trim() ? reason.trim() : undefined;
     }, [isActivateToolsIntervention, parsedArgs]);
-    const requestedToolNames = useToolStore(
+    const requestedToolTitles = useToolStore(
       (s) =>
-        requestedToolIdentifiers.map((toolIdentifier) => {
-          const meta = toolSelectors.getMetaById(toolIdentifier)(s);
-          return (
-            pluginHelpers.getPluginTitle(meta) ??
-            meta?.title ??
-            pluginHelpers.getToolFallbackName(toolIdentifier)
-          );
-        }),
+        requestedToolIdentifiers.map((toolIdentifier) =>
+          pluginHelpers.getPluginTitle(toolSelectors.getMetaById(toolIdentifier)(s)),
+        ),
       isEqual,
+    );
+    const requestedToolNames = requestedToolIdentifiers.map((toolIdentifier, index) =>
+      pluginHelpers.getToolDisplayName(toolIdentifier, t, requestedToolTitles[index]),
     );
     const actionTitleSuffix =
       requestedToolNames.length > 0 ? ` (${requestedToolNames.join(', ')})` : '';

@@ -9,7 +9,8 @@ import { useTranslation } from 'react-i18next';
 
 import { inspectorTextStyles, shinyTextStyles } from '@/styles';
 
-import type { ActivatedToolInfo, ActivateToolsParams, ActivateToolsState } from '../../../types';
+import type { ActivateToolsParams, ActivateToolsState } from '../../../types';
+import { getActivateToolsDisplay } from './display';
 
 const styles = createStaticStyles(({ css }) => ({
   notFoundHint: css`
@@ -58,23 +59,22 @@ export const ActivateToolsInspector = memo<
   const { t } = useTranslation('plugin');
 
   const identifiers = args?.identifiers || partialArgs?.identifiers;
-  const activatedTools = pluginState?.activatedTools;
-  const notFoundList = pluginState?.notFound ?? [];
-  const requestedTools: ActivatedToolInfo[] =
-    identifiers?.map((id) => ({ apiCount: 0, identifier: id, name: id })) ?? [];
-  const visibleTools =
-    activatedTools && activatedTools.length > 0 ? activatedTools : requestedTools;
+  const { notFoundNames, requestedTools, visibleTools } = getActivateToolsDisplay(
+    identifiers,
+    pluginState,
+    t,
+  );
 
-  // Streaming / Loading: show identifiers from arguments
+  // Streaming / Loading: show the tools requested in the arguments
   if (isArgumentsStreaming || isLoading) {
     return (
       <div className={cx(inspectorTextStyles.root, shinyTextStyles.shinyText)}>
         <span>{t('builtins.lobe-activator.apiName.activateTools')}</span>
-        {identifiers && identifiers.length > 0 && (
+        {requestedTools.length > 0 && (
           <span className={styles.tools}>
-            {identifiers.map((id) => (
-              <span className={styles.tool} key={id}>
-                <span className={styles.toolName}>{id}</span>
+            {requestedTools.map((tool) => (
+              <span className={styles.tool} key={tool.identifier}>
+                <span className={styles.toolName}>{tool.name}</span>
               </span>
             ))}
           </span>
@@ -84,8 +84,8 @@ export const ActivateToolsInspector = memo<
   }
 
   // Finished: show activated tool names with avatars; surface notFound in the title row
-  const hasNotFound = notFoundList.length > 0;
-  const notFoundTitle = notFoundList.join(', ');
+  const hasNotFound = notFoundNames.length > 0;
+  const notFoundTitle = notFoundNames.join(', ');
 
   return (
     <Flexbox
@@ -102,7 +102,7 @@ export const ActivateToolsInspector = memo<
             <Icon color={cssVar.colorWarning} icon={AlertTriangle} />
             <span>
               {t('builtins.lobe-activator.inspector.activateTools.notFoundCount', {
-                count: notFoundList.length,
+                count: notFoundNames.length,
               })}
             </span>
           </Flexbox>
