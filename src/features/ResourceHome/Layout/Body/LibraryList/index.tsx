@@ -4,6 +4,7 @@ import { Flexbox } from '@lobehub/ui';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useActiveWorkspaceId } from '@/business/client/hooks/useActiveWorkspaceId';
 import AsyncBoundary from '@/components/AsyncBoundary';
 import { useCreateNewModal } from '@/features/LibraryModal';
 import EmptyNavItem from '@/features/NavPanel/components/EmptyNavItem';
@@ -27,6 +28,7 @@ const LibraryList = memo(() => {
   // and the query returns everything the ownership predicate allows.
   const listVisibility = useResourceManagerStore((s) => s.listVisibility);
   const visibility = listVisibility === 'private' ? ('private' as const) : ('public' as const);
+  const activeWorkspaceId = useActiveWorkspaceId();
 
   const useFetchKnowledgeBaseList = useKnowledgeBaseStore((s) => s.useFetchKnowledgeBaseList);
   // `isValidating` catches the first fetch after switching mode — SWR's key
@@ -70,8 +72,14 @@ const LibraryList = memo(() => {
       empty={
         <EmptyNavItem
           disabled={!canCreate}
+          // Personal mode has no private/workspace split; "workspace library"
+          // there named a space the user does not have.
           title={t(
-            listVisibility === 'private' ? 'library.privateEmpty' : 'library.workspaceEmpty',
+            !activeWorkspaceId
+              ? 'home.uploadEntries.library.title'
+              : listVisibility === 'private'
+                ? 'library.privateEmpty'
+                : 'library.workspaceEmpty',
           )}
           onClick={handleCreate}
         />
@@ -86,9 +94,9 @@ const LibraryList = memo(() => {
             key={item.id}
             memberRestricted={(item as { memberRestricted?: boolean }).memberRestricted}
             name={item.name}
+            permissionManageable={(item as { permissionManageable?: boolean }).permissionManageable}
             userId={item.userId}
             visibility={item.visibility}
-            permissionManageable={(item as { permissionManageable?: boolean }).permissionManageable}
           />
         ))}
       </Flexbox>

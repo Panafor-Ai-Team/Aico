@@ -7,10 +7,12 @@ import dayjs from 'dayjs';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import AsyncError from '@/components/AsyncError';
 import FileIcon from '@/components/FileIcon';
 import { formatTaskItemDate } from '@/features/AgentTasks/features/formatTaskItemDate';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { useClientDataSWR } from '@/libs/swr';
+import { resourceKeys } from '@/libs/swr/keys';
 import { fileService } from '@/services/file';
 import { FilesTabs } from '@/types/files';
 
@@ -75,6 +77,8 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   `,
 }));
 
+const RECENT_FILES_LIMIT = 8;
+
 const RecentFiles = memo(() => {
   const { t, i18n } = useTranslation(['file', 'common']);
   // Past a week, match the Works cards above: a localized "MMM D" date
@@ -89,9 +93,23 @@ const RecentFiles = memo(() => {
         });
   const navigate = useWorkspaceAwareNavigate();
 
-  const { data, isLoading } = useClientDataSWR('resource-home-recent-files', () =>
-    fileService.getRecentFiles(8),
+  const { data, error, isLoading, mutate } = useClientDataSWR(
+    resourceKeys.recentFiles(RECENT_FILES_LIMIT),
+    () => fileService.getRecentFiles(RECENT_FILES_LIMIT),
   );
+
+  // A failed load used to hide the section as if there were no files.
+  if (error && !data) {
+    return (
+      <Flexbox gap={12}>
+        <SectionTitle
+          title={t('home.recentFiles', { ns: 'file' })}
+          viewAllUrl={`/resource/${FilesTabs.All}`}
+        />
+        <AsyncError error={error} variant={'inline'} onRetry={() => void mutate()} />
+      </Flexbox>
+    );
+  }
 
   if (!isLoading && !data?.length) return null;
 
@@ -127,7 +145,10 @@ const RecentFiles = memo(() => {
                 </div>
                 <Flexbox gap={4} padding={12}>
                   <span className={styles.name}>{item.name}</span>
-                  <span className={styles.meta}>{formatTime(item.createdAt)}</span>
+                  {/* The list is ordered by last update; show that date, not upload time. */}
+                  <span className={styles.meta}>
+                    {formatTime(item.updatedAt ?? item.createdAt)}
+                  </span>
                 </Flexbox>
               </button>
             );

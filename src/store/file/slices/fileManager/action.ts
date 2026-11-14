@@ -11,7 +11,7 @@ import { type SWRResponse } from 'swr';
 
 import { FILE_UPLOAD_BLACKLIST, MAX_UPLOAD_FILE_COUNT } from '@/const/file';
 import { mutate, useClientDataSWR } from '@/libs/swr';
-import { fileKeys } from '@/libs/swr/keys';
+import { fileKeys, resourceKeys } from '@/libs/swr/keys';
 import { documentService } from '@/services/document';
 import { FileService, fileService } from '@/services/file';
 import { ragService } from '@/services/rag';
@@ -476,6 +476,15 @@ export class FileManageActionImpl {
       {
         revalidate: true,
       },
+    );
+    // The Resources home "Recent" sections never refreshed after an upload,
+    // rename or delete (their raw keys matched nothing here).
+    await mutate(
+      (key) =>
+        Array.isArray(key) &&
+        (key[0] === resourceKeys.recentFiles.root || key[0] === resourceKeys.recentPages.root),
+      async (currentData) => currentData,
+      { revalidate: true },
     );
   };
 

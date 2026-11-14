@@ -8,8 +8,11 @@ import { FileTextIcon } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import AsyncError from '@/components/AsyncError';
+import { formatTaskItemDate } from '@/features/AgentTasks/features/formatTaskItemDate';
 import { useWorkspaceAwareNavigate } from '@/features/Workspace/useWorkspaceAwareNavigate';
 import { useClientDataSWR } from '@/libs/swr';
+import { resourceKeys } from '@/libs/swr/keys';
 import { fileService } from '@/services/file';
 
 import SectionTitle from './SectionTitle';
@@ -62,22 +65,41 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
   `,
 }));
 
-const formatTime = (date: Date | string) =>
-  dayjs().diff(dayjs(date), 'd') < 7 ? dayjs(date).fromNow() : dayjs(date).format('YYYY-MM-DD');
+const RECENT_PAGES_LIMIT = 6;
 
 const RecentPages = memo(() => {
-  const { t } = useTranslation('file');
+  const { t, i18n } = useTranslation(['file', 'common']);
+  // Past a week, a localized "MMM D" date like Recent Files, not a bare ISO date.
+  const formatTime = (date: Date | string) =>
+    dayjs().diff(dayjs(date), 'd') < 7
+      ? dayjs(date).fromNow()
+      : formatTaskItemDate(date, {
+          formatOtherYear: t('time.formatOtherYear', { ns: 'common' }),
+          formatThisYear: t('time.formatThisYear', { ns: 'common' }),
+          locale: i18n.language,
+        });
   const navigate = useWorkspaceAwareNavigate();
 
-  const { data, isLoading } = useClientDataSWR('resource-home-recent-pages', () =>
-    fileService.getRecentPages(6),
+  const { data, error, isLoading, mutate } = useClientDataSWR(
+    resourceKeys.recentPages(RECENT_PAGES_LIMIT),
+    () => fileService.getRecentPages(RECENT_PAGES_LIMIT),
   );
+
+  // A failed load used to hide the section as if there were no pages.
+  if (error && !data) {
+    return (
+      <Flexbox gap={12}>
+        <SectionTitle title={t('home.recentPages', { ns: 'file' })} viewAllUrl={'/resource/page'} />
+        <AsyncError error={error} variant={'inline'} onRetry={() => void mutate()} />
+      </Flexbox>
+    );
+  }
 
   if (!isLoading && !data?.length) return null;
 
   return (
     <Flexbox gap={12}>
-      <SectionTitle title={t('home.recentPages')} viewAllUrl={'/resource/page'} />
+      <SectionTitle title={t('home.recentPages', { ns: 'file' })} viewAllUrl={'/resource/page'} />
       {isLoading ? (
         <div className={styles.grid}>
           {Array.from({ length: 3 }, (_, index) => (
