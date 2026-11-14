@@ -4,7 +4,9 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getDraft } from '@/features/ChatInput/draftStorage';
 import type { SendButtonHandler } from '@/features/ChatInput/store/initialState';
+import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 
 import { useSend } from './useSend';
 
@@ -39,6 +41,7 @@ const fileState = vi.hoisted(() => ({
   chatUploadFileList: [],
   clearChatContextSelections: clearChatContextSelectionsMock,
   clearChatUploadFileList: clearChatUploadFileListMock,
+  dispatchChatUploadFileList: vi.fn(),
   restoreChatContextSelections: restoreChatContextSelectionsMock,
 }));
 
@@ -444,6 +447,35 @@ describe('Home InputArea useSend', () => {
     });
 
     expect(routerMock.replace).toHaveBeenCalledWith('/agent/agt_inbox/tpc_created');
+  });
+
+  it('returns a refused send to the blank conversation draft, not the Home editor', async () => {
+    localStorage.clear();
+    const { result } = renderHook(() => useSend());
+
+    await act(async () => {
+      await result.current.send({
+        clearContent: vi.fn(),
+        editor: {} as Parameters<SendButtonHandler>[0]['editor'],
+        getEditorData: () => ({ type: 'doc' }),
+        getMarkdownContent: () => 'hello',
+      });
+    });
+
+    const sentPayload = sendMessageMock.mock.calls[0][0];
+    // The Home editor is named so the lifecycle's own restore cannot write the
+    // text into the conversation composer a second time.
+    expect(sentPayload.inputEditor).toBe(chatState.mainInputEditor);
+
+    chatState.activeAgentId = 'agt_inbox';
+    chatState.activeTopicId = undefined;
+
+    // The conversation composer is not mounted yet, so the text must wait in
+    // the draft key the blank conversation reads on mount.
+    sentPayload.onPreflightFailure();
+    expect(getDraft(messageMapKey({ agentId: 'agt_inbox', topicId: null }))).toEqual({
+      type: 'doc',
+    });
   });
 
   it('switches the open agent chat to the created topic before the route transition commits', async () => {

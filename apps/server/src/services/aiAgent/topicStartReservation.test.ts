@@ -53,6 +53,9 @@ describe('acquireTopicStartReservation', () => {
       topicModel,
     });
 
-    expect(tryReserveTaskCallback).toHaveBeenCalledWith('topic-1', 'new-start', 'old-operation');
+    expect(tryReserveTaskCallback).toHaveBeenCalledWith('topic-1', 'new-start', {
+      ignoreRunningOperation: undefined,
+      replacesOperationId: 'old-operation',
+    });
   });
 });

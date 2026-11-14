@@ -429,6 +429,14 @@ interface InternalExecAgentParams extends ExecAgentParams {
   hooks?: AgentHook[];
   /** Initial step count offset for resumed operations (accumulated from previous runs) */
   initialStepCount?: number;
+  /**
+   * This start came from a person waiting at a composer, not from a background
+   * producer (task callback, cron, bot, API). Interactive starts serialize only
+   * on the short topic-start reservation and never on `runningOperation` — the
+   * client already owns "one foreground turn at a time" with a queue and a UI,
+   * and a refusal here destroys the message before it is ever persisted.
+   */
+  interactiveStart?: boolean;
   /** Maximum steps for the agent operation */
   maxSteps?: number;
   /**
@@ -1288,6 +1296,7 @@ export class AiAgentService {
 
     const reservationId = params.topicStartReservationId ?? `agent-start-${nanoid()}`;
     const reserved = await acquireTopicStartReservation({
+      ignoreRunningOperation: params.interactiveStart,
       replacesOperationId: params.replacesOperationId,
       reservationId,
       topicId,
@@ -2474,6 +2483,9 @@ export class AiAgentService {
         runningOperation: {
           assistantMessageId: assistantMessageRecord.id,
           hooks: serializedHooks,
+          // Liveness stamp — without it this marker can never be proven dead
+          // and would hold the topic against background starts forever.
+          startedAt: new Date().toISOString(),
           // Store deviceId + heteroType so interruptTask can cancel remote processes
           ...(isRemoteHetero && remoteDeviceId
             ? {
@@ -4694,6 +4706,9 @@ export class AiAgentService {
             assistantMessageId: assistantMessageRecord.id,
             operationId,
             scope: appContext?.scope ?? undefined,
+            // Liveness stamp — without it this marker can never be proven dead
+            // and would hold the topic against background starts forever.
+            startedAt: new Date().toISOString(),
             threadId: appContext?.threadId ?? undefined,
           },
         });
