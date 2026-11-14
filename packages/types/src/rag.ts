@@ -6,7 +6,7 @@ export const SemanticSearchSchema = z.object({
   fileIds: z.array(z.string()).optional(),
   knowledgeIds: z.array(z.string()).optional(),
   query: z.string(),
-  topK: z.number().optional(),
+  topK: z.number().int().min(1).max(100).optional(),
 });
 
 export type SemanticSearchSchemaType = z.infer<typeof SemanticSearchSchema>;

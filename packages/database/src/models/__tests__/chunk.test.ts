@@ -84,6 +84,22 @@ describe('ChunkModel', () => {
       expect(createdChunks[1]).toMatchObject(params[1]);
     });
 
+    it('replaces the chunks of an earlier parse of the same file', async () => {
+      await chunkModel.bulkCreate(
+        [
+          { text: 'Old 1', userId },
+          { text: 'Old 2', userId },
+        ],
+        '1',
+      );
+      await chunkModel.bulkCreate([{ text: 'New 1', userId }], '1');
+
+      const remaining = await serverDB.query.chunks.findMany({
+        where: eq(chunks.userId, userId),
+      });
+      expect(remaining.map((item) => item.text)).toEqual(['New 1']);
+    });
+
     // Test empty params scenario
     it('should handle empty params array', async () => {
       const result = await chunkModel.bulkCreate([], '1');

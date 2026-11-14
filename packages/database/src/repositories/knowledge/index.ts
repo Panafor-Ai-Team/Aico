@@ -55,12 +55,21 @@ const d = alias(documents, 'd');
  * `.as()`: `f.id` would otherwise collide with the `id` column, and every
  * `users` column would land under its bare name.
  */
+/**
+ * List rows never carry page bodies. A page's `content` / `editorData` can be
+ * megabytes (web crawls, long notes); detoasting and serializing it for every
+ * row of every list, recent and select-all request blocked the event loop. The
+ * editor, preview, download and duplicate paths all fetch the page by id.
+ */
+const noContent = sql<string | null>`NULL::text`.as('content');
+const noEditorData = sql<Record<string, any> | null>`NULL::jsonb`.as('editor_data');
+
 const fileArmColumns = {
   chunkTaskId: f.chunkTaskId,
-  content: d.content,
+  content: noContent,
   createdAt: f.createdAt,
   documentId: sql<string | null>`${d.id}`.as('document_id'),
-  editorData: d.editorData,
+  editorData: noEditorData,
   embeddingTaskId: f.embeddingTaskId,
   fileId: sql<string | null>`${f.id}`.as('file_id'),
   fileType: f.fileType,
@@ -83,10 +92,10 @@ const fileArmColumns = {
 
 const documentArmColumns = {
   chunkTaskId: sql<string | null>`NULL::uuid`.as('chunk_task_id'),
-  content: d.content,
+  content: noContent,
   createdAt: d.createdAt,
   documentId: sql<string | null>`${d.id}`.as('document_id'),
-  editorData: d.editorData,
+  editorData: noEditorData,
   embeddingTaskId: sql<string | null>`NULL::uuid`.as('embedding_task_id'),
   fileId: d.fileId,
   fileType: d.fileType,
@@ -413,7 +422,7 @@ export class KnowledgeRepo {
     ]);
 
     const rows = await unionAll(fileArm, documentArm)
-      .orderBy(this.orderBy(sortType, sorter))
+      .orderBy(...this.orderBy(sortType, sorter))
       .limit(limit)
       .offset(offset);
 
@@ -446,7 +455,7 @@ export class KnowledgeRepo {
     const recent =
       kind === 'file' ? fileArm : kind === 'page' ? documentArm : unionAll(fileArm, documentArm);
 
-    const rows = await recent.orderBy(this.orderBy(SortType.Desc, 'updatedAt')).limit(limit);
+    const rows = await recent.orderBy(...this.orderBy(SortType.Desc, 'updatedAt')).limit(limit);
 
     return rows.map(toKnowledgeItem);
   }
@@ -603,11 +612,18 @@ export class KnowledgeRepo {
    * `ORDER BY` may only name an output column, and `"f"."name"` is not one. The
    * value is looked up in `SORTABLE_COLUMNS`, never taken from the caller.
    */
-  private orderBy = (sortType?: string, sorter?: string): SQL => {
-    if (!sorter || !sortType || !(sorter in SORTABLE_COLUMNS)) return desc(sql.raw('created_at'));
+  private orderBy = (sortType?: string, sorter?: string): SQL[] => {
+    // `id` breaks ties so LIMIT/OFFSET pages are stable: rows written in one
+    // transaction share a timestamp and many rows share a size, and without a
+    // unique key Postgres may return them in a different order per page —
+    // repeating some rows and skipping others while scrolling.
+    const tieBreaker = desc(sql.raw('id'));
+    if (!sorter || !sortType || !(sorter in SORTABLE_COLUMNS)) {
+      return [desc(sql.raw('created_at')), tieBreaker];
+    }
 
     const direction = sortType.toLowerCase() === SortType.Asc ? asc : desc;
 
-    return direction(sql.raw(SORTABLE_COLUMNS[sorter]));
+    return [direction(sql.raw(SORTABLE_COLUMNS[sorter])), tieBreaker];
   };
 }

@@ -3,7 +3,14 @@ import { and, asc, cosineDistance, count, desc, eq, inArray, isNull, sql } from 
 import { chunk } from 'es-toolkit/compat';
 
 import type { NewChunkItem, NewUnstructuredChunkItem } from '../schemas';
-import { chunks, embeddings, fileChunks, files, unstructuredChunks } from '../schemas';
+import {
+  chunks,
+  documentChunks,
+  embeddings,
+  fileChunks,
+  files,
+  unstructuredChunks,
+} from '../schemas';
 import type { LobeChatDatabase } from '../type';
 import { buildWorkspacePayload, buildWorkspaceWhere } from '../utils/workspace';
 
@@ -25,9 +32,38 @@ export class ChunkModel {
   private fileChunksOwnership = () =>
     buildWorkspaceWhere({ userId: this.userId, workspaceId: this.workspaceId }, fileChunks);
 
+  /**
+   * Store the chunks of one parse of `fileId`, replacing any earlier parse.
+   *
+   * Retrying a parse (or a timed-out parse that still finishes) used to append
+   * a second full set, doubling the file's chunks and embeddings and returning
+   * duplicate hits in search.
+   */
   bulkCreate = async (params: NewChunkItem[], fileId: string) => {
     return this.db.transaction(async (trx) => {
       if (params.length === 0) return [];
+
+      const previous = await trx
+        .select({ chunkId: fileChunks.chunkId })
+        .from(fileChunks)
+        .where(and(eq(fileChunks.fileId, fileId), this.fileChunksOwnership()));
+      const previousIds = previous.map((row) => row.chunkId).filter(Boolean) as string[];
+      for (const batch of chunk(previousIds, 1000)) {
+        await trx.delete(embeddings).where(inArray(embeddings.chunkId, batch));
+        await trx.delete(documentChunks).where(inArray(documentChunks.chunkId, batch));
+        await trx.delete(chunks).where(inArray(chunks.id, batch));
+      }
+      await trx
+        .delete(unstructuredChunks)
+        .where(
+          and(
+            eq(unstructuredChunks.fileId, fileId),
+            buildWorkspaceWhere(
+              { userId: this.userId, workspaceId: this.workspaceId },
+              unstructuredChunks,
+            ),
+          ),
+        );
 
       const result = await trx
         .insert(chunks)

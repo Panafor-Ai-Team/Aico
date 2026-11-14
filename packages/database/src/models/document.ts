@@ -199,7 +199,8 @@ export class DocumentModel {
         })
         .from(documents)
         .where(whereCondition)
-        .orderBy(desc(documents.updatedAt))
+        // `id` keeps pages stable when several rows share an updatedAt.
+        .orderBy(desc(documents.updatedAt), desc(documents.id))
         .limit(pageSize)
         .offset(offset),
       this.db

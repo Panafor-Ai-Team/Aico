@@ -39,7 +39,7 @@ export const recentRouter = router({
     .input(
       z
         .object({
-          limit: z.number().optional(),
+          limit: z.number().int().min(1).max(100).optional(),
           /** Restrict a workspace feed to the viewer's own items (mine/team toggle). */
           mineOnly: z.boolean().optional(),
           types: z.array(z.enum(['topic', 'document', 'task'])).optional(),

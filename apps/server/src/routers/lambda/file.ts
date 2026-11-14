@@ -591,7 +591,7 @@ export const fileRouter = router({
     }),
 
   recentFiles: fileProcedure
-    .input(z.object({ limit: z.number().max(50).optional() }).optional())
+    .input(z.object({ limit: z.number().int().min(1).max(50).optional() }).optional())
     .query(async ({ ctx, input }) => {
       const limit = input?.limit ?? 12;
       // Files only (pages are excluded in SQL, so `limit` can't be eaten by
@@ -649,7 +649,7 @@ export const fileRouter = router({
     }),
 
   recentPages: fileProcedure
-    .input(z.object({ limit: z.number().max(50).optional() }).optional())
+    .input(z.object({ limit: z.number().int().min(1).max(50).optional() }).optional())
     .query(async ({ ctx, input }) => {
       const limit = input?.limit ?? 12;
       // Pages only (folders and files are excluded in SQL, so `limit` can't be
