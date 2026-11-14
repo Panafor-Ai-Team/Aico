@@ -1,3 +1,4 @@
+import { ErrorBoundary } from '@lobehub/ui';
 import { type PropsWithChildren } from 'react';
 import { memo } from 'react';
 
@@ -12,10 +13,17 @@ const Token = memo<PropsWithChildren>(({ children }) => {
   return showTag && children;
 });
 
+// The token tag is decorative. If its lazy chunk fails to load (a tab opened
+// before a deploy asks for a chunk hash that no longer exists), render nothing
+// instead of letting the error reach the route boundary and replace the chat.
+const renderNothing = () => null;
+
 const ContextWindow = () => {
   return (
     <Token>
-      <LargeTokenContent />
+      <ErrorBoundary fallbackRender={renderNothing}>
+        <LargeTokenContent />
+      </ErrorBoundary>
     </Token>
   );
 };

@@ -46,6 +46,13 @@ case "$1" in
     ((n > ${FAKE_PULL_FAILS:-0})) || { echo "Error response from daemon: net/http: TLS handshake timeout" >&2; exit 1; }
     echo "Status: Downloaded newer image for $2"
     ;;
+  cp)
+    # `docker cp <svc>:/app/public/<dir>/assets/. <dest>/` — log the source and
+    # drop one chunk into <dest>, or fail with FAKE_CP_FAIL=1.
+    echo "cp $2" >>"$FAKE_DIR/compose"
+    [[ "${FAKE_CP_FAIL:-0}" == 1 ]] && { echo "Error response from daemon: No such container" >&2; exit 1; }
+    touch "${3%/}/chunk-from-${2%%:*}.js"
+    ;;
   images) cat "$FAKE_DIR/images" ;;
   rmi)
     if grep -qxF "$2" "$FAKE_DIR/in-use" 2>/dev/null; then
@@ -231,6 +238,9 @@ run_deploy
 [[ "$(cat "$tmp/pulls")" == 2 ]] || fail "expected one pull per image, got $(cat "$tmp/pulls")"
 expected="$(printf '%s\n' \
   "compose slot-green panachat-green cp=$CP:new" \
+  'cp panachat-blue:/app/public/_spa/assets/.' \
+  'cp panachat-blue:/app/public/_spa-auth/assets/.' \
+  'cp panachat-blue:/app/public/_spa-workbench/assets/.' \
   'flip green' \
   "compose slot-blue panachat-blue cp=$CP:new" \
   "compose control-plane panachat-control-plane cp=$CP:new")"
@@ -254,5 +264,31 @@ run_deploy
 ((rc == 0)) || fail "deploy with shipped images must not need the registry: $(cat "$tmp/out.log")"
 [[ ! -e "$tmp/pulls" ]] || fail "shipped images must not be pulled: $(cat "$tmp/pulls") pulls"
 grep -qxF "PANACHAT_CONTROL_PLANE_IMAGE=$CP:new" "$tmp/infra.env" || fail "shipped control plane not persisted: $(cat "$tmp/infra.env")"
+
+# 13. Bug (prod, 2026-11-10, T-031): every deploy deleted the outgoing build's
+#     hashed chunks. A tab opened before the deploy then got 404s on its first
+#     lazy import and the chunk-error handler reloaded the page, killing a
+#     message the user had just sent. The outgoing slot's chunks are archived
+#     before the flip (asserted in 10) and old archive files are pruned.
+reset_deploy
+archive="$ASSET_ARCHIVE_DIR"
+mkdir -p "$archive/_spa/assets"
+touch -d '40 days ago' "$archive/_spa/assets/expired-old.js"
+touch -d '5 days ago' "$archive/_spa/assets/recent-old.js"
+run_deploy
+((rc == 0)) || fail "deploy should succeed with the archive step: $(cat "$tmp/out.log")"
+for dir in _spa _spa-auth _spa-workbench; do
+  [[ -f "$archive/$dir/assets/chunk-from-panachat-blue.js" ]] || fail "outgoing $dir chunks not archived"
+done
+[[ ! -e "$archive/_spa/assets/expired-old.js" ]] || fail "chunks older than the retention window must be pruned"
+[[ -f "$archive/_spa/assets/recent-old.js" ]] || fail "chunks inside the retention window must be kept"
+
+# 14. A failed archive copy is logged and never fails the deploy.
+reset_deploy
+export FAKE_CP_FAIL=1
+run_deploy
+unset FAKE_CP_FAIL
+((rc == 0)) || fail "an archive failure must not fail the deploy: $(cat "$tmp/out.log")"
+grep -q 'flip green' "$tmp/compose" || fail "deploy must still flip when the archive copy fails"
 
 echo "OK: panachat-deploy-remote"

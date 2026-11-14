@@ -58,7 +58,57 @@ function getRefreshMessage(): string {
 }
 
 /**
+ * Returns true while reloading the page would destroy work in flight (a message
+ * being sent, a reply streaming, a queued follow-up).
+ */
+export type ChunkReloadBlocker = () => boolean;
+
+const reloadBlockers = new Set<ChunkReloadBlocker>();
+
+/**
+ * Register a check that postpones the chunk-error auto-reload. Returns an
+ * unregister function.
+ *
+ * Why: a tab opened before a deploy requests chunk hashes that no longer exist.
+ * The first send in such a tab lazily loads a few UI chunks (route meta, token
+ * tag); their 404 used to reload the page immediately, killing the send that
+ * had just been saved — the user saw their message vanish and had to send it
+ * again.
+ */
+export const registerChunkReloadBlocker = (blocker: ChunkReloadBlocker): (() => void) => {
+  reloadBlockers.add(blocker);
+  return () => {
+    reloadBlockers.delete(blocker);
+  };
+};
+
+const isReloadBlocked = () =>
+  [...reloadBlockers].some((blocker) => {
+    try {
+      return blocker();
+    } catch {
+      // A broken check must not pin the tab on stale chunks forever.
+      return false;
+    }
+  });
+
+export const DEFERRED_RELOAD_POLL_MS = 1000;
+/**
+ * Consecutive idle checks required before a deferred reload fires. One idle
+ * tick can fall between the composer clearing and the send operation starting.
+ */
+const DEFERRED_RELOAD_IDLE_TICKS = 2;
+
+let deferredReloadTimer: ReturnType<typeof setInterval> | undefined;
+
+const reloadNow = () => {
+  sessionStorage.setItem(RELOAD_KEY, '1');
+  window.location.reload();
+};
+
+/**
  * Auto-reload on chunk load error. Uses sessionStorage to prevent infinite reload loops.
+ * The reload waits while a registered blocker reports work in flight.
  */
 export function notifyChunkError(error?: unknown): void {
   if (isAlreadyNotified(error)) return;
@@ -76,6 +126,33 @@ export function notifyChunkError(error?: unknown): void {
     return;
   }
 
-  sessionStorage.setItem(RELOAD_KEY, '1');
-  window.location.reload();
+  // A reload is already scheduled for when the current work settles.
+  if (deferredReloadTimer) return;
+
+  if (!isReloadBlocked()) {
+    reloadNow();
+    return;
+  }
+
+  let idleTicks = 0;
+  deferredReloadTimer = setInterval(() => {
+    if (isReloadBlocked()) {
+      idleTicks = 0;
+      return;
+    }
+
+    idleTicks += 1;
+    if (idleTicks < DEFERRED_RELOAD_IDLE_TICKS) return;
+
+    clearInterval(deferredReloadTimer);
+    deferredReloadTimer = undefined;
+    reloadNow();
+  }, DEFERRED_RELOAD_POLL_MS);
 }
+
+/** Test-only: drop scheduled reloads and blockers between cases. */
+export const __resetChunkErrorStateForTest = () => {
+  if (deferredReloadTimer) clearInterval(deferredReloadTimer);
+  deferredReloadTimer = undefined;
+  reloadBlockers.clear();
+};
