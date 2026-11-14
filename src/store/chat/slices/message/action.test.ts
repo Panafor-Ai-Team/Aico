@@ -1762,6 +1762,62 @@ describe('chatMessage actions', () => {
       expect(result.current.dbMessagesMap[messageMapKey(context)]).toEqual(messages);
     });
 
+    it('skips prefetch while a send is persisting in the same context', async () => {
+      const { result } = renderHook(() => useChatStore());
+      const context = {
+        agentId: 'prefetch-agent',
+        scope: 'main' as const,
+        topicId: 'sending-topic',
+      };
+
+      act(() => {
+        result.current.startOperation({
+          context: { agentId: 'prefetch-agent', topicId: 'sending-topic' },
+          type: 'sendMessage',
+        });
+      });
+
+      await act(async () => {
+        await result.current.prefetchMessages(context);
+      });
+
+      expect(messageService.getMessages).not.toHaveBeenCalled();
+    });
+
+    it('keeps the optimistic rows when a send starts while the prefetch is in flight', async () => {
+      const { result } = renderHook(() => useChatStore());
+      const context = {
+        agentId: 'prefetch-agent',
+        scope: 'main' as const,
+        topicId: 'send-during-prefetch-topic',
+      };
+      const snapshot = [{ id: 'server-before-send', role: 'assistant', content: 'old' }] as any;
+      let resolveRequest!: (value: unknown) => void;
+
+      (messageService.getMessages as Mock).mockReturnValue(
+        new Promise((resolve) => {
+          resolveRequest = resolve;
+        }),
+      );
+
+      const prefetchPromise = result.current.prefetchMessages(context);
+      await Promise.resolve();
+
+      act(() => {
+        result.current.startOperation({
+          context: { agentId: 'prefetch-agent', topicId: 'send-during-prefetch-topic' },
+          type: 'sendMessage',
+        });
+      });
+
+      await act(async () => {
+        resolveRequest(snapshot);
+        await prefetchPromise;
+      });
+
+      expect(result.current.dbMessagesMap[messageMapKey(context)]).toBeUndefined();
+    });
+
     it('shares an in-flight prefetch with the mounted canonical query', async () => {
       const { result } = renderHook(() => useChatStore());
       const context = {

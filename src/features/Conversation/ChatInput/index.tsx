@@ -402,7 +402,14 @@ const ChatInput = memo<ChatInputProps>(
           files: currentFileList,
           message,
           onPreflightFailure: () => {
-            useFileStore.getState().restoreChatContextSelections(contextKey, currentContextList);
+            const fileStore = useFileStore.getState();
+            fileStore.restoreChatContextSelections(contextKey, currentContextList);
+            // Uploads were cleared with the composer; hand back the ones the
+            // user already attached, skipping any they re-added meanwhile.
+            const attachedIds = new Set(fileStore.chatUploadFileList.map((item) => item.id));
+            const missingFiles = currentFileList.filter((item) => !attachedIds.has(item.id));
+            if (missingFiles.length > 0)
+              fileStore.dispatchChatUploadFileList({ files: missingFiles, type: 'addFiles' });
           },
           pageSelections,
         });

@@ -278,7 +278,7 @@ export default eslint(
             message:
               'Home cold-path modules must not statically import ChatInput. Load an isolated editor entry with import().',
             regex:
-              '^@/features/ChatInput(?:$|/(?!(?:store/initialState|utils/contextSelections)$).+)',
+              '^@/features/ChatInput(?:$|/(?!(?:draftStorage|store/initialState|utils/contextSelections)$).+)',
           },
         ],
       }),
@@ -306,7 +306,7 @@ export default eslint(
             message:
               'Home cold-path modules must not statically import ChatInput. Load an isolated editor entry with import().',
             regex:
-              '^@/features/ChatInput(?:$|/(?!(?:store/initialState|utils/contextSelections)$).+)',
+              '^@/features/ChatInput(?:$|/(?!(?:draftStorage|store/initialState|utils/contextSelections)$).+)',
           },
         ],
       }),

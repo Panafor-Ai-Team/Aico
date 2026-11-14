@@ -92,6 +92,9 @@ export class MessageQueryActionImpl {
 
     const messagesKey = getMessageListCacheIdentity(context);
     if (operationSelectors.isAgentRuntimeRunningByContext(context)(this.#get())) return;
+    // The send window holds optimistic tmp_* rows the server list cannot contain
+    // yet; warm the cache after it settles (same reason as the delivery check).
+    if (operationSelectors.isSendingMessageByContext(context)(this.#get())) return;
     if (isMessageListServerVerified(context)) return;
     if (prefetchingMessageKeys.has(messagesKey)) return;
 
@@ -104,8 +107,14 @@ export class MessageQueryActionImpl {
       // rows, and streaming updates targeting those now-missing ids are silent
       // no-ops until terminal reconciliation. Mirrors the defense-in-depth gate
       // in `useFetchMessages`' onData; the SWR cache seed below is unaffected.
-      if (!operationSelectors.isAgentRuntimeRunningByContext(context)(this.#get())) {
-        this.#get().replaceMessages(messages, { action: 'prefetchMessages', context });
+      // Both gates are needed: the runtime op exists only after the persist
+      // phase, and a follow-up waits in that phase with tmp_* rows on screen.
+      const chatStore = this.#get();
+      if (
+        !operationSelectors.isAgentRuntimeRunningByContext(context)(chatStore) &&
+        !operationSelectors.isSendingMessageByContext(context)(chatStore)
+      ) {
+        chatStore.replaceMessages(messages, { action: 'prefetchMessages', context });
       }
       return messages;
     });

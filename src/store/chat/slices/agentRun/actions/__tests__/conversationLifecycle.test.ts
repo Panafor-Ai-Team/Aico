@@ -372,6 +372,7 @@ describe('ConversationLifecycle actions', () => {
           useChatStore.setState({
             mainInputEditor: {
               getJSONState: vi.fn().mockReturnValue(clearedEditorState),
+              getMarkdownContent: vi.fn().mockReturnValue(''),
               setDocument,
               setJSONState,
             } as any,

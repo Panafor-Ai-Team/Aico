@@ -26,6 +26,7 @@ import { toast } from '@lobehub/ui/base-ui';
 import { t } from 'i18next';
 
 import { type ChatInputEditor } from '@/features/ChatInput';
+import { saveDraft } from '@/features/ChatInput/draftStorage';
 import {
   resolveAgentWorkingDirectory,
   resolveAgentWorkingDirectoryConfig,
@@ -104,6 +105,7 @@ import {
 import { describeSendFailure } from '../describeSendFailure';
 import { resolveExistingTopicForRun } from '../resolveExistingTopic';
 import { type ContextCompressionOptions, executeContextCompression } from './compression';
+import { showSendErrorInContext } from './sendErrorNotice';
 
 /**
  * Extended params for sendMessage with context
@@ -795,6 +797,43 @@ export class ConversationLifecycleActionImpl {
       const ids = options?.preserveOptimisticUser ? [tempAssistantId] : [tempId, tempAssistantId];
       this.#get().internal_dispatchMessage({ ids, type: 'deleteMessages' }, { operationId });
     };
+    /**
+     * Put the typed message back in the composer when a send fails before the
+     * user message was persisted. The composer is cleared the instant Enter is
+     * pressed, so without this the text is gone for good — the run never
+     * happened, and there is no persisted row to recover it from.
+     *
+     * Shared by all three runtime branches. Gateway and hetero previously only
+     * logged and deleted the optimistic pair, so a server-side start refusal
+     * (e.g. the topic-start reservation reporting the topic busy) was
+     * indistinguishable from the message being silently swallowed.
+     */
+    const restoreComposerAfterFailedSend = (error: unknown) => {
+      if (preserveComposer || hasNotifiedMessageAccepted) return;
+
+      // Only a real user cancel is silent — Stop has its own restore path and
+      // `cancelOperation` already restores the editor. Keying off the error text
+      // ("…aborted…") swallowed genuine network aborts: the operation status is
+      // the only signal that distinguishes them (#761).
+      if (this.#get().operations[operationId]?.status === 'cancelled') return;
+
+      this.#get().updateOperationMetadata(operationId, {
+        inputSendErrorMsg: error instanceof Error ? describeSendFailure(error) : String(error),
+      });
+
+      const op = this.#get().operations[operationId];
+      if (op?.metadata.inputEditorTempState) {
+        targetInputEditor?.setJSONState(op.metadata.inputEditorTempState);
+      } else {
+        targetInputEditor?.setDocument('markdown', message);
+      }
+
+      // The editor snapshot covers only text. A send rejected after the composer
+      // was cleared (e.g. the server refusing an offline bound device) would
+      // otherwise still swallow the cleared uploads and context selections —
+      // hand them back to the caller that captured them before clearing.
+      onPreflightFailure?.();
+    };
     const restoreUnacceptedVoiceMessageContext = () => {
       if (!optimisticUserMessageId || hasNotifiedMessageAccepted) return;
 
@@ -1196,6 +1235,24 @@ export class ConversationLifecycleActionImpl {
         messageMapKey({ ...operationContext, topicId: null }),
       );
       if (this.#get().activeTopicId === optimisticTopic.id) {
+        const op = this.#get().operations[operationId];
+        // A cancel or a refused send restores the editor before the topic rolls
+        // back. Read the live editor (the user may have edited it meanwhile) and
+        // carry it, plus the refusal notice, to the blank conversation: both are
+        // keyed by the topic being discarded.
+        const sendError = op?.status === 'failed' ? op.metadata.inputSendErrorMsg : undefined;
+        if (!hasNotifiedMessageAccepted && (op?.status === 'cancelled' || sendError) && jsonState) {
+          const blankContext = { ...operationContext, topicId: null };
+          // The editor named by the caller may already be unmounted (Home sends
+          // from a composer the route transition discards), so its snapshot can
+          // be empty even after the restore above. Fall back to the state
+          // captured before the composer was cleared.
+          const liveState = targetInputEditor?.getMarkdownContent().trim()
+            ? targetInputEditor.getJSONState()
+            : undefined;
+          saveDraft(messageMapKey(blankContext), liveState ?? jsonState);
+          if (sendError) showSendErrorInContext(this.#get(), blankContext, sendError);
+        }
         void this.#get().switchTopic(null, { skipRefreshMessage: true });
       }
       this.#get().internal_dispatchTopic(
@@ -1308,6 +1365,7 @@ export class ConversationLifecycleActionImpl {
             message: e instanceof Error ? e.message : 'Unknown error',
             type: 'HeterogeneousAgentError',
           });
+          restoreComposerAfterFailedSend(e);
         }
         cleanupTempMessages({ preserveOptimisticUser: Boolean(optimisticUserMessageId) });
         detachUnacceptedCallerAbort();
@@ -1675,6 +1733,7 @@ export class ConversationLifecycleActionImpl {
           message: e instanceof Error ? e.message : 'Unknown error',
           type: 'GatewayError',
         });
+        restoreComposerAfterFailedSend(e);
         cleanupTempMessages({
           preserveOptimisticUser: Boolean(optimisticUserMessageId && !hasNotifiedMessageAccepted),
         });
@@ -1902,14 +1961,9 @@ export class ConversationLifecycleActionImpl {
       // restores the editor itself. Anything else (a non-tRPC error, or a
       // network abort whose text merely contains "aborted") used to delete the
       // optimistic bubble with no error and no restored text, so the follow-up
-      // looked sent and then vanished. Read this before failOperation rewrites
-      // the status.
-      const isUserCancel =
-        abortController.signal.aborted ||
-        this.#get().operations[operationId]?.status === 'cancelled';
-
-      rollbackOptimisticTopic('sendMessage/rollbackOptimisticTopic');
-      // Fail operation on error
+      // looked sent and then vanished. Restore before the topic rollback so the
+      // text and the notice are carried to the blank conversation the user
+      // lands on.
       if (this.#get().operations[operationId]?.status !== 'cancelled') {
         this.#get().failOperation(operationId, {
           type: e instanceof Error ? e.name : 'unknown_error',
@@ -1917,18 +1971,8 @@ export class ConversationLifecycleActionImpl {
         });
       }
 
-      // Upstream: a send that keeps the composer (queued follow-up) never restores it.
-      if (!preserveComposer && !isUserCancel) {
-        this.#get().updateOperationMetadata(operationId, {
-          inputSendErrorMsg: e instanceof Error ? describeSendFailure(e) : String(e),
-        });
-        const op = this.#get().operations[operationId];
-        if (op?.metadata.inputEditorTempState) {
-          targetInputEditor?.setJSONState(op.metadata.inputEditorTempState);
-        } else {
-          targetInputEditor?.setDocument('markdown', message);
-        }
-      }
+      restoreComposerAfterFailedSend(e);
+      rollbackOptimisticTopic('sendMessage/rollbackOptimisticTopic');
     } finally {
       // Roll the optimistic pair back only when the send did not land (cancel or
       // failure). On success there is nothing to clean up: the rows were created

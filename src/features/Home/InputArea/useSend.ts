@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useActiveWorkspaceId } from '@/business/client/hooks/useActiveWorkspaceId';
 import { useActiveWorkspaceSlug } from '@/business/client/hooks/useActiveWorkspaceSlug';
 import { buildTaskHandoffPath } from '@/features/AgentTaskManager/taskHandoff';
+import { getDraft, saveDraft } from '@/features/ChatInput/draftStorage';
 import type { SendButtonHandler } from '@/features/ChatInput/store/initialState';
 import { buildMessageContextSelections } from '@/features/ChatInput/utils/contextSelections';
 import { useResourceAccess } from '@/features/ResourcePermission/useResourceAccess';
@@ -16,6 +17,7 @@ import { agentService } from '@/services/agent';
 import { useAgentStore } from '@/store/agent';
 import { builtinAgentSelectors } from '@/store/agent/selectors';
 import { useChatStore } from '@/store/chat';
+import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 import { fileChatSelectors, useFileStore } from '@/store/file';
 import { useGlobalStore } from '@/store/global';
 import { useHomeStore } from '@/store/home';
@@ -81,6 +83,74 @@ const ensureAgentConfigLoaded = async (agentId: string): Promise<void> => {
   if (agentState.agentMap[agentId]) return;
   const config = await agentService.getAgentConfigById(agentId);
   if (config) agentState.internal_dispatchAgentMap(agentId, config);
+};
+
+type EditorDocument = Record<string, unknown>;
+
+/**
+ * Append `extra`'s top-level blocks after `base`'s. Both are serialized
+ * editor states (`{ root: { children } }`); when either has another shape,
+ * `base` is returned untouched so content the user already has is never lost.
+ */
+const appendEditorDocument = (base: EditorDocument, extra: EditorDocument): EditorDocument => {
+  const baseRoot = base.root as { children?: unknown } | undefined;
+  const extraRoot = extra.root as { children?: unknown } | undefined;
+  if (!Array.isArray(baseRoot?.children) || !Array.isArray(extraRoot?.children)) return base;
+
+  return {
+    ...base,
+    root: { ...baseRoot, children: [...baseRoot.children, ...extraRoot.children] },
+  };
+};
+
+/**
+ * Put a refused Home send back in the composer of the conversation it moved to.
+ *
+ * A Home send does not wait for the run to start: it navigates to the agent's
+ * blank conversation and clears the Home editor immediately. When the server
+ * then refuses the run (for example, the plan's concurrent-run limit),
+ * `sendMessage` restores the text into the editor captured at send time, which
+ * is the unmounted Home editor. The conversation composer reads its draft only
+ * on mount or on a draft-key change, so without this the message is lost.
+ *
+ * - The conversation composer is mounted on that blank conversation: write
+ *   into it.
+ * - Otherwise: save it under the blank-conversation draft key, which the
+ *   composer reads when it mounts.
+ *
+ * Either target may already hold content the user typed there; the refused
+ * message is appended after it so neither is lost.
+ */
+const restoreRefusedSendToConversation = ({
+  agentId,
+  editorData,
+  homeEditor,
+}: {
+  agentId: string;
+  editorData: EditorDocument | undefined;
+  /** The Home composer that sent the message; only its identity is compared. */
+  homeEditor: unknown;
+}) => {
+  // A hint-only send has no typed content to give back.
+  if (!editorData) return;
+
+  const { activeAgentId, activeTopicId, mainInputEditor } = useChatStore.getState();
+  const conversationEditor =
+    mainInputEditor && mainInputEditor !== homeEditor ? mainInputEditor : undefined;
+
+  if (conversationEditor && activeAgentId === agentId && !activeTopicId) {
+    const current = conversationEditor.getJSONState();
+    conversationEditor.setJSONState(
+      conversationEditor.getMarkdownContent().trim() && current
+        ? appendEditorDocument(current, editorData)
+        : editorData,
+    );
+    return;
+  }
+
+  const draftKey = messageMapKey({ agentId, topicId: null });
+  const existingDraft = getDraft(draftKey);
+  saveDraft(draftKey, existingDraft ? appendEditorDocument(existingDraft, editorData) : editorData);
 };
 
 interface PendingTaskRun {
@@ -283,9 +353,26 @@ export const useSend = (mode: HomeMode = 'chat') => {
               contexts: contextList,
               editorData,
               files: fileList,
+              // The Home editor is unmounted once the route commits. Naming it
+              // here keeps the send lifecycle's failure restore out of the
+              // conversation composer, which `onPreflightFailure` fills below —
+              // otherwise the same text lands there twice.
+              inputEditor: mainInputEditor,
               message,
               onPreflightFailure: () => {
                 restoreChatContextSelections(contextSelectionKey, contextList);
+                restoreRefusedSendToConversation({
+                  agentId: selectedAgentId,
+                  editorData,
+                  homeEditor: mainInputEditor,
+                });
+                // The Home composer's uploads were cleared with it — hand them
+                // back so a refused send does not also drop the attachments.
+                const fileStore = useFileStore.getState();
+                const attachedIds = new Set(fileStore.chatUploadFileList.map((item) => item.id));
+                const missingFiles = fileList.filter((item) => !attachedIds.has(item.id));
+                if (missingFiles.length > 0)
+                  fileStore.dispatchChatUploadFileList({ files: missingFiles, type: 'addFiles' });
               },
               onTopicCreated: (topicId) => {
                 router.replace(AGENT_CHAT_TOPIC_URL(selectedAgentId, topicId, false));
