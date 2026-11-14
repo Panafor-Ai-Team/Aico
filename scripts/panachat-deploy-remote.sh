@@ -31,6 +31,9 @@
 #   PANACHAT_PRUNE_TIMEOUT_SEC    limit for each untagged-image prune (default 300)
 #   PANACHAT_SKIP_BACKUP=1
 #   PANACHAT_SKIP_NGINX=1
+#   PANACHAT_ASSET_ARCHIVE_DIR    where outgoing builds' hashed SPA chunks are kept (default: <state dir>/spa-asset-archive)
+#   PANACHAT_ASSET_ARCHIVE_DAYS   prune archived chunks older than N days (default 30)
+#   PANACHAT_SKIP_ASSET_ARCHIVE=1
 #   PANACHAT_ALLOW_DB_DRIFT=1     allow deploy when live user count dropped vs fingerprint
 #   COMPOSE_PROFILES              e.g. control-plane
 
@@ -93,6 +96,10 @@ export PANACHAT_APP_ENV_FILE="$APP_ENV_FILE"
 export PANACHAT_INFRA_ENV_FILE="$INFRA_ENV_FILE"
 
 STATE_FILE="$STATE_DIR/deploy.env"
+ASSET_ARCHIVE_DIR="${PANACHAT_ASSET_ARCHIVE_DIR:-$STATE_DIR/spa-asset-archive}"
+ASSET_ARCHIVE_DAYS="${PANACHAT_ASSET_ARCHIVE_DAYS:-30}"
+# Folders under /app/public whose `assets/` hold content-hashed chunks.
+SPA_ASSET_DIRS=(_spa _spa-auth _spa-workbench)
 NETWORK_NAME="${PANACHAT_STACK}-network"
 
 usage() {
@@ -521,6 +528,38 @@ write_nginx_upstream() {
   return 1
 }
 
+# Keep the outgoing build's hashed SPA chunks reachable after its slot stops.
+#
+# Why: a browser tab opened before a deploy keeps requesting the chunk names of
+# the build it loaded. Without this, those 404 the moment the old slot stops,
+# and the client's chunk-error handler reloads the page — which used to kill a
+# message the user had just sent (T-031). nginx serves this archive only when
+# the live slot answers 404 (see docker-compose/deploy/nginx/panachat-site.example.conf).
+#
+# Best effort: an archive failure is logged and never fails the deploy.
+archive_slot_assets() {
+  local service="$1" dir dest
+  if [[ "${PANACHAT_SKIP_ASSET_ARCHIVE:-0}" == "1" ]]; then
+    log "Skipping SPA asset archive (PANACHAT_SKIP_ASSET_ARCHIVE=1)"
+    return 0
+  fi
+  for dir in "${SPA_ASSET_DIRS[@]}"; do
+    dest="$ASSET_ARCHIVE_DIR/$dir/assets"
+    if ! mkdir -p "$dest" 2>/dev/null; then
+      err "Cannot create $dest — outgoing SPA chunks not archived"
+      return 0
+    fi
+    # `docker cp` keeps the image's file times (the build time), which is what
+    # the age-based prune below measures.
+    if ! docker cp "$service:/app/public/$dir/assets/." "$dest/" >/dev/null 2>&1; then
+      log "No $dir/assets archived from $service (missing or copy failed)"
+    fi
+  done
+  chmod -R a+rX "$ASSET_ARCHIVE_DIR" 2>/dev/null || true
+  find "$ASSET_ARCHIVE_DIR" -type f -mtime +"$ASSET_ARCHIVE_DAYS" -delete 2>/dev/null || true
+  log "Archived SPA chunks from $service → $ASSET_ARCHIVE_DIR (older than ${ASSET_ARCHIVE_DAYS}d pruned)"
+}
+
 flip_nginx() {
   local slot="$1"
   if [[ "${PANACHAT_SKIP_NGINX:-0}" == "1" ]]; then
@@ -732,6 +771,10 @@ cmd_deploy() {
     compose_with_profile "$inactive_profile" stop "$inactive_compose" || true
     exit 1
   fi
+
+  # Before the flip, while the outgoing slot still serves its chunks: open tabs
+  # on that build fall back to the archive once nginx points at the new slot.
+  archive_slot_assets "$active_svc"
 
   set_network_alias "$inactive_svc"
   if ! flip_nginx "$inactive"; then
