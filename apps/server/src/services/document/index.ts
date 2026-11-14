@@ -9,6 +9,7 @@ import { TRPCError } from '@trpc/server';
 import debug from 'debug';
 import { and, eq, sql } from 'drizzle-orm';
 import isEqual from 'fast-deep-equal';
+import pMap from 'p-map';
 
 import { serverDBEnv } from '@/config/db';
 import { DocumentModel } from '@/database/models/document';
@@ -38,6 +39,8 @@ import type {
 } from './types';
 
 const log = debug('lobe-chat:service:document');
+
+const DELETE_DOCUMENTS_CONCURRENCY = 4;
 
 const normalizeParseFileError = (error: unknown) => {
   if (error instanceof UnsupportedFileTypeError) {
@@ -625,8 +628,12 @@ export class DocumentService {
       targetIds = rows.filter((row) => row.userId === this.userId).map((row) => row.id);
     }
 
-    // Delete each document (which handles recursive deletion for folders)
-    await Promise.all(targetIds.map((id) => this.deleteDocument(id, options)));
+    // Delete each document (which handles recursive deletion for folders).
+    // Bounded: a "select all" delete can name thousands of rows, and running
+    // every recursive delete at once exhausted the DB connection pool.
+    await pMap(targetIds, (id) => this.deleteDocument(id, options), {
+      concurrency: DELETE_DOCUMENTS_CONCURRENCY,
+    });
   }
 
   /**

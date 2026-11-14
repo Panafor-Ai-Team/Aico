@@ -101,14 +101,19 @@ const ResourceManager = memo<ResourceManagerProps>(({ content }) => {
   useEffect(() => {
     if (mode === 'page' && currentViewItemId && !currentDocument) {
       // Document not in store, fetch it individually
-      documentService.getDocumentById(currentViewItemId).then((doc) => {
-        if (doc) {
-          // Add the document to the store's documents array
-          useFileStore.setState((state) => ({
-            documents: [...state.documents, doc as any],
-          }));
-        }
-      });
+      documentService
+        .getDocumentById(currentViewItemId)
+        .then((doc) => {
+          if (doc) {
+            // Add the document to the store's documents array
+            useFileStore.setState((state) => ({
+              documents: [...state.documents, doc as any],
+            }));
+          }
+        })
+        .catch((error) => {
+          console.error('Failed to load document:', error);
+        });
     }
   }, [mode, currentViewItemId, currentDocument]);
 

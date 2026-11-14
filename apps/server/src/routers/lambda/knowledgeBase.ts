@@ -299,19 +299,12 @@ export const knowledgeBaseRouter = router({
       if (!existing) return;
       assertWorkspaceRowManageable(ctx, existing.userId, 'knowledge base');
 
-      const result = await ctx.knowledgeBaseModel.deleteWithFiles(
-        input.id,
-        serverDBEnv.REMOVE_GLOBAL_FILE,
-        { restrictToCreator: isWorkspaceNonOwner(ctx) },
-      );
-
-      if (result.deletedFiles.length > 0) {
-        const fileService = new FileService(ctx.serverDB, ctx.userId, ctx.workspaceId ?? undefined);
-        const urls = result.deletedFiles.map((f) => f.url).filter(Boolean) as string[];
-        if (urls.length > 0) {
-          await fileService.deleteFiles(urls);
-        }
-      }
+      // Deleting a library removes only the library, as its confirm dialog
+      // promises ("files will not be deleted but moved to All Files"): the
+      // library links cascade, pages/folders lose their knowledgeBaseId (FK
+      // `set null`) and land at the root, and files stay with their owners.
+      // It used to delete every file only this library held.
+      await ctx.knowledgeBaseModel.delete(input.id);
     }),
 
   transferKnowledgeBase: knowledgeBaseProcedure

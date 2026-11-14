@@ -194,6 +194,59 @@ describe('FileUploadAction', () => {
     });
   });
 
+  describe('uploadWithProgress cancel and failure', () => {
+    it('does not create the file record when cancelled while the hash is checked', async () => {
+      const { result } = renderHook(() => useStore());
+      const mockFile = new File(['test content'], 'test.txt', { type: 'text/plain' });
+      const abortController = new AbortController();
+      const onStatusUpdate = vi.fn();
+
+      vi.mocked(getImageDimensions).mockResolvedValue(undefined);
+      vi.spyOn(fileService, 'checkFileHash').mockImplementation(async () => {
+        abortController.abort();
+        return { isExist: true, metadata: { path: 'files/1/a.txt' }, url: 'files/1/a.txt' } as any;
+      });
+      const createSpy = vi.spyOn(fileService, 'createFile').mockResolvedValue({
+        id: 'file-1',
+        url: 'u',
+      });
+
+      await act(async () => {
+        await expect(
+          result.current.uploadWithProgress({ abortController, file: mockFile, onStatusUpdate }),
+        ).rejects.toThrow('Upload cancelled by user');
+      });
+
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(onStatusUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ value: { status: 'cancelled' } }),
+      );
+      expect(onStatusUpdate).not.toHaveBeenCalledWith(
+        expect.objectContaining({ value: expect.objectContaining({ status: 'error' }) }),
+      );
+    });
+
+    it('marks the dock item as failed (so Retry shows) when the upload throws', async () => {
+      const { result } = renderHook(() => useStore());
+      const mockFile = new File(['test content'], 'test.txt', { type: 'text/plain' });
+      const onStatusUpdate = vi.fn();
+
+      vi.mocked(getImageDimensions).mockResolvedValue(undefined);
+      vi.spyOn(fileService, 'checkFileHash').mockResolvedValue({ isExist: false } as any);
+      vi.spyOn(uploadService, 'uploadFileToS3').mockRejectedValue(new Error('network down'));
+
+      await act(async () => {
+        await expect(
+          result.current.uploadWithProgress({ file: mockFile, onStatusUpdate }),
+        ).rejects.toThrow('network down');
+      });
+
+      expect(onStatusUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ value: expect.objectContaining({ status: 'error' }) }),
+      );
+    });
+  });
+
   describe('uploadWithProgress', () => {
     describe('file already exists (hash match)', () => {
       it('should skip upload when file exists and use existing metadata', async () => {

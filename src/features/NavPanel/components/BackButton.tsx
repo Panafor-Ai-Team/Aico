@@ -1,5 +1,6 @@
 import { type ActionIconProps } from '@lobehub/ui';
 import { ActionIcon } from '@lobehub/ui';
+import { createStaticStyles } from 'antd-style';
 import { ChevronLeftIcon } from 'lucide-react';
 import { memo, type MouseEvent } from 'react';
 
@@ -9,6 +10,15 @@ import { appNavigate } from '@/features/Electron/navigation/appNavigate';
 import { buildWorkspaceAwarePath } from '@/features/Workspace/workspaceAwarePath';
 
 export const BACK_BUTTON_ID = 'lobe-back-button';
+
+// "Back" points toward the start of the line: right in RTL (fa-IR).
+const styles = createStaticStyles(({ css }) => ({
+  link: css`
+    &:dir(rtl) svg {
+      transform: scaleX(-1);
+    }
+  `,
+}));
 
 const BackButton = memo<ActionIconProps & { to?: string }>(({ to = '/', onClick, ...rest }) => {
   const activeSlug = useActiveWorkspaceSlug();
@@ -27,7 +37,7 @@ const BackButton = memo<ActionIconProps & { to?: string }>(({ to = '/', onClick,
   };
 
   return (
-    <a href={resolvedTo} onClick={handleClick}>
+    <a className={styles.link} href={resolvedTo} onClick={handleClick}>
       <ActionIcon
         icon={ChevronLeftIcon}
         id={BACK_BUTTON_ID}

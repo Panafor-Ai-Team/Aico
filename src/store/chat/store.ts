@@ -4,6 +4,8 @@ import { shallow } from 'zustand/shallow';
 import { createWithEqualityFn } from 'zustand/traditional';
 import { type StateCreator } from 'zustand/vanilla';
 
+import { registerChunkReloadBlocker } from '@/utils/chunkError';
+
 import { createDevtools } from '../middleware/createDevtools';
 import { expose } from '../middleware/expose';
 import { flattenActions } from '../utils/flattenActions';
@@ -35,6 +37,7 @@ import { type ChatTTSAction } from './slices/tts/action';
 import { ChatTTSActionImpl } from './slices/tts/action';
 import { type VoiceMessageAction } from './slices/voiceMessage/action';
 import { VoiceMessageActionImpl } from './slices/voiceMessage/action';
+import { hasChatWorkInFlight } from './utils/chatWorkInFlight';
 
 export type ChatStoreAction = ChatMessageAction &
   ChatForwardAction &
@@ -105,5 +108,11 @@ export const useChatStore = createWithEqualityFn<ChatStore>()(
 );
 
 expose('chat', useChatStore);
+
+// A stale-chunk auto-reload must wait until the send / reply in flight settles,
+// otherwise it destroys a message that was just saved (see utils/chunkError).
+if (typeof window !== 'undefined') {
+  registerChunkReloadBlocker(() => hasChatWorkInFlight(useChatStore.getState()));
+}
 
 export const getChatStoreState = () => useChatStore.getState();

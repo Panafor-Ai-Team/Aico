@@ -32,6 +32,10 @@ services:
       - slot-blue
     ports:
       - '127.0.0.1:${PANACHAT_PORT_BLUE:-3210}:3210'
+    # Skill ZIP catalog (~11 GB) is host data, not app data: read-only mount keeps
+    # it out of Postgres and RustFS, so nightly backups stay small.
+    volumes:
+      - '${PANACHAT_SKILL_ZIP_DIR:-./skill-zips}:/app/skill-zips:ro'
     depends_on:
       postgresql:
         condition: service_healthy
@@ -88,6 +92,10 @@ services:
       - slot-green
     ports:
       - '127.0.0.1:${PANACHAT_PORT_GREEN:-3211}:3210'
+    # Skill ZIP catalog (~11 GB) is host data, not app data: read-only mount keeps
+    # it out of Postgres and RustFS, so nightly backups stay small.
+    volumes:
+      - '${PANACHAT_SKILL_ZIP_DIR:-./skill-zips}:/app/skill-zips:ro'
     depends_on:
       postgresql:
         condition: service_healthy

@@ -776,6 +776,23 @@ describe('DocumentService', () => {
       expect(mockFileModel.delete).toHaveBeenCalledWith('file-2', expect.any(Boolean));
     });
 
+    it('runs at most a few recursive deletes at once', async () => {
+      let running = 0;
+      let peak = 0;
+      mockDocumentModel.findById.mockImplementation(async (id: string) => {
+        running += 1;
+        peak = Math.max(peak, running);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        running -= 1;
+        return { fileId: null, fileType: 'custom/document', id };
+      });
+
+      await service.deleteDocuments(Array.from({ length: 20 }, (_, i) => `doc-${i}`));
+
+      expect(mockDocumentModel.delete).toHaveBeenCalledTimes(20);
+      expect(peak).toBeLessThanOrEqual(4);
+    });
+
     it('should handle empty ids array', async () => {
       await service.deleteDocuments([]);
       expect(mockDocumentModel.findById).not.toHaveBeenCalled();

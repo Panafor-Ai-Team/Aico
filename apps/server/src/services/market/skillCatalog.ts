@@ -10,8 +10,8 @@ import { sql } from 'drizzle-orm';
 /**
  * Reads the self-hosted skill catalog (`skill_catalog`, filled by
  * aico-skills/tools/to_postgres.py) so the market UI works without
- * market.lobehub.com. Comments, ratings and the ZIP download still come from
- * upstream — the catalog has no equivalent data.
+ * market.lobehub.com. Comments and ratings have no catalog equivalent and are
+ * served locally as empty/zero values; the ZIP download is in skillZip.ts.
  */
 
 export interface SkillCatalogQuery {
@@ -199,4 +199,11 @@ export async function getSkillCategoriesFromCatalog(
   if (categories.length === 0) throw new CatalogUnavailableError('no categories');
 
   return categories;
+}
+
+/** Installs are counted locally so the store never reports upstream numbers. */
+export async function incrementSkillInstall(db: LobeChatDatabase, identifier: string) {
+  await db.execute(sql`
+    UPDATE skill_catalog SET installs = coalesce(installs, 0) + 1 WHERE identifier = ${identifier}
+  `);
 }

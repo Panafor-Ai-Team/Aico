@@ -118,6 +118,7 @@ App updates only touch `${PANACHAT_STACK}-blue` / `-green` (default `panachat-bl
 
 - Nginx reload flips `panachat_backend` in under a second for normal releases.
 - Breaking DB migrations can still require a careful window (old app + new schema). Prefer additive / expand-contract migrations.
+- **Open tabs keep their build's chunks.** Before the flip, `archive_slot_assets` copies the outgoing slot's `/app/public/{_spa,_spa-auth,_spa-workbench}/assets` into `${PANACHAT_ASSET_ARCHIVE_DIR:-/var/lib/panachat/spa-asset-archive}` and prunes files older than `PANACHAT_ASSET_ARCHIVE_DAYS` (30). The site config must fall back to it on a live-slot 404 (`proxy_intercept_errors on; error_page 404 = @spa_asset_archive;` — see `panachat-site.example.conf`), and nginx's user must be able to read the archive. Without it, a tab opened before a deploy 404s on its next lazy chunk and the client reloads, which used to kill a message being sent (T-031).
 
 ## Version in the app
 

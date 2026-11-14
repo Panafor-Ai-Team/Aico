@@ -114,7 +114,7 @@ const CategoryMenu = memo(() => {
           key: category.key,
           // Business categories carry a chat-namespace key but the type narrows to a
           // string at this seam; cast so t() accepts the dynamic key.
-          title: t(category.titleKey as never) as string,
+          title: t(category.titleKey as never, { ns: 'chat' }) as string,
           url: category.url,
         })),
       ] as CategoryItem[],
@@ -137,6 +137,9 @@ const CategoryMenu = memo(() => {
                 key={item.key}
                 to={item.url}
                 onClick={(e) => {
+                  // Let the browser handle Cmd/Ctrl/Shift/middle-click (new tab
+                  // or window) instead of swallowing it.
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                   e.preventDefault();
                   setMode('explorer');
                   navigate(item.url, { replace: true });

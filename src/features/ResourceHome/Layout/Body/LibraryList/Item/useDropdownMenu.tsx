@@ -48,21 +48,32 @@ export const useDropdownMenu = ({
   const { allowed: canEdit } = usePermission('edit_own_content');
   const transferMenuItems = useKnowledgeBaseTransferMenuItem(id);
   const currentUserId = useUserStore(userProfileSelectors.userId);
+  const activeWorkspaceId = useActiveWorkspaceId();
+  // Visibility only exists inside a workspace: the server rejects these calls
+  // in personal mode ("visibility only applies inside a workspace"), where
+  // every library defaults to 'public' — so "Make private" always failed there.
   // Only the creator of a still-private KB sees the "Publish to workspace" entry.
   // Mirrors the file / agent / task one-way publish pattern.
   const isOwnPrivateKb =
-    visibility === 'private' && !!currentUserId && !!userId && userId === currentUserId;
+    !!activeWorkspaceId &&
+    visibility === 'private' &&
+    !!currentUserId &&
+    !!userId &&
+    userId === currentUserId;
   // Bidirectional counterpart: workspace-public KBs owned by the caller can be
   // pulled back to private via the same guarded server path.
   const isOwnPublicKb =
-    visibility === 'public' && !!currentUserId && !!userId && userId === currentUserId;
+    !!activeWorkspaceId &&
+    visibility === 'public' &&
+    !!currentUserId &&
+    !!userId &&
+    userId === currentUserId;
 
   // Member Permissions entry: navigates to the standalone permission page,
   // same as Agent. Private KBs are included — the creator configures what
   // members get the moment the KB is published. The manage flag rides the
   // list payload (creator or `KNOWLEDGE_BASE_UPDATE:all` curators), so no
   // per-row permission request is issued while rendering the sidebar.
-  const activeWorkspaceId = useActiveWorkspaceId();
   const wsNavigate = useWorkspaceAwareNavigate();
   const memberPermissionMenuItem = useMemo(
     () =>
@@ -238,7 +249,17 @@ export const useDropdownMenu = ({
           ),
           onClick: handleDelete,
         },
-      ].filter(Boolean) as MenuProps['items'],
+      ].reduce<any[]>((items, item) => {
+        // Optional sections each add a divider; skip one that would follow
+        // another divider or start the menu, so no empty gaps appear.
+        if (!item) return items;
+        if ((item as any).type === 'divider') {
+          const previous = items.at(-1);
+          if (!previous || previous.type === 'divider') return items;
+          return [...items, { ...item, key: `divider-${items.length}` }];
+        }
+        return [...items, item];
+      }, []) as MenuProps['items'],
     [
       canEdit,
       canManage,

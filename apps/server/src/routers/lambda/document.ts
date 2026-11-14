@@ -405,9 +405,9 @@ export const documentRouter = router({
     .input(
       z
         .object({
-          current: z.number().optional(),
+          current: z.number().int().min(0).optional(),
           fileTypes: z.array(z.string()).optional(),
-          pageSize: z.number().max(100).optional(),
+          pageSize: z.number().int().min(1).max(100).optional(),
           sourceTypes: z.array(z.string()).optional(),
         })
         .optional(),

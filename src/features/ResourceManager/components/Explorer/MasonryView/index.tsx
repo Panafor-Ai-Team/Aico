@@ -80,7 +80,11 @@ const MasonryView = memo(function MasonryView({
   const resourceList = useFileStore((s) => s.resourceList);
   const resourceTotal = useFileStore((s) => s.total);
 
-  const { queryParams: currentQueryParams, hasMore, loadMoreResources } = useFileStore();
+  // Select only what is used: the bare `useFileStore()` re-rendered the grid
+  // on every store change, including each upload progress tick.
+  const currentQueryParams = useFileStore((s) => s.queryParams);
+  const hasMore = useFileStore((s) => s.hasMore);
+  const loadMoreResources = useFileStore((s) => s.loadMoreResources);
 
   const isNavigating = useMemo(
     () => isQueryNavigation(currentQueryParams, queryParams),
@@ -162,6 +166,10 @@ const MasonryView = memo(function MasonryView({
     setIsLoadingMore(true);
     try {
       await loadMoreResources();
+    } catch (error) {
+      // Scroll handlers fire-and-forget this; keep the failure out of the
+      // unhandled-rejection path. The next scroll retries.
+      console.error('Failed to load more resources:', error);
     } finally {
       setIsLoadingMore(false);
     }
@@ -302,7 +310,7 @@ const MasonryView = memo(function MasonryView({
               minHeight: 40,
             }}
           >
-            {t('loading', { defaultValue: 'Loading...' })}
+            {t('loading', { ns: 'common' })}
           </Center>
         )}
       </div>

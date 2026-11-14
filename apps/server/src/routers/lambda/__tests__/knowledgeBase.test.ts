@@ -14,6 +14,8 @@ const mockKnowledgeBaseModelFindById = vi.fn();
 const mockKnowledgeBaseModelTransferTo = vi.fn();
 const mockKnowledgeBaseModelHasForeignLinkedRows = vi.fn().mockResolvedValue(false);
 const mockKnowledgeBaseModelUpdate = vi.fn();
+const mockKnowledgeBaseModelDelete = vi.fn();
+const mockKnowledgeBaseModelDeleteWithFiles = vi.fn();
 
 vi.mock('@/business/server/lambda-routers/file', () => ({
   businessFileTransferStorageCheck: routerMocks.businessFileTransferStorageCheck,
@@ -36,6 +38,8 @@ vi.mock('@/database/models/knowledgeBase', () => ({
   KnowledgeBaseModel: vi.fn(() => ({
     copyToWorkspace: mockKnowledgeBaseModelCopyToWorkspace,
     countFileUsage: mockKnowledgeBaseModelCountFileUsage,
+    delete: mockKnowledgeBaseModelDelete,
+    deleteWithFiles: mockKnowledgeBaseModelDeleteWithFiles,
     findById: mockKnowledgeBaseModelFindById,
     hasForeignLinkedRows: mockKnowledgeBaseModelHasForeignLinkedRows,
     transferTo: mockKnowledgeBaseModelTransferTo,
@@ -92,6 +96,20 @@ describe('knowledgeBaseRouter', () => {
         caller.updateKnowledgeBase({ id: 'kb-1', value: { name: '   ' } }),
       ).rejects.toThrow();
       expect(mockKnowledgeBaseModelUpdate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('removeKnowledgeBase', () => {
+    it('deletes only the library and keeps its files (as the confirm dialog says)', async () => {
+      const personalCaller = knowledgeBaseRouter.createCaller({
+        serverDB: {},
+        userId: 'test-user',
+      } as any);
+
+      await personalCaller.removeKnowledgeBase({ id: 'kb-1' });
+
+      expect(mockKnowledgeBaseModelDelete).toHaveBeenCalledWith('kb-1');
+      expect(mockKnowledgeBaseModelDeleteWithFiles).not.toHaveBeenCalled();
     });
   });
 

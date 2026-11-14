@@ -13,6 +13,10 @@ export const getResourceQueryKey = (params?: ResourceQueryParams | null) => {
     showFilesInKnowledgeBase: params.showFilesInKnowledgeBase ?? null,
     sorter: params.sorter ?? null,
     sortType: params.sortType ?? null,
+    // Part of what the list shows: without them an optimistic row created under
+    // one source filter / space was inserted into the other list too.
+    sourceFilter: params.sourceFilter ?? null,
+    visibility: params.visibility ?? null,
   });
 };
 

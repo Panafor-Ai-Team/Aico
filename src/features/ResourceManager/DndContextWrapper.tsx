@@ -14,6 +14,7 @@ import FileIcon from '@/components/FileIcon';
 import { usePermission } from '@/hooks/usePermission';
 import { useTreeStore } from '@/store/tree';
 
+import { getDragSelectionCount, isDragInSelection } from './dragSelection';
 import { useResourceManagerStore } from './store';
 
 /**
@@ -80,10 +81,13 @@ export const DndContextWrapper = memo<PropsWithChildren>(({ children }) => {
   const currentDragRef = useRef<DragState | null>(null);
   currentDragRef.current = currentDrag;
   const overlayRef = useRef<HTMLDivElement>(null);
-  const [selectedFileIds, setSelectedFileIds] = useResourceManagerStore((s) => [
-    s.selectedFileIds,
-    s.setSelectedFileIds,
-  ]);
+  const [selectedFileIds, setSelectedFileIds, selectAllState, selectionTotal] =
+    useResourceManagerStore((s) => [
+      s.selectedFileIds,
+      s.setSelectedFileIds,
+      s.selectAllState,
+      s.selectionTotal,
+    ]);
   const selectedFileIdsRef = useRef(selectedFileIds);
   selectedFileIdsRef.current = selectedFileIds;
 
@@ -108,7 +112,10 @@ export const DndContextWrapper = memo<PropsWithChildren>(({ children }) => {
 
     const handleDrop = (event: DragEvent) => {
       event.preventDefault();
+      void dropOn(event);
+    };
 
+    const dropOn = async (event: DragEvent) => {
       const drag = currentDragRef.current;
       if (!drag) return;
       if (!canEditResources) {
@@ -118,6 +125,7 @@ export const DndContextWrapper = memo<PropsWithChildren>(({ children }) => {
 
       let dropTarget = event.target as HTMLElement;
       let targetId: string | undefined;
+      let targetSlug: string | undefined;
       let isFolder = false;
       let isRootDrop = false;
 
@@ -125,6 +133,7 @@ export const DndContextWrapper = memo<PropsWithChildren>(({ children }) => {
         const dataset = dropTarget.dataset;
         if (dataset.dropTargetId) {
           targetId = dataset.dropTargetId;
+          targetSlug = dataset.dropTargetSlug;
           isFolder = dataset.isFolder === 'true';
           isRootDrop = dataset.rootDrop === 'true';
           break;
@@ -140,34 +149,48 @@ export const DndContextWrapper = memo<PropsWithChildren>(({ children }) => {
       const toParent = isRootDrop ? '' : (targetId ?? '');
       const fromParent = drag.parentKey;
       const currentSelectedIds = selectedFileIdsRef.current;
-      const isDraggingSelection = currentSelectedIds.includes(drag.id);
-      const itemsToMove = isDraggingSelection ? currentSelectedIds : [drag.id];
+      const managerState = useResourceManagerStore.getState();
+      const isDraggingSelection = isDragInSelection(
+        drag.id,
+        currentSelectedIds,
+        managerState.selectAllState,
+      );
 
-      if (!isRootDrop && targetId && itemsToMove.includes(targetId)) {
-        setCurrentDrag(null);
-        return;
-      }
-
-      if (fromParent === toParent) {
+      // The drag source records its folder by slug, the drop zone by id;
+      // dropping onto the folder the rows are already in is a no-op.
+      if (fromParent === toParent || (!!targetSlug && fromParent === targetSlug)) {
         setCurrentDrag(null);
         return;
       }
 
       setCurrentDrag(null);
 
-      const treeState = useTreeStore.getState();
-      const movePromise = isDraggingSelection
-        ? treeState.moveItems(itemsToMove, fromParent, toParent)
-        : treeState.moveItem(drag.id, fromParent, toParent);
+      try {
+        // In "select all" mode the stored ids are the exclusions, so the real
+        // set has to be resolved from the current query.
+        const itemsToMove = !isDraggingSelection
+          ? [drag.id]
+          : managerState.selectAllState === 'all'
+            ? await managerState.resolveSelectedResourceIds()
+            : currentSelectedIds;
 
-      movePromise.catch(() => {
+        if (itemsToMove.length === 0) return;
+        if (!isRootDrop && targetId && itemsToMove.includes(targetId)) return;
+
+        const treeState = useTreeStore.getState();
+        await (isDraggingSelection
+          ? treeState.moveItems(itemsToMove, fromParent, toParent)
+          : treeState.moveItem(drag.id, fromParent, toParent));
+
+        // Only claim success once the move actually went through.
+        toast.success(t('FileManager.actions.moveSuccess'));
+
+        if (isDraggingSelection) {
+          // Leaves "select all" mode too; setSelectedFileIds([]) would keep it.
+          useResourceManagerStore.getState().clearSelectAllState();
+        }
+      } catch {
         toast.error(t('FileManager.actions.moveError'));
-      });
-
-      toast.success(t('FileManager.actions.moveSuccess'));
-
-      if (isDraggingSelection) {
-        setSelectedFileIds([]);
       }
     };
 
@@ -295,26 +318,27 @@ export const DndContextWrapper = memo<PropsWithChildren>(({ children }) => {
                   >
                     {currentDrag.data.name}
                   </span>
-                  {selectedFileIds.includes(currentDrag.id) && selectedFileIds.length > 1 && (
-                    <div
-                      style={{
-                        alignItems: 'center',
-                        background: cssVar.colorPrimary,
-                        borderRadius: cssVar.borderRadiusSM,
-                        color: cssVar.colorTextLightSolid,
-                        display: 'flex',
-                        flexShrink: 0,
-                        fontSize: 12,
-                        fontWeight: 600,
-                        height: 22,
-                        justifyContent: 'center',
-                        minWidth: 22,
-                        padding: '0 6px',
-                      }}
-                    >
-                      {selectedFileIds.length}
-                    </div>
-                  )}
+                  {isDragInSelection(currentDrag.id, selectedFileIds, selectAllState) &&
+                    getDragSelectionCount(selectedFileIds, selectAllState, selectionTotal) > 1 && (
+                      <div
+                        style={{
+                          alignItems: 'center',
+                          background: cssVar.colorPrimary,
+                          borderRadius: cssVar.borderRadiusSM,
+                          color: cssVar.colorTextLightSolid,
+                          display: 'flex',
+                          flexShrink: 0,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          height: 22,
+                          justifyContent: 'center',
+                          minWidth: 22,
+                          padding: '0 6px',
+                        }}
+                      >
+                        {getDragSelectionCount(selectedFileIds, selectAllState, selectionTotal)}
+                      </div>
+                    )}
                 </div>
               ) : null,
               appElement ?? document.body,

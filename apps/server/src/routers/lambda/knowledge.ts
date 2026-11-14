@@ -90,12 +90,6 @@ export const knowledgeRouter = router({
           embeddingStatus: null,
           finishEmbedding: false,
         } as FileListItem;
-        console.info('[API getKnowledgeItems] Processing document:', {
-          editorDataPreview: item.editorData ? JSON.stringify(item.editorData).slice(0, 100) : null,
-          hasEditorData: !!item.editorData,
-          id: item.id,
-          name: item.name,
-        });
         resultItems.push(documentItem);
       }
     }

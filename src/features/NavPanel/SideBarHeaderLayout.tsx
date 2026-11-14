@@ -26,6 +26,11 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
     .${prefixCls}-breadcrumb-separator {
       margin-inline: 4px;
     }
+
+    /* The chevron points along the reading direction. */
+    &:dir(rtl) .${prefixCls}-breadcrumb-separator svg {
+      transform: scaleX(-1);
+    }
     .${prefixCls}-breadcrumb-link {
       display: flex !important;
       align-items: center !important;

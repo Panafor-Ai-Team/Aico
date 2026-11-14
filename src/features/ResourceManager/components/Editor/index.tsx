@@ -61,7 +61,7 @@ const openFileDetailModal = () =>
   });
 
 const FileEditorCanvas = memo<FileEditorProps>(({ onBack }) => {
-  const { t } = useTranslation(['common', 'file']);
+  const { t, i18n } = useTranslation(['common', 'file']);
   const theme = useTheme();
 
   const currentViewItemId = useResourceManagerStore((s) => s.currentViewItemId);
@@ -82,7 +82,13 @@ const FileEditorCanvas = memo<FileEditorProps>(({ onBack }) => {
               gap={12}
               style={{ minHeight: 32, minWidth: 0, overflow: 'hidden' }}
             >
-              <ActionIcon icon={ArrowLeftIcon} title={t('back')} onClick={onBack} />
+              <ActionIcon
+                icon={ArrowLeftIcon}
+                // "Back" points toward the start of the line: right in RTL.
+                style={i18n.dir() === 'rtl' ? { transform: 'scaleX(-1)' } : undefined}
+                title={t('back')}
+                onClick={onBack}
+              />
               <span
                 title={fileDetail?.name}
                 style={{

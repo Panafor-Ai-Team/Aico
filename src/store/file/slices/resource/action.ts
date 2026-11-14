@@ -1,4 +1,5 @@
 import debug from 'debug';
+import { isEqual } from 'es-toolkit';
 
 import { knowledgeBaseService } from '@/services/knowledgeBase';
 import { resourceService } from '@/services/resource';
@@ -393,15 +394,37 @@ export class ResourceActionImpl {
     return created.id;
   };
 
+  /** Rows removed from the loaded list no longer count toward the next page's offset. */
+  #shiftPagination = (draft: { offset: number; total?: number }, removed: number) => {
+    if (removed <= 0) return;
+    draft.offset = Math.max(draft.offset - removed, 0);
+    if (draft.total !== undefined) draft.total = Math.max(draft.total - removed, 0);
+  };
+
+  #patchCachedLists = async (patch: (items: ResourceItem[]) => ResourceItem[]) => {
+    const { patchCachedResourceLists } = await import('./hooks');
+    await patchCachedResourceLists(patch);
+  };
+
+  #dropOtherCachedLists = async () => {
+    const { dropOtherCachedResourceLists } = await import('./hooks');
+    await dropOtherCachedResourceLists();
+  };
+
   deleteResource = async (id: string): Promise<void> => {
     const syncEngine = this.#getSyncEngine();
     const tx = syncEngine.createTransaction(`deleteResource(${id})`);
 
     tx.set((draft) => {
+      const before = draft.resourceList.length;
       draft.resourceList = draft.resourceList.filter((item) => item.id !== id);
       draft.resourceMap.delete(id);
+      this.#shiftPagination(draft, before - draft.resourceList.length);
     });
     tx.mutation = () => resourceService.deleteResource(id);
+    tx.onSuccess = async () => {
+      await this.#patchCachedLists((items) => items.filter((item) => item.id !== id));
+    };
 
     await tx.commit<void>();
   };
@@ -414,12 +437,17 @@ export class ResourceActionImpl {
     const tx = syncEngine.createTransaction(`deleteResources(${ids.join(',')})`);
 
     tx.set((draft) => {
+      const before = draft.resourceList.length;
       draft.resourceList = draft.resourceList.filter((item) => !idsSet.has(item.id));
       for (const id of idsSet) {
         draft.resourceMap.delete(id);
       }
+      this.#shiftPagination(draft, before - draft.resourceList.length);
     });
     tx.mutation = () => resourceService.deleteResources(ids);
+    tx.onSuccess = async () => {
+      await this.#patchCachedLists((items) => items.filter((item) => !idsSet.has(item.id)));
+    };
 
     await tx.commit<void>();
   };
@@ -532,11 +560,18 @@ export class ResourceActionImpl {
     this.#set({ isLoadingMore: true }, false, 'resource/loadMoreResources/start');
 
     try {
-      const { items } = await resourceService.queryResources({
+      const { hasMore: serverHasMore, items } = await resourceService.queryResources({
         ...queryParams,
         limit: 50,
         offset,
       });
+
+      // The user may have opened another folder or changed the filter while
+      // this page was loading; appending it would mix the old list into the new.
+      if (!isEqual(this.#get().queryParams, queryParams)) {
+        this.#set({ isLoadingMore: false }, false, 'resource/loadMoreResources/stale');
+        return;
+      }
 
       this.#set(
         (state) => {
@@ -548,9 +583,11 @@ export class ResourceActionImpl {
           }
 
           return {
-            hasMore: items.length === 50,
+            // The server knows whether more rows exist; a page can come back
+            // short (rows filtered after LIMIT) while more remain.
+            hasMore: serverHasMore,
             isLoadingMore: false,
-            offset: offset + items.length,
+            offset: state.offset + items.length,
             resourceList: [
               ...state.resourceList,
               ...items.filter((item) => !existingIds.has(item.id)),
@@ -606,7 +643,10 @@ export class ResourceActionImpl {
     const existing = resourceMap.get(id);
 
     if (!existing) {
-      console.warn(`Resource ${id} not found for move`);
+      // Not in the loaded list (e.g. moved from search results): move it on
+      // the server directly instead of silently doing nothing.
+      await resourceService.moveResource(id, parentId);
+      await this.#dropOtherCachedLists();
       return;
     }
 
@@ -639,10 +679,15 @@ export class ResourceActionImpl {
 
       draft.resourceList = draft.resourceList.filter((item) => item.id !== id);
       draft.resourceMap.delete(id);
+      this.#shiftPagination(draft, 1);
     });
     tx.mutation = () => resourceService.moveResource(id, parentId);
     tx.onSuccess = async (result) => {
-      if (!shouldKeepVisible) return;
+      await this.#dropOtherCachedLists();
+      if (!shouldKeepVisible) {
+        await this.#patchCachedLists((items) => items.filter((item) => item.id !== id));
+        return;
+      }
       this.#replaceLocalResource(id, result as ResourceItem);
     };
 
@@ -772,7 +817,13 @@ export class ResourceActionImpl {
     const existing = resourceMap.get(id);
 
     if (!existing) {
-      console.warn(`Resource ${id} not found for update`);
+      // Not in the loaded list (e.g. renamed from search results): update it on
+      // the server directly; returning early made the caller toast "renamed"
+      // while nothing was saved.
+      const result = await resourceService.updateResource(id, updates);
+      await this.#patchCachedLists((items) =>
+        items.map((item) => (item.id === id ? { ...item, ...(result as ResourceItem) } : item)),
+      );
       return;
     }
 
@@ -802,6 +853,9 @@ export class ResourceActionImpl {
     tx.mutation = () => resourceService.updateResource(id, updates);
     tx.onSuccess = async (result) => {
       this.#replaceLocalResource(id, result as ResourceItem);
+      await this.#patchCachedLists((items) =>
+        items.map((item) => (item.id === id ? { ...item, ...(result as ResourceItem) } : item)),
+      );
     };
 
     await tx.commit<ResourceItem>();

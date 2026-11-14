@@ -24,12 +24,22 @@ export const useSaveDocumentHotkey = (onSave: () => void | Promise<void>) => {
  * Register Files scope and enable it
  * Use this in components that need Files scope hotkeys
  */
+// Several mounted components can register the Files scope at once (the
+// Resources layout, a library layout, the page editor). Count them so the
+// scope is only disabled when the last one unmounts; otherwise leaving a
+// library turned Cmd+S off while the outer Resources layout was still open.
+let filesScopeUsers = 0;
+
 export const useRegisterFilesHotkeys = () => {
   const { enableScope, disableScope } = useHotkeysContext();
 
   useEffect(() => {
+    filesScopeUsers += 1;
     enableScope(HotkeyScopeEnum.Files);
-    return () => disableScope(HotkeyScopeEnum.Files);
+    return () => {
+      filesScopeUsers = Math.max(filesScopeUsers - 1, 0);
+      if (filesScopeUsers === 0) disableScope(HotkeyScopeEnum.Files);
+    };
   }, [enableScope, disableScope]);
 
   return null;

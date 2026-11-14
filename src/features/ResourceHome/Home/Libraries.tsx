@@ -7,6 +7,7 @@ import { PlusIcon } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import AsyncError from '@/components/AsyncError';
 import LibIcon from '@/components/LibIcon';
 import LockedLibIcon from '@/components/LibIcon/Locked';
 import { useCreateNewModal } from '@/features/LibraryModal';
@@ -123,7 +124,9 @@ const Libraries = memo(() => {
   const visibility = listVisibility === 'private' ? ('private' as const) : ('public' as const);
 
   const useFetchKnowledgeBaseList = useKnowledgeBaseStore((s) => s.useFetchKnowledgeBaseList);
-  const { data, isLoading } = useFetchKnowledgeBaseList(visibility);
+  // `fallbackData: []` keeps `data` an array on failure, so read `error` too —
+  // otherwise a failed load looked like "no libraries yet".
+  const { data, error, isLoading, mutate } = useFetchKnowledgeBaseList(visibility);
 
   const setLibraryId = useResourceManagerStore((s) => s.setLibraryId);
   const { open: openCreateLibrary } = useCreateNewModal();
@@ -140,7 +143,9 @@ const Libraries = memo(() => {
   return (
     <Flexbox gap={12}>
       <SectionTitle title={t('home.libraries')} />
-      {isLoading ? (
+      {error && !data?.length ? (
+        <AsyncError error={error} variant={'inline'} onRetry={() => void mutate()} />
+      ) : isLoading ? (
         <div className={styles.grid}>
           {Array.from({ length: 4 }, (_, index) => (
             <Skeleton.Node active key={index} style={{ height: 52, width: '100%' }} />

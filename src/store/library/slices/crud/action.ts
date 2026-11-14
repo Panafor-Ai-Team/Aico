@@ -74,10 +74,13 @@ export class KnowledgeBaseCrudActionImpl {
 
   updateKnowledgeBase = async (id: string, value: CreateKnowledgeBaseParams): Promise<void> => {
     this.#get().internal_toggleKnowledgeBaseLoading(id, true);
-    await knowledgeBaseService.updateKnowledgeBaseList(id, value);
-    await this.#get().refreshKnowledgeBaseList();
-
-    this.#get().internal_toggleKnowledgeBaseLoading(id, false);
+    try {
+      await knowledgeBaseService.updateKnowledgeBaseList(id, value);
+      await this.#get().refreshKnowledgeBaseList();
+    } finally {
+      // A failed rename used to leave the row spinning until a reload.
+      this.#get().internal_toggleKnowledgeBaseLoading(id, false);
+    }
   };
 
   useFetchKnowledgeBaseItem = (id: string): SWRResponse<KnowledgeBaseItem | undefined> => {

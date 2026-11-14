@@ -32,6 +32,10 @@ const styles = createStaticStyles(({ css }) => ({
       transition: all 0.2s;
     }
 
+    &:dir(rtl) {
+      transform: translateX(4px);
+    }
+
     &:hover::after {
       width: 3px;
       background-color: ${cssVar.colorPrimary};
@@ -58,10 +62,12 @@ const ColumnResizeHandle = memo<ColumnResizeHandleProps>(
     const [isDragging, setIsDragging] = useState(false);
     const startXRef = useRef(0);
     const startWidthRef = useRef(0);
+    // In RTL the column's end edge is on the left, so dragging left widens it.
+    const directionRef = useRef(1);
 
     const handleMouseMove = useCallback(
       (e: MouseEvent) => {
-        const delta = e.clientX - startXRef.current;
+        const delta = (e.clientX - startXRef.current) * directionRef.current;
         const newWidth = Math.max(minWidth, Math.min(maxWidth, startWidthRef.current + delta));
 
         // Update width in real-time during drag
@@ -80,6 +86,7 @@ const ColumnResizeHandle = memo<ColumnResizeHandleProps>(
         e.stopPropagation();
 
         setIsDragging(true);
+        directionRef.current = getComputedStyle(e.currentTarget).direction === 'rtl' ? -1 : 1;
         startXRef.current = e.clientX;
         startWidthRef.current = currentWidth;
       },

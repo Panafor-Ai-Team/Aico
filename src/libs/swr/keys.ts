@@ -1130,6 +1130,10 @@ export const resourceKeys = {
     params,
     workspaceId,
   ]),
+  // Resources home "Recent files / pages": registered here so file mutations
+  // (upload, rename, delete) can revalidate them via `refreshFileList`.
+  recentFiles: def('resource:recentFiles', (limit: number) => ['resource:recentFiles', limit]),
+  recentPages: def('resource:recentPages', (limit: number) => ['resource:recentPages', limit]),
   search: def('resource:search', (params: unknown) => ['resource:search', params]),
 };
 export const providerKeys = {

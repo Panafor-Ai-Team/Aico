@@ -119,13 +119,15 @@ const SearchResults = memo<SearchResultsProps>(
         }
         case 'folder': {
           // Navigate to folder by slug
+          // Folder URLs are `/resource/library/:libraryId/:slug`. A slug alone in
+          // the library-id slot hit the 404 page, and `/resource/library` is
+          // not a route; folders outside a library open from Resources home.
           if (result.knowledgeBaseId && result.slug) {
             navigate(`/resource/library/${result.knowledgeBaseId}/${result.slug}`);
-          } else if (result.slug) {
-            navigate(`/resource/library/${result.slug}`);
+          } else if (result.knowledgeBaseId) {
+            navigate(`/resource/library/${result.knowledgeBaseId}`);
           } else {
-            // Fallback to library root if no slug
-            navigate(`/resource/library`);
+            navigate('/resource');
           }
           break;
         }

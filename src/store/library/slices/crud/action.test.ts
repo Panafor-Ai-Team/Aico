@@ -239,7 +239,8 @@ describe('KnowledgeBaseCrudAction', () => {
       ).rejects.toThrow('Update failed');
 
       expect(toggleLoadingSpy).toHaveBeenCalledWith('kb-1', true);
-      // The false toggle won't be called because the error interrupts the flow
+      // The spinner must clear on failure too, or the row spins until a reload.
+      expect(toggleLoadingSpy).toHaveBeenCalledWith('kb-1', false);
     });
   });
 
