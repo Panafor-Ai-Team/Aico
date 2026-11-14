@@ -166,7 +166,7 @@ export class S3 {
    */
   public async getFileMetadata(
     key: string,
-  ): Promise<{ contentLength: number; contentType?: string }> {
+  ): Promise<{ contentLength: number; contentType?: string; lastModified?: Date }> {
     const command = new HeadObjectCommand({
       Bucket: this.bucket,
       Key: key,
@@ -177,6 +177,7 @@ export class S3 {
     return {
       contentLength: response.ContentLength ?? 0,
       contentType: response.ContentType,
+      lastModified: response.LastModified,
     };
   }
 

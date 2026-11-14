@@ -129,6 +129,7 @@ describe('DocumentService', () => {
 
     mockFileService = {
       deleteFile: vi.fn(),
+      deleteStorageForRemovedFiles: vi.fn(),
       downloadFileToLocal: vi.fn(),
     };
 
@@ -445,6 +446,21 @@ describe('DocumentService', () => {
       });
     });
 
+    it('rejects linking a page into another user library in personal mode', async () => {
+      mockKnowledgeBaseModel.findById.mockResolvedValue(undefined);
+
+      await expect(
+        service.createDocument({
+          editorData: {},
+          knowledgeBaseId: 'someone-else-kb',
+          title: 'Planted',
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+      expect(mockFileModel.create).not.toHaveBeenCalled();
+      expect(mockDocumentModel.create).not.toHaveBeenCalled();
+    });
+
     it('omits visibility on the KB mirror file in personal mode', async () => {
       mockFileModel.create.mockResolvedValue({ id: 'file-1' });
       mockDocumentModel.create.mockResolvedValue({ id: 'doc-1' });
@@ -643,8 +659,10 @@ describe('DocumentService', () => {
 
       await service.deleteDocument('doc-1');
 
-      expect(mockFileModel.delete).toHaveBeenCalledWith('file-1');
-      expect(mockFileService.deleteFile).toHaveBeenCalledWith('files/doc-1.md');
+      expect(mockFileModel.delete).toHaveBeenCalledWith('file-1', expect.any(Boolean));
+      expect(mockFileService.deleteStorageForRemovedFiles).toHaveBeenCalledWith([
+        { url: 'files/doc-1.md' },
+      ]);
       expect(mockDocumentModel.delete).toHaveBeenCalledWith('doc-1');
     });
 
@@ -658,9 +676,30 @@ describe('DocumentService', () => {
 
       await service.deleteDocument('doc-1');
 
-      expect(mockFileModel.delete).toHaveBeenCalledWith('file-1');
+      expect(mockFileModel.delete).toHaveBeenCalledWith('file-1', expect.any(Boolean));
+      // Internal placeholder keys are skipped inside deleteStorageForRemovedFiles.
       expect(mockFileService.deleteFile).not.toHaveBeenCalled();
       expect(mockDocumentModel.delete).toHaveBeenCalledWith('doc-1');
+    });
+
+    it('stops on a parent loop stored in the database instead of recursing forever', async () => {
+      // loop-a's child is loop-b, whose child is loop-a again.
+      mockDocumentModel.findById.mockImplementation(async (id: string) => ({
+        fileId: null,
+        fileType: 'custom/folder',
+        id,
+      }));
+      (mockDb.query as any).documents.findMany.mockImplementation(async () => [
+        { id: 'loop-a' },
+        { id: 'loop-b' },
+      ]);
+      (mockDb.query as any).files.findMany.mockResolvedValue([]);
+
+      await service.deleteDocument('loop-a');
+
+      expect(mockDocumentModel.delete).toHaveBeenCalledTimes(2);
+      expect(mockDocumentModel.delete).toHaveBeenCalledWith('loop-a');
+      expect(mockDocumentModel.delete).toHaveBeenCalledWith('loop-b');
     });
 
     it('should recursively delete children when deleting a folder', async () => {
@@ -688,7 +727,7 @@ describe('DocumentService', () => {
       await service.deleteDocument('folder-1');
 
       // Should have deleted child-doc-1's associated file
-      expect(mockFileModel.delete).toHaveBeenCalledWith('file-child-1');
+      expect(mockFileModel.delete).toHaveBeenCalledWith('file-child-1', expect.any(Boolean));
       // Should have deleted all documents
       expect(mockDocumentModel.delete).toHaveBeenCalledWith('child-doc-1');
       expect(mockDocumentModel.delete).toHaveBeenCalledWith('child-folder-2');
@@ -712,10 +751,14 @@ describe('DocumentService', () => {
 
       await service.deleteDocument('folder-1');
 
-      expect(mockFileModel.delete).toHaveBeenCalledWith('file-in-folder-1');
-      expect(mockFileModel.delete).toHaveBeenCalledWith('file-in-folder-2');
-      expect(mockFileService.deleteFile).toHaveBeenCalledWith('files/file-in-folder-1.pdf');
-      expect(mockFileService.deleteFile).toHaveBeenCalledWith('files/file-in-folder-2.pdf');
+      expect(mockFileModel.delete).toHaveBeenCalledWith('file-in-folder-1', expect.any(Boolean));
+      expect(mockFileModel.delete).toHaveBeenCalledWith('file-in-folder-2', expect.any(Boolean));
+      expect(mockFileService.deleteStorageForRemovedFiles).toHaveBeenCalledWith([
+        expect.objectContaining({ url: 'files/file-in-folder-1.pdf' }),
+      ]);
+      expect(mockFileService.deleteStorageForRemovedFiles).toHaveBeenCalledWith([
+        expect.objectContaining({ url: 'files/file-in-folder-2.pdf' }),
+      ]);
       expect(mockDocumentModel.delete).toHaveBeenCalledWith('folder-1');
     });
   });
@@ -730,7 +773,7 @@ describe('DocumentService', () => {
 
       expect(mockDocumentModel.delete).toHaveBeenCalledWith('doc-1');
       expect(mockDocumentModel.delete).toHaveBeenCalledWith('doc-2');
-      expect(mockFileModel.delete).toHaveBeenCalledWith('file-2');
+      expect(mockFileModel.delete).toHaveBeenCalledWith('file-2', expect.any(Boolean));
     });
 
     it('runs at most a few recursive deletes at once', async () => {

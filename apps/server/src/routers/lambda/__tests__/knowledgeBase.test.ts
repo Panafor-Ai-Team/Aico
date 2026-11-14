@@ -13,6 +13,7 @@ const mockKnowledgeBaseModelCopyToWorkspace = vi.fn();
 const mockKnowledgeBaseModelFindById = vi.fn();
 const mockKnowledgeBaseModelTransferTo = vi.fn();
 const mockKnowledgeBaseModelHasForeignLinkedRows = vi.fn().mockResolvedValue(false);
+const mockKnowledgeBaseModelUpdate = vi.fn();
 const mockKnowledgeBaseModelDelete = vi.fn();
 const mockKnowledgeBaseModelDeleteWithFiles = vi.fn();
 
@@ -42,6 +43,7 @@ vi.mock('@/database/models/knowledgeBase', () => ({
     findById: mockKnowledgeBaseModelFindById,
     hasForeignLinkedRows: mockKnowledgeBaseModelHasForeignLinkedRows,
     transferTo: mockKnowledgeBaseModelTransferTo,
+    update: mockKnowledgeBaseModelUpdate,
   })),
 }));
 
@@ -62,6 +64,39 @@ describe('knowledgeBaseRouter', () => {
     mockKnowledgeBaseModelCountFileUsage.mockResolvedValue(4096);
     mockKnowledgeBaseModelFindById.mockResolvedValue({ id: 'kb-1', userId: 'test-user' });
     mockKnowledgeBaseModelTransferTo.mockResolvedValue({ id: 'kb-1' });
+  });
+
+  describe('updateKnowledgeBase', () => {
+    it('only writes the editable fields and drops ownership/visibility keys', async () => {
+      const personalCaller = knowledgeBaseRouter.createCaller({
+        serverDB: {},
+        userId: 'test-user',
+      } as any);
+
+      await personalCaller.updateKnowledgeBase({
+        id: 'kb-1',
+        value: {
+          description: 'd',
+          id: 'kb-hijack',
+          name: 'Renamed',
+          userId: 'victim-user',
+          visibility: 'private',
+          workspaceId: 'workspace-other',
+        } as any,
+      });
+
+      expect(mockKnowledgeBaseModelUpdate).toHaveBeenCalledWith('kb-1', {
+        description: 'd',
+        name: 'Renamed',
+      });
+    });
+
+    it('rejects an empty name', async () => {
+      await expect(
+        caller.updateKnowledgeBase({ id: 'kb-1', value: { name: '   ' } }),
+      ).rejects.toThrow();
+      expect(mockKnowledgeBaseModelUpdate).not.toHaveBeenCalled();
+    });
   });
 
   describe('removeKnowledgeBase', () => {

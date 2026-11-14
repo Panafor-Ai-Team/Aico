@@ -52,6 +52,28 @@ export class FileService {
   }
 
   /**
+   * Delete the storage objects behind deleted file rows, skipping any key that
+   * another file row or global file row (of any user) still points at.
+   */
+  public async deleteStorageForRemovedFiles(
+    removed: Array<{ globalFileUrl?: string | null; url?: string | null }>,
+  ): Promise<void> {
+    const keys = removed
+      .flatMap((file) => [file.url, file.globalFileUrl])
+      .filter((key): key is string => !!key && !key.startsWith('internal://'));
+    if (keys.length === 0) return;
+
+    const unreferenced = await this.fileModel.filterUnreferencedStorageKeys(keys);
+    if (unreferenced.length === 0) return;
+
+    if (unreferenced.length === 1) {
+      await this.impl.deleteFile(unreferenced[0]);
+      return;
+    }
+    await this.impl.deleteFiles(unreferenced);
+  }
+
+  /**
    * Get file content
    */
   public async getFileContent(key: string): Promise<string> {
@@ -85,7 +107,7 @@ export class FileService {
    */
   public async getFileMetadata(
     key: string,
-  ): Promise<{ contentLength: number; contentType?: string }> {
+  ): Promise<{ contentLength: number; contentType?: string; lastModified?: Date }> {
     return this.impl.getFileMetadata(key);
   }
 

@@ -1,5 +1,19 @@
 import { z } from 'zod';
 
+/**
+ * Upper bound for one page's `content` / `editorData` string (5 MB of text).
+ * Every save parses, walks and deep-compares the whole page on the server's
+ * single thread — about 22 ms per MB measured locally (2026-11-12) — which
+ * blocks every other request while it runs. Product decision: refuse larger
+ * saves with `PAGE_TOO_LARGE`, which the editor turns into a clear message.
+ */
+export const MAX_PAGE_PAYLOAD_LENGTH = 5 * 1024 * 1024;
+export const PAGE_TOO_LARGE_MESSAGE = 'PAGE_TOO_LARGE';
+
+/** A page body string, capped at {@link MAX_PAGE_PAYLOAD_LENGTH}. */
+export const pagePayloadString = () =>
+  z.string().max(MAX_PAGE_PAYLOAD_LENGTH, { message: PAGE_TOO_LARGE_MESSAGE });
+
 export const documentHistorySaveSourceSchema = z.enum([
   'autosave',
   'manual',
@@ -37,8 +51,8 @@ export const compareDocumentHistoryItemsInputSchema = z.object({
 
 export const updateDocumentInputSchema = z.object({
   breakAutosaveWindow: z.boolean().optional(),
-  content: z.string().optional(),
-  editorData: z.string().optional(),
+  content: pagePayloadString().optional(),
+  editorData: pagePayloadString().optional(),
   fileType: z.string().optional(),
   id: z.string(),
   lockOwnerId: z.string().optional(),
@@ -51,7 +65,7 @@ export const updateDocumentInputSchema = z.object({
 
 export const saveDocumentHistoryInputSchema = z.object({
   documentId: z.string(),
-  editorData: z.string(),
+  editorData: pagePayloadString(),
   lockOwnerId: z.string().optional(),
   saveSource: documentHistorySaveSourceSchema,
 });

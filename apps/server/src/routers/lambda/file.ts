@@ -27,6 +27,7 @@ import type { FileListItem, KnowledgeItemStatus } from '@/types/files';
 import { QueryFileListSchema, toFileSource, UploadFileSchema } from '@/types/files';
 import { TransferErrorCode } from '@/types/transferError';
 
+import { assertValidParentDocument } from './_helpers/assertValidParentDocument';
 import {
   assertWorkspaceRowManageable,
   isWorkspaceNonOwner,
@@ -126,6 +127,11 @@ const getKnowledgeItemStatusMap = async (
   );
 };
 
+// A fresh upload is claimed by createFile right after the PUT finishes. Large
+// multipart uploads can run long, so allow a day before an unclaimed object is
+// treated as someone else's.
+const UNCLAIMED_UPLOAD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 const isStoredObjectAvailable = async (fileService: FileService, url: string): Promise<boolean> => {
   try {
     // Hash records can outlive their backing object, for example when generated
@@ -163,13 +169,23 @@ export const fileRouter = router({
     .use(checkFileStorageUsage)
     .input(z.object({ hash: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const existingFile = await ctx.fileModel.checkHash(input.hash);
-      const existingHashUrl = existingFile?.isExist ? existingFile.url : undefined;
-      if (!existingHashUrl) return existingFile;
+      // Only reuse bytes the caller already stored, and answer with the
+      // caller's own copy. Answering for another user's hash would reveal that
+      // someone uploaded this exact file and hand out their storage key; the
+      // caller just uploads its own copy instead.
+      const ownFile = await ctx.fileModel.findOwnFileByHash(input.hash);
+      if (!ownFile?.url) return { isExist: false };
 
-      const isStorageAvailable = await isStoredObjectAvailable(ctx.fileService, existingHashUrl);
+      const isStorageAvailable = await isStoredObjectAvailable(ctx.fileService, ownFile.url);
+      if (!isStorageAvailable) return { isExist: false };
 
-      return isStorageAvailable ? existingFile : { isExist: false };
+      return {
+        fileType: ownFile.fileType,
+        isExist: true,
+        metadata: { ...(ownFile.metadata as Record<string, unknown> | null), path: ownFile.url },
+        size: ownFile.size,
+        url: ownFile.url,
+      };
     }),
 
   createFile: fileProcedure
@@ -196,17 +212,22 @@ export const fileRouter = router({
           parentVisibility = docBySlug.visibility;
         } else {
           const docById = await ctx.documentModel.findById(input.parentId);
-          if (docById) parentVisibility = docById.visibility;
+          if (!docById) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: 'Parent folder not found' });
+          }
+          parentVisibility = docById.visibility;
         }
       }
 
       let knowledgeBaseVisibility: 'private' | 'public' | undefined;
-      if (ctx.workspaceId && input.knowledgeBaseId) {
+      if (input.knowledgeBaseId) {
+        // Checked in personal mode too, so a caller cannot add a file to
+        // another user's library by id.
         const knowledgeBase = await ctx.knowledgeBaseModel.findById(input.knowledgeBaseId);
         if (!knowledgeBase) {
           throw new TRPCError({ code: 'NOT_FOUND', message: 'Knowledge base not found' });
         }
-        knowledgeBaseVisibility = knowledgeBase.visibility;
+        if (ctx.workspaceId) knowledgeBaseVisibility = knowledgeBase.visibility;
       }
 
       // Visibility precedence (workspace mode only — personal mode ignores the
@@ -221,14 +242,34 @@ export const fileRouter = router({
         ? (knowledgeBaseVisibility ?? input.visibility ?? parentVisibility ?? 'private')
         : undefined;
 
+      // The storage key comes from the client. Only accept a key this caller
+      // already uses, or a fresh object nobody has claimed yet; otherwise a
+      // caller could point a new row at another user's object and then read
+      // it through the file proxy or delete it via removeFile.
+      const storageKeyClaim = await ctx.fileModel.getStorageKeyClaim(input.url);
+      if (storageKeyClaim === 'foreign') {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'File URL belongs to another file' });
+      }
+
       let actualSize = input.size;
+      let objectMetadata: Awaited<ReturnType<FileService['getFileMetadata']>> | undefined;
       try {
-        const { contentLength } = await ctx.fileService.getFileMetadata(input.url);
-        if (contentLength >= 1) {
-          actualSize = contentLength;
+        objectMetadata = await ctx.fileService.getFileMetadata(input.url);
+        if (objectMetadata.contentLength >= 1) {
+          actualSize = objectMetadata.contentLength;
         }
       } catch {
         // If metadata fetch fails, use original size from input
+      }
+
+      if (storageKeyClaim === 'unreferenced') {
+        if (!objectMetadata) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Uploaded file not found' });
+        }
+        const lastModified = objectMetadata.lastModified?.getTime();
+        if (lastModified && Date.now() - lastModified > UNCLAIMED_UPLOAD_MAX_AGE_MS) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'File URL is not a recent upload' });
+        }
       }
 
       if (actualSize < 0) {
@@ -255,7 +296,14 @@ export const fileRouter = router({
         });
 
         let shouldRefreshGlobalFile = false;
-        if (isExist && existingFile.url && existingFile.url !== input.url) {
+        // Only repoint the shared hash row for the caller's own bytes (or a
+        // hash no file row uses any more), so one user cannot swap the object
+        // that other users' dedup lookups resolve to.
+        const mayRefreshGlobalFile =
+          isExist &&
+          ((await ctx.fileModel.hasOwnFileWithHash(input.hash!, trx)) ||
+            !(await ctx.fileModel.hasAnyFileWithHash(input.hash!, trx)));
+        if (mayRefreshGlobalFile && existingFile.url && existingFile.url !== input.url) {
           shouldRefreshGlobalFile = !(await isStoredObjectAvailable(
             ctx.fileService,
             existingFile.url,
@@ -583,7 +631,7 @@ export const fileRouter = router({
         );
 
         if (needToRemoveFileList && needToRemoveFileList.length > 0) {
-          await ctx.fileService.deleteFiles(needToRemoveFileList.map((file) => file.url!));
+          await ctx.fileService.deleteStorageForRemovedFiles(needToRemoveFileList);
         }
       }
 
@@ -669,8 +717,8 @@ export const fileRouter = router({
 
       if (!file) return;
 
-      // delete the file from S3 if it is not used by other files
-      await ctx.fileService.deleteFile(file.url!);
+      // delete the file from S3 if no other row (any user) still uses it
+      await ctx.fileService.deleteStorageForRemovedFiles([file]);
     }),
 
   removeUnreferencedFile: fileProcedure
@@ -684,7 +732,7 @@ export const fileRouter = router({
       const file = await ctx.fileModel.deleteUnreferenced(input.id, serverDBEnv.REMOVE_GLOBAL_FILE);
       if (!file) return;
 
-      await ctx.fileService.deleteFile(file.url!);
+      await ctx.fileService.deleteStorageForRemovedFiles([file]);
     }),
 
   removeFileAsyncTask: fileProcedure
@@ -725,7 +773,7 @@ export const fileRouter = router({
       if (!needToRemoveFileList || needToRemoveFileList.length === 0) return;
 
       // remove from S3
-      await ctx.fileService.deleteFiles(needToRemoveFileList.map((file) => file.url!));
+      await ctx.fileService.deleteStorageForRemovedFiles(needToRemoveFileList);
     }),
 
   updateFile: fileProcedure
@@ -752,6 +800,7 @@ export const fileRouter = router({
         if (docBySlug) {
           resolvedParentId = docBySlug.id;
         }
+        await assertValidParentDocument(ctx.documentModel, resolvedParentId);
       }
 
       const updates: Parameters<typeof ctx.fileModel.update>[1] = {};
