@@ -12,10 +12,11 @@ import type { QueuedFile, QueuedMessage } from './types';
  * cache uses, so two accounts sharing a browser can never see or auto-send each
  * other's queued text. One key per conversation keeps cross-tab writes small.
  *
- * Restored entries are NOT auto-sent. A client-side run dies with the tab and
- * the server may still be finishing the previous turn, so auto-sending could
- * duplicate a message. The tray shows them and the user decides (send now /
- * edit / delete), or the next successful turn drains them as usual.
+ * Restored entries are never sent by the act of restoring. A client-side run
+ * dies with the tab and the server may still be finishing the previous turn, so
+ * auto-sending on boot could duplicate a message. The tray shows them
+ * immediately; they leave it only when the user acts (send now / edit / delete)
+ * or when a later successful turn drains the queue as usual.
  */
 export const CHAT_MESSAGE_QUEUE_STORAGE_PREFIX = 'lobechat:chat-message-queue:v1:';
 

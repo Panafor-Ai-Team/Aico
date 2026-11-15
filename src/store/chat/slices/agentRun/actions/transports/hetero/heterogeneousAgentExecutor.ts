@@ -2414,6 +2414,7 @@ export const executeHeterogeneousAgent = async (
               ? (merged.files.map((id) => ({ id })) as any)
               : undefined;
 
+        let persisted = false;
         setTimeout(() => {
           useChatStore
             .getState()
@@ -2424,15 +2425,28 @@ export const executeHeterogeneousAgent = async (
               ...(merged.forceRuntime ? { forceRuntime: merged.forceRuntime } : {}),
               message: merged.content,
               metadata: merged.metadata,
-              onMessagePersisted: () =>
-                drainedIds.forEach((id) => get().removeQueuedMessage(contextKey, id)),
+              onMessagePersisted: () => {
+                persisted = true;
+                drainedIds.forEach((id) => get().removeQueuedMessage(contextKey, id));
+              },
             })
-            .catch((e: unknown) => {
-              console.error(
-                '[heterogeneousAgentExecutor] sendMessage for queued content failed:',
-                e,
-              );
-            });
+            .then(
+              () => {
+                // Resolved without persisting: the composer restore or a fresh
+                // queue row owns the text now, so the drained durable copy must
+                // not revive as a duplicate after the next reload.
+                if (!persisted) {
+                  drainedIds.forEach((id) => get().removeQueuedMessage(contextKey, id));
+                }
+              },
+              (e: unknown) => {
+                console.error(
+                  '[heterogeneousAgentExecutor] sendMessage for queued content failed:',
+                  e,
+                );
+                remainingQueued.forEach((message) => get().enqueueMessage(contextKey, message));
+              },
+            );
         }, 100);
       }
     }

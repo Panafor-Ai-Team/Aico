@@ -47,6 +47,7 @@ const makeStore = (afterCompletionCallbacks?: Array<() => void>) => {
     completeOperation: vi.fn(),
     dbMessagesMap: {},
     drainQueuedMessages: vi.fn(() => []),
+    enqueueMessage: vi.fn(),
     failOperation: vi.fn(),
     internal_updateTopic: vi.fn(),
     markTopicUnread: vi.fn(),
@@ -59,6 +60,8 @@ const makeStore = (afterCompletionCallbacks?: Array<() => void>) => {
       },
     },
     refreshTopic: vi.fn(async () => {}),
+    removeQueuedMessage: vi.fn(),
+    sendMessage: vi.fn(async () => {}),
     summaryTopicTitle: vi.fn(),
     // topicDataMap / messagesMap reads default to empty (no topic, no messages).
     topicDataMap: {},
@@ -304,6 +307,51 @@ describe('buildRunLifecycle — sub-agent runs skip top-level effects', () => {
       ),
     ).resolves.toBeUndefined();
     expect(desktopNotificationMock.notifyDesktopAgentCompleted).not.toHaveBeenCalled();
+  });
+});
+
+describe('buildRunLifecycle — drained resend keeps exactly one copy', () => {
+  const queued = { content: 'queued', createdAt: 1, id: 'q1', interruptMode: 'soft' as const };
+
+  const completeWithQueue = async (sendMessage: (params: any) => Promise<void>) => {
+    vi.useFakeTimers();
+    const { get, store } = makeStore();
+    store.drainQueuedMessages = vi.fn(() => [queued]);
+    store.sendMessage = vi.fn(sendMessage) as any;
+    try {
+      await lifecycle('gateway', get).completeRun(
+        completeEvent('gateway', { status: 'completed' }),
+      );
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
+    return store;
+  };
+
+  it('drops the durable copy when the resend resolves without persisting', async () => {
+    const store = await completeWithQueue(async () => {});
+
+    expect(store.removeQueuedMessage).toHaveBeenCalledWith(expect.any(String), 'q1');
+  });
+
+  it('leaves the durable copy to `onMessagePersisted` when the resend persists', async () => {
+    const store = await completeWithQueue(async (params) => {
+      params.onMessagePersisted?.();
+    });
+
+    expect(store.removeQueuedMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('puts the rows back in the tray when the resend throws before persisting', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const store = await completeWithQueue(async () => {
+      throw new Error('agent gone');
+    });
+    error.mockRestore();
+
+    expect(store.enqueueMessage).toHaveBeenCalledWith(expect.any(String), queued);
+    expect(store.removeQueuedMessage).not.toHaveBeenCalled();
   });
 });
 
