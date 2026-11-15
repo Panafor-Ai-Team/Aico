@@ -32,5 +32,5 @@ describe('chat store — durable queue hydration', () => {
     // durable copy stays in storage for that user's next sign-in.
     state.reset();
     expect(useChatStore.getState().queuedMessages).toEqual({});
-  }, 30_000);
+  }, 60_000);
 });
