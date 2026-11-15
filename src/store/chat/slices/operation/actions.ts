@@ -12,7 +12,6 @@ import { setNamespace } from '@/utils/storeDebug';
 
 import {
   addQueuedMessages,
-  readQueue,
   removeQueue,
   removeQueuedMessageIds,
   unionQueuedMessages,
@@ -883,12 +882,11 @@ export class OperationActionsImpl {
   moveQueuedMessages = (fromContextKey: string, toContextKey: string): void => {
     if (fromContextKey === toContextKey) return;
 
-    // Union with storage: another tab may have queued into the old key after
-    // this tab last rendered, and dropping those rows would lose real input.
-    const queue = unionQueuedMessages(
-      this.#get().queuedMessages[fromContextKey] ?? [],
-      readQueue(fromContextKey),
-    );
+    // Move only rows this tab holds in memory. Storage rows that are absent
+    // from memory were drained with `keepPersisted` and are mid-resend; moving
+    // them here would slide the durable copy out from under the completion
+    // callback and leave a duplicate to auto-send later.
+    const queue = this.#get().queuedMessages[fromContextKey] ?? [];
     if (queue.length === 0) return;
 
     this.#set(

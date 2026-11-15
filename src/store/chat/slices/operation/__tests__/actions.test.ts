@@ -1733,4 +1733,18 @@ describe('Operation Actions — durable input queue', () => {
     expect(readQueue('main_agt_new')).toEqual([]);
     expect(readQueue('main_agt_tpc').map((item) => item.id)).toEqual(['q1']);
   });
+
+  it('move does not revive a storage-only row that is mid-resend', () => {
+    // Drained with `keepPersisted`: the durable copy waits for the resend's
+    // `onMessagePersisted`, so a concurrent topic move must leave it alone.
+    addQueuedMessages('main_agt_new', [queued('q1')]);
+    useChatStore.setState({ queuedMessages: { main_agt_new: [] } });
+
+    act(() => {
+      useChatStore.getState().moveQueuedMessages('main_agt_new', 'main_agt_tpc');
+    });
+
+    expect(readQueue('main_agt_new').map((item) => item.id)).toEqual(['q1']);
+    expect(readQueue('main_agt_tpc')).toEqual([]);
+  });
 });

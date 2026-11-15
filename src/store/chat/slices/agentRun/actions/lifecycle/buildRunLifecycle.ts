@@ -415,6 +415,7 @@ export const buildRunLifecycle = (
                 ? (merged.files.map((id) => ({ id })) as any)
                 : undefined;
 
+          let persisted = false;
           setTimeout(() => {
             // Use the passed `get` (the live chat-store getter) rather than a
             // direct `useChatStore` import: in prod they resolve to the same
@@ -434,12 +435,28 @@ export const buildRunLifecycle = (
                 // is really stored. `removeQueuedMessage` also clears the
                 // in-memory row, which a concurrent tab's storage write may
                 // have re-added to the tray while this resend was in flight.
-                onMessagePersisted: () =>
-                  drainedIds.forEach((id) => get().removeQueuedMessage(contextKey, id)),
+                onMessagePersisted: () => {
+                  persisted = true;
+                  drainedIds.forEach((id) => get().removeQueuedMessage(contextKey, id));
+                },
               })
-              .catch((e: unknown) => {
-                console.error('[executeClientAgent] sendMessage for queued content failed:', e);
-              });
+              .then(
+                () => {
+                  // Resolved without persisting (refused / stopped / folded back
+                  // into the queue): the composer restore or the fresh queue row
+                  // now owns the text, so the drained copy must not linger as a
+                  // ghost that auto-sends after the next reload.
+                  if (!persisted) {
+                    drainedIds.forEach((id) => get().removeQueuedMessage(contextKey, id));
+                  }
+                },
+                (e: unknown) => {
+                  console.error('[executeClientAgent] sendMessage for queued content failed:', e);
+                  // Threw before any composer restore: the tray is the only
+                  // place the text can stay visible, so put it back.
+                  remainingQueued.forEach((message) => get().enqueueMessage(contextKey, message));
+                },
+              );
           }, 100);
 
           return { requeued: true };

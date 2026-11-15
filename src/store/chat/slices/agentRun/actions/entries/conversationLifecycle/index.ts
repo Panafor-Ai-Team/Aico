@@ -619,6 +619,7 @@ export class ConversationLifecycleActionImpl {
       const drainedIds = drained.map((message) => message.id);
       notifyMessageAccepted();
 
+      let persisted = false;
       setTimeout(() => {
         this.#get()
           .sendMessage({
@@ -633,12 +634,25 @@ export class ConversationLifecycleActionImpl {
             ...(merged.forceRuntime ? { forceRuntime: merged.forceRuntime } : {}),
             message: merged.content,
             metadata: merged.metadata,
-            onMessagePersisted: () =>
-              drainedIds.forEach((id) => this.#get().removeQueuedMessage(orphanedQueueKey, id)),
+            onMessagePersisted: () => {
+              persisted = true;
+              drainedIds.forEach((id) => this.#get().removeQueuedMessage(orphanedQueueKey, id));
+            },
           })
-          .catch((error: unknown) => {
-            console.error('[sendMessage] restarting queued content after Stop failed:', error);
-          });
+          .then(
+            () => {
+              // Resolved without persisting: the text is back in the composer
+              // (or re-queued under a fresh id), so drop the drained copy
+              // instead of reviving it as a duplicate after the next reload.
+              if (!persisted) {
+                drainedIds.forEach((id) => this.#get().removeQueuedMessage(orphanedQueueKey, id));
+              }
+            },
+            (error: unknown) => {
+              console.error('[sendMessage] restarting queued content after Stop failed:', error);
+              drained.forEach((message) => this.#get().enqueueMessage(orphanedQueueKey, message));
+            },
+          );
       }, 0);
 
       return;
