@@ -830,7 +830,10 @@ export class OperationActionsImpl {
       false,
       n(`enqueueMessage/${contextKey}`),
     );
-    addQueuedMessages(contextKey, [message]);
+    // Persist the whole in-memory queue, not just the new row: a previous write
+    // can lose a read-modify-write race with another tab, and a reload right
+    // after would drop this tab's memory-only entries.
+    addQueuedMessages(contextKey, this.#get().queuedMessages[contextKey] ?? [message]);
 
     // Hard interrupt: cancel the running operation
     if (message.interruptMode === 'hard' && runningOperationId) {

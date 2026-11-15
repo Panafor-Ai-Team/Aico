@@ -31,24 +31,6 @@ const currentScope = () => getCacheScope();
 const queueStorageKey = (scope: string, contextKey: string) =>
   `${CHAT_MESSAGE_QUEUE_STORAGE_PREFIX}${scope}${KEY_SEPARATOR}${contextKey}`;
 
-export interface QueueStorageKeyParts {
-  contextKey: string;
-  scope: string;
-}
-
-export const parseQueueStorageKey = (key: string | null): QueueStorageKeyParts | null => {
-  if (!key?.startsWith(CHAT_MESSAGE_QUEUE_STORAGE_PREFIX)) return null;
-
-  const rest = key.slice(CHAT_MESSAGE_QUEUE_STORAGE_PREFIX.length);
-  const separator = rest.indexOf(KEY_SEPARATOR);
-  if (separator <= 0) return null;
-
-  const contextKey = rest.slice(separator + 1);
-  if (!contextKey) return null;
-
-  return { contextKey, scope: rest.slice(0, separator) };
-};
-
 const isQueuedFile = (value: unknown): value is QueuedFile => {
   if (!value || typeof value !== 'object') return false;
   const file = value as QueuedFile;
@@ -92,7 +74,7 @@ const toPersistableMessage = (message: QueuedMessage): QueuedMessage => ({
   ...message,
   filesPreview: message.filesPreview?.map((file) => ({
     ...file,
-    url: /^https?:\/\//.test(file.url) ? file.url : '',
+    url: file.url.startsWith('blob:') || file.url.startsWith('data:') ? '' : file.url,
   })),
 });
 
@@ -254,19 +236,4 @@ export const removeQueue = (contextKey: string): void => {
   } catch {
     // ignore
   }
-};
-
-/**
- * Resolves a `storage` event into a queue change for the current scope, so the
- * other tab's queue can be mirrored instead of overwritten on the next write.
- */
-export const readQueueStorageChange = (
-  key: string | null,
-  newValue: string | null,
-  now = Date.now(),
-): { contextKey: string; messages: QueuedMessage[] } | null => {
-  const parts = parseQueueStorageKey(key);
-  if (!parts || parts.scope !== currentScope()) return null;
-
-  return { contextKey: parts.contextKey, messages: parseQueue(newValue, now) };
 };

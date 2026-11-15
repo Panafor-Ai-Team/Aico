@@ -23,7 +23,7 @@ import { type ChatMessageAction } from './slices/message/actions';
 import { chatMessage } from './slices/message/actions';
 import { type OperationActions } from './slices/operation/actions';
 import { OperationActionsImpl } from './slices/operation/actions';
-import { readAllQueues, readQueueStorageChange } from './slices/operation/queueStorage';
+import { readAllQueues } from './slices/operation/queueStorage';
 import { type ChatPluginAction } from './slices/plugin/actions';
 import { chatPlugin } from './slices/plugin/actions';
 import { type ChatPortalAction } from './slices/portal/action';
@@ -119,20 +119,6 @@ expose('chat', useChatStore);
 // otherwise it destroys a message that was just saved (see utils/chunkError).
 if (typeof window !== 'undefined') {
   registerChunkReloadBlocker(() => hasChatWorkInFlight(useChatStore.getState()));
-
-  // Another tab wrote its queue. Mirror it instead of overwriting the other
-  // tab's entries on our next mutation.
-  window.addEventListener('storage', (event) => {
-    const change = readQueueStorageChange(event.key, event.newValue);
-    if (!change) return;
-
-    useChatStore.setState((state) => {
-      const queuedMessages = { ...state.queuedMessages };
-      if (change.messages.length > 0) queuedMessages[change.contextKey] = change.messages;
-      else delete queuedMessages[change.contextKey];
-      return { queuedMessages };
-    });
-  });
 }
 
 export const getChatStoreState = () => useChatStore.getState();
