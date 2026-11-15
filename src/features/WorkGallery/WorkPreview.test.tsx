@@ -37,12 +37,24 @@ describe('WorkPreview task status', () => {
     expect(queryByText('running')).toBeNull();
   });
 
-  it('keeps a status the work row carries itself as-is', () => {
-    const { getByText } = render(
-      <WorkPreview item={taskItem('running', 'Shipped')} title={'Daily learning'} />,
+  it('shows the live task status, not the stale snapshot on the work row', () => {
+    // The work row snapshots `task.status` when the card is registered
+    // (`running` mid-run); the task later moved on to `scheduled`.
+    const { getByText, queryByText } = render(
+      <WorkPreview item={taskItem('scheduled', 'running')} title={'Daily learning'} />,
     );
 
-    expect(getByText('Shipped')).toBeTruthy();
+    expect(getByText('chat:taskDetail.status.scheduled')).toBeTruthy();
+    expect(queryByText('running')).toBeNull();
+    expect(queryByText('chat:taskDetail.status.running')).toBeNull();
+  });
+
+  it('falls back to the work row status when the task status is missing', () => {
+    const { getByText } = render(
+      <WorkPreview item={taskItem(null, 'completed')} title={'Daily learning'} />,
+    );
+
+    expect(getByText('chat:taskDetail.status.completed')).toBeTruthy();
   });
 
   it('renders no status tag when the task has no status', () => {

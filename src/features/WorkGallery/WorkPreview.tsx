@@ -183,15 +183,17 @@ const WorkPreview = memo<WorkPreviewProps>(({ item, title }) => {
     item.resourceType === 'document' ? t('work.type.document') : displayIdentifier;
   const isGithub = item.resourceType.startsWith('github_');
   const isLinear = item.resourceType.startsWith('linear_');
-  const taskStatus = item.resourceType === 'task' ? item.task.status : null;
-  const status = item.status || taskStatus;
+  // For a task, `item.status` is only a snapshot of `task.status` taken when
+  // the card was registered (often `running`), while `item.task.status` is the
+  // live row. Prefer the live value so the card never shows a stale state.
+  const taskStatus = item.resourceType === 'task' ? item.task.status || item.status : null;
+  const status = item.resourceType === 'task' ? taskStatus : item.status;
   // A task's status is a raw enum (`running`, `completed`, …): show the same
   // label and glyph the task board uses instead of the bare value.
   const taskVisual = taskStatus ? TASK_STATUS_VISUALS[taskStatus as TaskStatus] : undefined;
-  const statusLabel =
-    taskStatus && status === taskStatus
-      ? t(`taskDetail.status.${taskStatus}` as any, { defaultValue: taskStatus, ns: 'chat' })
-      : status;
+  const statusLabel = taskStatus
+    ? t(`taskDetail.status.${taskStatus}` as any, { defaultValue: taskStatus, ns: 'chat' })
+    : status;
 
   return (
     <div className={styles.cover}>
