@@ -2,6 +2,11 @@ import { act, renderHook } from '@testing-library/react';
 import { produce } from 'immer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  addQueuedMessages,
+  readAllQueues,
+  readQueue,
+} from '@/store/chat/slices/operation/queueStorage';
 import { mergeQueuedMessages } from '@/store/chat/slices/operation/types';
 import { useChatStore } from '@/store/chat/store';
 
@@ -1651,5 +1656,81 @@ describe('markTopicUnread', () => {
       status: 'unread',
       topicId: 'topic-1',
     });
+  });
+});
+
+describe('Operation Actions — durable input queue', () => {
+  const queued = (id: string, createdAt = Date.now()) => ({
+    content: `content-${id}`,
+    createdAt,
+    id,
+    interruptMode: 'soft' as const,
+  });
+
+  beforeEach(() => {
+    localStorage.clear();
+    useChatStore.setState(useChatStore.getInitialState());
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it('writes an enqueue to storage for the next page load', () => {
+    act(() => {
+      useChatStore.getState().enqueueMessage('main_agt_tpc', queued('q1'));
+    });
+
+    expect(readQueue('main_agt_tpc').map((item) => item.id)).toEqual(['q1']);
+    expect(readAllQueues()).toEqual({
+      main_agt_tpc: [expect.objectContaining({ id: 'q1' })],
+    });
+  });
+
+  it('removes only the deleted entry from storage', () => {
+    addQueuedMessages('main_agt_tpc', [queued('q1'), queued('q2')]);
+    useChatStore.setState({
+      queuedMessages: { main_agt_tpc: [queued('q1'), queued('q2')] },
+    });
+
+    act(() => {
+      useChatStore.getState().removeQueuedMessage('main_agt_tpc', 'q1');
+    });
+
+    expect(readQueue('main_agt_tpc').map((item) => item.id)).toEqual(['q2']);
+  });
+
+  it('drain drops only the drained ids, so a concurrent tab keeps its own entry', () => {
+    addQueuedMessages('main_agt_tpc', [queued('q1'), queued('q2', Date.now() + 1)]);
+    useChatStore.setState({ queuedMessages: { main_agt_tpc: [queued('q1')] } });
+
+    act(() => {
+      useChatStore.getState().drainQueuedMessages('main_agt_tpc');
+    });
+
+    expect(readQueue('main_agt_tpc').map((item) => item.id)).toEqual(['q2']);
+  });
+
+  it('keepPersisted leaves the durable copy until the resend is persisted', () => {
+    addQueuedMessages('main_agt_tpc', [queued('q1')]);
+    useChatStore.setState({ queuedMessages: { main_agt_tpc: [queued('q1')] } });
+
+    act(() => {
+      useChatStore.getState().drainQueuedMessages('main_agt_tpc', { keepPersisted: true });
+    });
+
+    expect(readQueue('main_agt_tpc').map((item) => item.id)).toEqual(['q1']);
+  });
+
+  it('move carries the queue to the resolved topic bucket', () => {
+    addQueuedMessages('main_agt_new', [queued('q1')]);
+    useChatStore.setState({ queuedMessages: { main_agt_new: [queued('q1')] } });
+
+    act(() => {
+      useChatStore.getState().moveQueuedMessages('main_agt_new', 'main_agt_tpc');
+    });
+
+    expect(readQueue('main_agt_new')).toEqual([]);
+    expect(readQueue('main_agt_tpc').map((item) => item.id)).toEqual(['q1']);
   });
 });

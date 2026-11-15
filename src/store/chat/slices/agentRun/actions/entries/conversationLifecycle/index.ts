@@ -349,55 +349,6 @@ export class ConversationLifecycleActionImpl {
       : undefined;
     const agentId = directMentionRoute?.agent.id ?? ownerAgentId;
 
-    let agentState = getAgentStoreState();
-    let agentConfig = agentSelectors.getAgentConfigById(agentId)(agentState);
-    if (directMentionRoute && !agentConfig) {
-      const targetAgentConfig = await agentService.getAgentConfigById(agentId);
-      if (!targetAgentConfig) throw new Error(`Mentioned agent not found: ${agentId}`);
-
-      agentState.internal_dispatchAgentMap(agentId, targetAgentConfig);
-      agentState = getAgentStoreState();
-      agentConfig = agentSelectors.getAgentConfigById(agentId)(agentState);
-    }
-    const agent = agentByIdSelectors.getAgentById(agentId)(agentState);
-    const currentUserId = userProfileSelectors.userId(getUserStoreState());
-    const isAuthor = !!currentUserId && agent?.userId === currentUserId;
-    const usesWorkspaceMemberSelection =
-      !!agent?.workspaceId && agent.visibility !== 'private' && !isAuthor;
-    const deviceOverride = usesWorkspaceMemberSelection
-      ? getUserStoreState().workspaceUserPreference.agentDeviceOverrides?.[agentId]
-      : undefined;
-    const workspaceScoped = resolveWorkspaceScoped(usesWorkspaceMemberSelection, deviceOverride);
-    // Runtime selection must use the same per-user device override as the
-    // switcher. A workspace-local pick is intentionally private to this member
-    // and is therefore safe to execute in-process on their desktop.
-    const agencyConfig = resolveAgentAgencyConfig(agentConfig?.agencyConfig, deviceOverride, {
-      canManage: isAuthor,
-      visibility: agent?.visibility,
-      workspaceId: agent?.workspaceId,
-    });
-    const isGatewayMode = this.#get().isGatewayModeEnabled(agentId);
-    // Legacy agents may only carry `model: '<cli-type>'`. Keep gateway routing
-    // unchanged when it is available, but recover the provider before the
-    // desktop-only local fallback so both runtime selection and the executor
-    // receive the same heterogeneous identity.
-    const heterogeneousProvider =
-      agencyConfig?.heterogeneousProvider ??
-      (isDesktop && !isGatewayMode && isHeterogeneousAgentModelId(agentConfig?.model)
-        ? { type: agentConfig.model }
-        : undefined);
-    const runtimeType = selectRuntimeType({
-      boundDeviceId: agencyConfig?.boundDeviceId,
-      executionTarget: agencyConfig?.executionTarget,
-      heterogeneousProvider,
-      isGatewayMode,
-      isWorkspaceAgent: workspaceScoped,
-      // Callers that need to pin the runtime (e.g. task topics that were
-      // started server-side via runTask) pass `forceRuntime` to override
-      // the agent's local/cloud preference.
-      parentRuntime: forceRuntime,
-    });
-
     // ── Command Bus: extract and process built-in commands from editorData ──
     const commandOverrides: CommandSendOverrides = processCommands({
       message,
@@ -512,49 +463,19 @@ export class ConversationLifecycleActionImpl {
     };
 
     const fileIdList = files?.map((f) => f.id);
-    const isLocalSystemEnabled =
-      chatConfigByIdSelectors.isLocalSystemEnabledById(agentId)(getAgentStoreState());
-    const canMaterializeLocalFiles =
-      isDesktop &&
-      localFileReferences.length > 0 &&
-      !metadata?.localSystemToolSnapshots?.length &&
-      (!!heterogeneousProvider || isLocalSystemEnabled);
-    const localSystemToolSnapshots = canMaterializeLocalFiles
-      ? await materializeLocalSystemToolSnapshots(localFileReferences).catch((error) => {
-          onPreflightFailure?.();
-          throw error;
-        })
-      : [];
-    const userMessageMetadata =
-      metadata ||
-      contextSelections?.length ||
-      pageSelections?.length ||
-      localSystemToolSnapshots.length
+
+    // Queue first, before any await below. The composer is already cleared and
+    // its draft removed when Enter is pressed, so a reload during skill/file
+    // enrichment would otherwise lose a follow-up that was never written down.
+    // (Local-system snapshots are re-materialized when the queue drains.)
+    const baseUserMessageMetadata =
+      metadata || contextSelections?.length || pageSelections?.length
         ? {
             ...metadata,
             ...(contextSelections?.length ? { contextSelections } : undefined),
             ...(pageSelections?.length ? { pageSelections } : undefined),
-            ...(localSystemToolSnapshots.length ? { localSystemToolSnapshots } : undefined),
           }
         : undefined;
-
-    // Enrich selected skills/tools with preloaded content, injected directly
-    // via SelectedSkillInjector/SelectedToolInjector — no fake tool-call preload messages
-    const enrichedSelectedSkills = await resolveSelectedSkillsWithContent({
-      message,
-      selectedSkills,
-    }).catch((error) => {
-      onPreflightFailure?.();
-      throw error;
-    });
-    const enrichedSelectedTools = resolveSelectedToolsWithContent({
-      message,
-      selectedTools,
-    });
-    const requestTrigger = (metadata as Pick<MessageMetadata, 'trigger'> | undefined)?.trigger;
-    const requestMetadata = requestTrigger ? { trigger: requestTrigger } : undefined;
-
-    throwIfSendAborted(signal);
 
     const hasFile = !!fileIdList && fileIdList.length > 0;
 
@@ -564,7 +485,7 @@ export class ConversationLifecycleActionImpl {
       return;
     }
 
-    const newTopicTitle = markdownToTxt(message).slice(0, 80) || t('defaultTitle', { ns: 'topic' });
+    throwIfSendAborted(signal);
 
     // ━━━ Message Queue: enqueue if this context is already busy ━━━
     // Include the initial `sendMessage` persist/create-topic phase. Example:
@@ -654,7 +575,7 @@ export class ConversationLifecycleActionImpl {
           filesPreview: filesPreview.length > 0 ? filesPreview : undefined,
           ...(forceRuntime ? { forceRuntime } : {}),
           interruptMode: 'soft',
-          metadata: userMessageMetadata,
+          metadata: baseUserMessageMetadata,
           createdAt: Date.now(),
         },
         runningQueueBlockingOp.id,
@@ -691,9 +612,11 @@ export class ConversationLifecycleActionImpl {
         ...(forceRuntime ? { forceRuntime } : {}),
         id: nanoid(),
         interruptMode: 'soft',
-        metadata: userMessageMetadata,
+        metadata: baseUserMessageMetadata,
       });
-      const merged = mergeQueuedMessages(this.#get().drainQueuedMessages(orphanedQueueKey));
+      const drained = this.#get().drainQueuedMessages(orphanedQueueKey, { keepPersisted: true });
+      const merged = mergeQueuedMessages(drained);
+      const drainedIds = drained.map((message) => message.id);
       notifyMessageAccepted();
 
       setTimeout(() => {
@@ -710,6 +633,8 @@ export class ConversationLifecycleActionImpl {
             ...(merged.forceRuntime ? { forceRuntime: merged.forceRuntime } : {}),
             message: merged.content,
             metadata: merged.metadata,
+            onMessagePersisted: () =>
+              drainedIds.forEach((id) => this.#get().removeQueuedMessage(orphanedQueueKey, id)),
           })
           .catch((error: unknown) => {
             console.error('[sendMessage] restarting queued content after Stop failed:', error);
@@ -718,6 +643,99 @@ export class ConversationLifecycleActionImpl {
 
       return;
     }
+
+    // Resolve agent/runtime only after the queue check above: this block may
+    // await a mentioned agent's config, and nothing queued should wait on a
+    // network round-trip to become durable.
+    let agentState = getAgentStoreState();
+    let agentConfig = agentSelectors.getAgentConfigById(agentId)(agentState);
+    if (directMentionRoute && !agentConfig) {
+      const targetAgentConfig = await agentService.getAgentConfigById(agentId);
+      if (!targetAgentConfig) throw new Error(`Mentioned agent not found: ${agentId}`);
+
+      agentState.internal_dispatchAgentMap(agentId, targetAgentConfig);
+      agentState = getAgentStoreState();
+      agentConfig = agentSelectors.getAgentConfigById(agentId)(agentState);
+    }
+    const agent = agentByIdSelectors.getAgentById(agentId)(agentState);
+    const currentUserId = userProfileSelectors.userId(getUserStoreState());
+    const isAuthor = !!currentUserId && agent?.userId === currentUserId;
+    const usesWorkspaceMemberSelection =
+      !!agent?.workspaceId && agent.visibility !== 'private' && !isAuthor;
+    const deviceOverride = usesWorkspaceMemberSelection
+      ? getUserStoreState().workspaceUserPreference.agentDeviceOverrides?.[agentId]
+      : undefined;
+    const workspaceScoped = resolveWorkspaceScoped(usesWorkspaceMemberSelection, deviceOverride);
+    // Runtime selection must use the same per-user device override as the
+    // switcher. A workspace-local pick is intentionally private to this member
+    // and is therefore safe to execute in-process on their desktop.
+    const agencyConfig = resolveAgentAgencyConfig(agentConfig?.agencyConfig, deviceOverride, {
+      canManage: isAuthor,
+      visibility: agent?.visibility,
+      workspaceId: agent?.workspaceId,
+    });
+    const isGatewayMode = this.#get().isGatewayModeEnabled(agentId);
+    // Legacy agents may only carry `model: '<cli-type>'`. Keep gateway routing
+    // unchanged when it is available, but recover the provider before the
+    // desktop-only local fallback so both runtime selection and the executor
+    // receive the same heterogeneous identity.
+    const heterogeneousProvider =
+      agencyConfig?.heterogeneousProvider ??
+      (isDesktop && !isGatewayMode && isHeterogeneousAgentModelId(agentConfig?.model)
+        ? { type: agentConfig.model }
+        : undefined);
+    const runtimeType = selectRuntimeType({
+      boundDeviceId: agencyConfig?.boundDeviceId,
+      executionTarget: agencyConfig?.executionTarget,
+      heterogeneousProvider,
+      isGatewayMode,
+      isWorkspaceAgent: workspaceScoped,
+      // Callers that need to pin the runtime (e.g. task topics that were
+      // started server-side via runTask) pass `forceRuntime` to override
+      // the agent's local/cloud preference.
+      parentRuntime: forceRuntime,
+    });
+
+    const isLocalSystemEnabled =
+      chatConfigByIdSelectors.isLocalSystemEnabledById(agentId)(getAgentStoreState());
+    const canMaterializeLocalFiles =
+      isDesktop &&
+      localFileReferences.length > 0 &&
+      !metadata?.localSystemToolSnapshots?.length &&
+      (!!heterogeneousProvider || isLocalSystemEnabled);
+    const localSystemToolSnapshots = canMaterializeLocalFiles
+      ? await materializeLocalSystemToolSnapshots(localFileReferences).catch((error) => {
+          onPreflightFailure?.();
+          throw error;
+        })
+      : [];
+    const userMessageMetadata =
+      baseUserMessageMetadata || localSystemToolSnapshots.length
+        ? {
+            ...baseUserMessageMetadata,
+            ...(localSystemToolSnapshots.length ? { localSystemToolSnapshots } : undefined),
+          }
+        : undefined;
+
+    // Enrich selected skills/tools with preloaded content, injected directly
+    // via SelectedSkillInjector/SelectedToolInjector — no fake tool-call preload messages
+    const enrichedSelectedSkills = await resolveSelectedSkillsWithContent({
+      message,
+      selectedSkills,
+    }).catch((error) => {
+      onPreflightFailure?.();
+      throw error;
+    });
+    const enrichedSelectedTools = resolveSelectedToolsWithContent({
+      message,
+      selectedTools,
+    });
+    const requestTrigger = (metadata as Pick<MessageMetadata, 'trigger'> | undefined)?.trigger;
+    const requestMetadata = requestTrigger ? { trigger: requestTrigger } : undefined;
+
+    throwIfSendAborted(signal);
+
+    const newTopicTitle = markdownToTxt(message).slice(0, 80) || t('defaultTitle', { ns: 'topic' });
 
     const replaceableGatewayOperationId = queueCandidateKeys
       .flatMap((key) => this.#get().operationsByContext[key] || [])

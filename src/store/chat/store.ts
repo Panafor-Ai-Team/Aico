@@ -23,6 +23,7 @@ import { type ChatMessageAction } from './slices/message/actions';
 import { chatMessage } from './slices/message/actions';
 import { type OperationActions } from './slices/operation/actions';
 import { OperationActionsImpl } from './slices/operation/actions';
+import { readAllQueues, readQueueStorageChange } from './slices/operation/queueStorage';
 import { type ChatPluginAction } from './slices/plugin/actions';
 import { chatPlugin } from './slices/plugin/actions';
 import { type ChatPortalAction } from './slices/portal/action';
@@ -107,12 +108,31 @@ export const useChatStore = createWithEqualityFn<ChatStore>()(
   shallow,
 );
 
+// Restore follow-ups queued before the reload. Kept OUTSIDE `createStore` so
+// `getInitialState()` stays empty: a store reset (sign-out / account switch)
+// must not resurrect the previous account's text.
+useChatStore.setState({ queuedMessages: readAllQueues() }, false, 'hydrateQueuedMessages');
+
 expose('chat', useChatStore);
 
 // A stale-chunk auto-reload must wait until the send / reply in flight settles,
 // otherwise it destroys a message that was just saved (see utils/chunkError).
 if (typeof window !== 'undefined') {
   registerChunkReloadBlocker(() => hasChatWorkInFlight(useChatStore.getState()));
+
+  // Another tab wrote its queue. Mirror it instead of overwriting the other
+  // tab's entries on our next mutation.
+  window.addEventListener('storage', (event) => {
+    const change = readQueueStorageChange(event.key, event.newValue);
+    if (!change) return;
+
+    useChatStore.setState((state) => {
+      const queuedMessages = { ...state.queuedMessages };
+      if (change.messages.length > 0) queuedMessages[change.contextKey] = change.messages;
+      else delete queuedMessages[change.contextKey];
+      return { queuedMessages };
+    });
+  });
 }
 
 export const getChatStoreState = () => useChatStore.getState();
