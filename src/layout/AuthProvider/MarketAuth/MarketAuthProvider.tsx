@@ -14,6 +14,7 @@ import { serverConfigSelectors } from '@/store/serverConfig/selectors';
 import { useUserStore } from '@/store/user';
 import { settingsSelectors } from '@/store/user/slices/settings/selectors/settings';
 
+import { getMarketBaseUrl } from './baseUrl';
 import ClaimResourcesModal from './ClaimResourcesModal';
 import { MarketAuthError } from './errors';
 import { marketAuthEvents } from './events';
@@ -169,7 +170,7 @@ export const MarketAuthProvider = ({ children, isDesktop }: MarketAuthProviderPr
   // Initialize OIDC client (client-side only)
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const baseUrl = process.env.NEXT_PUBLIC_MARKET_BASE_URL || 'https://market.lobehub.com';
+      const baseUrl = getMarketBaseUrl();
       const desktopRedirectUri = new URL(MARKET_OIDC_ENDPOINTS.desktopCallback, baseUrl).toString();
 
       // Desktop uses Market's manually maintained Web callback; Web uses the current domain

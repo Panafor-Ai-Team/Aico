@@ -91,6 +91,7 @@ Edit **both** files. Required:
 - `CHEAPVIBECODE_MANAGEMENT_API_KEY` in the control-plane env only, never in the product app container
 - Rotate `AUTH_SECRET`, `KEY_VAULTS_SECRET`, `POSTGRES_PASSWORD`, `RUSTFS_SECRET_KEY`, `JWKS_KEY`, `AICO_CONTROL_PLANE_SERVICE_TOKEN` (do not keep example values)
 - Browser-reachable `S3_ENDPOINT` (not `http://rustfs:9000`). One-level host only: `https://s3.panafor.com` → `127.0.0.1:9000` (never `s3.chat.*`)
+- `MARKET_BASE_URL=https://market.<host>` when a self-hosted Market runs. Unset means every Market call — settings → Credential, skill store, agent market — goes to upstream `market.lobehub.com`. Runtime value, container restart is enough
 
 Infra file (`docker-compose/deploy/.env`) should keep:
 
