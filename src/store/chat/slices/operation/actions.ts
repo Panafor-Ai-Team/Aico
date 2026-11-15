@@ -11,6 +11,13 @@ import { type StoreSetter } from '@/store/types';
 import { setNamespace } from '@/utils/storeDebug';
 
 import {
+  addQueuedMessages,
+  readQueue,
+  removeQueue,
+  removeQueuedMessageIds,
+  unionQueuedMessages,
+} from './queueStorage';
+import {
   type AfterCompletionCallback,
   AI_RUNTIME_OPERATION_TYPES,
   type Operation,
@@ -823,6 +830,10 @@ export class OperationActionsImpl {
       false,
       n(`enqueueMessage/${contextKey}`),
     );
+    // Persist the whole in-memory queue, not just the new row: a previous write
+    // can lose a read-modify-write race with another tab, and a reload right
+    // after would drop this tab's memory-only entries.
+    addQueuedMessages(contextKey, this.#get().queuedMessages[contextKey] ?? [message]);
 
     // Hard interrupt: cancel the running operation
     if (message.interruptMode === 'hard' && runningOperationId) {
@@ -836,8 +847,15 @@ export class OperationActionsImpl {
 
   /**
    * Drain all queued messages for a context (atomic take-all).
+   *
+   * `keepPersisted` keeps the durable copy in place while the drained content
+   * is being re-sent: if the tab dies before the user message is persisted, the
+   * queue survives the reload instead of disappearing between the two steps.
    */
-  drainQueuedMessages = (contextKey: string): QueuedMessage[] => {
+  drainQueuedMessages = (
+    contextKey: string,
+    options: { keepPersisted?: boolean } = {},
+  ): QueuedMessage[] => {
     const queue = this.#get().queuedMessages[contextKey];
     if (!queue || queue.length === 0) return [];
 
@@ -850,6 +868,13 @@ export class OperationActionsImpl {
       false,
       n(`drainQueuedMessages/${contextKey}`),
     );
+    // Id-based removal also protects entries another tab added after our read.
+    if (!options.keepPersisted) {
+      removeQueuedMessageIds(
+        contextKey,
+        messages.map((message) => message.id),
+      );
+    }
 
     log('[drainQueuedMessages] contextKey=%s, drained %d', contextKey, messages.length);
     return messages;
@@ -858,21 +883,28 @@ export class OperationActionsImpl {
   moveQueuedMessages = (fromContextKey: string, toContextKey: string): void => {
     if (fromContextKey === toContextKey) return;
 
-    const queue = this.#get().queuedMessages[fromContextKey];
-    if (!queue || queue.length === 0) return;
+    // Union with storage: another tab may have queued into the old key after
+    // this tab last rendered, and dropping those rows would lose real input.
+    const queue = unionQueuedMessages(
+      this.#get().queuedMessages[fromContextKey] ?? [],
+      readQueue(fromContextKey),
+    );
+    if (queue.length === 0) return;
 
     this.#set(
       produce((state: ChatStore) => {
-        const fromQueue = state.queuedMessages[fromContextKey];
-        if (!fromQueue || fromQueue.length === 0) return;
-
-        const toQueue = state.queuedMessages[toContextKey] ?? [];
-        state.queuedMessages[toContextKey] = [...toQueue, ...fromQueue];
+        const toQueue = unionQueuedMessages(state.queuedMessages[toContextKey] ?? [], queue);
+        state.queuedMessages[toContextKey] = toQueue;
         state.queuedMessages[fromContextKey] = [];
       }),
       false,
       n(`moveQueuedMessages/${fromContextKey}/${toContextKey}`),
     );
+    removeQueuedMessageIds(
+      fromContextKey,
+      queue.map((message) => message.id),
+    );
+    addQueuedMessages(toContextKey, this.#get().queuedMessages[toContextKey] ?? []);
 
     log(
       '[moveQueuedMessages] fromContextKey=%s, toContextKey=%s, moved %d',
@@ -893,6 +925,7 @@ export class OperationActionsImpl {
       false,
       n(`removeQueuedMessage/${contextKey}/${messageId}`),
     );
+    removeQueuedMessageIds(contextKey, [messageId]);
   };
 
   clearMessageQueue = (contextKey: string): void => {
@@ -903,6 +936,7 @@ export class OperationActionsImpl {
       false,
       n(`clearMessageQueue/${contextKey}`),
     );
+    removeQueue(contextKey);
   };
 }
 

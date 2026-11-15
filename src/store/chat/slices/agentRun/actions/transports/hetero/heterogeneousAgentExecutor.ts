@@ -2388,8 +2388,10 @@ export const executeHeterogeneousAgent = async (
       isCompletedRuntimeEnd((terminalEvent?.data as { reason?: string } | undefined)?.reason);
     if (!isAborted() && drainableTerminal) {
       const contextKey = messageMapKey(context);
-      const remainingQueued = get().drainQueuedMessages?.(contextKey) ?? [];
+      const remainingQueued =
+        get().drainQueuedMessages?.(contextKey, { keepPersisted: true }) ?? [];
       if (remainingQueued.length > 0) {
+        const drainedIds = remainingQueued.map((message) => message.id);
         // Force-complete this op + mark unread BEFORE the next sendMessage,
         // otherwise its queue check (covering all AI_RUNTIME_OPERATION_TYPES)
         // would still see this op as "running" and re-queue the merged content
@@ -2422,6 +2424,8 @@ export const executeHeterogeneousAgent = async (
               ...(merged.forceRuntime ? { forceRuntime: merged.forceRuntime } : {}),
               message: merged.content,
               metadata: merged.metadata,
+              onMessagePersisted: () =>
+                drainedIds.forEach((id) => get().removeQueuedMessage(contextKey, id)),
             })
             .catch((e: unknown) => {
               console.error(

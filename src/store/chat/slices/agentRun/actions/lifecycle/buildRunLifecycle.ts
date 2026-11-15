@@ -398,9 +398,10 @@ export const buildRunLifecycle = (
       //    run, so a nested sub-agent completion must never drain it (it would
       //    re-trigger the user's queued message mid-parent-run). See RunScope.
       if (disposition === 'success' && adapter.runScope !== 'sub_agent') {
-        const remainingQueued = get().drainQueuedMessages(contextKey);
+        const remainingQueued = get().drainQueuedMessages(contextKey, { keepPersisted: true });
         if (remainingQueued.length > 0) {
           const merged = mergeQueuedMessages(remainingQueued);
+          const drainedIds = remainingQueued.map((message) => message.id);
 
           completeSuccess();
           emitComplete(operationId, runtimeStatus);
@@ -428,6 +429,13 @@ export const buildRunLifecycle = (
                 ...(merged.forceRuntime ? { forceRuntime: merged.forceRuntime } : {}),
                 message: mergedContent,
                 metadata: merged.metadata,
+                // The durable queue copy is the safety net for the window
+                // between drain and persist: only drop it once the user message
+                // is really stored. `removeQueuedMessage` also clears the
+                // in-memory row, which a concurrent tab's storage write may
+                // have re-added to the tray while this resend was in flight.
+                onMessagePersisted: () =>
+                  drainedIds.forEach((id) => get().removeQueuedMessage(contextKey, id)),
               })
               .catch((e: unknown) => {
                 console.error('[executeClientAgent] sendMessage for queued content failed:', e);

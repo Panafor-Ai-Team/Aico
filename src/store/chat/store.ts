@@ -23,6 +23,7 @@ import { type ChatMessageAction } from './slices/message/actions';
 import { chatMessage } from './slices/message/actions';
 import { type OperationActions } from './slices/operation/actions';
 import { OperationActionsImpl } from './slices/operation/actions';
+import { readAllQueues } from './slices/operation/queueStorage';
 import { type ChatPluginAction } from './slices/plugin/actions';
 import { chatPlugin } from './slices/plugin/actions';
 import { type ChatPortalAction } from './slices/portal/action';
@@ -106,6 +107,11 @@ export const useChatStore = createWithEqualityFn<ChatStore>()(
   subscribeWithSelector(devtools(createStore)),
   shallow,
 );
+
+// Restore follow-ups queued before the reload. Kept OUTSIDE `createStore` so
+// `getInitialState()` stays empty: a store reset (sign-out / account switch)
+// must not resurrect the previous account's text.
+useChatStore.setState({ queuedMessages: readAllQueues() }, false, 'hydrateQueuedMessages');
 
 expose('chat', useChatStore);
 

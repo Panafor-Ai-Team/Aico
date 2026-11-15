@@ -12,11 +12,11 @@ const IN_FLIGHT_OPERATION_TYPES = new Set<OperationType>([
 
 /**
  * Whether reloading the page now would lose chat work: a message being saved,
- * a reply running, a voice upload, or follow-ups still waiting in a queue.
+ * a reply running, or a voice upload. Follow-ups waiting in the queue are
+ * persisted to localStorage (slices/operation/queueStorage), so a reload
+ * restores them and must not pin the tab on stale chunks forever.
  */
-export const hasChatWorkInFlight = (
-  state: Pick<ChatStoreState, 'operations' | 'queuedMessages'>,
-): boolean =>
+export const hasChatWorkInFlight = (state: Pick<ChatStoreState, 'operations'>): boolean =>
   Object.values(state.operations).some(
     (operation) => operation.status === 'running' && IN_FLIGHT_OPERATION_TYPES.has(operation.type),
-  ) || Object.values(state.queuedMessages).some((queue) => queue.length > 0);
+  );

@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Operation, QueuedMessage } from '../slices/operation/types';
+import type { Operation } from '../slices/operation/types';
 import { hasChatWorkInFlight } from './chatWorkInFlight';
 
 const op = (type: Operation['type'], status: Operation['status']) =>
   ({ id: `${type}-${status}`, status, type }) as Operation;
 
-const state = (operations: Operation[], queuedMessages: Record<string, QueuedMessage[]> = {}) => ({
+const state = (operations: Operation[]) => ({
   operations: Object.fromEntries(operations.map((item) => [item.id, item])),
-  queuedMessages,
 });
 
 describe('hasChatWorkInFlight', () => {
@@ -25,10 +24,10 @@ describe('hasChatWorkInFlight', () => {
     expect(hasChatWorkInFlight(state([op('execAgentRuntime', 'running')]))).toBe(true);
   });
 
-  it('is true while follow-ups wait in a queue', () => {
-    expect(hasChatWorkInFlight(state([], { main_agt_tpc: [{ id: 'q1' } as QueuedMessage] }))).toBe(
-      true,
-    );
+  it('does not count a persisted queue as in-flight work', () => {
+    // Queues survive a reload via localStorage, so blocking the stale-chunk
+    // reload on them would leave the tab on a broken chunk forever.
+    expect(hasChatWorkInFlight(state([op('sendMessage', 'completed')]))).toBe(false);
   });
 
   it('ignores running operations unrelated to sending', () => {
