@@ -1,11 +1,22 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { parseInternalLink } from './internalLink';
+
+// The official hosts come from APP_URL / BRANDING_SITE_URL (Aico rebrand), so the
+// test env would otherwise resolve both to localhost. Pin two distinct hosts so
+// the app-host vs. marketing-site cases stay meaningful.
+vi.mock('@lobechat/const', async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  OFFICIAL_SITE: 'https://official.test',
+  OFFICIAL_URL: 'https://app.official.test',
+}));
 
 describe('parseInternalLink', () => {
   it('parses official agent document links', () => {
     expect(
-      parseInternalLink('https://app.lobehub.com/agent/agt_agent/docs/document?mode=preview#title'),
+      parseInternalLink(
+        'https://app.official.test/agent/agt_agent/docs/document?mode=preview#title',
+      ),
     ).toEqual({
       agentId: 'agt_agent',
       documentId: 'docs_document',
@@ -23,7 +34,7 @@ describe('parseInternalLink', () => {
   });
 
   it('parses global and agent-scoped tasks', () => {
-    expect(parseInternalLink('https://app.lobehub.com/task/T-198')).toEqual({
+    expect(parseInternalLink('https://app.official.test/task/T-198')).toEqual({
       pathname: '/task/T-198',
       taskId: 'T-198',
       type: 'task',
@@ -37,7 +48,7 @@ describe('parseInternalLink', () => {
   });
 
   it('parses verification report links', () => {
-    expect(parseInternalLink('https://app.lobehub.com/verify/run-1')).toEqual({
+    expect(parseInternalLink('https://app.official.test/verify/run-1')).toEqual({
       pathname: '/verify/run-1',
       runId: 'run-1',
       type: 'verify',
@@ -51,7 +62,7 @@ describe('parseInternalLink', () => {
   });
 
   it('parses acceptance links as dedicated entities', () => {
-    expect(parseInternalLink('https://app.lobehub.com/acceptance/acceptance-1')).toEqual({
+    expect(parseInternalLink('https://app.official.test/acceptance/acceptance-1')).toEqual({
       acceptanceId: 'acceptance-1',
       pathname: '/acceptance/acceptance-1',
       type: 'acceptance',
@@ -65,7 +76,10 @@ describe('parseInternalLink', () => {
       workspaceSlug: 'lobe-team',
     });
     expect(
-      parseInternalLink('https://lobehub.com/acceptance/acceptance-3', 'https://app.lobehub.com'),
+      parseInternalLink(
+        'https://official.test/acceptance/acceptance-3',
+        'https://app.official.test',
+      ),
     ).toEqual({
       acceptanceId: 'acceptance-3',
       pathname: '/acceptance/acceptance-3',
@@ -94,18 +108,18 @@ describe('parseInternalLink', () => {
       type: 'task',
     });
     expect(
-      parseInternalLink('https://app.lobehub.com/task/T-200', 'https://chat.example.com'),
+      parseInternalLink('https://app.official.test/task/T-200', 'https://chat.example.com'),
     ).toBeNull();
   });
 
   it('accepts official links from the Electron renderer origin', () => {
-    expect(parseInternalLink('https://app.lobehub.com/task/T-201', 'app://renderer')).toEqual({
+    expect(parseInternalLink('https://app.official.test/task/T-201', 'app://renderer')).toEqual({
       pathname: '/task/T-201',
       taskId: 'T-201',
       type: 'task',
     });
     expect(
-      parseInternalLink('https://lobehub.com/acceptance/acceptance-4', 'app://renderer'),
+      parseInternalLink('https://official.test/acceptance/acceptance-4', 'app://renderer'),
     ).toEqual({
       acceptanceId: 'acceptance-4',
       pathname: '/acceptance/acceptance-4',
@@ -119,6 +133,12 @@ describe('parseInternalLink', () => {
       type: 'route',
       workspaceSlug: 'lobe-team',
     });
+  });
+
+  it('treats LobeHub cloud hosts as external when they are not the configured official hosts', () => {
+    expect(parseInternalLink('https://app.lobehub.com/task/T-202')).toBeNull();
+    expect(parseInternalLink('https://lobehub.com/acceptance/acceptance-5')).toBeNull();
+    expect(parseInternalLink('https://app.lobehub.com/task/T-202', 'app://renderer')).toBeNull();
   });
 
   it('rejects external hosts even when their path resembles an app route', () => {
@@ -148,7 +168,7 @@ describe('parseInternalLink', () => {
       pathname: '/agent/inbox',
       type: 'route',
     });
-    expect(parseInternalLink('https://app.lobehub.com/settings/profile')).toEqual({
+    expect(parseInternalLink('https://app.official.test/settings/profile')).toEqual({
       pathname: '/settings/profile',
       type: 'route',
     });
@@ -157,7 +177,7 @@ describe('parseInternalLink', () => {
   it('leaves same-origin backend and framework links to the browser', () => {
     expect(parseInternalLink('/api/agent/stream?operationId=op_1')).toBeNull();
     expect(parseInternalLink('/f/generated-file-id')).toBeNull();
-    expect(parseInternalLink('https://app.lobehub.com/f/generated-file-id')).toBeNull();
+    expect(parseInternalLink('https://app.official.test/f/generated-file-id')).toBeNull();
     expect(parseInternalLink('/trpc/lambda')).toBeNull();
     expect(parseInternalLink('/webapi/chat')).toBeNull();
     expect(parseInternalLink('/_next/static/chunks/app.js')).toBeNull();
