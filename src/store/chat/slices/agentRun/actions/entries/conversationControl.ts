@@ -37,6 +37,11 @@ import { type ToolApprovalScope } from '../state/toolApproval';
  */
 
 type Setter = StoreSetter<ChatStore>;
+
+// Tool message ids whose approval is being resumed. Module scope: every store
+// instance and every caller (approval card, auto-resolver) shares it.
+const approvalsInFlight = new Set<string>();
+
 export const conversationControl = (set: Setter, get: () => ChatStore, _api?: unknown) =>
   new ConversationControlActionImpl(set, get, _api);
 
@@ -372,7 +377,30 @@ export class ConversationControlActionImpl {
     return !!op && op.status !== 'running';
   };
 
+  /**
+   * One approval resumes one run. A second approval of a tool whose approval is
+   * still in flight is dropped: the manual approve records the request grant
+   * before the tool row reads as approved, which wakes
+   * PendingApprovalAutoResolver to approve the very same tool, and each
+   * approval would otherwise start its own run continuing the same turn.
+   */
   approveToolCalling = async (
+    toolMessageId: string,
+    assistantGroupId: string,
+    context?: ConversationContext,
+    options?: { scope?: ToolApprovalScope },
+  ): Promise<void> => {
+    if (approvalsInFlight.has(toolMessageId)) return;
+
+    approvalsInFlight.add(toolMessageId);
+    try {
+      await this.#approveToolCallingOnce(toolMessageId, assistantGroupId, context, options);
+    } finally {
+      approvalsInFlight.delete(toolMessageId);
+    }
+  };
+
+  #approveToolCallingOnce = async (
     toolMessageId: string,
     _assistantGroupId: string,
     context?: ConversationContext,
