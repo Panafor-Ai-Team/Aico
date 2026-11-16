@@ -69,18 +69,31 @@ describe('wrapCodeMirrorDecorator', () => {
     const stock = vi.fn(() => 'stock-block');
     const { kernel } = createKernel(stock);
 
-    expect(wrapCodeMirrorDecorator(kernel, (node, rendered) => ({ node, rendered }))).toBe(true);
+    expect(
+      wrapCodeMirrorDecorator(
+        kernel,
+        (node, rendered) => `${(node as unknown as { getKey: () => string }).getKey()}:${rendered}`,
+      ),
+    ).toBe(true);
 
     const node = codeNode('1', 'a');
-    expect(callDecorator(kernel, node)).toEqual({ node, rendered: 'stock-block' });
+    expect(callDecorator(kernel, node)).toBe('1:stock-block');
     expect(stock).toHaveBeenCalledWith(node, {});
   });
 
-  it('supports object-style decorators ({ render })', () => {
-    const { kernel } = createKernel({ render: () => 'rendered' });
+  it('keeps object-style decorators as objects, preserving queryDOM', () => {
+    const queryDOM = (element: HTMLElement) => element;
+    const { kernel } = createKernel({ queryDOM, render: () => 'rendered' });
     wrapCodeMirrorDecorator(kernel, (_node, rendered) => `wrapped:${rendered}`);
 
-    expect(callDecorator(kernel, codeNode('1', 'a'))).toBe('wrapped:rendered');
+    const decorator = kernel.getDecorator(CODEMIRROR_DECORATOR) as Exclude<
+      Decorator,
+      DecoratorFunc
+    >;
+    expect(decorator.queryDOM).toBe(queryDOM);
+    expect(
+      decorator.render(codeNode('1', 'a') as unknown as LexicalNode, {} as LexicalEditor),
+    ).toBe('wrapped:rendered');
   });
 
   it('wraps only once and is a no-op without the code-block plugin', () => {

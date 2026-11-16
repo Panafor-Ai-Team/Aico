@@ -8,7 +8,9 @@ export const CODEMIRROR_DECORATOR = 'codemirror';
 export const LANGUAGE_SELECT_SELECTOR = '.cm-language-select';
 
 export type DecoratorFunc = (node: LexicalNode, editor: LexicalEditor) => ReactNode;
-export type Decorator = DecoratorFunc | { render: DecoratorFunc };
+/** Mirrors @lobehub/editor's `IDecorator` (function, or object with a DOM query hook). */
+export type Decorator =
+  DecoratorFunc | { queryDOM: (element: HTMLElement) => HTMLElement; render: DecoratorFunc };
 
 /** The subset of the @lobehub/editor kernel plugin API the lock relies on. */
 export interface DecoratorKernel {
@@ -59,12 +61,14 @@ export const wrapCodeMirrorDecorator = (
   const original = kernel.getDecorator(CODEMIRROR_DECORATOR);
   if (!original || (original as { [WRAPPED]?: true })[WRAPPED]) return false;
 
-  const render: DecoratorFunc =
-    typeof original === 'function' ? original : (node, editor) => original.render(node, editor);
-
-  const wrapped: DecoratorFunc & { [WRAPPED]?: true } = (node, editor) =>
-    wrap(node, render(node, editor));
-  wrapped[WRAPPED] = true;
+  let wrapped: Decorator;
+  if (typeof original === 'function') {
+    wrapped = (node, editor) => wrap(node, original(node, editor));
+  } else {
+    // Keep the object form (and its `queryDOM`); only the rendered output changes.
+    wrapped = { ...original, render: (node, editor) => wrap(node, original.render(node, editor)) };
+  }
+  (wrapped as { [WRAPPED]?: true })[WRAPPED] = true;
 
   kernel.unregisterDecorator(CODEMIRROR_DECORATOR);
   kernel.registerDecorator(CODEMIRROR_DECORATOR, wrapped);
