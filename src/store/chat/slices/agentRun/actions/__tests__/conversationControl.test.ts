@@ -595,7 +595,9 @@ describe('ConversationControl actions', () => {
       const finishRun = () => pendingRuns.splice(0).forEach((resolve) => resolve());
       const executeClientAgent = vi
         .spyOn(result.current, 'executeClientAgent')
-        .mockImplementation(() => new Promise<any>((resolve) => pendingRuns.push(resolve)));
+        .mockImplementation(
+          () => new Promise<any>((resolve) => pendingRuns.push(() => resolve(undefined))),
+        );
 
       let first!: Promise<void>;
       let second!: Promise<void>;
