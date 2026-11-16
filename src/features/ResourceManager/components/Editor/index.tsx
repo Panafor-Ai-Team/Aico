@@ -61,7 +61,7 @@ const openFileDetailModal = () =>
   });
 
 const FileEditorCanvas = memo<FileEditorProps>(({ onBack }) => {
-  const { t, i18n } = useTranslation(['common', 'file']);
+  const { t } = useTranslation(['common', 'file']);
   const theme = useTheme();
 
   const currentViewItemId = useResourceManagerStore((s) => s.currentViewItemId);
@@ -84,8 +84,7 @@ const FileEditorCanvas = memo<FileEditorProps>(({ onBack }) => {
             >
               <ActionIcon
                 icon={ArrowLeftIcon}
-                // "Back" points toward the start of the line: right in RTL.
-                style={i18n.dir() === 'rtl' ? { transform: 'scaleX(-1)' } : undefined}
+                // RTL mirroring comes from the global lucide arrow rule (src/styles/global.ts).
                 title={t('back')}
                 onClick={onBack}
               />
