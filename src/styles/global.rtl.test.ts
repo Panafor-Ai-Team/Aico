@@ -37,6 +37,14 @@ describe('global RTL control fixes', () => {
     );
   });
 
+  it('mirrors every lucide panel icon under RTL by its svg class', () => {
+    // One global rule covers every PanelLeft*/PanelRight* (and Sidebar* alias)
+    // use site, so new panel toggles cannot regress to LTR arrows.
+    expect(source).toContain("svg[class*='lucide-panel-left']:dir(rtl)");
+    expect(source).toContain("svg[class*='lucide-panel-right']:dir(rtl)");
+    expect(source).toMatch(/lucide-panel-right'\]:dir\(rtl\)\s*\{\s*transform:\s*scaleX\(-1\);/);
+  });
+
   it('does not rely on approaches that cannot work for absolutely positioned indicators', () => {
     // `direction: ltr` on the indicator itself is ignored: logical insets map
     // through the containing block's direction.

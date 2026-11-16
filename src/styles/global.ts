@@ -117,6 +117,22 @@ const genGlobalStyle = ({ token }: { prefixCls: string; token: Theme }) => css`
   html[dir='rtl'] [data-orientation='horizontal'] > [aria-hidden='true']:first-of-type {
     inset-inline-start: calc(100% - var(--active-item-left) - var(--active-item-width));
   }
+
+  /*
+   * RTL: lucide panel icons (PanelLeft*, PanelRight*, and their Sidebar*
+   * aliases) are LTR artwork — the bar marks which side the panel docks to and
+   * the arrowhead the way it opens/closes. Under RTL every panel layout is
+   * mirrored (flex + logical insets), so mirror the icons with it. lucide-react
+   * stamps each <svg> with a stable \`lucide-<icon-name>\` class, which keeps
+   * this one rule in charge of every current and future use site.
+   *
+   * Match on the svg's own direction (not an ancestor's) so an explicit LTR
+   * island inside an RTL page keeps the original artwork.
+   */
+  svg[class*='lucide-panel-left']:dir(rtl),
+  svg[class*='lucide-panel-right']:dir(rtl) {
+    transform: scaleX(-1);
+  }
 `;
 
 export default genGlobalStyle;
