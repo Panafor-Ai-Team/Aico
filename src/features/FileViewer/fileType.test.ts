@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isPdfFile } from './fileType';
+import { isMarkdownFile, isPdfFile } from './fileType';
 
 describe('isPdfFile', () => {
   it('detects PDF files by MIME type', () => {
@@ -49,5 +49,28 @@ describe('isPdfFile', () => {
     expect(isPdfFile({ path: '/tmp/notes.txt' })).toBe(false);
     expect(isPdfFile({ fileType: 'custom/document' })).toBe(false);
     expect(isPdfFile({})).toBe(false);
+  });
+});
+
+describe('isMarkdownFile', () => {
+  it('detects Markdown by MIME type', () => {
+    expect(isMarkdownFile({ fileType: 'text/markdown' })).toBe(true);
+    expect(isMarkdownFile({ fileType: 'text/x-markdown' })).toBe(true);
+    expect(isMarkdownFile({ fileType: 'text/markdown; charset=utf-8' })).toBe(true);
+    expect(isMarkdownFile({ fileType: 'markdown' })).toBe(true);
+  });
+
+  it('detects Markdown by extension when the MIME type is generic', () => {
+    expect(isMarkdownFile({ fileName: 'report.md', fileType: 'application/octet-stream' })).toBe(
+      true,
+    );
+    expect(isMarkdownFile({ fileName: 'README.MARKDOWN' })).toBe(true);
+    expect(isMarkdownFile({ fileName: 'page.mdx', fileType: '' })).toBe(true);
+  });
+
+  it('rejects other files', () => {
+    expect(isMarkdownFile({ fileName: 'notes.txt', fileType: 'text/plain' })).toBe(false);
+    expect(isMarkdownFile({ fileName: 'readme.md.zip', fileType: 'application/zip' })).toBe(false);
+    expect(isMarkdownFile({})).toBe(false);
   });
 });

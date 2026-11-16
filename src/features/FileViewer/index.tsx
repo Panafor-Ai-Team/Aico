@@ -10,7 +10,7 @@ import { isHtmlFile } from '@/components/HtmlPreview';
 import NeuralNetworkLoading from '@/components/NeuralNetworkLoading';
 import { type FileListItem } from '@/types/files';
 
-import { isPdfFile } from './fileType';
+import { isMarkdownFile, isPdfFile } from './fileType';
 import NotSupport from './NotSupport';
 import CodeViewer from './Renderer/Code';
 import HTMLViewer from './Renderer/HTML';
@@ -182,12 +182,6 @@ const CODE_MIME_TYPES = new Set([
   'text/plain',
 ]);
 
-// Markdown renders as rich text (with a raw toggle) instead of the highlighted
-// source view — must be checked before the code fallback, whose lists also
-// contain the md/mdx extensions and MIME types.
-const MARKDOWN_EXTENSIONS = ['.md', '.mdx', '.markdown'];
-const MARKDOWN_FILE_MIME_TYPES = new Set(['md', 'mdx', 'markdown', ...MARKDOWN_MIME_TYPES]);
-
 const MSDOC_EXTENSIONS = ['.doc', '.docx', '.odt', '.ppt', '.pptx', '.xls', '.xlsx'];
 const MSDOC_MIME_TYPES = new Set([
   'doc',
@@ -342,8 +336,9 @@ const FileViewer = memo<FileViewerProps>(({ id, style, fileType, url, name }) =>
     return <HTMLViewer fileId={id} url={url} />;
   }
 
-  // Markdown files render as rich text with a raw toggle.
-  if (matchesFileType(fileType, name, MARKDOWN_EXTENSIONS, MARKDOWN_FILE_MIME_TYPES)) {
+  // Markdown files render as rich text with a raw toggle. Checked before the
+  // code fallback, whose lists also contain the md/mdx extensions and MIME types.
+  if (isMarkdownFile({ fileName: name, fileType })) {
     return <MarkdownViewer fileId={id} url={url} />;
   }
 

@@ -24,7 +24,7 @@ import { useChatStore } from '@/store/chat';
 import type { InternalLinkReference } from '../internalLink';
 import { InternalEntityPreview } from './InternalEntityPreview';
 
-const styles = createStaticStyles(({ css, cssVar }) => ({
+export const internalLinkStyles = createStaticStyles(({ css, cssVar }) => ({
   link: css`
     display: inline-flex;
     gap: 4px;
@@ -188,7 +188,7 @@ export const InternalEntityLink = memo<InternalEntityLinkProps>(({ href, label, 
   const link = (
     <a
       {...{ [RENDERER_HANDLED_LINK_ATTR]: 'true' }}
-      className={styles.link}
+      className={internalLinkStyles.link}
       href={href}
       rel="noopener noreferrer"
       target="_blank"

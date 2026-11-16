@@ -9,9 +9,11 @@ import { useUserStore } from '@/store/user';
 import { userGeneralSettingsSelectors } from '@/store/user/selectors';
 
 import { type MarkdownElementProps } from '../../type';
+import { parseFileProxyLink } from '../fileLink';
 import { parseInternalLink } from '../internalLink';
 import { type LobeLinkKind } from '../parse';
 import FaviconIcon from './FaviconIcon';
+import { FileProxyLink } from './FileProxyLink';
 import { InternalEntityLink } from './InternalEntityLink';
 import LinearIcon from './LinearIcon';
 import LinkChip from './LinkChip';
@@ -25,25 +27,14 @@ interface LobeLinkProperties {
   linkLabel?: string;
 }
 
-const Render = memo<MarkdownElementProps<LobeLinkProperties>>(({ node }) => {
-  const { linkHref, linkKind, linkLabel, linkDomain } = node?.properties || {};
-  const showIcon = useUserStore(userGeneralSettingsSelectors.enableMessageLinkIcon);
-  const workspaces = useWorkspaces();
-
-  const label = linkLabel || linkHref || '';
-  const internalReference = parseInternalLink(
-    linkHref,
-    typeof window === 'undefined' ? undefined : window.location.origin,
-    workspaces.map((workspace) => workspace.slug),
-  );
-
-  if (linkHref && internalReference) {
-    return <InternalEntityLink href={linkHref} label={label} reference={internalReference} />;
-  }
-
-  if (!showIcon) {
-    return <LinkChip href={linkHref} label={label} />;
-  }
+const renderChip = ({
+  label,
+  linkDomain,
+  linkHref,
+  linkKind,
+  showIcon,
+}: LobeLinkProperties & { label: string; showIcon: boolean }) => {
+  if (!showIcon) return <LinkChip href={linkHref} label={label} />;
 
   if (linkKind === 'github') {
     return <LinkChip href={linkHref} icon={<Github size={ICON_SIZE} />} label={label} />;
@@ -64,6 +55,38 @@ const Render = memo<MarkdownElementProps<LobeLinkProperties>>(({ node }) => {
       label={label}
     />
   );
+};
+
+const Render = memo<MarkdownElementProps<LobeLinkProperties>>(({ node }) => {
+  const { linkHref, linkKind, linkLabel, linkDomain } = node?.properties || {};
+  const showIcon = useUserStore(userGeneralSettingsSelectors.enableMessageLinkIcon);
+  const workspaces = useWorkspaces();
+
+  const label = linkLabel || linkHref || '';
+  const internalReference = parseInternalLink(
+    linkHref,
+    typeof window === 'undefined' ? undefined : window.location.origin,
+    workspaces.map((workspace) => workspace.slug),
+  );
+
+  if (linkHref && internalReference) {
+    return <InternalEntityLink href={linkHref} label={label} reference={internalReference} />;
+  }
+
+  const chip = renderChip({ linkDomain, linkHref, linkKind, label, showIcon });
+
+  const fileReference = parseFileProxyLink(
+    linkHref,
+    typeof window === 'undefined' ? undefined : window.location.origin,
+  );
+
+  if (linkHref && fileReference) {
+    return (
+      <FileProxyLink fallback={chip} fileId={fileReference.fileId} href={linkHref} label={label} />
+    );
+  }
+
+  return chip;
 });
 
 Render.displayName = 'LobeLinkRender';

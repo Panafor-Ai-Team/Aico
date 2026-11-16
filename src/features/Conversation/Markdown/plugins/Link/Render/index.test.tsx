@@ -28,6 +28,8 @@ const mockOpenAgentDetail = vi.fn();
 const mockOpenDocument = vi.fn();
 const mockOpenTaskDetail = vi.fn();
 const mockOpenVerifyReport = vi.fn();
+const mockOpenFilePreview = vi.fn();
+let mockFile: { fileType?: string; name?: string } | undefined;
 
 vi.mock('@/business/client/hooks/useWorkspaces', () => ({
   useWorkspaces: () => [{ id: 'ws-1', slug: 'lobe-team' }],
@@ -59,9 +61,15 @@ vi.mock('@/store/chat', () => ({
       openAcceptance: mockOpenAcceptance,
       openAgentDetail: mockOpenAgentDetail,
       openDocument: mockOpenDocument,
+      openFilePreview: mockOpenFilePreview,
       openTaskDetail: mockOpenTaskDetail,
       openVerifyReport: mockOpenVerifyReport,
     }),
+}));
+
+vi.mock('@/store/file', () => ({
+  useFileStore: (selector: (state: unknown) => unknown) =>
+    selector({ useFetchKnowledgeItem: () => ({ data: mockFile }) }),
 }));
 
 vi.mock('@/store/user', () => ({
@@ -90,6 +98,7 @@ const renderLink = (properties: Record<string, unknown>) =>
   );
 
 afterEach(() => {
+  mockFile = undefined;
   mockShowIcon = true;
   mockIsDesktop = false;
   mockEnableInAppBrowser = false;
@@ -421,5 +430,68 @@ describe('Link Render — open an external link in the side browser', () => {
 
     expect(mockNavigate).toHaveBeenCalledWith('/agent/agt_other/docs/docs_1', { escape: true });
     expect(mockOpenDocument).not.toHaveBeenCalled();
+  });
+});
+
+const renderFileLink = (href: string, label = 'report.md') =>
+  renderLink({ linkHref: href, linkKind: 'generic', linkLabel: label });
+
+describe('Link Render — file proxy (/f/:id) links', () => {
+  it('opens a Markdown file stored as octet-stream in the in-app preview', () => {
+    mockFile = { fileType: 'application/octet-stream', name: 'report.md' };
+    const { container } = renderFileLink(`${window.location.origin}/f/file_md1`);
+
+    const anchor = container.querySelector('a')!;
+    const event = new MouseEvent('click', { bubbles: true, button: 0, cancelable: true });
+    fireEvent(anchor, event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(mockOpenFilePreview).toHaveBeenCalledWith({ fileId: 'file_md1' });
+  });
+
+  it('opens a text/markdown file from a root-relative link in the in-app preview', () => {
+    mockFile = { fileType: 'text/markdown', name: 'notes' };
+    const { container } = renderFileLink('/f/file_md2');
+
+    fireEvent.click(container.querySelector('a')!);
+
+    expect(mockOpenFilePreview).toHaveBeenCalledWith({ fileId: 'file_md2' });
+  });
+
+  it('keeps the browser behaviour for a modifier-click', () => {
+    mockFile = { fileType: 'text/markdown', name: 'report.md' };
+    const { container } = renderFileLink('/f/file_md3');
+
+    fireEvent.click(container.querySelector('a')!, { metaKey: true });
+
+    expect(mockOpenFilePreview).not.toHaveBeenCalled();
+  });
+
+  it('keeps a plain link for non-Markdown files', () => {
+    mockFile = { fileType: 'application/zip', name: 'archive.zip' };
+    const { container } = renderFileLink('/f/file_zip', 'archive.zip');
+
+    const anchor = container.querySelector('a')!;
+    expect(anchor.getAttribute('href')).toBe('/f/file_zip');
+    fireEvent.click(anchor);
+
+    expect(mockOpenFilePreview).not.toHaveBeenCalled();
+  });
+
+  it('keeps a plain link while the file cannot be resolved', () => {
+    const { container } = renderFileLink('/f/file_unknown');
+
+    fireEvent.click(container.querySelector('a')!);
+
+    expect(mockOpenFilePreview).not.toHaveBeenCalled();
+  });
+
+  it('keeps an explicit ?download link as a download', () => {
+    mockFile = { fileType: 'text/markdown', name: 'report.md' };
+    const { container } = renderFileLink('/f/file_md4?download=1');
+
+    fireEvent.click(container.querySelector('a')!);
+
+    expect(mockOpenFilePreview).not.toHaveBeenCalled();
   });
 });
