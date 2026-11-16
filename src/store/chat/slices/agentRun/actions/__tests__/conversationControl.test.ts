@@ -556,6 +556,73 @@ describe('ConversationControl actions', () => {
       expect(updateTopicMetadata).not.toHaveBeenCalled();
     });
 
+    // The manual approve records the request grant, which wakes
+    // PendingApprovalAutoResolver while the tool still reads as pending; it then
+    // approves the same tool again. Production 2026-11-16: one click, two
+    // resume runs continuing the same turn in parallel.
+    it('starts one resume run when the same tool is approved twice while the first is in flight', async () => {
+      const { result } = renderHook(() => useChatStore());
+      const context: ConversationContext = { agentId: 'agent-1', topicId: 'topic-1' };
+      const key = messageMapKey(context);
+      const messages = [
+        createMockMessage({ id: 'user-1', role: 'user' }),
+        createMockMessage({ id: 'assistant-1', parentId: 'user-1', role: 'assistant' }),
+        createMockMessage({
+          id: 'tool-msg-1',
+          parentId: 'assistant-1',
+          plugin: { apiName: 'test', arguments: '{}', identifier: 'test-plugin', type: 'default' },
+          role: 'tool',
+        }),
+      ];
+
+      act(() => {
+        useChatStore.setState({
+          dbMessagesMap: { [key]: messages },
+          messagesMap: { [key]: messages },
+          toolApprovalRequestGrants: {},
+        });
+      });
+
+      const updatePlugin = vi
+        .spyOn(result.current, 'optimisticUpdateMessagePlugin')
+        .mockResolvedValue(undefined);
+      vi.spyOn(result.current, 'internal_createAgentState').mockReturnValue({
+        agentConfig: createMockResolvedAgentConfig(),
+        context: { phase: 'init' } as any,
+        state: {} as any,
+      });
+      const pendingRuns: Array<() => void> = [];
+      const finishRun = () => pendingRuns.splice(0).forEach((resolve) => resolve());
+      const executeClientAgent = vi
+        .spyOn(result.current, 'executeClientAgent')
+        .mockImplementation(
+          () => new Promise<any>((resolve) => pendingRuns.push(() => resolve(undefined))),
+        );
+
+      let first!: Promise<void>;
+      let second!: Promise<void>;
+      await act(async () => {
+        first = result.current.approveToolCalling('tool-msg-1', 'group-1', context);
+        second = result.current.approveToolCalling('tool-msg-1', 'group-1', context);
+        await Promise.resolve();
+      });
+
+      await act(async () => {
+        finishRun();
+        await Promise.all([first, second]);
+      });
+
+      expect(executeClientAgent).toHaveBeenCalledTimes(1);
+      expect(updatePlugin).toHaveBeenCalledTimes(1);
+
+      // The guard is released once the run ends, so a later approval still works.
+      executeClientAgent.mockResolvedValue(undefined);
+      await act(async () => {
+        await result.current.approveToolCalling('tool-msg-1', 'group-1', context);
+      });
+      expect(executeClientAgent).toHaveBeenCalledTimes(2);
+    });
+
     it('saves "always approve in this chat" on the topic', async () => {
       const { result } = renderHook(() => useChatStore());
       const context: ConversationContext = { agentId: 'agent-1', topicId: 'topic-1' };
