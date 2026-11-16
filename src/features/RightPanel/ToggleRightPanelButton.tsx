@@ -13,7 +13,6 @@ import { useGlobalStore } from '@/store/global';
 import { systemStatusSelectors } from '@/store/global/selectors';
 import { useUserStore } from '@/store/user';
 import { settingsSelectors } from '@/store/user/selectors';
-import { rtlMirrorStyles } from '@/styles/rtlMirror';
 
 export const TOGGLE_BUTTON_ID = 'toggle_right_panel_button';
 
@@ -54,9 +53,6 @@ const ToggleRightPanelButton = memo<ToggleRightPanelButtonProps>(
     return (
       <ActionIcon
         active={showActive ? expand : undefined}
-        // The default panel icons are LTR artwork; mirror them in RTL so the
-        // arrowhead points the way the (mirrored) right panel moves.
-        className={icon ? undefined : rtlMirrorStyles.icon}
         icon={icon || (expand ? PanelRightClose : PanelRightOpen)}
         id={TOGGLE_BUTTON_ID}
         size={size || DESKTOP_HEADER_ICON_SMALL_SIZE}
