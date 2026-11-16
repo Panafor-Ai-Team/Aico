@@ -133,6 +133,36 @@ const genGlobalStyle = ({ token }: { prefixCls: string; token: Theme }) => css`
   svg[class*='lucide-panel-right']:dir(rtl) {
     transform: scaleX(-1);
   }
+
+  /*
+   * RTL: horizontal lucide arrows (ArrowLeft/Right and their -to-line /
+   * -from-line, Big, Circle, Square and Move variants) express reading-order
+   * motion — "back" points to the line start, "next/forward/go" to its end.
+   * Under RTL both ends swap, so mirror the artwork; one rule covers every
+   * current and future use site (portal back button, "go" buttons, flows).
+   *
+   * - \`scale\` (not \`transform\`) so a use site's own \`transform: rotate()\` on
+   *   the svg still composes instead of being overridden.
+   * - Keyboard-shortcut glyphs inside <kbd> (@lobehub/ui Hotkey) name physical
+   *   ← → keys and keep their artwork.
+   * - Chevrons are intentionally not included: several components (e.g.
+   *   DraggablePanel, DraggableSideNav) already pick them per RTL placement and
+   *   many are rotated disclosure toggles.
+   */
+  svg:is(
+      [class*='lucide-arrow-left'],
+      [class*='lucide-arrow-right'],
+      [class*='lucide-arrow-big-left'],
+      [class*='lucide-arrow-big-right'],
+      [class*='lucide-circle-arrow-left'],
+      [class*='lucide-circle-arrow-right'],
+      [class*='lucide-square-arrow-left'],
+      [class*='lucide-square-arrow-right'],
+      [class*='lucide-move-left'],
+      [class*='lucide-move-right']
+    ):dir(rtl):not(kbd *) {
+    scale: -1 1;
+  }
 `;
 
 export default genGlobalStyle;

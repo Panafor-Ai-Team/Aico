@@ -45,6 +45,22 @@ describe('global RTL control fixes', () => {
     expect(source).toMatch(/lucide-panel-right'\]:dir\(rtl\)\s*\{\s*transform:\s*scaleX\(-1\);/);
   });
 
+  it('mirrors horizontal lucide arrows under RTL, except physical keys in <kbd>', () => {
+    // Regression: the document portal "back" ArrowLeft pointed into the content
+    // in Persian. One global rule covers every ArrowLeft/Right-family use site.
+    const rule = /svg:is\(([\s\S]*?)\):dir\(rtl\):not\(kbd \*\)\s*\{\s*scale:\s*-1 1;\s*\}/.exec(
+      source,
+    );
+    expect(rule).not.toBeNull();
+    for (const icon of ['arrow-left', 'arrow-right', 'circle-arrow-right', 'arrow-big-left']) {
+      expect(rule![1]).toContain(`[class*='lucide-${icon}']`);
+    }
+    // `scale`, not `transform`, so a use site's own rotate() still composes.
+    expect(rule![0]).not.toContain('transform');
+    // Chevrons are excluded on purpose (RTL-aware placement / rotated disclosures).
+    expect(rule![1]).not.toContain('chevron');
+  });
+
   it('does not rely on approaches that cannot work for absolutely positioned indicators', () => {
     // `direction: ltr` on the indicator itself is ignored: logical insets map
     // through the containing block's direction.
