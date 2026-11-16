@@ -32,6 +32,7 @@ import {
   useResolvedDocumentId,
 } from './documentViewContext';
 import EditorCanvas from './EditorCanvas';
+import HtmlDocumentView from './HtmlDocumentView';
 import TodoList from './TodoList';
 
 const styles = createStaticStyles(({ css }) => ({
@@ -362,13 +363,28 @@ const DocumentBody = memo(() => {
         <SkillFrontmatterBlock documentId={documentId} frontmatter={skillFrontmatter} />
       )}
       {renderMode.mode === 'highlight' && documentId ? (
-        <HighlightEditor
-          content={documentMeta?.content ?? ''}
-          documentId={documentId}
-          key={documentId}
-          language={renderMode.language}
-          onSaved={handleHighlightSaved}
-        />
+        renderMode.language === 'html' ? (
+          <HtmlDocumentView
+            content={documentMeta?.content ?? ''}
+            key={documentId}
+            code={
+              <HighlightEditor
+                content={documentMeta?.content ?? ''}
+                documentId={documentId}
+                language={renderMode.language}
+                onSaved={handleHighlightSaved}
+              />
+            }
+          />
+        ) : (
+          <HighlightEditor
+            content={documentMeta?.content ?? ''}
+            documentId={documentId}
+            key={documentId}
+            language={renderMode.language}
+            onSaved={handleHighlightSaved}
+          />
+        )
       ) : (
         <EditorCanvas />
       )}

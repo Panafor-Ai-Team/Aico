@@ -7,6 +7,8 @@ export interface DesktopExportOptions {
   content: string;
   dialogTitle?: string;
   fileName: string;
+  /** Save-dialog file filters; defaults to Markdown. */
+  filters?: { extensions: string[]; name: string }[];
   successTitle?: string;
 }
 
@@ -17,11 +19,11 @@ export interface DesktopExportResult {
 
 class DesktopExportService {
   async exportMarkdown(options: DesktopExportOptions): Promise<DesktopExportResult> {
-    const { content, dialogTitle, fileName, successTitle } = options;
+    const { content, dialogTitle, fileName, filters, successTitle } = options;
 
     const result = await localFileService.showSaveDialog({
       defaultPath: fileName,
-      filters: [{ extensions: ['md'], name: 'Markdown' }],
+      filters: filters ?? [{ extensions: ['md'], name: 'Markdown' }],
       title: dialogTitle || i18next.t('pageEditor.exportDialogTitle', { ns: 'file' }),
     });
 

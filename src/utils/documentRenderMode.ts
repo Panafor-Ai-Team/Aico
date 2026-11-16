@@ -11,7 +11,7 @@ import {
 import { getLanguageFromFilename } from './fileLanguage';
 import { isSkillMarkdownDocument } from './skillMarkdown';
 
-interface DocumentRenderModeFields {
+export interface DocumentRenderModeFields {
   category?: string | null;
   filename?: string | null;
   fileType?: string | null;

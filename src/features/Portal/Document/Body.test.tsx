@@ -35,6 +35,31 @@ vi.mock('@lobehub/ui', () => ({
   TextArea: () => <textarea />,
 }));
 
+vi.mock('@lobehub/ui/base-ui', () => ({
+  Button: ({ children }: { children: ReactNode }) => <button>{children}</button>,
+  Segmented: ({
+    onChange,
+    options,
+  }: {
+    onChange: (value: string) => void;
+    options: { label: string; value: string }[];
+  }) => (
+    <div>
+      {options.map((option) => (
+        <button key={option.value} type="button" onClick={() => onChange(option.value)}>
+          {option.label}
+        </button>
+      ))}
+    </div>
+  ),
+}));
+
+vi.mock('@/components/HtmlPreview', () => ({
+  InlineHtmlPreview: ({ content }: { content: string }) => (
+    <iframe data-testid="html-preview" srcDoc={content} title="preview" />
+  ),
+}));
+
 vi.mock('@/components/CodeEditorPane', () => ({
   default: ({
     onChange,
@@ -228,6 +253,27 @@ describe('DocumentBody', () => {
 
     expect(screen.getByTestId('highlight-editor')).toHaveValue('raw log content');
     expect(screen.queryByTestId('editor-canvas')).toBeNull();
+  });
+
+  it('opens .html documents on a rendered preview, with the source one click away', () => {
+    mockDocumentMeta.current = {
+      content: '<!DOCTYPE html><html><body><h1>Game</h1></body></html>',
+      fileType: 'agent/document',
+      filename: 'landing.html',
+    };
+
+    render(<DocumentBody />);
+
+    expect(screen.getByTestId('html-preview')).toBeDefined();
+    expect(screen.queryByTestId('highlight-editor')).toBeNull();
+    expect(screen.queryByTestId('editor-canvas')).toBeNull();
+
+    fireEvent.click(screen.getByText('artifacts.display.code'));
+
+    expect(screen.getByTestId('highlight-editor')).toHaveValue(
+      '<!DOCTYPE html><html><body><h1>Game</h1></body></html>',
+    );
+    expect(screen.queryByTestId('html-preview')).toBeNull();
   });
 
   it('renders EditorCanvas for markdown files', () => {

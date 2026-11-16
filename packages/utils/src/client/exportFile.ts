@@ -1,6 +1,6 @@
-export const exportFile = (content: string, filename?: string) => {
+export const exportFile = (content: string, filename?: string, type: string = 'plain/text') => {
   // Create a Blob object
-  const blob = new Blob([content], { type: 'plain/text' });
+  const blob = new Blob([content], { type });
 
   // Create a URL object for download
   const url = URL.createObjectURL(blob);

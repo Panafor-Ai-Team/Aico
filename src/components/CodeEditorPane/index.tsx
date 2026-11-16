@@ -97,7 +97,13 @@ const CodeEditorPane = memo<CodeEditorPaneProps>(
     }, [readOnly]);
 
     return (
-      <div className={`${styles} ${className ?? ''}`.trim()} ref={containerRef} style={style}>
+      // Source code is always left-to-right, even inside RTL locales (fa-IR).
+      <div
+        className={`${styles} ${className ?? ''}`.trim()}
+        dir={'ltr'}
+        ref={containerRef}
+        style={style}
+      >
         <textarea className={'cm-textarea'} ref={textareaRef} />
       </div>
     );
