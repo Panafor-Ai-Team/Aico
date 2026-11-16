@@ -13,6 +13,7 @@ import { useAgentStore } from '@/store/agent';
 import { useChatStore } from '@/store/chat';
 
 import { useResolvedDocumentId } from './documentViewContext';
+import DownloadAction from './DownloadAction';
 import DocumentTitle from './Header';
 
 /**
@@ -42,7 +43,15 @@ const OpenAsPageAction = memo(() => {
 });
 
 const PortalHeader = () => (
-  <PortalChromeHeader rightExtra={<OpenAsPageAction />} title={<DocumentTitle />} />
+  <PortalChromeHeader
+    title={<DocumentTitle />}
+    rightExtra={
+      <>
+        <DownloadAction />
+        <OpenAsPageAction />
+      </>
+    }
+  />
 );
 
 export default PortalHeader;

@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 
 import { createChatInputRichPlugins } from '@/features/ChatInput/InputEditor/plugins';
 
+import ReactCodeBlockFormatLockPlugin from './CodeBlockFormatLock';
 import { type EditorCanvasProps } from './EditorCanvas';
 import InlineToolbar from './InlineToolbar';
 import LinearFilePlugin from './LinearFilePlugin';
@@ -46,6 +47,8 @@ const STATIC_PLUGINS = [
   ReactLiteXmlPlugin,
   ...createChatInputRichPlugins({ linkPlugin: ReactLinkPlugin }),
   ReactTablePlugin,
+  // Saved code blocks keep their language and always render LTR.
+  ReactCodeBlockFormatLockPlugin,
 ];
 
 const EDITOR_INIT_DATA_SOURCE_TYPES = ['json', 'markdown'] as const;
