@@ -1,4 +1,4 @@
-import { resolveCCSubagentType } from '@lobechat/builtin-tool-claude-code/client';
+import { resolveCCSubagentType } from '@lobechat/builtin-tool-claude-code/client/subagentTypes';
 import { Avatar, Flexbox, Icon, Tag, Text } from '@lobehub/ui';
 import { cssVar } from 'antd-style';
 import isEqual from 'fast-deep-equal';

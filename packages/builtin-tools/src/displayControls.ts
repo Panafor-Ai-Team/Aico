@@ -1,7 +1,9 @@
-import {
-  ClaudeCodeIdentifier,
-  resolveClaudeCodeRenderDisplayControl,
-} from '@lobechat/builtin-tool-claude-code/client';
+// Import the identifier and the resolver from their own entry points, never the
+// `/client` barrel: the barrel re-exports every Claude Code inspector/render,
+// which pulls `@lobehub/ui` Markdown → Mermaid → elkjs (~3 MB) into the boot
+// bundle through the tool store selector.
+import { ClaudeCodeIdentifier } from '@lobechat/builtin-tool-claude-code';
+import { resolveClaudeCodeRenderDisplayControl } from '@lobechat/builtin-tool-claude-code/client/displayControls';
 import { type RenderDisplayControl } from '@lobechat/types';
 
 import { CodexRenderDisplayControls } from './codex/displayControls';

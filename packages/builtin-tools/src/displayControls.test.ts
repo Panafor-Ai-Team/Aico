@@ -3,8 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CodexRenderDisplayControls } from './codex/displayControls';
 import { getBuiltinRenderDisplayControl } from './displayControls';
 
-vi.mock('@lobechat/builtin-tool-claude-code/client', () => ({
-  ClaudeCodeIdentifier: 'claude-code',
+vi.mock('@lobechat/builtin-tool-claude-code/client/displayControls', () => ({
   // Stand-in for the real resolver: only `Read` on an uploaded image expands.
   resolveClaudeCodeRenderDisplayControl: (apiName: string, pluginState?: any) =>
     apiName === 'Read' && pluginState?.images?.some((image: any) => !!image.url)
