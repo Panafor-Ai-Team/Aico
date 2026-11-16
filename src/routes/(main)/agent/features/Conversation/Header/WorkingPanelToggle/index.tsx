@@ -9,6 +9,7 @@ import { useLocation } from 'react-router';
 
 import { useGlobalStore } from '@/store/global';
 import { systemStatusSelectors } from '@/store/global/selectors';
+import { rtlMirrorStyles } from '@/styles/rtlMirror';
 
 const WorkingPanelToggle = memo(() => {
   const { t } = useTranslation('chat');
@@ -35,6 +36,7 @@ const WorkingPanelToggle = memo(() => {
   // picked Space/Files tab every time the panel is re-opened.
   return (
     <ActionIcon
+      className={rtlMirrorStyles.icon}
       icon={PanelRightOpenIcon}
       size={DESKTOP_HEADER_ICON_SMALL_SIZE}
       title={t('workingPanel.title')}
