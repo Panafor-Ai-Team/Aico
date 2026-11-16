@@ -14,6 +14,7 @@ import { useGlobalStore } from '@/store/global';
 import { systemStatusSelectors } from '@/store/global/selectors';
 import { useUserStore } from '@/store/user';
 import { settingsSelectors } from '@/store/user/selectors';
+import { rtlMirrorStyles } from '@/styles/rtlMirror';
 import { isMacOS } from '@/utils/platform';
 
 export const TOGGLE_BUTTON_ID = 'toggle_left_panel_button';
@@ -56,6 +57,9 @@ const ToggleLeftPanelButton = memo<ToggleLeftPanelButtonProps>(
     return (
       <ActionIcon
         active={showActive ? expand : undefined}
+        // The default panel icons are LTR artwork; mirror them in RTL so the
+        // arrowhead points the way the (mirrored) nav panel moves.
+        className={icon ? undefined : rtlMirrorStyles.icon}
         icon={icon || (expand ? PanelLeftClose : PanelLeftOpen)}
         id={id ?? undefined}
         size={size || DESKTOP_HEADER_ICON_SMALL_SIZE}
