@@ -26,31 +26,37 @@ describe('MessageService - Race Condition Control', () => {
   });
 
   describe('batch tool message update race condition', () => {
-    it('should cancel a stale batch update for the same tool message', async () => {
+    it('keeps both same-field writes and lands the latest value last', async () => {
       let firstRequestAborted = false;
+      const appliedValues: unknown[] = [];
 
-      vi.mocked(lambdaClient.message.batchMutate.mutate)
-        .mockImplementationOnce(
-          (_params, options) =>
-            new Promise((resolve, reject) => {
-              options?.signal?.addEventListener('abort', () => {
-                firstRequestAborted = true;
-                reject(new Error('Aborted'));
-              });
-            }),
-        )
-        .mockResolvedValueOnce({
-          results: [{ id: 'tool-1', index: 0, success: true, type: 'updateToolMessage' }],
-          success: true,
+      vi.mocked(lambdaClient.message.batchMutate.mutate).mockImplementation((params: any) => {
+        appliedValues.push(params.operations[0].value.content);
+        // Resolve on the next macrotask so both writes overlap in flight.
+        return new Promise((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                results: [{ id: 'tool-1', index: 0, success: true, type: 'updateToolMessage' }],
+                success: true,
+              }),
+            0,
+          ),
+        );
+      });
+
+      const firstPromise = messageService
+        .batchMutateOrThrow([
+          {
+            id: 'tool-1',
+            type: 'updateToolMessage',
+            value: { content: 'stale result' },
+          },
+        ])
+        .catch((error) => {
+          firstRequestAborted = error.message === 'Aborted';
+          throw error;
         });
-
-      const firstPromise = messageService.batchMutateOrThrow([
-        {
-          id: 'tool-1',
-          type: 'updateToolMessage',
-          value: { content: 'stale result' },
-        },
-      ]);
       const secondPromise = messageService.batchMutateOrThrow([
         {
           id: 'tool-1',
@@ -59,21 +65,56 @@ describe('MessageService - Race Condition Control', () => {
         },
       ]);
 
-      await expect(firstPromise).rejects.toThrow('Aborted');
+      // No write is dropped anymore — both land, in submission order.
+      await expect(firstPromise).resolves.toMatchObject({ success: true });
       await expect(secondPromise).resolves.toMatchObject({ success: true });
-      expect(firstRequestAborted).toBe(true);
-      expect(lambdaClient.message.batchMutate.mutate).toHaveBeenNthCalledWith(
-        2,
-        expect.objectContaining({
-          operations: [
-            expect.objectContaining({
-              id: 'tool-1',
-              value: { content: 'latest result' },
-            }),
-          ],
-        }),
-        { signal: expect.any(AbortSignal) },
+      expect(firstRequestAborted).toBe(false);
+      expect(lambdaClient.message.batchMutate.mutate).toHaveBeenCalledTimes(2);
+      expect(appliedValues).toEqual(['stale result', 'latest result']);
+    });
+
+    // Regression: different partial fields under the same abort key cancelled
+    // each other — `ClientMessageTransport.updateToolMessage` sends
+    // content/metadata/pluginState/error while `updatePluginState` sends
+    // pluginState only, so the later write aborted the earlier one and left the
+    // tool row completely empty (19 empty rows in 30 days of production).
+    it('does not abort a partial write covering different fields of the same tool message', async () => {
+      const abortsSeen: number[] = [];
+      let callIndex = 0;
+      vi.mocked(lambdaClient.message.batchMutate.mutate).mockImplementation(
+        (params: any, options?: { signal?: AbortSignal }) => {
+          const index = callIndex++;
+          options?.signal?.addEventListener?.('abort', () => abortsSeen.push(index));
+          return new Promise((resolve) =>
+            setTimeout(
+              () =>
+                resolve({
+                  results: [
+                    {
+                      id: params.operations[0].id,
+                      index: 0,
+                      success: true,
+                      type: 'updateToolMessage',
+                    },
+                  ],
+                  success: true,
+                }),
+              0,
+            ),
+          );
+        },
       );
+
+      const contentWrite = messageService.batchMutateOrThrow([
+        { id: 'tool-2', type: 'updateToolMessage', value: { content: 'result' } },
+      ]);
+      const pluginStateWrite = messageService.batchMutateOrThrow([
+        { id: 'tool-2', type: 'updateToolMessage', value: { pluginState: { step: 1 } } },
+      ]);
+
+      await expect(contentWrite).resolves.toMatchObject({ success: true });
+      await expect(pluginStateWrite).resolves.toMatchObject({ success: true });
+      expect(abortsSeen).toEqual([]);
     });
   });
 

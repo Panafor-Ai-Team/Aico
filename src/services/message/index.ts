@@ -142,6 +142,28 @@ export class MessageBatchMutationError extends Error {
   }
 }
 
+const toolMessageWriteQueues = new Map<string, Promise<unknown>>();
+
+/**
+ * Serialize tool-message writes per message id instead of aborting the
+ * in-flight one. The old behavior aborted on any new write for the same id,
+ * but callers send *different partial fields* (content/metadata/pluginState/
+ * error vs. pluginState-only) — the later write cancelled the earlier one and
+ * left the tool row completely empty (19 empty rows in 30 days of production).
+ * Writes for different ids still run concurrently; for the same id they chain.
+ */
+const enqueueToolMessageWrite = <T>(id: string, run: () => Promise<T>): Promise<T> => {
+  const previous = toolMessageWriteQueues.get(id) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(run);
+  toolMessageWriteQueues.set(
+    id,
+    next.finally(() => {
+      if (toolMessageWriteQueues.get(id) === next) toolMessageWriteQueues.delete(id);
+    }),
+  );
+  return next;
+};
+
 const getBatchMutationAbortKey = (operations: MessageBatchOperation[]) => {
   if (operations.length !== 1) return;
 
@@ -189,6 +211,13 @@ export class MessageService {
     };
 
     const abortKey = getBatchMutationAbortKey(operations);
+
+    // Same-id tool-message writes serialize instead of aborting: the queued
+    // write must land, and a newer *full* write by the transport still lands
+    // after it, so ordering is preserved without dropping fields.
+    if (operations.length === 1 && operations[0].type === 'updateToolMessage') {
+      return enqueueToolMessageWrite(operations[0].id, execute);
+    }
 
     return abortKey ? abortableRequest.execute(abortKey, execute) : execute();
   };

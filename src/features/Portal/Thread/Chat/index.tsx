@@ -28,6 +28,7 @@ import { messageMapKey } from '@/store/chat/utils/messageMapKey';
 import { getThreadInputMode } from './inputMode';
 import ThreadDivider from './ThreadDivider';
 import { useThreadActionsBarConfig } from './useThreadActionsBarConfig';
+import { useThreadComposerTarget } from './useThreadComposerTarget';
 
 /**
  * Inner component that uses ConversationStore for message rendering
@@ -116,14 +117,16 @@ ThreadChatContent.displayName = 'ThreadChatContent';
  */
 const ThreadChat = memo(() => {
   // Get thread context from ChatStore
-  const [activeAgentId, activeTopicId, portalThreadId, threadStartMessageId, newThreadMode] =
-    useChatStore((s) => [
-      s.activeAgentId,
-      s.activeTopicId,
-      s.portalThreadId,
-      s.threadStartMessageId,
-      s.newThreadMode,
-    ]);
+  const [activeAgentId, activeTopicId, newThreadMode] = useChatStore((s) => [
+    s.activeAgentId,
+    s.activeTopicId,
+    s.newThreadMode,
+  ]);
+  // Write target resolved from the mounted Thread view (see hook doc): the
+  // free-floating `portalThreadId` field can outlive its view and would send
+  // messages into a thread nothing displays.
+  const { startMessageId: threadStartMessageId, threadId: portalThreadId } =
+    useThreadComposerTarget();
 
   // Subagent threads are auto-spawned by a parent tool call (CC's `Agent`
   // tool etc.); the external CLI owns the session so the user can't inject

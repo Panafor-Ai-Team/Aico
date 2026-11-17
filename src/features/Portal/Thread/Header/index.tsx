@@ -5,13 +5,15 @@ import { memo } from 'react';
 
 import NavHeader from '@/features/NavHeader';
 import { useChatStore } from '@/store/chat';
+import { portalThreadSelectors } from '@/store/chat/selectors';
 
 import Title from './Title';
 
 const Header = memo(() => {
-  const [hasPortal, portalThreadId, closeThreadPortal, switchThread] = useChatStore((s) => [
-    !!s.portalThreadId,
-    s.portalThreadId,
+  const [portalThreadId, closeThreadPortal, switchThread] = useChatStore((s) => [
+    // Same source the portal renders from — never the free-floating field,
+    // which can outlive its view (T-041 lost-message class).
+    portalThreadSelectors.currentThreadView(s)?.threadId,
     s.closeThreadPortal,
     s.switchThread,
   ]);
@@ -24,7 +26,7 @@ const Header = memo(() => {
       showTogglePanelButton={false}
       right={
         <Flexbox horizontal gap={4}>
-          {hasPortal && (
+          {!!portalThreadId && (
             <ActionIcon
               icon={ArrowLeftRight}
               size={'small'}
