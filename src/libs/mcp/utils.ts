@@ -2,12 +2,22 @@ import { isRecord } from '@lobechat/utils/object';
 
 import type { ToolCRUDType } from '@/database/schemas';
 
-// Prefix-based matching (anchored at ^) handles camelCase names like getReactions, listPins.
-// \b word-boundary fails on camelCase because adjacent word-chars share no boundary.
-const DELETE_PREFIX = /^(?:delete|remove|destroy|drop|unlink|uninstall|clear|purge)/;
-const UPDATE_PREFIX = /^(?:update|edit|modify|patch|set|change|rename|move)/;
-const READ_PREFIX =
-  /^(?:get|list|read|fetch|search|find|check|compare|describe|show|view|extract|query|count)/;
+// Prefix-based matching (anchored at ^). The verb must end at a word boundary
+// or a longer word swallows it: `drop` would match `dropbox_…` (classifying the
+// whole Dropbox toolkit as delete) and `check` would match `checkout_…`. The
+// boundary differs by naming style: underscore names (GITHUB_GET_X,
+// linear_list_issues) end the verb at `_`; camelCase names (getReactions) end
+// it at an uppercase hump. A false delete mislabels mutating tools as safe; a
+// false write only costs an extra approval, so this errs safe-side.
+const verbPrefixes = (boundary: string) => ({
+  delete: new RegExp(`^(?:delete|remove|destroy|drop|unlink|uninstall|clear|purge)${boundary}`),
+  update: new RegExp(`^(?:update|edit|modify|patch|set|change|rename|move)${boundary}`),
+  read: new RegExp(
+    `^(?:get|list|read|fetch|search|find|check|compare|describe|show|view|extract|query|count)${boundary}`,
+  ),
+});
+const SNAKE_PREFIXES = verbPrefixes('(?=_|$)');
+const CAMEL_PREFIXES = verbPrefixes('(?=[A-Z]|$)');
 
 /** Drops a leading toolkit namespace (`github_list_issues` → `list_issues`). */
 const stripNamespace = (name: string) => {
@@ -53,12 +63,18 @@ export const getMCPLogOrigin = (endpoint: string): string | undefined => {
  * The 'write' fallback covers create/add/save/send/upload/post/connect etc.
  */
 export function inferCrudType(toolName: string): ToolCRUDType {
-  // Namespaced tool names (`GITHUB_GET_REPOS`, `linear_list_issues`) never match
-  // the anchored prefixes, so also try the name without its leading namespace.
-  for (const name of [toolName.toLowerCase(), stripNamespace(toolName.toLowerCase())]) {
-    if (DELETE_PREFIX.test(name)) return 'delete';
-    if (UPDATE_PREFIX.test(name)) return 'update';
-    if (READ_PREFIX.test(name)) return 'read';
+  // camelCase names keep their case for the uppercase-hump boundary; underscore
+  // names (`GITHUB_GET_REPOS`, `linear_list_issues`) are lowercased and also
+  // tried without their leading namespace, since the anchors never match it.
+  const isCamel = !toolName.includes('_') && /[A-Z]/.test(toolName);
+  const prefixes = isCamel ? CAMEL_PREFIXES : SNAKE_PREFIXES;
+  const names = isCamel
+    ? [toolName]
+    : [toolName.toLowerCase(), stripNamespace(toolName.toLowerCase())];
+  for (const name of names) {
+    if (prefixes.delete.test(name)) return 'delete';
+    if (prefixes.update.test(name)) return 'update';
+    if (prefixes.read.test(name)) return 'read';
   }
   return 'write';
 }

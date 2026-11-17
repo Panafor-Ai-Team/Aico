@@ -64,8 +64,72 @@ const GITHUB_PRIORITY_SLUGS = [
   'GITHUB_UPDATE_AN_ISSUE',
 ];
 
+// Reads first, then the ≤8 writes that let the agent edit files in place.
+// Slugs verified against the live Composio catalog (2026-11-17).
+const GOOGLEDRIVE_PRIORITY_SLUGS = [
+  // Reads — find/open/export a file before editing it.
+  'GOOGLEDRIVE_FIND_FILE',
+  'GOOGLEDRIVE_LIST_FILES',
+  'GOOGLEDRIVE_GET_FILE_METADATA',
+  'GOOGLEDRIVE_DOWNLOAD_FILE',
+  'GOOGLEDRIVE_EXPORT_GOOGLE_WORKSPACE_FILE',
+  'GOOGLEDRIVE_PARSE_FILE',
+  'GOOGLEDRIVE_READ_SPREADSHEET_VALUES',
+  'GOOGLEDRIVE_BATCH_GET_SPREADSHEET_VALUES',
+  // Writes — the in-place edit paths (edit text blob, staged upload replace,
+  // move, create, copy, and native-Sheet value updates).
+  'GOOGLEDRIVE_EDIT_FILE',
+  'GOOGLEDRIVE_UPDATE_FILE_PUT',
+  'GOOGLEDRIVE_MOVE_FILE',
+  'GOOGLEDRIVE_CREATE_FILE_FROM_TEXT',
+  'GOOGLEDRIVE_CREATE_FOLDER',
+  'GOOGLEDRIVE_COPY_FILE_ADVANCED',
+  'GOOGLEDRIVE_UPDATE_SPREADSHEET_VALUES',
+  'GOOGLEDRIVE_BATCH_UPDATE_SPREADSHEET_VALUES',
+];
+
+const GOOGLEDOCS_PRIORITY_SLUGS = [
+  // Reads.
+  'GOOGLEDOCS_SEARCH_DOCUMENTS',
+  'GOOGLEDOCS_GET_DOCUMENT_BY_ID',
+  'GOOGLEDOCS_GET_DOCUMENT_PLAINTEXT',
+  'GOOGLEDOCS_EXPORT_DOCUMENT_AS_PDF',
+  // Writes — markdown-based in-place edits keep the doc's native structure.
+  'GOOGLEDOCS_UPDATE_DOCUMENT_MARKDOWN',
+  'GOOGLEDOCS_UPDATE_DOCUMENT_SECTION_MARKDOWN',
+  'GOOGLEDOCS_REPLACE_ALL_TEXT',
+  'GOOGLEDOCS_INSERT_TEXT_ACTION',
+  'GOOGLEDOCS_CREATE_DOCUMENT_MARKDOWN',
+  'GOOGLEDOCS_INSERT_TABLE_ACTION',
+  'GOOGLEDOCS_COPY_DOCUMENT',
+  'GOOGLEDOCS_DELETE_CONTENT_RANGE',
+];
+
+const GOOGLESHEETS_PRIORITY_SLUGS = [
+  // Reads.
+  'GOOGLESHEETS_VALUES_GET',
+  'GOOGLESHEETS_GET_BATCH_VALUES',
+  'GOOGLESHEETS_GET_SPREADSHEET_INFO',
+  'GOOGLESHEETS_SEARCH_SPREADSHEETS',
+  'GOOGLESHEETS_FIND_WORKSHEET_BY_TITLE',
+  'GOOGLESHEETS_GET_SHEET_NAMES',
+  'GOOGLESHEETS_BATCH_GET',
+  // Writes.
+  'GOOGLESHEETS_VALUES_UPDATE',
+  'GOOGLESHEETS_UPDATE_VALUES_BATCH',
+  'GOOGLESHEETS_SPREADSHEETS_VALUES_APPEND',
+  'GOOGLESHEETS_UPSERT_ROWS',
+  'GOOGLESHEETS_ADD_SHEET',
+  'GOOGLESHEETS_CREATE_GOOGLE_SHEET1',
+  'GOOGLESHEETS_FIND_REPLACE',
+  'GOOGLESHEETS_UPDATE_SHEET_PROPERTIES',
+];
+
 const PRIORITY_SLUGS_BY_APP: Record<string, string[]> = {
   github: GITHUB_PRIORITY_SLUGS,
+  googledrive: GOOGLEDRIVE_PRIORITY_SLUGS,
+  googledocs: GOOGLEDOCS_PRIORITY_SLUGS,
+  googlesheets: GOOGLESHEETS_PRIORITY_SLUGS,
 };
 
 const slugOf = (tool: ComposioToolLike) => (tool.slug || tool.name || '').toUpperCase();
@@ -73,14 +137,17 @@ const slugOf = (tool: ComposioToolLike) => (tool.slug || tool.name || '').toUppe
 const hasTag = (tool: ComposioToolLike, tag: string) => tool.tags?.includes(tag) ?? false;
 
 /**
- * Classify a Composio tool. Composio tags every tool with `readOnlyHint` /
- * `destructiveHint`; trust those first. Name-based inference is only the
- * fallback for untagged tools — it misreads namespaces with underscores
- * (`ONE_DRIVE_GET_ITEM`) and treats `DOWNLOAD_*` / `EXPORT_*` as writes.
+ * Classify a Composio tool. Composio hints are trusted first: `readOnlyHint`,
+ * `destructiveHint`, plus the mutating hints (`updateHint` / `createHint`) that
+ * some toolkits (e.g. Dropbox) use instead of a name-encoded verb. Name-based
+ * inference is only the fallback for untagged tools — it misreads namespaces
+ * with underscores (`ONE_DRIVE_GET_ITEM`) and treats `DOWNLOAD_*` / `EXPORT_*`
+ * as writes.
  */
 export const classifyComposioTool = (tool: ComposioToolLike): ToolCRUDType => {
   if (hasTag(tool, 'readOnlyHint')) return 'read';
   if (hasTag(tool, 'destructiveHint')) return 'delete';
+  if (hasTag(tool, 'updateHint') || hasTag(tool, 'createHint')) return 'write';
   return inferCrudType(slugOf(tool));
 };
 
@@ -121,16 +188,32 @@ export const curateComposioTools = <T extends ComposioToolLike>(
   const reads = unique.filter(isRead);
   const writes = unique.filter((tool) => !isRead(tool));
 
+  // Without a per-app priority list, alphabetical order fills the 8 write slots
+  // with whatever comes first (e.g. Drive's ADD_*/CREATE_COMMENT block) and the
+  // tools that edit file contents (EDIT_FILE, UPDATE_SPREADSHEET_VALUES, …) are
+  // dropped. Rank `important` writes first, then backfill with mutation-verb
+  // writes (some toolkits like Zendesk tag no write as `important` at all), so
+  // every app advertises at least the edit tools users ask for. Non-important
+  // backfilled writes are still approval-gated at sync time.
+  const mutateVerbRank = (slug: string) =>
+    /(?:^|_)(?:UPDATE|EDIT|MODIFY|REPLACE|APPEND|INSERT|UPLOAD|MOVE|RENAME|SEND|REPLY)(?:_|$)/.test(
+      slug,
+    )
+      ? 0
+      : 1;
+  const importantRank = (tool: T) => (hasTag(tool, 'important') ? 0 : 1);
   const advertisedWrites =
     prioritySlugs.length > 0
       ? writes.filter((tool) => prioritySlugs.includes(slugOf(tool)))
-      : writes.filter(
-          (tool) => hasTag(tool, 'important') && classifyComposioTool(tool) !== 'delete',
-        );
+      : writes.filter((tool) => classifyComposioTool(tool) !== 'delete');
   const selectedWrites = [...advertisedWrites]
     .sort(
       (a, b) =>
-        priorityRank(slugOf(a)) - priorityRank(slugOf(b)) || slugOf(a).localeCompare(slugOf(b)),
+        priorityRank(slugOf(a)) - priorityRank(slugOf(b)) ||
+        (prioritySlugs.length === 0 &&
+          (importantRank(a) - importantRank(b) ||
+            mutateVerbRank(slugOf(a)) - mutateVerbRank(slugOf(b)))) ||
+        slugOf(a).localeCompare(slugOf(b)),
     )
     .slice(0, PRIORITY_WRITES);
 
@@ -187,7 +270,7 @@ export const fetchCuratedComposioTools = async (
  * (or no) `metadata.composio.toolsVersion` are re-synced on their next agent run,
  * because the saved tool rows are otherwise only written once, at connect time.
  */
-export const COMPOSIO_TOOLS_VERSION = 2;
+export const COMPOSIO_TOOLS_VERSION = 3;
 
 export interface ComposioToolInput {
   /** Resolved from Composio's hints; falls back to name inference when absent. */

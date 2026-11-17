@@ -17,4 +17,19 @@ describe('inferCrudType', () => {
     expect(inferCrudType('getReactions')).toBe('read');
     expect(inferCrudType('sendEmail')).toBe('write');
   });
+
+  // Regression: the `drop` prefix matched every `DROPBOX_*` tool name, so the
+  // whole toolkit was classified as delete and lost every write tool.
+  it('requires the verb to end at a namespace boundary', () => {
+    expect(inferCrudType('DROPBOX_ALPHA_UPLOAD_FILE')).toBe('write');
+    expect(inferCrudType('DROPBOX_CREATE_FOLDER')).toBe('write');
+    expect(inferCrudType('DROPBOX_GET_TEMPORARY_UPLOAD_LINK')).toBe('read');
+    expect(inferCrudType('DROPBOX_DELETE_FILE')).toBe('delete');
+    expect(inferCrudType('GITHUB_CHECKOUT_A_BRANCH')).toBe('write');
+    expect(inferCrudType('APP_SETUP_AUTOMATION')).toBe('write');
+    // Real verbs still classify.
+    expect(inferCrudType('DROP_FILE')).toBe('delete');
+    expect(inferCrudType('CHECK_STATUS')).toBe('read');
+    expect(inferCrudType('SET_TITLE')).toBe('update');
+  });
 });
