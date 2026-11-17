@@ -1,26 +1,25 @@
 'use client';
 
 import { memo, useEffect, useLayoutEffect } from 'react';
-import { createStoreUpdater } from 'zustand-utils';
 
 import { useFetchThreads } from '@/hooks/useFetchThreads';
+import { usePortalThreadUrlSync } from '@/hooks/usePortalThreadUrlSync';
 import { useQueryState } from '@/hooks/useQueryParam';
 import { useChatStore } from '@/store/chat';
 import { PortalViewType } from '@/store/chat/slices/portal/initialState';
 
 // sync outside state to useChatStore
 const ThreadHydration = memo(() => {
-  const useStoreUpdater = createStoreUpdater(useChatStore);
-
   // two-way bindings the topic params to chat store
   const [portalThread, setThread] = useQueryState('portalThread');
-  useStoreUpdater('portalThreadId', portalThread!);
+  // URL → store, including clearing when the param disappears.
+  usePortalThreadUrlSync(portalThread);
 
   useLayoutEffect(() => {
     const unsubscribe = useChatStore.subscribe(
       (s) => s.portalThreadId,
       (state) => {
-        setThread(!state ? null : state);
+        setThread(state || null);
       },
     );
 
