@@ -1,12 +1,7 @@
 {
   "buildCommand": "bun run build:vercel",
-  "crons": [
-    {
-      "path": "/api/aico/cron/sync-openrouter-models",
-      "schedule": "0 3 * * *"
-    }
-  ],
-  "headers": [
+  "installCommand": "npx pnpm@10.26.2 install",
+  "rewrites": [
     {
       "source": "/_spa/(.*)",
       "headers": [
