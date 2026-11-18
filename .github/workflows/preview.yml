@@ -143,6 +143,10 @@ jobs:
           # would refuse every request. 5000 = 0.005 USD of upstream float.
           AICO_LEDGER_FLOAT_FLOOR_MICRO_USD=5000
           AICO_CVC_RESIZE_IN_PLACE=1
+          # Fresh database: no synced model catalog, so Auto's built-in target
+          # (mimo-v2.6-pro) has no price and enforce mode refuses every Auto
+          # request. Point every slot at a model the bundled snapshot prices.
+          AICO_CVC_AUTO_ROUTE={"default":"glm-5.3-flash","reasoning":"grok-4.6","vision":"gpt-5.6-luna","visionTools":"gpt-5.6-terra"}
           AICO_LLM_START_TIMEOUT_SECONDS=240
           AICO_OPENROUTER_MOCK=0
           AICO_INSECURE_AUTH_COOKIES=0
