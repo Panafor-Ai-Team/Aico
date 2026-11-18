@@ -1,7 +1,9 @@
 name: Deploy Panachat Preview
 
 # Build ghcr.io/<owner>/panachat and panachat-control-plane on every push
-# to preview, then SSH-deploy the isolated preview stack (own DB volumes).
+# to preview AND on every PR targeting canary, then SSH-deploy the isolated
+# preview stack (own DB volumes). PR previews share one URL
+# (https://preview.panafor.com) — the newest PR push replaces what is deployed.
 #
 # Required secrets (same as canary deploy):
 #   DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY
@@ -15,6 +17,9 @@ name: Deploy Panachat Preview
 on:
   push:
     branches: [preview]
+  pull_request:
+    branches: [canary]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
       skip_deploy:
@@ -27,6 +32,7 @@ on:
 permissions:
   contents: read
   packages: write
+  pull-requests: write
 
 env:
   REGISTRY: ghcr.io
@@ -230,3 +236,22 @@ jobs:
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           GHCR_USER: ${{ github.repository_owner }}
           GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+
+      # One comment per PR, updated on every push — never a new comment per SHA.
+      - name: Upsert preview URL comment on PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          marker='<!-- panachat-preview -->'
+          body="$marker
+          🚀 **Preview ready:** https://preview.panafor.com — build \`${{ needs.build.outputs.sha_short }}\`
+          ℹ️ Shared preview stack: the newest PR push replaces what is deployed there."
+          num="${{ github.event.pull_request.number }}"
+          cid="$(gh api "repos/${{ github.repository }}/issues/$num/comments" \
+            --jq "[.[] | select(.body | startswith(\"$marker\"))][0].id")"
+          if [ -n "$cid" ] && [ "$cid" != "null" ]; then
+            gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$cid" -f body="$body" >/dev/null
+          else
+            gh api --method POST "repos/${{ github.repository }}/issues/$num/comments" -f body="$body" >/dev/null
+          fi
