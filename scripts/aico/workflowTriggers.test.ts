@@ -27,6 +27,7 @@ const REVIEWED_AUTOMATIC: Record<string, string> = {
   'issue-auto-comments.yml': 'issue housekeeping',
   'lock-closed-issues.yml': 'issue housekeeping',
   'migration-ledger.yml': 'Aico migration scenarios on PRs',
+  'preview.yml': 'ephemeral full-stack PR preview on the PR runner',
   'release.yml': 'runs on v* release tags; pushes a README sync commit',
   'sync-database-schema.yml': 'schema docs sync on main',
   'sync-main-to-canary.yaml': 'opens the main → canary sync PR',
