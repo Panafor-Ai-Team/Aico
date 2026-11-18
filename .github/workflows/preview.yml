@@ -1,0 +1,256 @@
+name: PR Preview
+
+# Ephemeral preview for PRs into canary, running entirely on the PR's GitHub
+# Actions runner — never on the production host:
+#   - builds the app image, boots the full stack (app, ParadeDB, Redis, RustFS,
+#     SearXNG) on throwaway /tmp env files and fresh named volumes,
+#   - exposes the app and object storage through Cloudflare quick tunnels so
+#     the URL works from outside the runner,
+#   - upserts one PR comment with the URL, then holds the job open (max 6 h).
+# A push cancels the previous run through the concurrency group; closing the PR
+# cancels it too. Nothing survives the run.
+#
+# Chat runs on a single shared CVC inference key (no per-user key minting, no
+# control plane). The secret PREVIEW_CVC_INFERENCE_KEY must be a CVC sub-key
+# with a small balance; use a key separate from production: PR workflows execute
+# the PR's code, so any secret here is readable by that code. Missing → managed
+# chat refuses traffic (BYOK still works), everything else still previews.
+
+on:
+  pull_request:
+    branches: [canary]
+    types: [opened, synchronize, reopened, closed]
+
+# A new push (or the close event) cancels the previous preview. The close run
+# exists only to kill the sleeping job; its own job is skipped.
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  COMPOSE_DIR: docker-compose/deploy
+  APP_ENV_FILE: /tmp/preview-app.env
+  INFRA_ENV_FILE: /tmp/preview-infra.env
+
+jobs:
+  preview:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/az /opt/hostedtoolcache/CodeQL
+
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build app image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          push: false
+          tags: panachat:preview
+          cache-from: type=gha
+          platforms: linux/amd64
+
+      - name: Reclaim build cache
+        run: docker buildx prune -af
+
+      - name: Start Cloudflare quick tunnels
+        run: |
+          set -euo pipefail
+          BIN="$RUNNER_TEMP/cloudflared"
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o "$BIN"
+          chmod +x "$BIN"
+          "$BIN" tunnel --no-autoupdate --url http://127.0.0.1:3210 >/tmp/app-tunnel.log 2>&1 &
+          "$BIN" tunnel --no-autoupdate --url http://127.0.0.1:9000 >/tmp/s3-tunnel.log 2>&1 &
+          APP_URL='' S3_URL=''
+          for _ in $(seq 1 60); do
+            APP_URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/app-tunnel.log | head -1 || true)
+            S3_URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/s3-tunnel.log | head -1 || true)
+            if [ -n "$APP_URL" ] && [ -n "$S3_URL" ]; then break; fi
+            sleep 2
+          done
+          if [ -z "$APP_URL" ] || [ -z "$S3_URL" ]; then
+            echo "::error::Cloudflare quick tunnels did not come up"
+            tail -n 50 /tmp/app-tunnel.log /tmp/s3-tunnel.log || true
+            exit 1
+          fi
+          echo "APP_URL=$APP_URL" >> "$GITHUB_ENV"
+          echo "S3_URL=$S3_URL" >> "$GITHUB_ENV"
+          echo "Preview: $APP_URL (storage $S3_URL)"
+
+      - name: Write throwaway environment
+        env:
+          CVC_KEY: ${{ secrets.PREVIEW_CVC_INFERENCE_KEY }}
+        run: |
+          set -euo pipefail
+          POSTGRES_PASSWORD=$(openssl rand -hex 16)
+          RUSTFS_ACCESS_KEY="preview$(openssl rand -hex 8)"
+          RUSTFS_SECRET_KEY=$(openssl rand -hex 24)
+          AUTH_SECRET=$(openssl rand -hex 32)
+          KEY_VAULTS_SECRET=$(openssl rand -base64 32 | tr -d '\n')
+
+          cat > "$INFRA_ENV_FILE" <<EOF
+          PANACHAT_STACK=panachat-preview
+          PANACHAT_VOLUME_PREFIX=panachat_preview
+          PANACHAT_IMAGE=panachat:preview
+          PANACHAT_PORT_BLUE=3210
+          PANACHAT_PORT_GREEN=3211
+          PANACHAT_DB_NAME=lobechat
+          LOBE_DB_NAME=lobechat
+          POSTGRES_CONTAINER=panachat-preview-postgres
+          POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+          RUSTFS_PORT=9000
+          RUSTFS_ACCESS_KEY=$RUSTFS_ACCESS_KEY
+          RUSTFS_SECRET_KEY=$RUSTFS_SECRET_KEY
+          RUSTFS_LOBE_BUCKET=lobe
+          S3_ENDPOINT=$S3_URL
+          PANACHAT_APP_ENV_FILE=$APP_ENV_FILE
+          PANACHAT_INFRA_ENV_FILE=$INFRA_ENV_FILE
+          EOF
+
+          # Same knobs as production's .env, except managed inference uses one
+          # shared preview key (the control plane cannot mint with a sub-key).
+          cat > "$APP_ENV_FILE" <<EOF
+          APP_URL=$APP_URL
+          AUTH_SECRET=$AUTH_SECRET
+          AUTH_EMAIL_VERIFICATION=0
+          AUTH_TRUSTED_ORIGINS=$APP_URL
+          AUTH_SSO_PROVIDERS=
+          KEY_VAULTS_SECRET=$KEY_VAULTS_SECRET
+          INTERNAL_APP_URL=http://localhost:3210
+          S3_ENDPOINT=$S3_URL
+          S3_INTERNAL_ENDPOINT=http://rustfs:9000
+          S3_BUCKET=lobe
+          S3_ENABLE_PATH_STYLE=1
+          S3_SET_ACL=0
+          AICO_MANAGED_PROVIDER=cheapvibecode
+          AICO_MANAGED_INFERENCE_KEY=shared
+          AICO_SHARED_INFERENCE_API_KEY=$CVC_KEY
+          CHEAPVIBECODE_BASE_URL=https://ru.cheapvibecode.ru
+          AICO_CVC_TOKENS_PER_USD=25000000
+          AICO_BILLING_LEDGER_MODE=enforce
+          # The preview key holds cents, not dollars: the production floor (1 USD)
+          # would refuse every request. 5000 = 0.005 USD of upstream float.
+          AICO_LEDGER_FLOAT_FLOOR_MICRO_USD=5000
+          AICO_CVC_RESIZE_IN_PLACE=1
+          AICO_LLM_START_TIMEOUT_SECONDS=240
+          AICO_OPENROUTER_MOCK=0
+          AICO_INSECURE_AUTH_COOKIES=0
+          OPENROUTER_MANAGEMENT_API_KEY=
+          CHEAPVIBECODE_MANAGEMENT_API_KEY=
+          CHEAPVIBECODE_API_KEY=
+          EOF
+
+      - name: Boot the stack
+        run: |
+          set -euo pipefail
+          cd "$COMPOSE_DIR"
+          docker compose -p panachat-preview \
+            --env-file "$INFRA_ENV_FILE" --env-file "$APP_ENV_FILE" \
+            -f docker-compose.panachat.yml \
+            --profile slot-blue \
+            up -d --pull never
+
+      - name: Wait for the app
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 600))
+          while (( SECONDS < deadline )); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3210/signin || true)
+            case "$code" in
+              200|302|307) echo "app is up ($code)"; exit 0 ;;
+            esac
+            if [ "$(docker inspect -f '{{.State.Running}}' panachat-preview-blue 2>/dev/null || true)" != true ]; then
+              echo "::error::app container exited"
+              docker logs panachat-preview-blue 2>&1 | tail -n 100 || true
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "::error::app did not become healthy in 10 minutes"
+          docker logs panachat-preview-blue 2>&1 | tail -n 100 || true
+          exit 1
+
+      - name: Comment the preview URL
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANAGED_CHAT: ${{ secrets.PREVIEW_CVC_INFERENCE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          echo "Preview: $APP_URL" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$MANAGED_CHAT" = true ]; then
+            CHAT="enabled on the shared preview key (no per-user keys, no wallet top-ups)"
+          else
+            CHAT="disabled — add the PREVIEW_CVC_INFERENCE_KEY secret, or use your own provider key"
+          fi
+          cat > /tmp/preview-comment.md <<EOF
+          <!-- panachat-preview -->
+          ## Preview ready — SHA ${{ github.event.pull_request.head.sha }}
+
+          **$APP_URL**
+
+          - Sign up with any email + password; verification is off and SSO is disabled.
+          - Fresh database, Redis, and object storage on the runner. Nothing from production, and nothing survives the run.
+          - Managed chat: $CHAT
+          - No production server, DNS record, or deploy workflow is involved. The URL dies on the next push (a new preview replaces it) or after ~6 hours.
+          EOF
+
+          REPO="${{ github.repository }}"
+          PR="${{ github.event.pull_request.number }}"
+          ID=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq '.[] | select(.body | startswith("<!-- panachat-preview -->")) | .id' | head -1 || true)
+          if [ -n "$ID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$ID" -F body=@/tmp/preview-comment.md >/dev/null
+          else
+            gh pr comment "$PR" --repo "$REPO" --body-file /tmp/preview-comment.md
+          fi
+
+      - name: Serve preview
+        run: |
+          set -euo pipefail
+          compose() {
+            docker compose -p panachat-preview \
+              --env-file "$INFRA_ENV_FILE" --env-file "$APP_ENV_FILE" \
+              -f docker-compose.panachat.yml "$@"
+          }
+          cd "$COMPOSE_DIR"
+
+          # Enforce mode refuses traffic until a snapshot marks the ledger
+          # authoritative. A throwaway database needs none of the reconciliation
+          # a real cutover does, so flip the flag it waits on.
+          compose exec -T postgresql psql -U postgres -d lobechat -q -c "
+            update aico_ledger_state set snapshot_completed_at = now()
+            where id = 'default' and snapshot_completed_at is null;
+          "
+
+          # Preview money is internal only: the shared key is the real spend cap.
+          # Wallets are created lazily, so grant $1 once per wallet and never
+          # refill a wallet that already holds capacity.
+          (
+            while true; do
+              compose exec -T postgresql psql -U postgres -d lobechat -q -c "
+                insert into user_wallets (id, user_id, balance_micro_usd, raw_capacity_micro_usd)
+                select 'wlt_preview_' || replace(gen_random_uuid()::text, '-', ''), id, 1000000, 1000000
+                from users
+                on conflict (user_id) do update
+                  set balance_micro_usd = 1000000, raw_capacity_micro_usd = 1000000
+                  where user_wallets.raw_capacity_micro_usd = 0;
+              " >/dev/null 2>&1 || true
+              sleep 10
+            done
+          ) &
+
+          # Hold the job (and both tunnels) open. A push or PR close cancels this
+          # run; 5 h also stays under the 350-minute job timeout.
+          sleep 18000
