@@ -155,11 +155,13 @@ jobs:
         run: |
           set -euo pipefail
           cd "$COMPOSE_DIR"
+          # `--pull missing` overrides the app's `pull_policy: always` (the image
+          # was built locally) while still fetching Postgres/Redis/RustFS/SearXNG.
           docker compose -p panachat-preview \
             --env-file "$INFRA_ENV_FILE" --env-file "$APP_ENV_FILE" \
             -f docker-compose.panachat.yml \
             --profile slot-blue \
-            up -d --pull never
+            up -d --pull missing
 
       - name: Wait for the app
         run: |
