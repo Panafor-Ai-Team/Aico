@@ -62,10 +62,9 @@ jobs:
           load: true
           push: false
           tags: panachat:preview
-          # Without cache-to nothing is ever written, so every run rebuilt from
-          # zero (374 s). mode=max keeps the dependency layers too.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Measured on this PR: 374 s without cache-to, 743 s cold + 819 s warm
+          # with `mode=max`. Exporting the whole cache costs more than it saves,
+          # because the PR sha changes the source layer on every run.
           platforms: linux/amd64
 
       - name: Reclaim build cache
@@ -223,7 +222,7 @@ jobs:
           **$APP_URL**
 
           - Sign in as \`$PREVIEW_EMAIL\` / \`$PREVIEW_PASSWORD\`. Sign-up is closed: every other email is rejected.
-          - Wallet: \`$WALLET_MICRO_USD\` µUSD (1,000,000 µUSD = $1), read from the shared CVC key at boot. It is not renewed per run and only goes down; when the key is empty, chat stops until it is topped up.
+          - Wallet: \`$WALLET_MICRO_USD\` µUSD (1,000,000 µUSD = 1 USD), read from the shared CVC key at boot. It is not renewed per run and only goes down; when the key is empty, chat stops until it is topped up.
           - Fresh database, Redis, and object storage on the runner. Nothing from production, and nothing survives the run.
           - No production server, DNS record, or deploy workflow is involved. The URL dies on the next push (a new preview replaces it) or after ~6 hours.
           - Expired? \`gh run rerun <run-id>\` boots it again from the cached image, without rebuilding from scratch.
