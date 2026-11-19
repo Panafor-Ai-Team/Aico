@@ -3,8 +3,8 @@
 -- as production. Without it a preview has an empty catalog and falls back to the
 -- static model-bank snapshot (11 models, some of which CVC no longer serves).
 --
--- Deliberately omits `openrouter/auto`: the preview should list real models
--- only, not the Auto meta-router row that production pins on top of them.
+-- One difference from production: `openrouter/auto` is stored disabled, so the
+-- preview lists real models only. See the note above its INSERT.
 --
 -- Production refreshes it every 6 h; refresh this snapshot the same way:
 --   docker compose -p panachat exec -T postgresql pg_dump -U postgres -d lobechat \
@@ -12,6 +12,7 @@
 --     --table=public.openrouter_model_catalog \
 --     --table=public.openrouter_model_sync_state
 --
+
 -- PostgreSQL database dump
 --
 
@@ -34,6 +35,11 @@ SET row_security = off;
 --
 -- Data for Name: openrouter_model_catalog; Type: TABLE DATA; Schema: public; Owner: -
 --
+
+-- Auto stays in the catalog but disabled. Deleting the row is not enough:
+-- `listAsProviderModels` re-injects it as an enabled card when it is absent,
+-- so the preview disables it instead.
+INSERT INTO public.openrouter_model_catalog (id, display_name, description, enabled, type, context_window_tokens, pricing, abilities, settings, released_at, payload, synced_at, created_at, updated_at) VALUES ('openrouter/auto', 'Panachat Auto', 'Routes each request to the best available model based on context length, topic, and complexity.', false, 'chat', 2000000, NULL, '{"vision": true, "functionCall": true}', '{}', NULL, '{"id": "openrouter/auto", "type": "chat", "abilities": {"vision": true, "functionCall": true}, "description": "Routes each request to the best available model based on context length, topic, and complexity.", "displayName": "Panachat Auto", "contextWindowTokens": 2000000}', '2026-11-19 06:00:02.394+00', '2026-08-17 11:07:33.901137+00', '2026-11-19 06:00:02.394+00');
 
 INSERT INTO public.openrouter_model_catalog (id, display_name, description, enabled, type, context_window_tokens, pricing, abilities, settings, released_at, payload, synced_at, created_at, updated_at) VALUES ('gpt-image-2.5-flare', 'GPT Image 2.5 Flare', 'GPT Image 2.5 Flare — image generation and editing with quality tiers and sizes through 4K.', true, 'image', NULL, '{"units": [{"name": "imageGeneration", "unit": "image", "lookup": {"prices": {"low": 0.002, "auto": 0.002, "high": 0.006, "medium": 0.004}, "pricingParams": ["quality"]}, "strategy": "lookup"}], "approximatePricePerImage": 0.004}', '{}', '{}', NULL, '{"id": "gpt-image-2.5-flare", "type": "image", "pricing": {"units": [{"name": "imageGeneration", "unit": "image", "lookup": {"prices": {"low": 0.002, "auto": 0.002, "high": 0.006, "medium": 0.004}, "pricingParams": ["quality"]}, "strategy": "lookup"}], "approximatePricePerImage": 0.004}, "parameters": {"size": {"enum": ["auto", "1024x1024", "1536x1024", "1024x1536", "2048x2048", "2048x1152", "3840x2160", "2160x3840"], "default": "auto"}, "prompt": {"default": ""}, "quality": {"enum": ["low", "medium", "high", "auto"], "default": "medium"}, "imageUrls": {"default": [], "maxCount": 16, "maxFileSize": 5242880}}, "description": "GPT Image 2.5 Flare — image generation and editing with quality tiers and sizes through 4K.", "displayName": "GPT Image 2.5 Flare"}', '2026-11-19 06:00:02.394+00', '2026-09-30 06:00:02.131788+00', '2026-11-19 06:00:02.394+00');
 INSERT INTO public.openrouter_model_catalog (id, display_name, description, enabled, type, context_window_tokens, pricing, abilities, settings, released_at, payload, synced_at, created_at, updated_at) VALUES ('gpt-6.1-sol', 'OpenAI · GPT 6.1 Sol', NULL, true, 'chat', 1050000, '{"units": [{"name": "textInput", "rate": 0.12, "unit": "millionTokens", "strategy": "fixed"}, {"name": "textOutput", "rate": 0.12, "unit": "millionTokens", "strategy": "fixed"}]}', '{}', '{"extendParams": ["reasoningEffort"]}', NULL, '{"id": "gpt-6.1-sol", "type": "chat", "pricing": {"units": [{"name": "textInput", "rate": 0.12, "unit": "millionTokens", "strategy": "fixed"}, {"name": "textOutput", "rate": 0.12, "unit": "millionTokens", "strategy": "fixed"}]}, "settings": {"extendParams": ["reasoningEffort"]}, "abilities": {}, "maxOutput": 128000, "displayName": "OpenAI · GPT 6.1 Sol", "contextWindowTokens": 1050000}', '2026-11-19 06:00:02.394+00', '2026-09-30 00:00:02.160288+00', '2026-11-19 06:00:02.394+00');
