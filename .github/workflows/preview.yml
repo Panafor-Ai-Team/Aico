@@ -35,6 +35,10 @@ env:
   COMPOSE_DIR: docker-compose/deploy
   APP_ENV_FILE: /tmp/preview-app.env
   INFRA_ENV_FILE: /tmp/preview-infra.env
+  # The single account that owns the preview wallet. Override the password with
+  # a repository secret when the repo is public.
+  PREVIEW_EMAIL: preview@panafor.com
+  PREVIEW_PASSWORD: ${{ secrets.PREVIEW_ACCOUNT_PASSWORD || 'Preview-2026!' }}
 
 jobs:
   preview:
@@ -157,43 +161,9 @@ jobs:
           docker logs panachat-preview-blue 2>&1 | tail -n 100 || true
           exit 1
 
-      - name: Comment the preview URL
-        continue-on-error: true
+      - name: Seed the preview account and its wallet
         env:
-          GH_TOKEN: ${{ github.token }}
-          MANAGED_CHAT: ${{ secrets.PREVIEW_CVC_INFERENCE_KEY != '' }}
-        run: |
-          set -euo pipefail
-          echo "Preview: $APP_URL" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$MANAGED_CHAT" = true ]; then
-            CHAT="enabled on the shared preview key (no per-user keys, no wallet top-ups)"
-          else
-            CHAT="disabled — add the PREVIEW_CVC_INFERENCE_KEY secret, or use your own provider key"
-          fi
-          cat > /tmp/preview-comment.md <<EOF
-          <!-- panachat-preview -->
-          ## Preview ready — SHA ${{ github.event.pull_request.head.sha }}
-
-          **$APP_URL**
-
-          - Sign up with any email + password; verification is off and SSO is disabled.
-          - Fresh database, Redis, and object storage on the runner. Nothing from production, and nothing survives the run.
-          - Managed chat: $CHAT
-          - No production server, DNS record, or deploy workflow is involved. The URL dies on the next push (a new preview replaces it) or after ~6 hours.
-          - Expired? \`gh run rerun <run-id>\` boots it again from the cached image, without rebuilding from scratch.
-          EOF
-
-          REPO="${{ github.repository }}"
-          PR="${{ github.event.pull_request.number }}"
-          ID=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
-            --jq '.[] | select(.body | startswith("<!-- panachat-preview -->")) | .id' | head -1 || true)
-          if [ -n "$ID" ]; then
-            gh api -X PATCH "repos/$REPO/issues/comments/$ID" -F body=@/tmp/preview-comment.md >/dev/null
-          else
-            gh pr comment "$PR" --repo "$REPO" --body-file /tmp/preview-comment.md
-          fi
-
-      - name: Serve preview
+          CVC_KEY: ${{ secrets.PREVIEW_CVC_INFERENCE_KEY }}
         run: |
           set -euo pipefail
           compose() {
@@ -211,23 +181,65 @@ jobs:
             where id = 'default' and snapshot_completed_at is null;
           "
 
-          # Preview money is internal only: the shared key is the real spend cap.
-          # Wallets are created lazily, so grant $1 once per wallet and never
-          # refill a wallet that already holds capacity.
-          (
-            while true; do
-              compose exec -T postgresql psql -U postgres -d lobechat -q -c "
-                insert into user_wallets (id, user_id, balance_micro_usd, raw_capacity_micro_usd)
-                select 'wlt_preview_' || replace(gen_random_uuid()::text, '-', ''), id, 1000000, 1000000
-                from users
-                on conflict (user_id) do update
-                  set balance_micro_usd = 1000000, raw_capacity_micro_usd = 1000000
-                  where user_wallets.raw_capacity_micro_usd = 0;
-              " >/dev/null 2>&1 || true
-              sleep 10
-            done
-          ) &
+          # One account owns the only wallet: reviewers sign in with it instead
+          # of creating a user per run. Sign-up stays open, but new accounts get
+          # no wallet, so managed chat only ever spends this one balance.
+          curl -fsS -X POST http://127.0.0.1:3210/api/auth/sign-up/email \
+            -H 'content-type: application/json' -H "Origin: $APP_URL" \
+            -d "{\"email\":\"$PREVIEW_EMAIL\",\"password\":\"$PREVIEW_PASSWORD\",\"name\":\"Preview\"}" \
+            >/dev/null 2>&1 || true   # 422 when the account already exists
 
+          # The wallet is not a per-run allowance: it starts at the shared key's
+          # real remaining balance and only goes down, so topping the key up is
+          # the only way to refill it. 25,000,000 tokens = 1 USD = 1,000,000 µUSD.
+          TOKENS=$(curl -fsS https://ru.cheapvibecode.ru/v1/balance \
+            -H "Authorization: Bearer ${CVC_KEY:-}" |
+            python3 -c 'import sys,json;print(json.load(sys.stdin)["token_balance"])' 2>/dev/null || echo 0)
+          MICRO=$(( TOKENS / 25 ))
+
+          compose exec -T postgresql psql -U postgres -d lobechat -q -c "
+            insert into user_wallets (id, user_id, balance_micro_usd, raw_capacity_micro_usd)
+            select 'wlt_preview_shared', id, $MICRO, $MICRO
+            from users where email = '$PREVIEW_EMAIL'
+            on conflict (user_id) do update
+              set balance_micro_usd = excluded.balance_micro_usd,
+                  raw_capacity_micro_usd = excluded.raw_capacity_micro_usd;
+          "
+          echo "preview wallet: $TOKENS tokens = $MICRO µUSD for $PREVIEW_EMAIL"
+          echo "WALLET_MICRO_USD=$MICRO" >> "$GITHUB_ENV"
+
+      - name: Comment the preview URL
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "Preview: $APP_URL" >> "$GITHUB_STEP_SUMMARY"
+          cat > /tmp/preview-comment.md <<EOF
+          <!-- panachat-preview -->
+          ## Preview ready — SHA ${{ github.event.pull_request.head.sha }}
+
+          **$APP_URL**
+
+          - Sign in as \`$PREVIEW_EMAIL\` / \`$PREVIEW_PASSWORD\` — the only account with a wallet. Sign-up stays open, but new accounts get no credit.
+          - Wallet: \`$WALLET_MICRO_USD\` µUSD (1,000,000 µUSD = $1), read from the shared CVC key at boot. It is not renewed per run and only goes down; when the key is empty, chat stops until it is topped up.
+          - Fresh database, Redis, and object storage on the runner. Nothing from production, and nothing survives the run.
+          - No production server, DNS record, or deploy workflow is involved. The URL dies on the next push (a new preview replaces it) or after ~6 hours.
+          - Expired? \`gh run rerun <run-id>\` boots it again from the cached image, without rebuilding from scratch.
+          EOF
+
+          REPO="${{ github.repository }}"
+          PR="${{ github.event.pull_request.number }}"
+          ID=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq '.[] | select(.body | startswith("<!-- panachat-preview -->")) | .id' | head -1 || true)
+          if [ -n "$ID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$ID" -F body=@/tmp/preview-comment.md >/dev/null
+          else
+            gh pr comment "$PR" --repo "$REPO" --body-file /tmp/preview-comment.md
+          fi
+
+      - name: Serve preview
+        run: |
           # Hold the job (and both tunnels) open. A push or PR close cancels this
           # run; 5 h also stays under the 350-minute job timeout.
           sleep 18000
