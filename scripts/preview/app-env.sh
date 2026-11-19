@@ -27,6 +27,10 @@ AUTH_SECRET=$AUTH_SECRET
 AUTH_EMAIL_VERIFICATION=0
 AUTH_TRUSTED_ORIGINS=$APP_URL
 AUTH_SSO_PROVIDERS=
+# Only the one preview account may register. The sign-up form still exists, but
+# any other email is rejected with EMAIL_NOT_ALLOWED, so nobody can create an
+# account and spend the shared key.
+AUTH_ALLOWED_EMAILS=${PREVIEW_EMAIL:-preview@panafor.com}
 KEY_VAULTS_SECRET=$KEY_VAULTS_SECRET
 INTERNAL_APP_URL=http://localhost:3210
 S3_ENDPOINT=$S3_URL
