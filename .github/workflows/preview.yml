@@ -208,6 +208,19 @@ jobs:
           echo "preview wallet: $TOKENS tokens = $MICRO µUSD for $PREVIEW_EMAIL"
           echo "WALLET_MICRO_USD=$MICRO" >> "$GITHUB_ENV"
 
+      - name: Seed the managed model catalog
+        run: |
+          set -euo pipefail
+          cd "$COMPOSE_DIR"
+
+          # A fresh database has no synced catalog, so the picker would serve the
+          # static model-bank fallback. Load production's snapshot instead.
+          docker compose -p panachat-preview \
+            --env-file "$INFRA_ENV_FILE" --env-file "$APP_ENV_FILE" \
+            -f docker-compose.panachat.yml exec -T postgresql \
+            psql -U postgres -d lobechat -q -v ON_ERROR_STOP=1 \
+            < "$GITHUB_WORKSPACE/scripts/preview/model-catalog.sql"
+
       - name: Comment the preview URL
         continue-on-error: true
         env:
