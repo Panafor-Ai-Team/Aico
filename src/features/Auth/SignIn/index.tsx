@@ -9,6 +9,7 @@ import { useSignIn } from './useSignIn';
 const SignIn = () => {
   const {
     disableEmailPassword,
+    disableSignUp,
     email,
     form,
     handleBackFromSent,
@@ -81,6 +82,7 @@ const SignIn = () => {
   return (
     <SignInEmailStep
       disableEmailPassword={disableEmailPassword}
+      disableSignUp={disableSignUp}
       form={form as any}
       isSocialOnly={isSocialOnly}
       loading={loading}

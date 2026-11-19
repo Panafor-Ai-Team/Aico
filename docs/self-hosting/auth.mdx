@@ -112,6 +112,10 @@ When configuring OAuth providers, use the following callback URL format:
 
 Set `AUTH_DISABLE_EMAIL_PASSWORD=1` to hide the email input on the login page and redirect the signup page to login. Users can only sign in via configured SSO providers. Ensure at least one SSO provider is configured before enabling this.
 
+**Login-only UI:**
+
+Set `AUTH_DISABLE_SIGNUP=1` to hide the sign-up link on the login page and redirect `/signup` to `/signin`. The registration endpoint itself stays available, so keep `AUTH_ALLOWED_EMAILS` configured to control who may register.
+
 **Restrict registration to specific emails or domains:**
 
 Set `AUTH_ALLOWED_EMAILS` with a comma-separated list:
