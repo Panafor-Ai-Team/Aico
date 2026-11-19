@@ -100,6 +100,8 @@ export interface GlobalServerConfig {
   aiProvider: ServerLanguageModel;
   defaultAgent?: PartialDeep<UserDefaultAgent>;
   disableEmailPassword?: boolean;
+  /** Hide the sign-up UI; the server-side allow-list still decides who may register. */
+  disableSignUp?: boolean;
   enableBusinessFeatures?: boolean;
   /**
    * Whether the deployment has a reachable Cloud Sandbox backend (a configured

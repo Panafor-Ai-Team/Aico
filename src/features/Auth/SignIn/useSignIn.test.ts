@@ -72,11 +72,13 @@ vi.mock('@/business/client/hooks/useBusinessSignin', () => ({
 
 let mockEnableBusinessFeatures = false;
 let mockEnableMagicLink = false;
+let mockDisableSignUp = false;
 vi.mock('@/features/AuthShell', () => ({
   useAuthServerConfigStore: (selector: (s: any) => any) =>
     selector({
       serverConfig: {
         disableEmailPassword: false,
+        disableSignUp: mockDisableSignUp,
         enableBusinessFeatures: mockEnableBusinessFeatures,
         enableMagicLink: mockEnableMagicLink,
         oAuthSSOProviders: ['google', 'github'],
@@ -124,6 +126,7 @@ describe('useSignIn', () => {
     mockSearchParamsGet.mockReturnValue(null);
     mockEnableBusinessFeatures = false;
     mockEnableMagicLink = false;
+    mockDisableSignUp = false;
     mockBusinessSignin.ssoProviders = [];
     mockBusinessSignin.getAdditionalData.mockResolvedValue({});
     mockBusinessSignin.preSocialSigninCheck.mockResolvedValue(true);
@@ -153,6 +156,15 @@ describe('useSignIn', () => {
       expect(result.current.socialLoading).toBeNull();
       expect(result.current.isSocialOnly).toBe(false);
       expect(result.current.disableEmailPassword).toBe(false);
+      expect(result.current.disableSignUp).toBe(false);
+    });
+
+    it('should forward the sign-up flag from the server config', () => {
+      mockDisableSignUp = true;
+
+      const { result } = renderHook(() => useSignIn());
+
+      expect(result.current.disableSignUp).toBe(true);
     });
   });
 

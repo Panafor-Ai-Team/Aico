@@ -265,15 +265,20 @@ services:
       - panachat-network
 
   rustfs-init:
-    image: minio/mc:latest
+    # minio/mc left Docker Hub; the official AWS CLI creates the bucket against
+    # RustFS's S3 API. create-bucket is idempotent here because an existing
+    # bucket fails that call and head-bucket then proves it is there.
+    image: amazon/aws-cli:latest
     container_name: ${PANACHAT_STACK:-panachat}-rustfs-init
     depends_on:
       rustfs:
         condition: service_healthy
-    volumes:
-      - ./bucket.config.json:/bucket.config.json:ro
+    environment:
+      - 'AWS_ACCESS_KEY_ID=${RUSTFS_ACCESS_KEY}'
+      - 'AWS_SECRET_ACCESS_KEY=${RUSTFS_SECRET_KEY}'
+      - 'AWS_DEFAULT_REGION=us-east-1'
     entrypoint: /bin/sh
-    command: -c ' set -eux; mc alias set rustfs "http://rustfs:9000" "${RUSTFS_ACCESS_KEY}" "${RUSTFS_SECRET_KEY}"; mc ls rustfs || true; mc mb "rustfs/lobe" --ignore-existing; mc admin info rustfs || true; mc anonymous set none "rustfs/lobe"; '
+    command: -c 'set -eux; aws --endpoint-url http://rustfs:9000 s3api create-bucket --bucket lobe || true; aws --endpoint-url http://rustfs:9000 s3api head-bucket --bucket lobe'
     restart: 'no'
     networks:
       - panachat-network

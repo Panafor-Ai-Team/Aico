@@ -81,6 +81,7 @@ export const useSignIn = () => {
   const disableEmailPassword = useAuthServerConfigStore(
     (s) => s.serverConfig.disableEmailPassword || false,
   );
+  const disableSignUp = useAuthServerConfigStore((s) => s.serverConfig.disableSignUp || false);
   const enableBusinessFeatures = useAuthServerConfigStore(
     (s) => s.serverConfig.enableBusinessFeatures || false,
   );
@@ -484,6 +485,7 @@ export const useSignIn = () => {
 
   return {
     disableEmailPassword,
+    disableSignUp,
     email,
     form,
     handleBackFromSent,

@@ -38,6 +38,7 @@ export const USERNAME_REGEX = /^\w+$/;
 
 export interface SignInEmailStepProps {
   disableEmailPassword?: boolean;
+  disableSignUp?: boolean;
   form: FormInstance<{ email: string }>;
   isSocialOnly: boolean;
   loading: boolean;
@@ -55,6 +56,7 @@ export interface SignInEmailStepProps {
 
 export const SignInEmailStep = ({
   disableEmailPassword,
+  disableSignUp,
   form,
   isSocialOnly,
   loading,
@@ -196,7 +198,7 @@ export const SignInEmailStep = ({
         </Text>
       )}
       {!showEmailForm && <AuthAgreement />}
-      {showEmailForm && (
+      {showEmailForm && !disableSignUp && (
         <Text align={'center'} fontSize={13} style={{ marginTop: 4 }} type={'secondary'}>
           {t('betterAuth.signin.noAccount')}{' '}
           <a

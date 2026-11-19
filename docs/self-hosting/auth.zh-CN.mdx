@@ -110,6 +110,10 @@ LobeHub 支持使用 Better Auth 配置外部身份验证服务，供企业 / �
 
 设置 `AUTH_DISABLE_EMAIL_PASSWORD=1` 可在登录页面隐藏邮箱输入框，并将注册页面重定向至登录页面。用户只能通过已配置的 SSO 提供商登录。启用前请确保至少配置了一个 SSO 提供商。
 
+**仅登录界面：**
+
+设置 `AUTH_DISABLE_SIGNUP=1` 可隐藏登录页面上的注册链接，并将 `/signup` 重定向至 `/signin`。注册接口本身仍然保留，请同时配置 `AUTH_ALLOWED_EMAILS` 以限制允许注册的邮箱。
+
 **限制注册邮箱或域名：**
 
 设置 `AUTH_ALLOWED_EMAILS`，以逗号分隔多个值：
